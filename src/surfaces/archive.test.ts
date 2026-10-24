@@ -96,14 +96,18 @@ test("CLI project export replays only that project over HTTP and keeps the sourc
 				}),
 			).toMatchObject([{ status: "decided" }]);
 		}
-		const policyRows = source.instance.app.reader.raw
-			.query("SELECT * FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'selected') ORDER BY version")
-			.all();
-		const aliasRows = source.instance.app.reader.raw
-			.query(
+		const policyRows = await source.instance.app.database.read((db) =>
+			db.allDynamic<Record<string, unknown>>(
+				"SELECT * FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'selected') ORDER BY version",
+				[],
+			),
+		);
+		const aliasRows = await source.instance.app.database.read((db) =>
+			db.allDynamic<Record<string, unknown>>(
 				"SELECT * FROM case_aliases WHERE project = (SELECT id FROM projects WHERE key = 'selected') ORDER BY alias",
-			)
-			.all();
+				[],
+			),
+		);
 		await selected.call("report", {
 			target: { commit: "projectexport1", branch: "main" },
 			results: [{ test: { key: "selected-test" }, outcome: "pass", annotation: { case: "C-1" } }],
@@ -120,11 +124,21 @@ test("CLI project export replays only that project over HTTP and keeps the sourc
 			const restored = target.client.with({ project: "selected" });
 			expect(await restored.call("find", {})).toEqual(before);
 			expect(await restored.call("gate", { commit: "projectexport1" })).toEqual(gate);
-			expect(target.instance.app.reader.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "selected" }]);
-			expect(target.instance.app.reader.raw.query("SELECT * FROM policies ORDER BY version").all()).toEqual(policyRows);
-			expect(target.instance.app.reader.raw.query("SELECT * FROM case_aliases ORDER BY alias").all()).toEqual(
-				aliasRows,
-			);
+			expect(
+				await target.instance.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT key FROM projects", []),
+				),
+			).toEqual([{ key: "selected" }]);
+			expect(
+				await target.instance.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT * FROM policies ORDER BY version", []),
+				),
+			).toEqual(policyRows);
+			expect(
+				await target.instance.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT * FROM case_aliases ORDER BY alias", []),
+				),
+			).toEqual(aliasRows);
 			expect(
 				Policy.parse(await restored.call("admin", { do: "policy.show", project: "selected" })).settings.fields,
 			).toEqual({
@@ -144,7 +158,11 @@ test("CLI project export replays only that project over HTTP and keeps the sourc
 				}),
 			).toMatchObject({ status: "adopted" });
 			for (const table of ["tokens", "sessions", "credentials", "invitations", "passkey_users"]) {
-				expect(target.instance.app.reader.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
+				expect(
+					await target.instance.app.database.read((db) =>
+						db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, []),
+					),
+				).toEqual([]);
 			}
 		});
 		expect(await selected.call("find", {})).toEqual(before);
@@ -172,7 +190,15 @@ test("invalid import leaves bootstrap rows and the caller's token intact", async
 			expect(response.status).toBe(400);
 			expect(await response.text()).toContain('"code":"invalid"');
 			expect(await client.call("admin", { do: "project.list" })).toEqual(before);
-			expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM actors").get()?.n).toBe(2);
+			expect(
+				(
+					(
+						await instance.app.database.read((db) =>
+							db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM actors", []),
+						)
+					)[0] ?? null
+				)?.n,
+			).toBe(2);
 		},
 		{ mode: "server" },
 	);
@@ -221,7 +247,11 @@ test("HTTP and CLI archive imports refuse invalid durations and accept their exa
 					expect(imported.code).toBe(4);
 					expect(imported.stderr).toContain(`invalid: ${refused.error.message}`);
 					expect(await target.client.call("admin", { do: "project.list" })).toEqual(before);
-					expect(target.instance.app.reader.raw.query("SELECT * FROM results").all()).toEqual([]);
+					expect(
+						await target.instance.app.database.read((db) =>
+							db.allDynamic<Record<string, unknown>>("SELECT * FROM results", []),
+						),
+					).toEqual([]);
 					expect(await readdir(join(target.directory, "spool"))).toEqual([]);
 				}
 			}
@@ -229,9 +259,11 @@ test("HTTP and CLI archive imports refuse invalid durations and accept their exa
 			await Bun.write(file, Bun.gzipSync(text));
 			expect(await target.run(["import", file])).toMatchObject({ code: 0, stderr: "" });
 			for (const table of ["results", "result_tries"]) {
-				expect(target.instance.app.reader.raw.query(`SELECT duration_ms FROM ${table}`).all()).toEqual([
-					{ duration_ms: 2_592_000_000 },
-				]);
+				expect(
+					await target.instance.app.database.read((db) =>
+						db.allDynamic<Record<string, unknown>>(`SELECT duration_ms FROM ${table}`, []),
+					),
+				).toEqual([{ duration_ms: 2_592_000_000 }]);
 			}
 		});
 	});
@@ -245,8 +277,10 @@ test("HTTP and CLI exports warn about unrestorable durations while preserving th
 				{ test: { key: "timed-test" }, outcome: "pass", durationMs: 0, tries: [{ outcome: "fail", durationMs: 0 }] },
 			],
 		});
-		source.instance.app.db.raw.exec(
-			"UPDATE results SET duration_ms = -1; UPDATE result_tries SET duration_ms = 2592000001",
+		await source.instance.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec("UPDATE results SET duration_ms = -1; UPDATE result_tries SET duration_ms = 2592000001"),
+			),
 		);
 		const exported = await source.client.request("/api/export");
 		expect(exported.status).toBe(200);
@@ -278,7 +312,9 @@ test("HTTP and CLI exports warn about unrestorable durations while preserving th
 		await scoped.body?.cancel();
 		for (const duration of [0, 2_592_000_000, null]) {
 			for (const table of ["results", "result_tries"]) {
-				source.instance.app.db.raw.query(`UPDATE ${table} SET duration_ms = ?`).run(duration);
+				await source.instance.app.database.write((db) =>
+					db.transaction(() => db.runDynamic(`UPDATE ${table} SET duration_ms = $1`, [duration])),
+				);
 			}
 			const valid = await source.client.request("/api/export");
 			expect(valid.headers.get("x-mainworthy-archive-warning")).toBeNull();
@@ -287,16 +323,26 @@ test("HTTP and CLI exports warn about unrestorable durations while preserving th
 	});
 });
 
-test("a failed export reports the worker's validation error and the next export succeeds", async () => {
+test("a failed export reports damaged attachment content and the next export succeeds", async () => {
 	await withInstance(async ({ client, instance }) => {
-		instance.app.db.raw.exec("INSERT INTO meta (key, value) VALUES ('bad-text', CAST(X'80' AS TEXT))");
+		await client.call("report", {
+			target: { commit: "brokenattachment" },
+			results: [{ test: { key: "one" }, outcome: "pass" }],
+		});
+		await instance.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec(
+					`INSERT INTO attachments (result, name, hash, size, type) VALUES (1, 'log.txt', '${"0".repeat(64)}', 1, 'application/octet-stream')`,
+				),
+			),
+		);
 		const refused = await client.request("/api/export");
 		expect(refused.status).toBe(400);
 		expect(await refused.json()).toEqual({
 			ok: false,
-			error: { code: "invalid", message: "cannot export table meta losslessly: stored TEXT contains invalid UTF-8" },
+			error: { code: "invalid", message: "attachment 1 is missing or damaged; restore its content before exporting" },
 		});
-		instance.app.db.raw.exec("DELETE FROM meta WHERE key = 'bad-text'");
+		await instance.app.database.write((db) => db.transaction(() => db.exec("DELETE FROM attachments")));
 		const exported = await client.request("/api/export");
 		expect(exported.status).toBe(200);
 		expect(await exported.text()).toContain('"end":true');
@@ -314,12 +360,17 @@ test("an export whose token is revoked while its worker runs returns no archive"
 				.parse(await client.call("admin", { do: "token.list" }))
 				.at(-1);
 			if (!token) throw new Error("the second owner token is missing");
-			const session: Session = { via: "token", actor: (project) => authenticate(instance.app, secret, project) };
+			const session: Session = {
+				via: "token",
+				actor: async (project) => await authenticate(instance.app, secret, project),
+			};
 			const route = archiveRoutes(instance.app)["/api/export"];
 			if (!route) throw new Error("export route is missing");
 			const pending = route(new Request(`${instance.url}/api/export`), session);
 			// The route has admitted the token and started the worker. Revoke before any worker reply is handled.
-			instance.app.db.transaction(() => revokeToken(instance.app, token.id));
+			await instance.app.database.write((db) =>
+				db.transaction(async () => await revokeToken(instance.app, db, token.id)),
+			);
 			const response = await pending;
 			if (response.status === 200) await response.body?.cancel();
 			expect(response.status).toBe(403);
@@ -351,7 +402,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 			],
 		});
 		const spool = join(instance.app.config.dataDir, "spool");
-		const session: Session = { via: "local", actor: () => instance.owner };
+		const session: Session = { via: "local", actor: async () => instance.owner };
 		const route = archiveRoutes(instance.app)["/api/export"];
 		if (!route) throw new Error("export route is missing");
 		const response = await route(new Request(`${instance.url}/api/export?project=scratch`), session);
@@ -390,7 +441,7 @@ test("imports spool privately on the data filesystem and remove rejected uploads
 		if (!route || !input) throw new Error("missing import input");
 		const pending = route(new Request(`${instance.url}/api/import`, { method: "POST", body }), {
 			via: "local",
-			actor: () => instance.owner,
+			actor: async () => instance.owner,
 		});
 		const spool = join(instance.app.config.dataDir, "spool");
 		try {
@@ -427,7 +478,7 @@ test("a token revoked while the body is uploading cannot complete the import", a
 				if (!token) throw new Error("the second token is missing");
 				const session: Session = {
 					via: "token",
-					actor: (project) => authenticate(instance.app, secret, project),
+					actor: async (project) => await authenticate(instance.app, secret, project),
 				};
 				let input: ReadableStreamDefaultController<Uint8Array> | undefined;
 				const body = new ReadableStream<Uint8Array>({
@@ -445,10 +496,22 @@ test("a token revoked while the body is uploading cannot complete the import", a
 				const response = await pending;
 				expect(response.status).toBe(403);
 				expect(await response.text()).toContain('"code":"forbidden"');
-				expect(instance.app.reader.raw.query<{ key: string }, []>("SELECT key FROM projects").get()?.key).toBe(
-					"scratch",
-				);
-				expect(instance.app.reader.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM cases").get()?.n).toBe(0);
+				expect(
+					(
+						(
+							await instance.app.database.read((db) => db.allDynamic<{ key: string }>("SELECT key FROM projects", []))
+						)[0] ?? null
+					)?.key,
+				).toBe("scratch");
+				expect(
+					(
+						(
+							await instance.app.database.read((db) =>
+								db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM cases", []),
+							)
+						)[0] ?? null
+					)?.n,
+				).toBe(0);
 			},
 			{ mode: "server" },
 		);
@@ -466,9 +529,12 @@ test("a local import preserves the configured owner's identity for the next writ
 				await target.client.call("propose", {
 					edits: [{ op: "create", outline: "After import\nAn action > Expected" }],
 				});
-				const actor = target.instance.app.reader.raw
-					.query<{ name: string }, []>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by")
-					.get();
+				const actor =
+					(
+						await target.instance.app.database.read((db) =>
+							db.allDynamic<{ name: string }>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by", []),
+						)
+					)[0] ?? null;
 				expect(actor?.name).toBe("robin");
 			});
 		},
@@ -481,20 +547,22 @@ test("a report the original had accepted and not yet applied is applied by the i
 		await source.client.call("propose", { edits: [{ op: "create", outline: "Imported mid-report" }] });
 		// The moment between a report's two transactions, as an export taken under load catches it.
 		const app = source.instance.app;
-		app.db.transaction(() => {
-			const project = findProject(app.db, "scratch");
-			const owner = project ? actorByName(app.db, "robin", project.id) : null;
-			if (!project || !owner) throw new Error("the source has no project or owner");
-			const ctx = makeCtx(app, project, owner, true);
-			acceptReport(ctx, {
-				target: { commit: "midreport1", branch: "main" },
-				results: [
-					{ test: { key: "one" }, outcome: "pass" },
-					{ test: { key: "two" }, outcome: "fail", failure: { message: "expected 1 to equal 2" } },
-				],
-			});
-			stampSeq(ctx);
-		});
+		await app.database.write((db) =>
+			db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				const owner = project ? await actorByName(db, "robin", project.id) : null;
+				if (!project || !owner) throw new Error("the source has no project or owner");
+				const ctx = makeCtx(app, db, project, owner, true);
+				await acceptReport(ctx, {
+					target: { commit: "midreport1", branch: "main" },
+					results: [
+						{ test: { key: "one" }, outcome: "pass" },
+						{ test: { key: "two" }, outcome: "fail", failure: { message: "expected 1 to equal 2" } },
+					],
+				});
+				await stampSeq(ctx);
+			}),
+		);
 		const archive = await source.client.request("/api/export");
 		if (!archive.body) throw new Error("missing archive body");
 		await withInstance(async (target) => {
@@ -515,14 +583,16 @@ test("an archive refuses out-of-range durations in pending reports before recove
 			tries: [{ outcome: "fail" as const, durationMs: 2_592_000_000 }],
 		};
 		const app = source.instance.app;
-		app.db.transaction(() => {
-			const project = findProject(app.db, "scratch");
-			const owner = project ? actorByName(app.db, "robin", project.id) : null;
-			if (!project || !owner) throw new Error("the source has no project or owner");
-			const ctx = makeCtx(app, project, owner, true);
-			acceptReport(ctx, { target: { commit: "pending-duration", branch: "main" }, results: [result] });
-			stampSeq(ctx);
-		});
+		await app.database.write((db) =>
+			db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				const owner = project ? await actorByName(db, "robin", project.id) : null;
+				if (!project || !owner) throw new Error("the source has no project or owner");
+				const ctx = makeCtx(app, db, project, owner, true);
+				await acceptReport(ctx, { target: { commit: "pending-duration", branch: "main" }, results: [result] });
+				await stampSeq(ctx);
+			}),
+		);
 		await withInstance(async (target) => {
 			const before = await target.client.call("admin", { do: "project.list" });
 			for (const field of ["result", "try"]) {
@@ -530,7 +600,11 @@ test("an archive refuses out-of-range durations in pending reports before recove
 					const staged = [
 						{ ...result, ...(field === "result" ? { durationMs } : { tries: [{ outcome: "fail", durationMs }] }) },
 					];
-					app.db.raw.query("UPDATE batches SET staged = ? WHERE state = 'accepted'").run(JSON.stringify(staged));
+					await app.database.write((db) =>
+						db.transaction(() =>
+							db.runDynamic("UPDATE batches SET staged = $1 WHERE state = 'accepted'", [JSON.stringify(staged)]),
+						),
+					);
 					const archive = await source.client.request("/api/export");
 					const response = await target.client.request("/api/import", { method: "POST", body: archive.body });
 					expect(response.status).toBe(400);
@@ -540,13 +614,19 @@ test("an archive refuses out-of-range durations in pending reports before recove
 					expect(await target.client.call("admin", { do: "project.list" })).toEqual(before);
 				}
 			}
-			app.db.raw.query("UPDATE batches SET staged = ? WHERE state = 'accepted'").run(JSON.stringify([result]));
+			await app.database.write((db) =>
+				db.transaction(() =>
+					db.runDynamic("UPDATE batches SET staged = $1 WHERE state = 'accepted'", [JSON.stringify([result])]),
+				),
+			);
 			const archive = await source.client.request("/api/export");
 			expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
 			for (const table of ["results", "result_tries"]) {
-				expect(target.instance.app.reader.raw.query(`SELECT duration_ms FROM ${table}`).all()).toEqual([
-					{ duration_ms: 2_592_000_000 },
-				]);
+				expect(
+					await target.instance.app.database.read((db) =>
+						db.allDynamic<Record<string, unknown>>(`SELECT duration_ms FROM ${table}`, []),
+					),
+				).toEqual([{ duration_ms: 2_592_000_000 }]);
 			}
 		});
 	});

@@ -1,5 +1,5 @@
 // A demo project takes the time of a write from its caller, and no other project does (decision 0100).
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +14,13 @@ import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { invoke, type Reply } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
+import { type TestDatabase, testDatabase } from "./db.ts";
 import { type Harness, harness } from "./helpers.ts";
+
+const httpDatabases: TestDatabase[] = [];
+afterAll(async () => {
+	for (const db of httpDatabases.splice(0)) await db.close();
+});
 
 const DAY = 86_400_000;
 
@@ -28,8 +34,14 @@ const at = async (
 	input: unknown,
 	project: string | null = "demo",
 ): Promise<Reply> =>
-	await invoke(h.app, OPS, { op, project, input, actor: () => h.owner, ...(time === undefined ? {} : { at: time }) });
-const rows = <T>(query: string): T[] => h.app.db.raw.query<T, []>(query).all();
+	await invoke(h.app, OPS, {
+		op,
+		project,
+		input,
+		actor: async () => h.owner,
+		...(time === undefined ? {} : { at: time }),
+	});
+const rows = <T>(query: string): Promise<T[]> => h.app.database.read((db) => db.allDynamic<T>(query));
 const newCase = (title: string, cmd?: string) => ({
 	edits: [{ op: "create", body: { title } }],
 	...(cmd ? { cmd } : {}),
@@ -69,13 +81,13 @@ describe("which project is a demo", () => {
 			ok: false,
 			error: { code: "not_found" },
 		});
-		expect(rows("SELECT * FROM demo_projects")).toEqual([]);
+		expect(await rows("SELECT * FROM demo_projects")).toEqual([]);
 	});
 
 	test("only a caller who administers the instance makes one", async () => {
 		h = await harness();
 		await h.call("admin", { do: "project.create", key: "demo" });
-		const member = h.actor("mira", "human", ["read", "produce", "answer", "plan"]);
+		const member = await h.actor("mira", "human", ["read", "produce", "answer", "plan"]);
 		expect(await h.raw("admin", { do: "project.demo", key: "demo" }, member)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
@@ -89,17 +101,17 @@ describe("when a write happened", () => {
 		const then = since - 10 * DAY;
 		const made = await at(then, "propose", newCase("Ten days ago", "demo-time-case-1"));
 		expect(made.ok).toBe(true);
-		expect(rows<{ at: number }>("SELECT at FROM versions")).toEqual([{ at: then }]);
-		expect(rows<{ at: number }>("SELECT at FROM commands WHERE id = 'demo-time-case-1'")).toEqual([{ at: then }]);
+		expect(await rows<{ at: number }>("SELECT at FROM versions")).toEqual([{ at: then }]);
+		expect(await rows<{ at: number }>("SELECT at FROM commands WHERE id = 'demo-time-case-1'")).toEqual([{ at: then }]);
 		// A report, which commits twice, carries the time through both transactions.
 		const reported = await at(then + DAY, "report", {
 			target: { commit: "aaaaaaa1", branch: "main" },
 			results: [{ test: { key: "t1" }, outcome: "fail", failure: { message: "boom" } }],
 		});
 		expect(reported.ok).toBe(true);
-		expect(rows<{ at: number }>("SELECT at FROM batches")).toEqual([{ at: then + DAY }]);
-		expect(rows<{ at: number }>("SELECT at FROM results")).toEqual([{ at: then + DAY }]);
-		expect(rows<{ opened_at: number }>("SELECT opened_at FROM questions WHERE kind = 'failure'")).toEqual([
+		expect(await rows<{ at: number }>("SELECT at FROM batches")).toEqual([{ at: then + DAY }]);
+		expect(await rows<{ at: number }>("SELECT at FROM results")).toEqual([{ at: then + DAY }]);
+		expect(await rows<{ opened_at: number }>("SELECT opened_at FROM questions WHERE kind = 'failure'")).toEqual([
 			{ opened_at: then + DAY },
 		]);
 	});
@@ -108,7 +120,7 @@ describe("when a write happened", () => {
 		await demo();
 		h.advance(5_000);
 		expect((await at(undefined, "propose", newCase("Now"))).ok).toBe(true);
-		expect(rows<{ at: number }>("SELECT at FROM versions")).toEqual([{ at: h.app.now() }]);
+		expect(await rows<{ at: number }>("SELECT at FROM versions")).toEqual([{ at: h.app.now() }]);
 	});
 
 	test("a project that is no demo refuses a time and writes nothing", async () => {
@@ -118,7 +130,7 @@ describe("when a write happened", () => {
 			ok: false,
 			error: { code: "invalid", message: expect.stringContaining("scratch is not a demo project") },
 		});
-		expect(rows("SELECT id FROM cases")).toEqual([]);
+		expect(await rows("SELECT id FROM cases")).toEqual([]);
 	});
 
 	test("a time in the future, a time that is no number, a read and an instance operation are refused", async () => {
@@ -137,7 +149,7 @@ describe("when a write happened", () => {
 			ok: false,
 			error: { code: "invalid", message: expect.stringContaining("admin takes no time") },
 		});
-		expect(rows("SELECT id FROM cases")).toEqual([]);
+		expect(await rows("SELECT id FROM cases")).toEqual([]);
 	});
 
 	test("a command id names the time too: the same request at another time is refused, at the same time it is a retry", async () => {
@@ -151,24 +163,26 @@ describe("when a write happened", () => {
 				ok: false,
 				error: { code: "conflict" },
 			});
-		expect(rows("SELECT id FROM cases")).toHaveLength(1);
+		expect(await rows("SELECT id FROM cases")).toHaveLength(1);
 	});
 
 	test("a report accepted before a restart is applied with the time it was accepted at", async () => {
 		const since = await demo();
 		const then = since - 4 * DAY;
-		const project = findProject(h.app.db, "demo");
+		const project = await h.app.database.read((db) => findProject(db, "demo"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, h.owner, true, then);
-			acceptReport(ctx, {
-				target: { commit: "bbbbbbb2", branch: "main" },
-				results: [{ test: { key: "t1" }, outcome: "pass" }],
-			});
-			stampSeq(ctx);
-		});
-		expect(recoverAccepted(h.app)).toBe(1);
-		expect(rows<{ at: number }>("SELECT at FROM results")).toEqual([{ at: then }]);
+		await h.app.database.write((db) =>
+			db.transaction(async () => {
+				const ctx = makeCtx(h.app, db, project, h.owner, true, then);
+				await acceptReport(ctx, {
+					target: { commit: "bbbbbbb2", branch: "main" },
+					results: [{ test: { key: "t1" }, outcome: "pass" }],
+				});
+				await stampSeq(ctx);
+			}),
+		);
+		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(await rows<{ at: number }>("SELECT at FROM results")).toEqual([{ at: then }]);
 	});
 });
 
@@ -178,26 +192,30 @@ describe("a demo and an archive", () => {
 		h = await harness();
 		await h.call("propose", newCase("Real work"));
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		await h.app.database.read((db) => exportArchive(db, (chunk) => chunks.push(chunk)));
 		const archive = chunks.join("");
 		expect(archive).not.toContain("demo_projects");
-		h.close();
+		await h.close();
 
 		// It goes into a fresh instance whose untouched first project was made a demo: the same id, another project.
 		h = await harness();
 		await h.call("admin", { do: "project.demo", key: "scratch" });
-		expect(rows<{ project: number }>("SELECT project FROM demo_projects")).toEqual([{ project: 1 }]);
-		removeBootstrap(h.app.db);
-		importArchive(h.app.db, linesOf(archive));
-		expect(rows<{ id: number }>("SELECT id FROM projects")).toEqual([{ id: 1 }]);
-		expect(rows("SELECT project FROM demo_projects")).toEqual([]);
-		const owner = actorByName(h.app.db, "robin", 0);
+		expect(await rows<{ project: number }>("SELECT project FROM demo_projects")).toEqual([{ project: 1 }]);
+		await h.app.database.write((db) =>
+			db.transaction(async () => {
+				await removeBootstrap(db);
+				await importArchive(db, linesOf(archive));
+			}),
+		);
+		expect(await rows<{ id: number }>("SELECT id FROM projects")).toEqual([{ id: 1 }]);
+		expect(await rows("SELECT project FROM demo_projects")).toEqual([]);
+		const owner = await h.app.database.read((db) => actorByName(db, "robin", 0));
 		if (!owner) throw new Error("the archive holds no owner");
 		const refused = await invoke(h.app, OPS, {
 			op: "propose",
 			project: "scratch",
 			input: newCase("Backdated after import"),
-			actor: () => owner,
+			actor: async () => owner,
 			at: h.app.now() - DAY,
 		});
 		expect(refused).toMatchObject({
@@ -218,8 +236,11 @@ describe("the time over HTTP", () => {
 	test("the header carries the time to a demo's write, and one that is not a number is refused", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-demo-time-"));
 		dirs.push(dataDir);
-		const instance = start(
+		const database = await testDatabase();
+		httpDatabases.push(database);
+		const instance = await start(
 			{
+				databaseUrl: database.url,
 				dataDir,
 				host: "127.0.0.1",
 				port: 0,

@@ -9,6 +9,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
+import { testDatabase } from "../db.ts";
 import { browserAvailable, openPage, type Server } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -16,10 +17,18 @@ test.skipIf(!browserAvailable)(
 	async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-project-live-"));
 		const token = "draft-project-live-owner-token";
-		const instance = start(
-			{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
+		const database = await testDatabase();
+		const instance = await start(
+			{
+				...defaultConfig({}),
+				databaseUrl: database.url,
+				dataDir,
+				port: 0,
+				owner: "robin",
+				ownerToken: token,
+				mode: "local",
+			},
 			() => ({ ui }),
-			{ readers: 0 },
 		);
 		const server: Server = {
 			url: instance.url,
@@ -69,7 +78,11 @@ test.skipIf(!browserAvailable)(
 			page.on("request", (request) => {
 				if (/\/(propose|decide)$/.test(request.url())) writes.push(request.url());
 			});
-			removeProject(instance.app.db, "scratch");
+			await instance.app.database.write(async (db) => {
+				await db.transaction(async () => {
+					await removeProject(db, "scratch");
+				});
+			});
 			await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 			await prepare();
 			const replacement = await server.api("propose", {
@@ -97,6 +110,7 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await view?.close();
 			await instance.stop();
+			await database.close();
 			await rm(dataDir, { recursive: true, force: true });
 		}
 	},
@@ -109,10 +123,18 @@ for (const action of ["placement", "undo"] as const) {
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-placement-project-"));
 			const token = "placement-project-owner-token";
-			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
+			const database = await testDatabase();
+			const instance = await start(
+				{
+					...defaultConfig({}),
+					databaseUrl: database.url,
+					dataDir,
+					port: 0,
+					owner: "robin",
+					ownerToken: token,
+					mode: "local",
+				},
 				() => ({ ui }),
-				{ readers: 0 },
 			);
 			const server: Server = {
 				url: instance.url,
@@ -133,7 +155,11 @@ for (const action of ["placement", "undo"] as const) {
 					await page.keyboard.press("#");
 					await page.locator("#stat").filter({ hasText: "1 case changed" }).waitFor();
 				}
-				removeProject(instance.app.db, "scratch");
+				await instance.app.database.write(async (db) => {
+					await db.transaction(async () => {
+						await removeProject(db, "scratch");
+					});
+				});
 				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 				await server.api("propose", { edits: [{ op: "create", body: { title: "Replacement project case" } }] });
 				if (action === "undo")
@@ -162,6 +188,7 @@ for (const action of ["placement", "undo"] as const) {
 			} finally {
 				await view?.close();
 				await instance.stop();
+				await database.close();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},

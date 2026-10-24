@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { type Harness, harness } from "../../../test/helpers.ts";
 import { isLoopbackOrPrivate } from "../kernel/address.ts";
+import { sql } from "../kernel/db.ts";
 import { limiterOf } from "./attempts.ts";
 import { admit, createToken, hashToken } from "./identity.ts";
 import {
@@ -622,22 +623,30 @@ describe("as a surface uses it", () => {
 
 	const instances: Harness[] = [];
 	afterEach(async () => {
-		for (const h of instances.splice(0)) h.close();
+		for (const h of instances.splice(0)) await h.close();
 	});
 
 	async function caller() {
 		const h = await harness();
 		instances.push(h);
 		for (const secret of [GENERATED, CHOSEN]) {
-			const token = createToken(h.app, { actor: "robin", kind: "human", can: [], project: 0, label: "test" });
-			h.app.db.raw
-				.query("UPDATE tokens SET hash = ?, source = ? WHERE id = ?")
-				.run(hashToken(secret), secret === CHOSEN ? "env" : null, token.id);
+			const token = await createToken(h.app, { actor: "robin", kind: "human", can: [], project: 0, label: "test" });
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						await db.run(
+							sql<{ hash: string; source: string | null; id: number }>(
+								"UPDATE tokens SET hash = $hash, source = $source WHERE id = $id",
+							),
+							{ hash: hashToken(secret), source: secret === CHOSEN ? "env" : null, id: token.id },
+						);
+					}),
+			);
 		}
 		return {
 			limiter: limiterOf(h.app),
-			admit: (from: string | null, secret: string): string => {
-				const answer = admit(h.app, {
+			admit: async (from: string | null, secret: string): Promise<string> => {
+				const answer = await admit(h.app, {
 					bearer: secret,
 					address: from,
 					cookie: null,
@@ -656,38 +665,38 @@ describe("as a surface uses it", () => {
 
 	test("the fifth wrong secret blocks: a secret a person chose is refused unread, a right generated one passes", async () => {
 		const c = await caller();
-		for (let i = 0; i < 5; i++) expect(c.admit("203.0.113.9", wrong(i))).toBe("unauthorized");
-		expect(c.admit("203.0.113.9", wrong(5))).toBe("limited for 1 s");
-		expect(c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
-		expect(c.admit("203.0.113.9", GENERATED)).toBe("admitted");
+		for (let i = 0; i < 5; i++) expect(await c.admit("203.0.113.9", wrong(i))).toBe("unauthorized");
+		expect(await c.admit("203.0.113.9", wrong(5))).toBe("limited for 1 s");
+		expect(await c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
+		expect(await c.admit("203.0.113.9", GENERATED)).toBe("admitted");
 		// The prefix is blocked for every address, and another prefix from another address is not.
-		expect(c.admit("198.51.100.7", CHOSEN)).toBe("limited for 1 s");
-		expect(c.admit("198.51.100.7", GENERATED)).toBe("admitted");
-		expect(c.admit("198.51.100.7", "cb_another-secret")).toBe("unauthorized");
+		expect(await c.admit("198.51.100.7", CHOSEN)).toBe("limited for 1 s");
+		expect(await c.admit("198.51.100.7", GENERATED)).toBe("admitted");
+		expect(await c.admit("198.51.100.7", "cb_another-secret")).toBe("unauthorized");
 	});
 
 	test("nothing that came during the block was reported: the next failure doubles it once, from 1 second", async () => {
 		const c = await caller();
-		for (let i = 0; i < 5; i++) c.admit("203.0.113.9", wrong(i));
+		for (let i = 0; i < 5; i++) await c.admit("203.0.113.9", wrong(i));
 		for (let i = 0; i < 50; i++) {
-			c.admit("203.0.113.9", wrong(100 + i));
-			c.admit("203.0.113.9", CHOSEN);
-			c.admit("203.0.113.9", GENERATED);
+			await c.admit("203.0.113.9", wrong(100 + i));
+			await c.admit("203.0.113.9", CHOSEN);
+			await c.admit("203.0.113.9", GENERATED);
 		}
 		await c.pass(SECOND);
-		expect(c.admit("203.0.113.9", wrong(5))).toBe("unauthorized");
-		expect(c.admit("203.0.113.9", wrong(6))).toBe("limited for 2 s");
+		expect(await c.admit("203.0.113.9", wrong(5))).toBe("unauthorized");
+		expect(await c.admit("203.0.113.9", wrong(6))).toBe("limited for 2 s");
 	});
 
 	test("a success clears the prefix and never the address", async () => {
 		const c = await caller();
-		for (let i = 0; i < 4; i++) c.admit("203.0.113.9", wrong(i));
-		expect(c.admit("203.0.113.9", CHOSEN)).toBe("admitted");
+		for (let i = 0; i < 4; i++) await c.admit("203.0.113.9", wrong(i));
+		expect(await c.admit("203.0.113.9", CHOSEN)).toBe("admitted");
 		expect(c.limiter.size).toBe(1);
-		expect(c.admit("203.0.113.9", "cb_another-secret")).toBe("unauthorized");
-		expect(c.admit("203.0.113.9", GENERATED)).toBe("admitted");
-		expect(c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
-		expect(c.admit("198.51.100.7", CHOSEN)).toBe("admitted");
+		expect(await c.admit("203.0.113.9", "cb_another-secret")).toBe("unauthorized");
+		expect(await c.admit("203.0.113.9", GENERATED)).toBe("admitted");
+		expect(await c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
+		expect(await c.admit("198.51.100.7", CHOSEN)).toBe("admitted");
 	});
 
 	test("a peer that is a proxy, or unknown, is counted by prefix alone", async () => {
@@ -697,21 +706,21 @@ describe("as a surface uses it", () => {
 			// Twenty wrong secrets from each, no two with the same first 8 characters.
 			for (let i = 0; i < 20; i++) {
 				attempts += 1;
-				expect(c.admit(from, `cb_${String(attempts).padStart(8, "0")}`)).toBe("unauthorized");
+				expect(await c.admit(from, `cb_${String(attempts).padStart(8, "0")}`)).toBe("unauthorized");
 			}
 		}
 		// One key for each prefix, and none for an address.
 		expect(c.limiter.size).toBe(80);
-		for (let i = 0; i < 5; i++) c.admit("127.0.0.1", wrong(i));
-		expect(c.admit("::1", CHOSEN)).toBe("limited for 1 s");
+		for (let i = 0; i < 5; i++) await c.admit("127.0.0.1", wrong(i));
+		expect(await c.admit("::1", CHOSEN)).toBe("limited for 1 s");
 	});
 
 	test("a secret with no prefix key is counted by address alone, and by nothing behind a proxy", async () => {
 		const c = await caller();
-		for (let i = 0; i < 20; i++) expect(c.admit("127.0.0.1", i % 2 ? "" : "cb_")).toBe("unauthorized");
+		for (let i = 0; i < 20; i++) expect(await c.admit("127.0.0.1", i % 2 ? "" : "cb_")).toBe("unauthorized");
 		expect(c.limiter.size).toBe(0);
-		for (let i = 0; i < 5; i++) expect(c.admit("203.0.113.9", "")).toBe("unauthorized");
-		expect(c.admit("203.0.113.9", "cb_")).toBe("limited for 1 s");
+		for (let i = 0; i < 5; i++) expect(await c.admit("203.0.113.9", "")).toBe("unauthorized");
+		expect(await c.admit("203.0.113.9", "cb_")).toBe("limited for 1 s");
 		expect(c.limiter.size).toBe(1);
 	});
 });

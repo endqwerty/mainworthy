@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { harness } from "../../../test/helpers.ts";
+import { writerDatabase } from "../../../test/pg-scopes.ts";
 import { seed } from "../../cli/seed.ts";
 import { withInstance } from "../../cli/test-support.ts";
+
+async function harness(...args: Parameters<typeof import("../../../test/helpers.ts")["harness"]>) {
+	return (await import("../../../test/helpers.ts")).harness(...args);
+}
+
 import { PRESETS } from "../../core/presets.ts";
 import { signatureHash } from "../../core/signature.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
-import { Db } from "../kernel/db.ts";
+import type { ReadDb, WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
-import { ARCHIVE_VERSION, MIGRATIONS, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
+import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../kernel/migrate.ts";
 import {
 	exportArchive as exportWithBlobs,
 	importArchive as importWithBlobs,
@@ -24,10 +29,9 @@ import {
 // compare the target before/after rejected input, and time actual export/import of 50,000 result rows.
 type Value = string | number | bigint | null;
 type Row = Record<string, Value>;
-const opened: Db[] = [];
-const stores = new WeakMap<Db, BlobStore>();
+const stores = new WeakMap<ReadDb, BlobStore>();
 const attachmentBytes = Buffer.from("archive attachment");
-function storage(db: Db): BlobStore {
+function storage(db: ReadDb): BlobStore {
 	let store = stores.get(db);
 	if (!store) {
 		store = memoryBlobs();
@@ -35,11 +39,11 @@ function storage(db: Db): BlobStore {
 	}
 	return store;
 }
-function exportArchive(db: Db, write: (chunk: string) => void, options: { now?: number; project?: string } = {}) {
+function exportArchive(db: ReadDb, write: (chunk: string) => void, options: { now?: number; project?: string } = {}) {
 	return exportWithBlobs(db, write, { ...options, blobs: storage(db) });
 }
-function importArchive(db: Db, lines: Iterable<string>) {
-	return importWithBlobs(db, lines, { blobs: storage(db) });
+async function importArchive(db: WriteDb, lines: Iterable<string>) {
+	return await importWithBlobs(db, lines, { blobs: storage(db) });
 }
 
 const time = 1_791_741_600_000;
@@ -544,140 +548,116 @@ const fixtures: Record<string, Row[]> = {
 	depends_on: [{ run: 601, decision: 401, expires_at: null }],
 };
 
-function database(): Db {
-	const db = new Db(":memory:");
+const opened: (WriteDb & AsyncDisposable)[] = [];
+async function database(): Promise<WriteDb> {
+	const db = await writerDatabase();
 	opened.push(db);
-	migrate(db, ":memory:");
 	return db;
 }
+afterEach(async () => {
+	for (const db of opened.splice(0)) await db[Symbol.asyncDispose]();
+});
 
 function identifier(name: string): string {
 	return `"${name.replaceAll('"', '""')}"`;
 }
 
-function insert(db: Db, table: string, row: Row): void {
+async function insert(db: WriteDb, table: string, row: Row): Promise<void> {
 	const columns = Object.keys(row);
-	db.raw
-		.query<unknown, Value[]>(
-			`INSERT INTO ${identifier(table)} (${columns.map(identifier).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
-		)
-		.run(...Object.values(row));
+	await db.transaction(() =>
+		db.runDynamic(
+			`INSERT INTO ${identifier(table)} (${columns.map(identifier).join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`,
+			Object.values(row),
+		),
+	);
 }
 
-function source(): Db {
-	const db = database();
+async function source(): Promise<WriteDb> {
+	const db = await database();
 	storage(db).put(attachmentBytes);
-	db.transaction(() => {
-		db.raw.exec("PRAGMA defer_foreign_keys = ON");
+	await db.transaction(async () => {
+		await db.transaction(() => db.exec("SET CONSTRAINTS ALL DEFERRED"));
 		for (const [table, rows] of Object.entries(fixtures)) {
-			for (const row of rows) insert(db, table, row);
+			for (const row of rows) await insert(db, table, row);
 		}
-		insert(db, "tokens", {
+		await insert(db, "tokens", {
 			id: 900,
 			actor: 71,
 			hash: "synthetic-source-credential-hash",
 			label: "test",
 			created_at: time,
 		});
-		db.raw
-			.query("INSERT INTO search_docs (rowid, title, body, tags, project) VALUES (?, ?, ?, ?, ?)")
-			.run(101, "stale title", "obsoleteindexword", "stale", 23);
+		await db.transaction(() =>
+			db.runDynamic("INSERT INTO search_docs (id, title, body, tags, project) VALUES ($1, $2, $3, $4, $5)", [
+				101,
+				"stale title",
+				"obsoleteindexword",
+				"stale",
+				23,
+			]),
+		);
 	});
 	return db;
 }
 
-function target(): Db {
-	const db = database();
-	insert(db, "orgs", { id: 1, name: "default", created_at: time });
-	insert(db, "actors", { id: 1, org: 1, kind: "human", name: "bootstrap owner", created_at: time });
-	insert(db, "actors", { id: 2, org: 1, kind: "rule", name: "bootstrap rule", created_at: time });
-	insert(db, "grants", { actor: 1, project: 0, can: '["admin"]' });
-	insert(db, "tokens", {
+async function target(): Promise<WriteDb> {
+	const db = await database();
+	await insert(db, "orgs", { id: 1, name: "default", created_at: time });
+	await insert(db, "actors", { id: 1, org: 1, kind: "human", name: "bootstrap owner", created_at: time });
+	await insert(db, "actors", { id: 2, org: 1, kind: "rule", name: "bootstrap rule", created_at: time });
+	await insert(db, "grants", { actor: 1, project: 0, can: '["admin"]' });
+	await insert(db, "tokens", {
 		id: 1,
 		actor: 1,
 		hash: "synthetic-target-credential-hash",
 		label: "bootstrap",
 		created_at: time,
 	});
-	insert(db, "meta", { key: "bootstrap-note", value: "unchanged on refusal" });
-	db.raw
-		.query("INSERT INTO search_docs (rowid, title, body, tags, project) VALUES (1, '', 'bootstrapindexword', '', 0)")
-		.run();
+	await insert(db, "meta", { key: "bootstrap-note", value: "unchanged on refusal" });
+	await db.transaction(() =>
+		db.runDynamic(
+			"INSERT INTO search_docs (id, title, body, tags, project) VALUES (1, '', 'bootstrapindexword', '', 0)",
+			[],
+		),
+	);
 	return db;
 }
 
-function archive(db: Db, now = time): string {
+async function archive(db: ReadDb, now = time): Promise<string> {
 	const chunks: string[] = [];
-	exportArchive(db, (chunk) => chunks.push(chunk), { now });
+	await exportArchive(db, (chunk) => chunks.push(chunk), { now });
 	return chunks.join("");
 }
 
-function tables(db: Db): string[] {
-	return db.raw
-		.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-		.all()
-		.map((row) => row.name);
+async function tables(db: ReadDb): Promise<string[]> {
+	return (await db.catalog()).map((table) => table.name).sort();
 }
-
-function exportedTables(db: Db): string[] {
-	return tables(db).filter(
-		(name) =>
-			![
-				"assertion_index",
-				"assertion_roots",
-				"assertion_seen",
-				"assertion_spreads",
-				"slot_leases",
-				"tokens",
-				"sessions",
-				"credentials",
-				"invitations",
-				"passkey_users",
-				"change_ends",
-				"merge_receipt_dirty",
-				"merge_receipt_heads",
-				"merge_receipt_members",
-				"merge_receipt_nodes",
-				"merge_receipt_payloads",
-				"merge_receipt_snapshots",
-				"merge_receipts",
-				"tracker_requests",
-				"tracker_polls",
-				"scope_moves",
-				"demo_projects",
-				"commit_statuses",
-				"commit_status_delivery",
-				"handoffs",
-			].includes(name) &&
-			!name.startsWith("search_docs") &&
-			!name.startsWith("sqlite_"),
-	);
+async function exportedTables(db: ReadDb): Promise<string[]> {
+	return (await tables(db)).filter((name) => !UNEXPORTED.includes(name) && name !== "search_docs");
 }
-
-function dump(db: Db): Record<string, string[]> {
-	return Object.fromEntries(
-		exportedTables(db).map((table) => {
-			const columns = db.raw.query<{ name: string; pk: number }, []>(`PRAGMA table_info(${identifier(table)})`).all();
-			const primary = columns.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk);
-			const fields = columns.flatMap((column) => [`'${column.name.replaceAll("'", "''")}'`, identifier(column.name)]);
-			const where = table === "meta" ? "WHERE key != 'schema_version'" : "";
-			return [
-				table,
-				db.raw
-					.query<{ row: string }, []>(
-						`SELECT json_object(${fields.join(", ")}) AS row FROM ${identifier(table)} ${where} ORDER BY ${primary.map((column) => identifier(column.name)).join(", ")}`,
-					)
-					.all()
-					.map((row) => row.row),
-			];
-		}),
-	);
+async function dump(db: ReadDb): Promise<Record<string, string[]>> {
+	const result: Record<string, string[]> = {};
+	for (const table of await db.catalog()) {
+		if (UNEXPORTED.includes(table.name) || table.name === "search_docs") continue;
+		const columns = table.columns.filter((column) => column.generated !== "stored");
+		const fields = columns.flatMap((column) => [`'${column.name.replaceAll("'", "''")}'`, identifier(column.name)]);
+		const filter =
+			table.name === "meta" ? "WHERE key NOT IN ('schema_version', 'baseline_hash', 'archive_version')" : "";
+		result[table.name] = (
+			await db.allDynamic<{ row: string }>(
+				`SELECT json_build_object(${fields.join(", ")})::text AS row FROM ${identifier(table.name)} ${filter} ORDER BY ${table.primary.map(identifier).join(", ")}`,
+			)
+		).map((row) => JSON.stringify(JSON.parse(row.row)));
+	}
+	return result;
 }
-
-function allRows(db: Db): Record<string, unknown[]> {
-	return Object.fromEntries(
-		tables(db).map((table) => [table, db.raw.query<unknown, []>(`SELECT * FROM ${identifier(table)}`).all()]),
-	);
+async function allRows(db: ReadDb): Promise<Record<string, unknown[]>> {
+	const result: Record<string, unknown[]> = {};
+	for (const table of await db.catalog())
+		result[table.name] = await db.allDynamic(
+			`SELECT row_to_json(t)::text AS row FROM ${identifier(table.name)} t ORDER BY ${table.primary.map(identifier).join(", ")}`,
+		);
+	return result;
 }
 
 function rehash(text: string): string {
@@ -688,17 +668,13 @@ function rehash(text: string): string {
 	return `${preceding}${JSON.stringify({ end: true, rows, sha256: createHash("sha256").update(preceding).digest("hex") })}\n`;
 }
 
-function refuse(text: string, message: string | RegExp): void {
-	const db = target();
-	const before = allRows(db);
-	expect(() => importArchive(db, linesOf(text))).toThrow(message);
-	expect(allRows(db)).toEqual(before);
-	expect(db.raw.inTransaction).toBe(false);
+async function refuse(text: string, message: string | RegExp): Promise<void> {
+	const db = await target();
+	const before = await allRows(db);
+	await expect(importArchive(db, linesOf(text))).rejects.toThrow(message);
+	expect(await allRows(db)).toEqual(before);
+	expect(db.inTransaction).toBe(false);
 }
-
-afterEach(() => {
-	for (const db of opened.splice(0)) db.close();
-});
 
 test("archives wait for retired demo cleanup instead of restoring retired data without its mark", async () => {
 	await withInstance(async ({ instance }) => {
@@ -708,46 +684,58 @@ test("archives wait for retired demo cleanup instead of restoring retired data w
 		await refreshDemo(instance, "demo", { cases: 12, days: 0, unlinkedFiles: 0 });
 		app.config.commit = "b".repeat(40);
 		await refreshDemo(instance, "demo", { cases: 12, days: 0, unlinkedFiles: 0 });
+
 		let bytes = 0;
-		expect(() =>
-			exportWithBlobs(
-				app.db,
-				(chunk) => {
-					bytes += chunk.length;
-				},
-				{ blobs: app.blobs },
+		await expect(
+			instance.app.database.read((db) =>
+				exportWithBlobs(
+					db,
+					(chunk) => {
+						bytes += chunk.length;
+					},
+					{ blobs: app.blobs },
+				),
 			),
-		).toThrow("retired demo cleanup");
+		).rejects.toThrow("retired demo cleanup");
 		expect(bytes).toBe(0);
-		expect(exportWithBlobs(app.db, () => {}, { project: "demo", blobs: app.blobs }).rows).toBeGreaterThan(0);
+		expect(
+			(await app.database.read((db) => exportWithBlobs(db, () => {}, { project: "demo", blobs: app.blobs }))).rows,
+		).toBeGreaterThan(0);
 		await drainRetiredDemos(instance);
-		expect(exportWithBlobs(app.db, () => {}, { blobs: app.blobs }).rows).toBeGreaterThan(0);
+		expect((await app.database.read((db) => exportWithBlobs(db, () => {}, { blobs: app.blobs }))).rows).toBeGreaterThan(
+			0,
+		);
 	});
 }, 30_000);
 
 describe("Mainworthy instance archives", () => {
-	test("an archive preserves legacy corrections that branch from the same result", () => {
-		const from = source();
-		insert(from, "results", { ...fixtures.results?.[1], id: 202, outcome: "blocked" });
-		const to = target();
-		importArchive(to, linesOf(archive(from)));
-		expect(to.raw.query("SELECT id, corrects, outcome FROM results ORDER BY id").all()).toEqual([
+	test("an archive preserves legacy corrections that branch from the same result", async () => {
+		const from = await source();
+		await insert(from, "results", { ...fixtures.results?.[1], id: 202, outcome: "blocked" });
+		const to = await target();
+		await importArchive(to, linesOf(await archive(from)));
+		expect(
+			await to.allDynamic<Record<string, unknown>>("SELECT id, corrects, outcome FROM results ORDER BY id", []),
+		).toEqual([
 			{ id: 200, corrects: 201, outcome: "pass" },
 			{ id: 201, corrects: null, outcome: "fail" },
 			{ id: 202, corrects: 201, outcome: "blocked" },
 		]);
 	});
 
-	test("a project archive keeps every head, decision and verdict and excludes other projects", () => {
-		const from = source();
+	test("a project archive keeps every head, decision and verdict and excludes other projects", async () => {
+		const from = await source();
 		const selectedSettings = JSON.stringify({
 			...PRESETS.standard.settings,
 			named: "雪",
 			fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },
 		});
-		from.raw.query("UPDATE policies SET settings = ? WHERE project = 23").run(selectedSettings);
-		const expected = dump(from);
-		from.exec(`
+		await from.transaction(() =>
+			from.runDynamic("UPDATE policies SET settings = $1 WHERE project = 23", [selectedSettings]),
+		);
+		const expected = await dump(from);
+		await from.transaction(() =>
+			from.exec(`
 			INSERT INTO orgs VALUES (18, 'Unrelated organisation', 1);
 			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1, 'identity-other');
@@ -756,14 +744,15 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO mail_contacts VALUES (80, 'unrelated@example.com', NULL, 'other-revision');
 			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
 			INSERT INTO grants (actor, project, can) VALUES (81, 24, '["read"]');
-		`);
+		`),
+		);
 		const otherSettings = JSON.stringify({
 			...PRESETS.standard.settings,
 			fields: { other_only: { kind: "text", label: "Private field", required: false } },
 		});
-		insert(from, "policies", { ...fixtures.policies?.[0], project: 24, settings: otherSettings, actor: 80 });
+		await insert(from, "policies", { ...fixtures.policies?.[0], project: 24, settings: otherSettings, actor: 80 });
 		const chunks: string[] = [];
-		exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });
+		await exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });
 		const text = chunks.join("");
 		expect(text).not.toContain("unrelated@example.com");
 		expect(text).toContain("zoe@example.com");
@@ -772,21 +761,22 @@ describe("Mainworthy instance archives", () => {
 		expect(text).not.toContain("Other project only");
 		expect(text).not.toContain("instance-note");
 		for (const table of UNEXPORTED) expect(text).not.toContain(`"t":"${table}"`);
-		const to = target();
-		importArchive(to, linesOf(text));
-		const actual = dump(to);
+		const to = await target();
+		await importArchive(to, linesOf(text));
+		const actual = await dump(to);
 		for (const [table, rows] of Object.entries(expected)) {
 			expect(actual[table]).toEqual(table === "meta" ? [] : rows);
 		}
-		expect(to.raw.query("SELECT head_hash, claim_hash FROM cases").all()).toEqual(
-			from.raw.query("SELECT head_hash, claim_hash FROM cases").all(),
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT head_hash, claim_hash FROM cases", [])).toEqual(
+			await from.allDynamic<Record<string, unknown>>("SELECT head_hash, claim_hash FROM cases", []),
 		);
-		expect(to.raw.query("SELECT verdict FROM runs").all()).toEqual(from.raw.query("SELECT verdict FROM runs").all());
-		expect(to.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT verdict FROM runs", [])).toEqual(
+			await from.allDynamic<Record<string, unknown>>("SELECT verdict FROM runs", []),
+		);
 
 		// Inverting the selection must also exclude children that hold no project column of their own.
 		const otherChunks: string[] = [];
-		const otherCounts = exportArchive(from, (chunk) => otherChunks.push(chunk), { project: "other" });
+		const otherCounts = await exportArchive(from, (chunk) => otherChunks.push(chunk), { project: "other" });
 		for (const table of [
 			"attachments",
 			"answers",
@@ -801,49 +791,62 @@ describe("Mainworthy instance archives", () => {
 		]) {
 			expect(otherCounts.tables[table]).toBe(0);
 		}
-		const other = target();
-		importArchive(other, linesOf(otherChunks.join("")));
-		expect(other.raw.query("SELECT email, verified_at FROM mail_contacts ORDER BY actor").all()).toEqual([
+		const other = await target();
+		await importArchive(other, linesOf(otherChunks.join("")));
+		expect(
+			await other.allDynamic<Record<string, unknown>>(
+				"SELECT email, verified_at FROM mail_contacts ORDER BY actor",
+				[],
+			),
+		).toEqual([
 			{ email: "zoe@example.com", verified_at: time },
 			{ email: "unrelated@example.com", verified_at: null },
 		]);
-		expect(other.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
-		expect(other.raw.query("SELECT name FROM actors ORDER BY id").all()).toEqual([
+		expect(await other.allDynamic<Record<string, unknown>>("SELECT key FROM projects", [])).toEqual([{ key: "other" }]);
+		expect(await other.allDynamic<Record<string, unknown>>("SELECT name FROM actors ORDER BY id", [])).toEqual([
 			{ name: "Zoë 雪" },
 			{ name: "Unrelated person" },
 			{ name: "Other project only" },
 		]);
-		expect(other.raw.query("SELECT id FROM cases").all()).toEqual([]);
-		expect(other.raw.query("SELECT settings FROM policies").all()).toEqual([{ settings: otherSettings }]);
+		expect(await other.allDynamic<Record<string, unknown>>("SELECT id FROM cases", [])).toEqual([]);
+		expect(await other.allDynamic<Record<string, unknown>>("SELECT settings FROM policies", [])).toEqual([
+			{ settings: otherSettings },
+		]);
 	});
 
-	test("project identity includes signer-only actors and the people and organisations behind them", () => {
-		const from = source();
-		from.exec(`
+	test("project identity includes signer-only actors and the people and organisations behind them", async () => {
+		const from = await source();
+		await from.transaction(() =>
+			from.exec(`
 			INSERT INTO orgs VALUES (18, 'Delegated organisation', 1);
 			INSERT INTO actors VALUES (81, 18, 'human', 'Delegating person', NULL, 1, NULL);
 			INSERT INTO actors VALUES (82, 18, 'agent', 'Signer only', 81, 1, NULL);
 			UPDATE decisions SET signers = '[{"by":82}]';
-		`);
+		`),
+		);
 		const chunks: string[] = [];
-		exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" });
-		const to = target();
-		importArchive(to, linesOf(chunks.join("")));
-		expect(to.raw.query("SELECT id FROM actors ORDER BY id").all()).toEqual([
+		await exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" });
+		const to = await target();
+		await importArchive(to, linesOf(chunks.join("")));
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT id FROM actors ORDER BY id", [])).toEqual([
 			{ id: 70 },
 			{ id: 71 },
 			{ id: 81 },
 			{ id: 82 },
 		]);
-		expect(to.raw.query("SELECT id FROM orgs ORDER BY id").all()).toEqual([{ id: 17 }, { id: 18 }]);
-		expect(to.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT id FROM orgs ORDER BY id", [])).toEqual([
+			{ id: 17 },
+			{ id: 18 },
+		]);
 	});
 
-	test("a project export refuses a new table with no ownership rule before writing", () => {
-		const from = source();
-		from.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
+	test("a project export refuses a new table with no ownership rule before writing", async () => {
+		const from = await source();
+		await from.transaction(() => from.exec("CREATE TABLE unscoped_private (id bigint PRIMARY KEY, note TEXT)"));
 		const chunks: string[] = [];
-		expect(() => exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" })).toThrow(/no ownership rule/);
+		await expect(exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" })).rejects.toThrow(
+			/no ownership rule/,
+		);
 		expect(chunks).toEqual([]);
 	});
 
@@ -852,24 +855,26 @@ describe("Mainworthy instance archives", () => {
 		const to = await harness();
 		try {
 			const chunks: string[] = [];
-			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
-			to.app.db.transaction(() => {
-				// The harness recorded project.create; the server's untouched bootstrap records no command.
-				to.app.db.raw.exec("DELETE FROM commands");
-				removeBootstrap(to.app.db);
-				importArchive(to.app.db, linesOf(chunks.join("")));
-			});
+			await from.app.database.read((db) => exportArchive(db, (chunk) => chunks.push(chunk), { project: "scratch" }));
+			await to.app.database.write((db) =>
+				db.transaction(async () => {
+					// The harness recorded project.create; the server's untouched bootstrap records no command.
+					await db.transaction(() => db.exec("DELETE FROM commands"));
+					await removeBootstrap(db);
+					await importArchive(db, linesOf(chunks.join("")));
+				}),
+			);
 			expect(await to.raw("propose", { edits: [{ op: "create", outline: "First case after restore" }] })).toMatchObject(
 				{
 					ok: true,
 				},
 			);
-			expect(to.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all()).toEqual(
-				from.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all(),
+			expect(await to.app.database.read((db) => db.allDynamic("SELECT kind, name FROM actors ORDER BY id"))).toEqual(
+				await from.app.database.read((db) => db.allDynamic("SELECT kind, name FROM actors ORDER BY id")),
 			);
 		} finally {
-			from.close();
-			to.close();
+			await from.close();
+			await to.close();
 		}
 	});
 
@@ -894,7 +899,7 @@ describe("Mainworthy instance archives", () => {
 				select: {},
 				accepts: { commit: target.commit },
 			});
-			const passer = from.actor("passer", "human", ["read", "produce"]);
+			const passer = await from.actor("passer", "human", ["read", "produce"]);
 			const result = (outcome: string) => ({
 				test: { key: "one" },
 				annotation: { case: "C-1" },
@@ -912,23 +917,26 @@ describe("Mainworthy instance archives", () => {
 			if (!chosen) throw new Error("missing slot dispute");
 			await from.call("decide", { q: chosen.q, onEvidence: chosen.evidenceHash, answer: { is: "flaky" } });
 			const chunks: string[] = [];
-			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
-			to.app.db.transaction(() => {
-				to.app.db.raw.exec("DELETE FROM commands");
-				removeBootstrap(to.app.db);
-				importArchive(to.app.db, linesOf(chunks.join("")));
-			});
+			await from.app.database.read((db) => exportArchive(db, (chunk) => chunks.push(chunk), { project: "scratch" }));
+			await to.app.database.write((db) =>
+				db.transaction(async () => {
+					await db.transaction(() => db.exec("DELETE FROM commands"));
+					await removeBootstrap(db);
+					await importArchive(db, linesOf(chunks.join("")));
+				}),
+			);
 			expect(await to.call("gate", { run: one.run })).toMatchObject({ tally: { pass: 1, disputed: 0 } });
 			expect(await to.call("gate", { run: two.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		} finally {
-			from.close();
-			to.close();
+			await from.close();
+			await to.close();
 		}
 	});
 
-	test("removing a project deletes every row it owns and leaves people and another project as they were", () => {
-		const db = source();
-		db.exec(`
+	test("removing a project deletes every row it owns and leaves people and another project as they were", async () => {
+		const db = await source();
+		await db.transaction(() =>
+			db.exec(`
 			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1, 'identity-other');
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
@@ -948,20 +956,26 @@ describe("Mainworthy instance archives", () => {
 				VALUES ('request-1', 'nonce-1', 23, 200, 'demo/shop', 'create', 'key-1', 'Title', 'Body', 'queued', 1);
 			INSERT INTO handoffs (id, nonce, project, question, body, state, at)
 				VALUES ('handoff-1', 'nonce-1', 23, 402, '{}', 'sent', 1);
-		`);
-		insert(db, "policies", { ...fixtures.policies?.[0], project: 24, actor: 71 });
-		const other = (): string => {
+		`),
+		);
+		await insert(db, "policies", { ...fixtures.policies?.[0], project: 24, actor: 71 });
+		const other = async (): Promise<string> => {
 			const chunks: string[] = [];
-			exportArchive(db, (chunk) => chunks.push(chunk), { now: time, project: "other" });
+			await exportArchive(db, (chunk) => chunks.push(chunk), { now: time, project: "other" });
 			return chunks.join("");
 		};
 		const kept = ["meta", "orgs", "actors", "tokens", "mail_contacts", "teams", "team_members"];
-		const before = { other: other(), kept: kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all()) };
-		const removed = removeProject(db, "qa");
+		const before = {
+			other: await other(),
+			kept: await Promise.all(
+				kept.map((table) => db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, [])),
+			),
+		};
+		const removed = await removeProject(db, "qa");
 		// Every table the fixture fills for the project lost its rows, the ones an archive leaves out included, and
 		// the count says so. The other project holds no rows of the tables that find their project through a parent.
 		for (const table of [
-			...exportedTables(db),
+			...(await exportedTables(db)),
 			"merge_receipt_dirty",
 			"merge_receipt_heads",
 			"merge_receipt_members",
@@ -982,30 +996,40 @@ describe("Mainworthy instance archives", () => {
 				table,
 				removed: table === "grants" ? 1 : (fixtures[table]?.length ?? 1),
 			});
-			const columns = db.raw.query<{ name: string }, []>(`PRAGMA table_info(${identifier(table)})`).all();
+			const columns = (await db.catalog()).find((item) => item.name === table)?.columns ?? [];
 			const where =
 				table === "projects" ? "WHERE id = 23" : columns.some((c) => c.name === "project") ? "WHERE project = 23" : "";
-			expect({ table, left: db.raw.query(`SELECT count(*) AS n FROM ${identifier(table)} ${where}`).get() }).toEqual({
+			expect({
+				table,
+				left:
+					(
+						await db.allDynamic<Record<string, unknown>>(`SELECT count(*) AS n FROM ${identifier(table)} ${where}`, [])
+					)[0] ?? null,
+			}).toEqual({
 				table,
 				left: { n: 0 },
 			});
 		}
 		expect(removed.rows).toBe(Object.values(removed.tables).reduce((sum, count) => sum + count, 0));
-		expect(db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
-		expect(db.raw.query("SELECT actor, project FROM grants ORDER BY actor, project").all()).toEqual([
+		expect(await db.allDynamic<Record<string, unknown>>("SELECT key FROM projects", [])).toEqual([{ key: "other" }]);
+		expect(
+			await db.allDynamic<Record<string, unknown>>("SELECT actor, project FROM grants ORDER BY actor, project", []),
+		).toEqual([
 			{ actor: 70, project: 24 },
 			{ actor: 71, project: 0 },
 		]);
-		expect(other()).toBe(before.other);
-		expect(kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all())).toEqual(before.kept);
-		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-		expect(db.raw.inTransaction).toBe(false);
+		expect(await other()).toBe(before.other);
+		expect(
+			await Promise.all(kept.map((table) => db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, []))),
+		).toEqual(before.kept);
+		expect(db.inTransaction).toBe(false);
 	});
 
-	test("project removal slices commit intact foreign keys, retain the mark, and resume from a reopened database", () => {
-		let db = source();
-		db.exec(`
-			INSERT INTO projects (id,org,key,name,created_at) VALUES (24,17,'other','Kept',1);
+	test("project removal slices commit intact foreign keys, retain the mark, and resume after committed slices", async () => {
+		const db = await source();
+		await db.transaction(() =>
+			db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (24,17,'other','Kept',1,'other');
 			INSERT INTO folders VALUES (44,24,NULL,'Kept folder','a0','active',1);
 			INSERT INTO demo_projects (project,since) VALUES (23,1);
 			INSERT INTO slot_leases VALUES (602,71,1,30001);
@@ -1016,46 +1040,41 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO merge_receipt_members (node,slot,payload) VALUES (1,0,1);
 			INSERT INTO merge_receipt_heads (run,project,root) VALUES (601,23,1);
 			INSERT INTO merge_receipt_dirty (run,bucket) VALUES (601,1);
-		`);
-		const retained = db.raw.query("SELECT * FROM folders WHERE project=24").all();
+		`),
+		);
+		const retained = await db.allDynamic("SELECT * FROM folders WHERE project=24");
 		let slices = 0;
 		for (;;) {
-			const result = removeProjectSlice(db, "qa", 4);
-			expect(db.raw.inTransaction).toBe(false);
-			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-			expect(db.raw.query("SELECT * FROM folders WHERE project=24").all()).toEqual(retained);
+			const result = await removeProjectSlice(db, "qa", 4);
+			expect(db.inTransaction).toBe(false);
+			expect(await db.allDynamic("SELECT * FROM folders WHERE project=24")).toEqual(retained);
 			expect(result.rows).toBeLessThanOrEqual(4);
 			slices++;
 			if (result.done) break;
 			expect(result.rows).toBeGreaterThan(0);
-			expect(db.raw.query("SELECT project FROM demo_projects").all()).toEqual([{ project: 23 }]);
-			if (slices === 3) {
-				db = new Db(db.raw.serialize());
-				opened.push(db);
-			}
+			expect(await db.allDynamic("SELECT project FROM demo_projects")).toEqual([{ project: 23 }]);
 			expect(slices).toBeLessThan(200);
 		}
 		expect(slices).toBeGreaterThan(3);
-		expect(db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
-		expect(db.raw.query("SELECT * FROM demo_projects").all()).toEqual([]);
-		expect(db.raw.query("SELECT rowid FROM search_docs WHERE project=23").all()).toEqual([]);
-		expect(removeProjectSlice(db, "qa")).toEqual({ done: true, table: null, rows: 0 });
+		expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "other" }]);
+		expect(await db.allDynamic("SELECT * FROM demo_projects")).toEqual([]);
+		expect(await db.allDynamic("SELECT id FROM search_docs WHERE project=23")).toEqual([]);
+		expect(await removeProjectSlice(db, "qa")).toEqual({ done: true, table: null, rows: 0 });
 	});
 
 	test("project removal slices drain an HTTP-seeded demo while another project stays readable", async () => {
 		await withInstance(async ({ client, instance }) => {
 			await seed(client, { project: "demo", cases: 30, days: 1 });
-			const db = instance.app.db;
-			const kept = db.raw.query("SELECT * FROM projects WHERE key='scratch'").get();
-			const people = db.raw.query("SELECT * FROM actors ORDER BY id").all();
+			const read = instance.app.database.read.bind(instance.app.database);
+			const kept = (await read((db) => db.allDynamic("SELECT * FROM projects WHERE key='scratch'")))[0];
+			const people = await read((db) => db.allDynamic("SELECT * FROM actors ORDER BY id"));
 			let rows = 0;
 			for (let i = 0; i < 500; i++) {
-				const result = await instance.app.gate.run(() => removeProjectSlice(db, "demo", 16));
+				const result = await instance.app.database.write((db) => removeProjectSlice(db, "demo", 16));
 				rows += result.rows;
 				expect(result.rows).toBeLessThanOrEqual(16);
-				expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-				expect(db.raw.query("SELECT * FROM projects WHERE key='scratch'").get()).toEqual(kept);
-				expect(db.raw.query("SELECT * FROM actors ORDER BY id").all()).toEqual(people);
+				expect((await read((db) => db.allDynamic("SELECT * FROM projects WHERE key='scratch'")))[0]).toEqual(kept);
+				expect(await read((db) => db.allDynamic("SELECT * FROM actors ORDER BY id"))).toEqual(people);
 				if (result.done) {
 					expect(rows).toBeGreaterThan(100);
 					expect((await client.call("find", { limit: 1 })).items).toEqual([]);
@@ -1067,150 +1086,163 @@ describe("Mainworthy instance archives", () => {
 		});
 	}, 30_000);
 
-	test("project removal slices delete cross-table cycles with composite foreign keys", () => {
-		const db = target();
-		db.exec(`
-			INSERT INTO projects (id,org,key,name,created_at) VALUES (23,1,'qa','Remove',1);
-			CREATE TABLE slice_a (project INTEGER REFERENCES projects(id), id INTEGER, b INTEGER NOT NULL,
-				PRIMARY KEY(project,id), FOREIGN KEY(project,b) REFERENCES slice_b(project,id)) WITHOUT ROWID;
-			CREATE TABLE slice_b (project INTEGER REFERENCES projects(id), id INTEGER, a INTEGER NOT NULL,
-				PRIMARY KEY(project,id), FOREIGN KEY(project,a) REFERENCES slice_a(project,id)) WITHOUT ROWID;
-		`);
-		db.transaction(() => {
-			db.raw.exec("PRAGMA defer_foreign_keys=ON");
-			db.exec("INSERT INTO slice_a VALUES (23,1,2); INSERT INTO slice_b VALUES (23,2,1)");
+	test("project removal slices delete cross-table cycles with composite foreign keys", async () => {
+		const db = await target();
+		await db.transaction(() =>
+			db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'qa');
+			CREATE TABLE slice_a (project INTEGER REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE, id INTEGER, b INTEGER NOT NULL,
+				PRIMARY KEY(project,id));
+			CREATE TABLE slice_b (project INTEGER REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE, id INTEGER, a INTEGER NOT NULL,
+				PRIMARY KEY(project,id), FOREIGN KEY(project,a) REFERENCES slice_a(project,id) DEFERRABLE INITIALLY IMMEDIATE);
+			ALTER TABLE slice_a ADD FOREIGN KEY(project,b) REFERENCES slice_b(project,id) DEFERRABLE INITIALLY IMMEDIATE;
+		`),
+		);
+		await db.transaction(async () => {
+			await db.exec("SET CONSTRAINTS ALL DEFERRED");
+			await db.exec("INSERT INTO slice_a VALUES (23,1,2); INSERT INTO slice_b VALUES (23,2,1)");
 		});
-		const result = removeProjectSlice(db, "qa", 2);
+		const result = await removeProjectSlice(db, "qa", 2);
 		expect(result).toMatchObject({ done: false, rows: 2 });
-		expect(db.raw.query("SELECT * FROM slice_a").all()).toEqual([]);
-		expect(db.raw.query("SELECT * FROM slice_b").all()).toEqual([]);
-		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-		expect(removeProjectSlice(db, "qa", 2).done).toBe(true);
+		expect(await db.allDynamic("SELECT * FROM slice_a")).toEqual([]);
+		expect(await db.allDynamic("SELECT * FROM slice_b")).toEqual([]);
+		expect((await removeProjectSlice(db, "qa", 2)).done).toBe(true);
 	});
 
-	test("project removal slices handle self references and bounded cycles without cascading outside the slice", () => {
-		const db = target();
-		db.exec(`
-			INSERT INTO projects (id,org,key,name,created_at) VALUES (23,1,'qa','Remove',1);
-			CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id),
-				parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE);
+	test("project removal slices handle self references and bounded cycles without cascading outside the slice", async () => {
+		const db = await target();
+		await db.transaction(() =>
+			db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'qa');
+			CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE,
+				parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE);
 			CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
 			CREATE INDEX slice_nodes_project ON slice_nodes(project);
 			INSERT INTO slice_nodes VALUES (1,23,NULL),(2,23,1),(3,23,2),(4,23,1),(5,23,1),(6,23,1);
-		`);
-		db.transaction(() => {
-			db.raw.exec("PRAGMA defer_foreign_keys=ON");
-			db.exec("INSERT INTO slice_nodes VALUES (7,23,8),(8,23,7)");
+		`),
+		);
+		await db.transaction(async () => {
+			await db.exec("SET CONSTRAINTS ALL DEFERRED");
+			await db.exec("INSERT INTO slice_nodes VALUES (7,23,8),(8,23,7)");
 		});
 		for (let i = 0; i < 30; i++) {
-			const before = db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM slice_nodes").get()?.n ?? 0;
-			const result = removeProjectSlice(db, "qa", 2);
-			const after = db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM slice_nodes").get()?.n ?? 0;
+			const before = (await db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM slice_nodes"))[0]?.n ?? 0;
+			const result = await removeProjectSlice(db, "qa", 2);
+			const after = (await db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM slice_nodes"))[0]?.n ?? 0;
 			expect(before - after).toBeLessThanOrEqual(2);
 			expect(result.rows).toBeLessThanOrEqual(2);
-			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 			if (result.done) return;
 		}
 		throw new Error("slice removal did not finish");
 	});
 
-	test("project removal slices roll back incoming retained references, oversized cycles, and unknown ownership", () => {
+	test("project removal slices roll back incoming retained references, oversized cycles, and unknown ownership", async () => {
 		for (const retained of [false, true]) {
-			const db = target();
-			db.exec(`
+			const db = await target();
+			await db.transaction(() =>
+				db.exec(`
 				INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'remove'),(24,1,'other','Keep',1,'keep');
-				CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id),
-					parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE);
+				CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE,
+					parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE);
 				CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
-			`);
-			db.transaction(() => {
-				db.raw.exec("PRAGMA defer_foreign_keys=ON");
-				db.exec(
+			`),
+			);
+			await db.transaction(async () => {
+				await db.exec("SET CONSTRAINTS ALL DEFERRED");
+				await db.exec(
 					retained
 						? "INSERT INTO slice_nodes VALUES (1,23,NULL),(2,24,1)"
 						: "INSERT INTO slice_nodes VALUES (1,23,2),(2,23,3),(3,23,1)",
 				);
 			});
-			const before = allRows(db);
-			expect(() => removeProjectSlice(db, "qa", 2)).toThrow(retained ? /another project|retained/ : /limit|bounded/);
-			expect(allRows(db)).toEqual(before);
-			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+			const before = await allRows(db);
+			await expect(removeProjectSlice(db, "qa", 2)).rejects.toThrow(
+				retained ? /another project|retained/ : /limit|bounded/,
+			);
+			expect(await allRows(db)).toEqual(before);
 		}
-		const db = source();
-		db.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY)");
-		const before = allRows(db);
-		expect(() => removeProjectSlice(db, "qa")).toThrow(/ownership/);
-		expect(allRows(db)).toEqual(before);
+		const db = await source();
+		await db.transaction(() => db.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY)"));
+		const before = await allRows(db);
+		await expect(removeProjectSlice(db, "qa")).rejects.toThrow(/ownership/);
+		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("project removal slices refuse nested or unenforced transactions and never audit unrelated foreign keys", () => {
-		const db = source();
-		db.transaction(() => expect(() => removeProjectSlice(db, "qa")).toThrow(/transaction/));
-		db.exec("PRAGMA foreign_keys=OFF");
-		expect(() => removeProjectSlice(db, "qa")).toThrow(/foreign.key/i);
-		db.exec("CREATE TABLE unrelated_broken (id INTEGER PRIMARY KEY, project INTEGER REFERENCES projects(id))");
-		db.exec("INSERT INTO unrelated_broken VALUES (1,9999)");
-		db.exec("PRAGMA foreign_keys=ON");
+	test("project removal slices refuse nested transactions and never audit unrelated foreign keys", async () => {
+		const db = await source();
+		await db.transaction(async () => {
+			await expect(removeProjectSlice(db, "qa")).rejects.toThrow(/transaction/);
+		});
+		await db.transaction(() =>
+			db.exec(`CREATE TABLE unrelated_broken (id INTEGER PRIMARY KEY, project INTEGER);
+		INSERT INTO unrelated_broken VALUES (1,9999);
+		ALTER TABLE unrelated_broken ADD FOREIGN KEY(project) REFERENCES projects(id) NOT VALID;`),
+		);
 		for (let i = 0; i < 200; i++) {
-			if (removeProjectSlice(db, "qa").done) {
-				expect(db.raw.query("SELECT * FROM unrelated_broken").all()).toEqual([{ id: 1, project: 9999 }]);
+			if ((await removeProjectSlice(db, "qa")).done) {
+				expect(await db.allDynamic("SELECT * FROM unrelated_broken")).toEqual([{ id: 1, project: 9999 }]);
 				return;
 			}
 		}
 		throw new Error("slice removal did not finish");
 	});
 
-	test("removing a project that is not there, or with a table nobody owns, changes nothing", () => {
-		const db = source();
-		const before = allRows(db);
-		expect(() => removeProject(db, "missing' OR 1=1 --")).toThrow(/project.*not found/i);
-		db.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
-		expect(() => removeProject(db, "qa")).toThrow(
+	test("removing a project that is not there, or with a table nobody owns, changes nothing", async () => {
+		const db = await source();
+		const before = await allRows(db);
+		await expect(removeProject(db, "missing' OR 1=1 --")).rejects.toThrow(/project.*not found/i);
+		await db.transaction(() => db.exec("CREATE TABLE unscoped_private (id bigint PRIMARY KEY, note TEXT)"));
+		await expect(removeProject(db, "qa")).rejects.toThrow(
 			/removing a project has no ownership rule for table unscoped_private/,
 		);
-		expect({ ...allRows(db), unscoped_private: undefined }).toEqual({ ...before, unscoped_private: undefined });
-		expect(db.raw.inTransaction).toBe(false);
+		expect({ ...(await allRows(db)), unscoped_private: undefined }).toEqual({ ...before, unscoped_private: undefined });
+		expect(db.inTransaction).toBe(false);
 	});
 
-	test("an unknown project refuses export before the writer receives a byte", () => {
+	test("an unknown project refuses export before the writer receives a byte", async () => {
 		const chunks: string[] = [];
-		expect(() => exportArchive(source(), (chunk) => chunks.push(chunk), { project: "missing' OR 1=1 --" })).toThrow(
-			/project.*not found/i,
-		);
+		await expect(
+			exportArchive(await source(), (chunk) => chunks.push(chunk), { project: "missing' OR 1=1 --" }),
+		).rejects.toThrow(/project.*not found/i);
 		expect(chunks).toEqual([]);
 	});
-	test("every included table and column survives replay, including full 64-bit integers", () => {
-		const from = source();
-		const to = target();
-		expect(Object.keys(fixtures).sort()).toEqual(exportedTables(from));
-		const text = archive(from);
-		const result = importArchive(to, linesOf(text));
-		expect(dump(to)).toEqual(dump(from));
-		for (const table of exportedTables(from)) expect(result.tables[table]).toBeGreaterThan(0);
+	test("every included table and column survives replay, including full 64-bit integers", async () => {
+		const from = await source();
+		const to = await target();
+		expect(Object.keys(fixtures).sort()).toEqual(await exportedTables(from));
+		const text = await archive(from);
+		const result = await importArchive(to, linesOf(text));
+		expect(await dump(to)).toEqual(await dump(from));
+		for (const table of await exportedTables(from)) expect(result.tables[table]).toBeGreaterThan(0);
 		expect(result.rows).toBe(Object.values(result.tables).reduce((sum, count) => sum + count, 0));
 		expect(text).toContain('"value":9223372036854775807');
 		expect(text).toContain('"value":-9223372036854775808');
 		expect(text).toContain('"duration_ms":2592000000');
-		expect(to.raw.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
+		expect(
+			(await to.allDynamic<Record<string, unknown>>("SELECT value FROM meta WHERE key = 'schema_version'", []))[0] ??
+				null,
+		).toEqual({
 			value: String(SCHEMA_VERSION),
 		});
-		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT * FROM tokens", [])).toEqual([]);
 	});
 
 	test.each([
 		["results", 201],
 		["result_tries", 513],
-	] as const)("an archive refuses out-of-range %s durations without changing the target", (table, id) => {
-		const from = source();
+	] as const)("an archive refuses out-of-range %s durations without changing the target", async (table, id) => {
+		const from = await source();
 		for (const duration of [-1, 2_592_000_001, 9_223_372_036_854_775_807n]) {
-			from.raw.query(`UPDATE ${table} SET duration_ms = ? WHERE id = ?`).run(duration, id);
-			const text = archive(from);
-			refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
+			await from.transaction(() =>
+				from.runDynamic(`UPDATE ${table} SET duration_ms = $1 WHERE id = $2`, [duration, id]),
+			);
+			const text = await archive(from);
+			await refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
 		}
 	});
 
-	test("invalid failure subjects name the archive row and line and roll back every table", () => {
-		const from = source();
+	test("invalid failure subjects name the archive row and line and roll back every table", async () => {
+		const from = await source();
 		for (const subject of [
 			'{"signature":1,"scope":"line:main","perResult":false}',
 			'{"signature":"1","scope":"line:main"}',
@@ -1221,38 +1253,50 @@ describe("Mainworthy instance archives", () => {
 			"[]",
 			"{",
 		]) {
-			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
-			const text = archive(from);
+			await from.transaction(() =>
+				from.runDynamic("UPDATE questions SET kind = 'failure', subject = $1 WHERE id = 402", [subject]),
+			);
+			const text = await archive(from);
 			const line = [...linesOf(text)].findIndex((line) => line.startsWith('{"t":"questions",')) + 1;
-			refuse(text, `invalid archive questions.subject for row 402 on line ${line}: expected a valid failure subject`);
+			await refuse(
+				text,
+				`invalid archive questions.subject for row 402 on line ${line}: expected a valid failure subject`,
+			);
 		}
 	});
 
-	test("every written failure subject shape imports without changing its stored JSON", () => {
-		const from = source();
+	test("every written failure subject shape imports without changing its stored JSON", async () => {
+		const from = await source();
 		for (const subject of [
 			'{ "scope": "line:main", "signature": 505 }',
 			'{"signature":505,"scope":"change:1","perResult":true}',
 			'{"slot":1,"signature":505,"scope":"run:301"}',
 		]) {
-			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
-			const to = target();
-			importArchive(to, linesOf(archive(from)));
-			expect(dump(to)).toEqual(dump(from));
+			await from.transaction(() =>
+				from.runDynamic("UPDATE questions SET kind = 'failure', subject = $1 WHERE id = 402", [subject]),
+			);
+			const to = await target();
+			await importArchive(to, linesOf(await archive(from)));
+			expect(await dump(to)).toEqual(await dump(from));
 		}
 	});
 
-	test("result and runner-try durations keep the exact limit, zero and unknown time", () => {
-		const from = source();
+	test("result and runner-try durations keep the exact limit, zero and unknown time", async () => {
+		const from = await source();
 		for (const duration of [2_592_000_000, 0, null]) {
-			from.raw.query("UPDATE results SET duration_ms = ? WHERE id = 201").run(duration);
-			from.raw.query("UPDATE result_tries SET duration_ms = ? WHERE id = 513").run(duration);
-			const to = target();
-			importArchive(to, linesOf(archive(from)));
+			await from.transaction(() => from.runDynamic("UPDATE results SET duration_ms = $1 WHERE id = 201", [duration]));
+			await from.transaction(() =>
+				from.runDynamic("UPDATE result_tries SET duration_ms = $1 WHERE id = 513", [duration]),
+			);
+			const to = await target();
+			await importArchive(to, linesOf(await archive(from)));
 			for (const table of ["results", "result_tries"]) {
-				expect(to.raw.query(`SELECT DISTINCT duration_ms FROM ${table} WHERE id IN (201, 513)`).all()).toEqual([
-					{ duration_ms: duration },
-				]);
+				expect(
+					await to.allDynamic<Record<string, unknown>>(
+						`SELECT DISTINCT duration_ms FROM ${table} WHERE id IN (201, 513)`,
+						[],
+					),
+				).toEqual([{ duration_ms: duration }]);
 			}
 		}
 	});
@@ -1261,26 +1305,29 @@ describe("Mainworthy instance archives", () => {
 		{ staged: null, path: "results" },
 		{ staged: JSON.stringify([{ test: { key: "one" }, outcome: "wrong" }]), path: "0\\.outcome" },
 		{ staged: JSON.stringify([{ test: { key: "x".repeat(1001) }, outcome: "pass" }]), path: "0\\.test\\.key" },
-	])("pending result errors name $path on one line without blaming durations", ({ staged, path }) => {
-		const from = source();
-		from.raw.query("UPDATE batches SET staged = ? WHERE id = 504").run(staged);
-		refuse(
-			archive(from),
+	])("pending result errors name $path on one line without blaming durations", async ({ staged, path }) => {
+		const from = await source();
+		await from.transaction(() => from.runDynamic("UPDATE batches SET staged = $1 WHERE id = 504", [staged]));
+		await refuse(
+			await archive(from),
 			new RegExp(
 				`^invalid archive batches\\.staged for row 504 on line \\d+: pending results fail result input: ${path}: [^\\r\\n]+$`,
 			),
 		);
 	});
 
-	test("an archive keeps the moved scope but leaves its audit trail behind", () => {
-		const from = source();
-		from.raw
-			.query(
+	test("an archive keeps the moved scope but leaves its audit trail behind", async () => {
+		const from = await source();
+		await from.transaction(() =>
+			from.runDynamic(
 				"UPDATE targets SET what = 'code:example/app@abc12345', commit_sha = 'abc12345', branch = 'main', line = 'trunk' WHERE id = 502",
-			)
-			.run();
-		from.raw.query("UPDATE runs SET scope = 'line:trunk@example/app' WHERE id = 601").run();
-		insert(from, "scope_moves", {
+				[],
+			),
+		);
+		await from.transaction(() =>
+			from.runDynamic("UPDATE runs SET scope = 'line:trunk@example/app' WHERE id = 601", []),
+		);
+		await insert(from, "scope_moves", {
 			id: 510,
 			project: 23,
 			what: "code:example/app@abc12345",
@@ -1290,42 +1337,53 @@ describe("Mainworthy instance archives", () => {
 			at: time,
 			seq: 2,
 		});
-		const text = archive(from);
+		const text = await archive(from);
 		expect(text).not.toContain('"t":"scope_moves"');
-		const to = target();
-		importArchive(to, linesOf(text));
-		expect(to.raw.query("SELECT line, branch, change FROM targets WHERE id = 502").get()).toEqual({
+		const to = await target();
+		await importArchive(to, linesOf(text));
+		expect(
+			(
+				await to.allDynamic<Record<string, unknown>>("SELECT line, branch, change FROM targets WHERE id = 502", [])
+			)[0] ?? null,
+		).toEqual({
 			line: "trunk",
 			branch: "main",
 			change: null,
 		});
-		expect(to.raw.query("SELECT scope FROM runs WHERE id = 601").get()).toEqual({ scope: "line:trunk@example/app" });
-		expect(from.raw.query("SELECT count(*) AS n FROM scope_moves").get()).toEqual({ n: 1 });
-		expect(to.raw.query("SELECT * FROM scope_moves").all()).toEqual([]);
+		expect(
+			(await to.allDynamic<Record<string, unknown>>("SELECT scope FROM runs WHERE id = 601", []))[0] ?? null,
+		).toEqual({ scope: "line:trunk@example/app" });
+		expect(
+			(await from.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM scope_moves", []))[0] ?? null,
+		).toEqual({ n: 1 });
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT * FROM scope_moves", [])).toEqual([]);
 	});
 
-	test("an archive exported under the former name replays the same rows", () => {
-		const from = source();
-		const to = target();
-		const former = rehash(archive(from).replace('{"mainworthy":"archive"', '{"casebook":"archive"'));
+	test("an archive exported under the former name replays the same rows", async () => {
+		const from = await source();
+		const to = await target();
+		const former = rehash((await archive(from)).replace('{"mainworthy":"archive"', '{"casebook":"archive"'));
 		expect(former.startsWith('{"casebook":"archive"')).toBe(true);
-		importArchive(to, linesOf(former));
-		expect(dump(to)).toEqual(dump(from));
+		await importArchive(to, linesOf(former));
+		expect(await dump(to)).toEqual(await dump(from));
 	});
 
-	test("a header that names both the former and the current name, or neither, is refused", () => {
-		const text = archive(source());
-		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"casebook":"archive","mainworthy":"archive"')), /header/);
-		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"other":"archive"')), /header/);
+	test("a header that names both the former and the current name, or neither, is refused", async () => {
+		const text = await archive(await source());
+		await refuse(
+			rehash(text.replace('{"mainworthy":"archive"', '{"casebook":"archive","mainworthy":"archive"')),
+			/header/,
+		);
+		await refuse(rehash(text.replace('{"mainworthy":"archive"', '{"other":"archive"')), /header/);
 	});
 
-	test("exports are deterministic apart from exportedAt, with a verifiable footer", () => {
-		const db = source();
-		const first = archive(db, 100);
-		const second = archive(db, 200);
+	test("exports are deterministic apart from exportedAt, with a verifiable footer", async () => {
+		const db = await source();
+		const first = await archive(db, 100);
+		const second = await archive(db, 200);
 		const normalize = (text: string) =>
 			text.replace(/"exportedAt":\d+/, '"exportedAt":0').replace(/"sha256":"[a-f0-9]+"/, '"sha256":""');
-		expect(archive(db, 100)).toBe(first);
+		expect(await archive(db, 100)).toBe(first);
 		// The footer digest necessarily changes when the timestamp in its hashed header changes.
 		expect(normalize(second)).toBe(normalize(first));
 		const lines = [...linesOf(first)];
@@ -1340,15 +1398,15 @@ describe("Mainworthy instance archives", () => {
 		expect(first).not.toContain('"key":"schema_version"');
 	});
 
-	test("tables follow foreign-key dependencies and rows follow composite primary keys", () => {
-		const db = source();
-		const text = archive(db);
-		const positions = new Map(exportedTables(db).map((name) => [name, text.indexOf(`"t":${JSON.stringify(name)}`)]));
-		for (const table of exportedTables(db)) {
-			for (const foreign of db.raw
-				.query<{ table: string }, []>(`PRAGMA foreign_key_list(${identifier(table)})`)
-				.all()) {
-				if (foreign.table !== table) expect(positions.get(foreign.table)).toBeLessThan(positions.get(table) ?? -1);
+	test("tables follow foreign-key dependencies and rows follow composite primary keys", async () => {
+		const db = await source();
+		const text = await archive(db);
+		const positions = new Map(
+			(await exportedTables(db)).map((name) => [name, text.indexOf(`"t":${JSON.stringify(name)}`)]),
+		);
+		for (const table of await exportedTables(db)) {
+			for (const key of (await db.catalog()).find((item) => item.name === table)?.foreignKeys ?? []) {
+				if (key.parent !== table) expect(positions.get(key.parent)).toBeLessThan(positions.get(table) ?? -1);
 			}
 		}
 		expect(text.indexOf('"name":"case","value":')).toBeLessThan(text.indexOf('"name":"version","value":'));
@@ -1356,25 +1414,26 @@ describe("Mainworthy instance archives", () => {
 		expect(text.indexOf('"id":200,"project":23,')).toBeLessThan(text.indexOf('"id":201,"project":23,'));
 	});
 
-	test("rebuilds the head version's title, preconditions, steps and tags, including archived cases", () => {
-		const db = target();
-		importArchive(db, linesOf(archive(source())));
-		const query = db.raw.query<{ rowid: number }, [string]>("SELECT rowid FROM search_docs WHERE search_docs MATCH ?");
-		for (const term of ["nebulouswidget", "luminousreply", "Précondition", "regression", "café"]) {
-			expect(query.all(term)).toEqual([{ rowid: 101 }]);
-		}
-		for (const term of ["obsoleteindexword", "bootstrapindexword", "Old"]) expect(query.all(term)).toEqual([]);
-		expect(db.raw.query("SELECT title, body, tags, project FROM search_docs WHERE rowid = 101").get()).toEqual({
-			title: "雪だるま ☃ café",
-			body: "Précondition 雪\nInspect nebulouswidget\nA luminousreply appears\nLeave empty",
-			tags: "café 雪 regression",
-			project: 23,
-		});
+	test("rebuilds the head version's title, preconditions, steps and tags, including archived cases", async () => {
+		const db = await target();
+		await importArchive(db, linesOf(await archive(await source())));
+		for (const term of ["nebulouswidget", "luminousreply", "Précondition", "regression"])
+			expect(
+				await db.allDynamic("SELECT id FROM search_docs WHERE tsv @@ plainto_tsquery('mainworthy_search', $1)", [term]),
+			).toEqual([{ id: 101 }]);
+		expect(await db.allDynamic("SELECT title, body, tags, project FROM search_docs WHERE id = 101")).toEqual([
+			{
+				title: "雪だるま ☃ café",
+				body: "Précondition 雪\nInspect nebulouswidget\nA luminousreply appears\nLeave empty",
+				tags: "café 雪 regression",
+				project: 23,
+			},
+		]);
 	});
 
-	test("replays a model-valid case whose step has no expected result", () => {
-		const from = source();
-		const to = target();
+	test("replays a model-valid case whose step has no expected result", async () => {
+		const from = await source();
+		const to = await target();
 		const validBody = JSON.stringify({
 			title: "An unfinished expectation",
 			pre: "",
@@ -1383,112 +1442,146 @@ describe("Mainworthy instance archives", () => {
 			automate: "none",
 			fields: {},
 		});
-		from.raw.query("UPDATE versions SET body = ? WHERE case_id = 101 AND no = 2").run(validBody);
-		importArchive(to, linesOf(archive(from)));
-		expect(dump(to)).toEqual(dump(from));
-		expect(to.raw.query("SELECT body FROM search_docs WHERE rowid = 101").get()).toEqual({
+		await from.transaction(() =>
+			from.runDynamic("UPDATE versions SET body = $1 WHERE case_id = 101 AND no = 2", [validBody]),
+		);
+		await importArchive(to, linesOf(await archive(from)));
+		expect(await dump(to)).toEqual(await dump(from));
+		expect(
+			(await to.allDynamic<Record<string, unknown>>("SELECT body FROM search_docs WHERE id = 101", []))[0] ?? null,
+		).toEqual({
 			body: "\nInspect unansweredstep",
 		});
-		expect(to.raw.query("SELECT rowid FROM search_docs WHERE search_docs MATCH 'unansweredstep'").all()).toEqual([
-			{ rowid: 101 },
-		]);
+		expect(
+			await to.allDynamic<Record<string, unknown>>(
+				"SELECT id FROM search_docs WHERE tsv @@ plainto_tsquery('mainworthy_search', 'unansweredstep')",
+				[],
+			),
+		).toEqual([{ id: 101 }]);
 	});
 
-	test("discovers added tables, quoted identifiers and added columns without an archive list", () => {
-		const from = source();
-		const to = target();
+	test("discovers added tables, quoted identifiers and added columns without an archive list", async () => {
+		const from = await source();
+		const to = await target();
 		for (const db of [from, to])
-			db.exec(`
+			await db.transaction(() =>
+				db.exec(`
 			ALTER TABLE cases ADD COLUMN extra_text TEXT;
-			CREATE TABLE "future 'table" ("odd column" INTEGER PRIMARY KEY, owner INTEGER REFERENCES cases(id), note TEXT) STRICT;
-		`);
-		from.raw.query("UPDATE cases SET extra_text = ?").run("new\ncolumn 雪");
-		insert(from, "future 'table", { "odd column": 9_223_372_036_854_775_807n, owner: 101, note: "" });
-		const result = importArchive(to, linesOf(archive(from)));
+			CREATE TABLE "future 'table" ("odd column" bigint PRIMARY KEY, owner bigint REFERENCES cases(id), note TEXT);
+		`),
+			);
+		await from.transaction(() => from.runDynamic("UPDATE cases SET extra_text = $1", ["new\ncolumn 雪"]));
+		await insert(from, "future 'table", { "odd column": 9_223_372_036_854_775_807n, owner: 101, note: "" });
+		const result = await importArchive(to, linesOf(await archive(from)));
 		expect(result.tables["future 'table"]).toBe(1);
-		expect(dump(to)).toEqual(dump(from));
+		expect(await dump(to)).toEqual(await dump(from));
 	});
 
-	test("an older archive fills added nullable columns with NULL, even with defaults", () => {
-		const from = source();
-		const to = target();
-		to.exec(
-			"ALTER TABLE cases ADD COLUMN later_note TEXT DEFAULT 'new'; ALTER TABLE cases ADD COLUMN later_count INTEGER",
+	test("an older archive fills added nullable columns with NULL, even with defaults", async () => {
+		const from = await source();
+		const to = await target();
+		await to.transaction(() =>
+			to.exec(
+				"ALTER TABLE cases ADD COLUMN later_note TEXT DEFAULT 'new'; ALTER TABLE cases ADD COLUMN later_count INTEGER",
+			),
 		);
-		importArchive(to, linesOf(archive(from)));
-		expect(to.raw.query("SELECT later_note, later_count FROM cases WHERE id = 101").get()).toEqual({
+		await importArchive(to, linesOf(await archive(from)));
+		expect(
+			(
+				await to.allDynamic<Record<string, unknown>>("SELECT later_note, later_count FROM cases WHERE id = 101", [])
+			)[0] ?? null,
+		).toEqual({
 			later_note: null,
 			later_count: null,
 		});
-		expect(to.raw.query("SELECT title FROM cases WHERE id = 101").get()).toEqual(
-			from.raw.query("SELECT title FROM cases WHERE id = 101").get(),
+		expect(
+			(await to.allDynamic<Record<string, unknown>>("SELECT title FROM cases WHERE id = 101", []))[0] ?? null,
+		).toEqual(
+			(await from.allDynamic<Record<string, unknown>>("SELECT title FROM cases WHERE id = 101", []))[0] ?? null,
 		);
 	});
 
-	test("an archive from before head observations leaves the observation unset", () => {
-		const to = target();
-		const old = rehash(archive(source()).replace(',"head_observed_seq":2', ""));
+	test("an archive from before head observations leaves the observation unset", async () => {
+		const to = await target();
+		const old = rehash((await archive(await source())).replace(',"head_observed_seq":2', ""));
 		expect(old).not.toContain('"head_observed_seq"');
-		importArchive(to, linesOf(old));
-		expect(to.raw.query("SELECT key, head_observed_seq FROM changes WHERE id = 503").get()).toEqual({
+		await importArchive(to, linesOf(old));
+		expect(
+			(
+				await to.allDynamic<Record<string, unknown>>("SELECT key, head_observed_seq FROM changes WHERE id = 503", [])
+			)[0] ?? null,
+		).toEqual({
 			key: "change-one",
 			head_observed_seq: null,
 		});
 	});
 
-	test("an archive without decision evidence imports legacy hashes as NULL", () => {
-		const migration = MIGRATIONS.find((entry) => entry.name === "decision_evidence");
-		expect(migration?.archive).toBe(false);
-		const from = source();
-		from.exec("ALTER TABLE decisions DROP COLUMN on_evidence");
-		const old = archive(from);
+	test("an archive without decision evidence imports legacy hashes as NULL", async () => {
+		const from = await source();
+		await from.transaction(() => from.exec("ALTER TABLE decisions DROP COLUMN on_evidence"));
+		const old = await archive(from);
 		expect(old).toContain(`"schema":${ARCHIVE_VERSION},`);
 		const decision = [...linesOf(old)].map((line) => JSON.parse(line)).find((row) => row.t === "decisions");
 		expect(decision.r).not.toHaveProperty("on_evidence");
-		const to = target();
-		importArchive(to, linesOf(old));
-		expect(to.raw.query("SELECT DISTINCT on_evidence FROM decisions").all()).toEqual([{ on_evidence: null }]);
+		const to = await target();
+		await importArchive(to, linesOf(old));
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT DISTINCT on_evidence FROM decisions", [])).toEqual([
+			{ on_evidence: null },
+		]);
 	});
 
-	test("a missing required column is refused rather than using a default", () => {
-		const to = target();
-		to.raw.exec("ALTER TABLE cases ADD COLUMN required_note TEXT NOT NULL DEFAULT 'new'");
-		const before = allRows(to);
-		expect(() => importArchive(to, linesOf(archive(source())))).toThrow("missing column cases.required_note");
-		expect(allRows(to)).toEqual(before);
+	test("a missing required column is refused rather than using a default", async () => {
+		const to = await target();
+		await to.transaction(() => to.exec("ALTER TABLE cases ADD COLUMN required_note TEXT NOT NULL DEFAULT 'new'"));
+		const before = await allRows(to);
+		await expect(importArchive(to, linesOf(await archive(await source())))).rejects.toThrow(
+			"missing column cases.required_note",
+		);
+		expect(await allRows(to)).toEqual(before);
 	});
 
-	test("a missing primary key is refused rather than assigned a new identity", () => {
-		refuse(rehash(archive(source()).replace('"id":101,', "")), /missing column cases.id/);
+	test("a missing primary key is refused rather than assigned a new identity", async () => {
+		await refuse(rehash((await archive(await source())).replace('"id":101,', "")), /missing column cases.id/);
 	});
 
-	test("SQLite table and column names that match object prototypes remain lossless", () => {
-		const from = source();
-		const to = target();
+	test("table and column names that match object prototypes remain lossless", async () => {
+		const from = await source();
+		const to = await target();
 		for (const db of [from, to])
-			db.exec(`
-			CREATE TABLE future_notes (id INTEGER PRIMARY KEY, "__proto__" TEXT) STRICT;
-			CREATE TABLE "__proto__" (id INTEGER PRIMARY KEY, "constructor" TEXT) STRICT;
-		`);
-		from.raw.query("INSERT INTO future_notes VALUES (1, ?)").run("preserved column");
-		from.raw.query('INSERT INTO "__proto__" VALUES (1, ?)').run("preserved table");
-		importArchive(to, linesOf(archive(from)));
-		expect(dump(to)).toEqual(dump(from));
+			await db.transaction(() =>
+				db.exec(`
+			CREATE TABLE future_notes (id bigint PRIMARY KEY, "__proto__" TEXT);
+			CREATE TABLE "__proto__" (id bigint PRIMARY KEY, "constructor" TEXT);
+		`),
+			);
+		await from.transaction(() => from.runDynamic("INSERT INTO future_notes VALUES (1, $1)", ["preserved column"]));
+		await from.transaction(() => from.runDynamic('INSERT INTO "__proto__" VALUES (1, $1)', ["preserved table"]));
+		await importArchive(to, linesOf(await archive(from)));
+		expect(await dump(to)).toEqual(await dump(from));
 	});
 
-	test("unknown prototype-named tables and columns are named and refused", () => {
-		refuse(rehash(archive(source()).replace('"tables":{', '"tables":{"__proto__":0,')), /unknown.*table.*__proto__/i);
-		refuse(rehash(archive(source()).replace('"r":{', '"r":{"__proto__":"unknown",')), /unknown.*column.*__proto__/i);
+	test("unknown prototype-named tables and columns are named and refused", async () => {
+		await refuse(
+			rehash((await archive(await source())).replace('"tables":{', '"tables":{"__proto__":0,')),
+			/unknown.*table.*__proto__/i,
+		);
+		await refuse(
+			rehash((await archive(await source())).replace('"r":{', '"r":{"__proto__":"unknown",')),
+			/unknown.*column.*__proto__/i,
+		);
 	});
 
-	test("emits complete lines in approximately 64 KiB chunks within a read transaction", () => {
-		const db = source();
-		for (let i = 0; i < 2_000; i++) insert(db, "meta", { key: `chunk-${i}`, value: "雪".repeat(40) });
+	test("emits complete lines in approximately 64 KiB chunks within a read transaction", async () => {
+		const db = await source();
+		await db.transaction(() =>
+			db.runDynamic(
+				"INSERT INTO meta (key, value) SELECT 'chunk-' || i::text, repeat('雪', 40) FROM generate_series(0, 1999) i",
+			),
+		);
 		const chunks: string[] = [];
-		exportArchive(
+		await exportArchive(
 			db,
 			(chunk) => {
-				expect(db.raw.inTransaction).toBe(true);
 				expect(chunk.endsWith("\n")).toBe(true);
 				expect(Buffer.byteLength(chunk)).toBeLessThanOrEqual(64 * 1024);
 				for (const line of linesOf(chunk)) expect(() => JSON.parse(line)).not.toThrow();
@@ -1497,116 +1590,173 @@ describe("Mainworthy instance archives", () => {
 			{ now: time },
 		);
 		expect(chunks.length).toBeGreaterThan(3);
-		expect(db.raw.inTransaction).toBe(false);
-		expect(importArchive(target(), linesOf(chunks.join(""))).tables.meta).toBe(2_001);
+		expect(db.inTransaction).toBe(false);
+		expect((await importArchive(await target(), linesOf(chunks.join("")))).tables.meta).toBe(2_001);
 	});
 
-	test("an oversized row stays one line and a failing writer releases the read transaction", () => {
-		const db = source();
-		insert(db, "meta", { key: "large-document", value: "雪".repeat(40_000) });
+	test("an oversized row stays one line and a failing writer releases the read transaction", async () => {
+		const db = await source();
+		await insert(db, "meta", { key: "large-document", value: "雪".repeat(40_000) });
 		const chunks: string[] = [];
-		exportArchive(db, (chunk) => chunks.push(chunk));
+		await exportArchive(db, (chunk) => chunks.push(chunk));
 		expect(chunks.some((chunk) => Buffer.byteLength(chunk) > 64 * 1024 && [...linesOf(chunk)].length === 1)).toBe(true);
-		expect(() =>
+		await expect(
 			exportArchive(db, () => {
 				throw new Error("writer failed");
 			}),
-		).toThrow("writer failed");
-		expect(db.raw.inTransaction).toBe(false);
-		const to = target();
-		importArchive(to, linesOf(archive(db)));
-		expect(dump(to)).toEqual(dump(db));
+		).rejects.toThrow("writer failed");
+		expect(db.inTransaction).toBe(false);
+		const to = await target();
+		await importArchive(to, linesOf(await archive(db)));
+		expect(await dump(to)).toEqual(await dump(db));
 	});
 
-	test("invalid UTF-8 in stored TEXT is refused instead of replacing bytes", () => {
-		const db = source();
-		db.raw.exec("UPDATE meta SET value = CAST(X'61FF62' AS TEXT) WHERE key = 'instance-note'");
-		expect(() => exportArchive(db, () => {})).toThrow(/UTF-8/);
-		expect(db.raw.inTransaction).toBe(false);
-	});
-
-	test("an instance with no rows exports every table with zero counts and can be replayed", () => {
-		const from = database();
-		const to = target();
-		const imported = importArchive(to, linesOf(archive(from)));
+	test("an instance with no rows exports every table with zero counts and can be replayed", async () => {
+		const from = await database();
+		const to = await target();
+		const imported = await importArchive(to, linesOf(await archive(from)));
 		expect(imported.rows).toBe(0);
-		expect(Object.keys(imported.tables).sort()).toEqual(exportedTables(from));
+		expect(Object.keys(imported.tables).sort()).toEqual(await exportedTables(from));
 		expect(Object.values(imported.tables).every((count) => count === 0)).toBe(true);
-		expect(dump(to)).toEqual(dump(from));
+		expect(await dump(to)).toEqual(await dump(from));
 	});
 
-	test("a missing footer rolls back every row and bootstrap deletion", () => {
-		const lines = [...linesOf(archive(source()))];
+	test("import advances identity sequences beyond every restored explicit id", async () => {
+		const db = await target();
+		await importArchive(db, linesOf(await archive(await source())));
+		await db.transaction(async () => {
+			const [org] = await db.allDynamic<{ id: number }>(
+				"INSERT INTO orgs (name, created_at) VALUES ('After import', 1) RETURNING id",
+			);
+			const [actor] = await db.allDynamic<{ id: number }>(
+				"INSERT INTO actors (org, kind, name, created_at) VALUES (17, 'human', 'after-import', 1) RETURNING id",
+			);
+			const [project] = await db.allDynamic<{ id: number }>(
+				"INSERT INTO projects (org, key, identity, name, created_at) VALUES (17, 'after-import', 'after-import', 'After import', 1) RETURNING id",
+			);
+			expect(org?.id).toBeGreaterThan(17);
+			expect(actor?.id).toBeGreaterThan(71);
+			expect(project?.id).toBeGreaterThan(23);
+		});
+	});
+
+	test("rolling back an imported archive also restores discarded credential identity allocation", async () => {
+		const db = await target();
+		const text = await archive(await source());
+		await db.transaction(async () => {
+			await db.exec("ALTER TABLE tokens ALTER COLUMN id RESTART WITH 1000");
+		});
+		await expect(
+			db.transaction(async () => {
+				await importArchive(db, linesOf(text));
+				throw new Error("the caller rolled back its import");
+			}),
+		).rejects.toThrow("the caller rolled back its import");
+		const rows = await db.transaction(
+			async () =>
+				await db.allDynamic<{ id: number }>(
+					"INSERT INTO tokens (actor,hash,label,created_at) VALUES (1,'after-rollback','after rollback',1) RETURNING id",
+					[],
+				),
+		);
+		expect(rows).toEqual([{ id: 1000 }]);
+	});
+
+	test("malformed numeric archive values are invalid operations and restore the target", async () => {
+		const db = await target();
+		const before = await allRows(db);
+		const text = rehash((await archive(await source())).replace('"org":17', '"org":"seventeen"'));
+		await expect(importArchive(db, linesOf(text))).rejects.toMatchObject({ code: "invalid" });
+		expect(await allRows(db)).toEqual(before);
+	});
+
+	test("a missing footer rolls back every row and bootstrap deletion", async () => {
+		const lines = [...linesOf(await archive(await source()))];
 		lines.pop();
-		refuse(`${lines.join("\n")}\n`, /footer|truncated/);
+		await refuse(`${lines.join("\n")}\n`, /footer|truncated/);
 	});
 
-	test("a truncated footer is refused without changing the target", () => {
-		refuse(archive(source()).slice(0, -20), /JSON|footer|archive/);
+	test("a truncated footer is refused without changing the target", async () => {
+		await refuse((await archive(await source())).slice(0, -20), /JSON|footer|archive/);
 	});
 
-	test("a flipped byte is refused without changing the target", () => {
-		refuse(archive(source()).replace("Archive organisation", "Brchive organisation"), /hash|checksum|SHA/);
+	test("a flipped byte is refused without changing the target", async () => {
+		await refuse(
+			(await archive(await source())).replace("Archive organisation", "Brchive organisation"),
+			/hash|checksum|SHA/,
+		);
 	});
 
-	test("a wrong footer row count is refused without changing the target", () => {
-		refuse(archive(source()).replace(/"rows":\d+/, '"rows":0'), /row count/);
+	test("a wrong footer row count is refused without changing the target", async () => {
+		await refuse((await archive(await source())).replace(/"rows":\d+/, '"rows":0'), /row count/);
 	});
 
-	test("a wrong per-table count is refused even with a valid checksum", () => {
-		refuse(rehash(archive(source()).replace(/"results":2/, '"results":3')), /results.*count|count.*results/);
+	test("a wrong per-table count is refused even with a valid checksum", async () => {
+		await refuse(
+			rehash((await archive(await source())).replace(/"results":2/, '"results":3')),
+			/results.*count|count.*results/,
+		);
 	});
 
-	test("an unknown row table is named and rolled back", () => {
-		refuse(archive(source()).replace('"t":"meta"', '"t":"unknown_table"'), /unknown.*table.*unknown_table/i);
+	test("an unknown row table is named and rolled back", async () => {
+		await refuse(
+			(await archive(await source())).replace('"t":"meta"', '"t":"unknown_table"'),
+			/unknown.*table.*unknown_table/i,
+		);
 	});
 
-	test("an unknown header table is named and refused", () => {
-		refuse(archive(source()).replace('"tables":{', '"tables":{"unknown_table":0,'), /unknown.*table.*unknown_table/i);
+	test("an unknown header table is named and refused", async () => {
+		await refuse(
+			(await archive(await source())).replace('"tables":{', '"tables":{"unknown_table":0,'),
+			/unknown.*table.*unknown_table/i,
+		);
 	});
 
-	test("an unknown column is named and rolled back", () => {
-		refuse(
-			archive(source()).replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
+	test("an unknown column is named and rolled back", async () => {
+		await refuse(
+			(await archive(await source())).replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
 			/unknown.*column.*unknown_column/i,
 		);
 	});
 
-	test("newer formats are refused before changing the target", () => {
-		refuse(archive(source()).replace('"format":1', '"format":2'), /format.*2/);
+	test("newer formats are refused before changing the target", async () => {
+		await refuse((await archive(await source())).replace('"format":1', '"format":2'), /format.*2/);
 	});
 
-	test("newer and older schemas are refused with a clear message", () => {
+	test("newer and older schemas are refused with a clear message", async () => {
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
-		expect(archive(source())).toContain(`"schema":${ARCHIVE_VERSION},`);
-		expect(ARCHIVE_VERSION).toBeLessThanOrEqual(SCHEMA_VERSION);
-		refuse(
-			archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
+		expect(await archive(await source())).toContain(`"schema":${ARCHIVE_VERSION},`);
+		expect(ARCHIVE_VERSION).toBe(43);
+		await refuse(
+			(await archive(await source())).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
 		);
-		refuse(archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'), /schema.*older|older.*schema/);
+		await refuse(
+			(await archive(await source())).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'),
+			/schema.*older|older.*schema/,
+		);
 	});
 
-	test("sessions never travel, and an import empties them before the tokens they refer to", () => {
-		const from = source();
+	test("sessions never travel, and an import empties them before the tokens they refer to", async () => {
+		const from = await source();
 		const seen = { created_at: time, last_seen_at: time, expires_at: time };
-		insert(from, "sessions", { id: 1, actor: 71, token: 900, hash: "c".repeat(64), ...seen });
-		const text = archive(from);
+		await insert(from, "sessions", { id: 1, actor: 71, token: 900, hash: "c".repeat(64), ...seen });
+		const text = await archive(from);
 		expect(text).not.toContain('"t":"sessions"');
 		expect(text).not.toContain("c".repeat(64));
-		refuse(text.replace('"t":"meta"', '"t":"sessions"'), /sessions/);
+		await refuse(text.replace('"t":"meta"', '"t":"sessions"'), /sessions/);
 		// The target's own session refers to the target's own token: both go, the session first.
-		const to = target();
-		insert(to, "sessions", { id: 1, actor: 1, token: 1, hash: "d".repeat(64), ...seen });
-		importArchive(to, linesOf(text));
-		expect(to.raw.query("SELECT * FROM sessions").all()).toEqual([]);
-		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
+		const to = await target();
+		await insert(to, "sessions", { id: 1, actor: 1, token: 1, hash: "d".repeat(64), ...seen });
+		await importArchive(to, linesOf(text));
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT * FROM sessions", [])).toEqual([]);
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT * FROM tokens", [])).toEqual([]);
 	});
 
-	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", () => {
-		const people = (db: Db, actor: number, mark: string): void => {
-			insert(db, "credentials", {
+	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", async () => {
+		const people = async (db: WriteDb, actor: number, mark: string): Promise<void> => {
+			await insert(db, "credentials", {
 				id: 1,
 				actor,
 				kind: "password",
@@ -1614,7 +1764,7 @@ describe("Mainworthy instance archives", () => {
 				label: "password",
 				created_at: time,
 			});
-			insert(db, "credentials", {
+			await insert(db, "credentials", {
 				id: 2,
 				actor,
 				kind: "passkey",
@@ -1623,8 +1773,8 @@ describe("Mainworthy instance archives", () => {
 				label: "laptop",
 				created_at: time,
 			});
-			insert(db, "passkey_users", { actor, handle: `handle-${mark}`, created_at: time });
-			insert(db, "invitations", {
+			await insert(db, "passkey_users", { actor, handle: `handle-${mark}`, created_at: time });
+			await insert(db, "invitations", {
 				id: 1,
 				actor,
 				hash: mark.repeat(64),
@@ -1634,7 +1784,7 @@ describe("Mainworthy instance archives", () => {
 				expires_at: time,
 			});
 			// A session that rests on the passkey: it has to go before the credential it refers to.
-			insert(db, "sessions", {
+			await insert(db, "sessions", {
 				id: 1,
 				actor,
 				credential: 2,
@@ -1644,22 +1794,22 @@ describe("Mainworthy instance archives", () => {
 				expires_at: time,
 			});
 		};
-		const from = source();
-		people(from, 71, "e");
-		const text = archive(from);
+		const from = await source();
+		await people(from, 71, "e");
+		const text = await archive(from);
 		for (const table of ["credentials", "passkey_users", "invitations"]) {
 			expect(text).not.toContain(`"t":"${table}"`);
-			refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
+			await refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
 		}
 		for (const held of ["$argon2id$e", "credential-e", "key-e", "handle-e", "e".repeat(63)])
 			expect(text).not.toContain(held);
-		const to = target();
-		people(to, 1, "f");
-		importArchive(to, linesOf(text));
+		const to = await target();
+		await people(to, 1, "f");
+		await importArchive(to, linesOf(text));
 		for (const table of UNEXPORTED.filter(
 			(table) => !["assertion_index", "assertion_roots", "assertion_seen", "assertion_spreads"].includes(table),
 		))
-			expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
+			expect(await to.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, [])).toEqual([]);
 		expect([...UNEXPORTED].sort()).toEqual([
 			"assertion_index",
 			"assertion_roots",
@@ -1687,96 +1837,40 @@ describe("Mainworthy instance archives", () => {
 			"tracker_polls",
 			"tracker_requests",
 		]);
-		// The list is the order they are emptied in: a table comes before every table it refers to.
-		const late: string[] = [];
-		UNEXPORTED.forEach((table, at) => {
-			const parents = to.raw.query<{ table: string }, []>(`PRAGMA foreign_key_list(${table})`).all();
-			for (const parent of parents)
-				if (UNEXPORTED.includes(parent.table) && UNEXPORTED.indexOf(parent.table) < at)
-					late.push(`${table} is emptied after ${parent.table}, which it refers to`);
-		});
-		expect(late).toEqual([]);
 	});
 
-	test("a non-empty target throws conflict and stays unchanged", () => {
-		const db = target();
-		insert(db, "projects", { id: 1, org: 1, key: "existing", name: "Existing", created_at: time });
-		const before = allRows(db);
+	test("a non-empty target throws conflict and stays unchanged", async () => {
+		const db = await target();
+		await insert(db, "projects", { id: 1, org: 1, key: "existing", name: "Existing", created_at: time });
+		const before = await allRows(db);
 		try {
-			importArchive(db, linesOf(archive(source())));
+			await importArchive(db, linesOf(await archive(await source())));
 			throw new Error("import should have conflicted");
 		} catch (error) {
 			expect(error).toBeInstanceOf(OpError);
 			if (!(error instanceof OpError)) throw error;
 			expect(error.code).toBe("conflict");
 		}
-		expect(allRows(db)).toEqual(before);
+		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("a deferred foreign-key violation rolls back, including when a caller catches it", () => {
-		const text = rehash(archive(source()).replace('"org":17', '"org":9999'));
-		refuse(text, /foreign key/i);
-		const db = target();
-		const before = allRows(db);
-		db.transaction(() => {
-			expect(() => importArchive(db, linesOf(text))).toThrow(/foreign key/i);
+	test("a deferred foreign-key violation rolls back, including when a caller catches it", async () => {
+		const text = rehash((await archive(await source())).replace('"org":17', '"org":9999'));
+		await refuse(text, /foreign key/i);
+		const db = await target();
+		const before = await allRows(db);
+		await db.transaction(async () => {
+			await expect(importArchive(db, linesOf(text))).rejects.toThrow(/foreign key/i);
 		});
-		expect(allRows(db)).toEqual(before);
+		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("nested import restores the caller's foreign-key deferral setting after success or failure", () => {
-		const text = archive(source());
-		for (const deferred of [0, 1]) {
-			for (const fail of [false, true]) {
-				const db = target();
-				db.transaction(() => {
-					db.raw.exec(`PRAGMA defer_foreign_keys = ${deferred}`);
-					if (fail) {
-						expect(() =>
-							importArchive(db, linesOf(text.replace("Archive organisation", "Brchive organisation"))),
-						).toThrow(/checksum/);
-					} else {
-						importArchive(db, linesOf(text));
-					}
-					expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
-						defer_foreign_keys: deferred,
-					});
-					if (deferred === 0) {
-						expect(() => db.raw.query("INSERT INTO grants (actor, can) VALUES (9999, '[]')").run()).toThrow(
-							/FOREIGN KEY/,
-						);
-					}
-				});
-			}
-		}
-	});
-
-	test("nested import preserves a caller's already pending deferred constraint", () => {
-		const from = source();
-		const db = target();
-		for (const instance of [from, db])
-			instance.raw.exec(`CREATE TABLE future_rows (
-			id INTEGER PRIMARY KEY, org INTEGER REFERENCES orgs(id) DEFERRABLE INITIALLY DEFERRED
-		) STRICT`);
-		const text = archive(from).replace("Archive organisation", "Brchive organisation");
-		expect(() =>
-			db.transaction(() => {
-				db.raw.query("INSERT INTO future_rows VALUES (1, 9999)").run();
-				expect(() => importArchive(db, linesOf(text))).toThrow();
-				expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
-					defer_foreign_keys: 0,
-				});
-			}),
-		).toThrow(/FOREIGN KEY/);
-		expect(db.raw.query("SELECT * FROM future_rows").all()).toEqual([]);
-	});
-
-	test("invalid archived row constraints produce an invalid operation error and roll back", () => {
-		const db = target();
-		const before = allRows(db);
-		const text = rehash(archive(source()).replace('"name":"Archive organisation"', '"name":null'));
+	test("invalid archived row constraints produce an invalid operation error and roll back", async () => {
+		const db = await target();
+		const before = await allRows(db);
+		const text = rehash((await archive(await source())).replace('"name":"Archive organisation"', '"name":null'));
 		try {
-			importArchive(db, linesOf(text));
+			await importArchive(db, linesOf(text));
 			throw new Error("import should have refused a NULL organisation name");
 		} catch (error) {
 			expect(error).toBeInstanceOf(OpError);
@@ -1784,59 +1878,57 @@ describe("Mainworthy instance archives", () => {
 			expect(error.code).toBe("invalid");
 			expect(error.message).toContain("orgs");
 		}
-		expect(allRows(db)).toEqual(before);
+		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("trailing input, empty input and attempts to import excluded data are refused", () => {
-		refuse(`${archive(source())}{"end":true}\n`, /after.*footer|trailing/);
-		refuse("", /header|empty/);
-		refuse(archive(source()).replace('"key":"instance-note"', '"key":"schema_version"'), /schema_version/);
-		refuse(archive(source()).replace('"t":"meta"', '"t":"tokens"'), /tokens/);
-		refuse(archive(source()).replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
+	test("trailing input, empty input and attempts to import excluded data are refused", async () => {
+		await refuse(`${await archive(await source())}{"end":true}\n`, /after.*footer|trailing/);
+		await refuse("", /header|empty/);
+		await refuse(
+			(await archive(await source())).replace('"key":"instance-note"', '"key":"schema_version"'),
+			/schema_version/,
+		);
+		await refuse((await archive(await source())).replace('"t":"meta"', '"t":"tokens"'), /tokens/);
+		await refuse((await archive(await source())).replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
 	});
 
-	test("a missing head version or invalid search body rolls back index rebuilding", () => {
-		refuse(rehash(archive(source()).replace('"head":2', '"head":99')), /head.*version|version.*head/);
-		refuse(rehash(archive(source()).replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')), /search|body|pre/);
+	test("a missing head version or invalid search body rolls back index rebuilding", async () => {
+		await refuse(
+			rehash((await archive(await source())).replace('"head":2', '"head":99')),
+			/head.*version|version.*head/,
+		);
+		await refuse(
+			rehash((await archive(await source())).replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')),
+			/search|body|pre/,
+		);
 	});
 
-	test("50,000 result rows are exported and imported, with timing and complete data checks", () => {
-		const from = source();
-		const to = target();
+	test("50,000 result rows are exported and imported, with timing and complete data checks", async () => {
+		const from = await source();
+		const to = await target();
 		const row = fixtures.results?.[0];
 		if (!row) throw new Error("missing result fixture");
-		const columns = Object.keys(row);
-		const statement = from.raw.prepare<unknown, Value[]>(
-			`INSERT INTO results (${columns.map(identifier).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+		await from.transaction(() =>
+			from.runDynamic(
+				`INSERT INTO results (id, project, test, seq, ord, batch, target, method, actor, basis, outcome, at)
+   SELECT 201 + n, 23, 501, 1, n, 504, 502, 'auto', 71, 'unresolved', 'pass', $1 FROM generate_series(2, 49999) n`,
+				[time],
+			),
 		);
-		try {
-			from.transaction(() => {
-				for (let i = 2; i < 50_000; i++)
-					statement.run(
-						...columns.map((column) => {
-							if (column === "id") return 201 + i;
-							if (column === "ord") return i;
-							return row[column] ?? null;
-						}),
-					);
-			});
-		} finally {
-			statement.finalize();
-		}
 		const chunks: string[] = [];
 		const start = performance.now();
-		const exported = exportArchive(from, (chunk) => chunks.push(chunk), { now: time });
+		const exported = await exportArchive(from, (chunk) => chunks.push(chunk), { now: time });
 		const exportedAt = performance.now();
 		const text = chunks.join("");
 		const importStart = performance.now();
-		const imported = importArchive(to, linesOf(text));
+		const imported = await importArchive(to, linesOf(text));
 		const finished = performance.now();
 		expect(exported.tables.results).toBe(50_000);
 		expect(imported.tables.results).toBe(50_000);
 		expect(imported.rows).toBe(exported.rows);
-		expect(dump(to)).toEqual(dump(from));
+		expect(await dump(to)).toEqual(await dump(from));
 		console.log(
-			`50,000 results, one in-memory run: export ${(exportedAt - start).toFixed(1)} ms, import ${(finished - importStart).toFixed(1)} ms, ${Buffer.byteLength(text)} bytes, ${chunks.length} chunks, 0 failures`,
+			`50,000 results, one PostgreSQL run: export ${(exportedAt - start).toFixed(1)} ms, import ${(finished - importStart).toFixed(1)} ms, ${Buffer.byteLength(text)} bytes, ${chunks.length} chunks, 0 failures`,
 		);
 	}, 30_000);
 });
@@ -1901,18 +1993,20 @@ test("archive import leaves a landed change open without naming its landing on t
 			location: { label: "main · pr:8 Keep coupons", commit, change: "pr:8" },
 		});
 		const chunks: string[] = [];
-		exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
+		await from.app.database.read((db) => exportArchive(db, (chunk) => chunks.push(chunk), { project: "scratch" }));
 		const archive = chunks.join("");
 		expect(archive).not.toContain('"t":"change_ends"');
-		to.app.db.transaction(() => {
-			to.app.db.exec("DELETE FROM commands");
-			removeBootstrap(to.app.db);
-			importArchive(to.app.db, linesOf(archive));
-		});
+		await to.app.database.write((db) =>
+			db.transaction(async () => {
+				await db.transaction(() => db.exec("DELETE FROM commands"));
+				await removeBootstrap(db);
+				await importArchive(db, linesOf(archive));
+			}),
+		);
 		expect(await history(to)).toMatchObject({ location: { label: "main", commit, change: null } });
 		expect(await to.call("find", { in: "changes" })).toMatchObject({ items: [{ key: "pr:8", state: "open" }] });
 	} finally {
-		from.close();
-		to.close();
+		await from.close();
+		await to.close();
 	}
 });

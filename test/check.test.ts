@@ -32,10 +32,10 @@ import {
 	phaseReport,
 	playwrightChromium,
 	readOutcome,
+	STATIC_CHECKS,
 	sharedBrowserEndpoint,
 	slowest,
 	testArgs,
-	testReaders,
 } from "../scripts/check-plan.ts";
 import {
 	ChromiumDiagnosticOutput,
@@ -48,6 +48,21 @@ import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
 import { make, remove } from "../scripts/work/scratch.ts";
 import type { ResultIn } from "../src/core/ops.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+
+test("database process lifecycle tests run serially outside the parallel shards", () => {
+	expect(PERFORMANCE).toContain("test/check-process.test.ts");
+	expect(phaseFiles("performance")).toContain("test/check-process.test.ts");
+	expect(phaseFiles("parallel")).not.toContain("test/check-process.test.ts");
+});
+
+test("the local static plan includes async-port and each stage runs in CI", () => {
+	expect(STATIC_CHECKS.map((check) => check.name)).toEqual(["typecheck", "lint", "async-port"]);
+	const workflow = z
+		.object({ jobs: z.object({ static: z.object({ steps: z.array(z.object({ run: z.string().optional() })) }) }) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const commands = workflow.jobs.static.steps.map((step) => step.run);
+	for (const stage of STATIC_CHECKS) expect(commands).toContain(`bun ${stage.args.join(" ")}`);
+});
 
 test("Chromium stderr tails retain at most 200 lines and 64 KiB, including partial and Unicode lines", () => {
 	const tail = new StderrTail();
@@ -519,7 +534,7 @@ test("the page is ready before teardown", async () => {
 	60_000,
 );
 
-test("the browser fixture uses the production compiler flags and worker layout", () => {
+test("the browser fixture uses the production compiler flags and source root", () => {
 	const args = fixtureBuildArgs("/scratch/fixture", "/repo");
 	const production = z
 		.object({ scripts: z.object({ build: z.string() }) })
@@ -559,13 +574,15 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			"check-plan.ts",
 			"chromium-diagnostics.ts",
 			"preflight.ts",
+			"pg.ts",
+			"work/scratch.ts",
+			"work/test-databases.ts",
 			"work/processes.ts",
 			"work/run.ts",
 		])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
-		for (const worker of ["src/server/ops/read-worker.ts"]) writeFileSync(join(root, worker), "export {};");
 		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
 		const child = Bun.spawn(
 			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/broken.test.ts"],
@@ -697,14 +714,34 @@ test("the workers fit the machine: the performance phase is alone on a small one
 	expect(parallelWorkers(2)).toBeGreaterThanOrEqual(1);
 	expect(testArgs("performance", { timings: "t.json", workers: 8 })).toContain("--parallel=1");
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
-	expect(testReaders()).toBe("1");
+});
+
+test("CI functional runners leave a CPU for PostgreSQL", () => {
+	for (const entries of [matrix("all"), matrix(["test/docs.test.ts", "test/policy-latency.test.ts"])]) {
+		for (const entry of entries) {
+			if (entry.name === "performance") {
+				expect(entry.phase).toBe("--only=performance");
+				continue;
+			}
+			const options = parseCheckArgs(["test", ...entry.phase.split(" ")]);
+			expect(options.workers).toBe(1);
+			expect(testArgs("parallel", { timings: "t.json", workers: options.workers, shard: options.shard })).toContain(
+				"--parallel=1",
+			);
+		}
+	}
 });
 
 test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
+	expect(CI_SHARDS).toBe(14);
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
 	expect(matrix("all")).toEqual([
-		...shards.map((name, i) => ({ name, phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`, files: "" })),
+		...shards.map((name, i) => ({
+			name,
+			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS}`,
+			files: "",
+		})),
 		{ name: "performance", phase: "--only=performance", files: "" },
 	]);
 	const all = Object.fromEntries(
@@ -828,7 +865,15 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 		"publish",
 	]);
 	expect(
-		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
+		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]
+			.filter((env) => env !== undefined)
+			.map((env) => {
+				const entries = z.record(z.string(), z.string()).parse(env);
+				if (entries.MAINWORTHY_TEST_PG !== undefined)
+					expect(entries.MAINWORTHY_TEST_PG).toBe("postgres://postgres@127.0.0.1:5432/postgres");
+				return Object.fromEntries(Object.entries(entries).filter(([key]) => key !== "MAINWORTHY_TEST_PG"));
+			})
+			.filter((env) => Object.keys(env).length > 0),
 	).toEqual([]);
 	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not. The
 	// description job reads the pull request and its issues, and writes nothing.
@@ -1123,6 +1168,146 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	}
 });
 
+test("CI installs PostgreSQL snapshot tools before running the test matrix", () => {
+	const workflow = z
+		.object({
+			jobs: z.object({
+				tests: z.object({
+					steps: z.array(
+						z.object({
+							run: z.string().optional(),
+							name: z.string().optional(),
+						}),
+					),
+				}),
+			}),
+		})
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const steps = workflow.jobs.tests.steps;
+	const tools = steps.findIndex(
+		(step) => step.run?.includes("pg_dump --version") && step.run.includes("pg_restore --version"),
+	);
+	expect(tools, "a service container does not install snapshot clients on the runner").toBeGreaterThanOrEqual(0);
+	expect(tools).toBeLessThan(steps.findIndex((step) => step.name === "Tests"));
+});
+
+test("CI functional PostgreSQL skips durability while the performance job keeps it", async () => {
+	const Step = z.object({
+		name: z.string().optional(),
+		run: z.string().optional(),
+		env: z.record(z.string(), z.string()).optional(),
+	});
+	const Job = z.object({ services: z.unknown().optional(), steps: z.array(Step) });
+	const workflow = z
+		.object({ jobs: z.object({ tests: Job, gate: Job }) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const starts = [workflow.jobs.tests, workflow.jobs.gate].map((job) => {
+		const step = job.steps.find((one) => one.run?.includes("bash scripts/ci-postgres.sh"));
+		expect(step, "the throwaway database starts with the selected CI durability mode").toBeDefined();
+		return step;
+	});
+	const expression = (name: string): string => `$\{{ ${name} }}`;
+	expect(starts[0]?.env).toEqual({ TEST_PHASE: expression("matrix.phase") });
+	expect(starts[1]?.env).toEqual({ TEST_PHASE: "--only=parallel" });
+	const root = make("ci-postgres-args");
+	const argsFile = join(root, "args");
+	writeFileSync(
+		join(root, "docker"),
+		`#!/bin/sh
+printf '%s\n' "$@" >> "$DOCKER_ARGS"
+if [ "$1" = exec ] && [ "$3" = psql ]; then
+ mode=$(sed -n 's/^fsync=//p' "$DOCKER_ARGS")
+ if [ -n "$DOCKER_SETTINGS" ]; then
+ printf '%s\\n' "$DOCKER_SETTINGS"
+ else
+ printf '%s,%s,%s\n' "$mode" "$mode" "$mode"
+ fi
+fi
+`,
+		{ mode: 0o755 },
+	);
+	try {
+		const entries = [...matrix("all"), ...matrix(["test/check.test.ts"])];
+		for (const [index, job] of [workflow.jobs.tests, workflow.jobs.gate].entries()) {
+			expect(job.services).toBeUndefined();
+			const step = starts[index];
+			if (!step?.run) throw new Error("missing PostgreSQL startup");
+			expect(job.steps.indexOf(step)).toBeLessThan(
+				job.steps.findIndex(
+					(one) => one.name === (index === 0 ? "Tests" : "Report every shard to Mainworthy, then the gate"),
+				),
+			);
+			for (const entry of index === 0 ? entries : [{ phase: "--only=parallel", name: "gate" }]) {
+				writeFileSync(argsFile, "");
+				const child = Bun.spawn(["bash", "-e", "-c", step.run], {
+					env: {
+						...process.env,
+						PATH: `${root}:${process.env.PATH}`,
+						TEST_PHASE: entry.phase,
+						DOCKER_ARGS: argsFile,
+						DOCKER_SETTINGS: "",
+					},
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const [out, err, rc] = await Promise.all([
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+					child.exited,
+				]);
+				expect(rc, out + err).toBe(0);
+				const args = readFileSync(argsFile, "utf8").trim().split("\n");
+				const mode = entry.name === "performance" ? "on" : "off";
+				for (const key of ["fsync", "synchronous_commit", "full_page_writes"])
+					expect(args, entry.name).toContain(`${key}=${mode}`);
+				expect(args).toContain("--shm-size=256m");
+				expect(args).toContain("127.0.0.1:5432:5432");
+				for (const command of ["pg_isready", "psql"])
+					for (const [position, arg] of args.entries())
+						if (arg === command) expect(args.slice(position + 1, position + 3)).toEqual(["-h", "127.0.0.1"]);
+				expect(args).toContain("postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6");
+				const image = args.indexOf(
+					"postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6",
+				);
+				expect(args.slice(image + 1, image + 8)).toEqual([
+					"postgres",
+					"-c",
+					`fsync=${mode}`,
+					"-c",
+					`synchronous_commit=${mode}`,
+					"-c",
+					`full_page_writes=${mode}`,
+				]);
+			}
+		}
+		const functional = starts[0]?.run;
+		if (!functional) throw new Error("missing functional PostgreSQL startup");
+		for (const settings of ["on,off,off", "off,on,off", "off,off,on"]) {
+			writeFileSync(argsFile, "");
+			const child = Bun.spawn(["bash", "-e", "-c", functional], {
+				env: {
+					...process.env,
+					PATH: `${root}:${process.env.PATH}`,
+					TEST_PHASE: "--only=parallel",
+					DOCKER_ARGS: argsFile,
+					DOCKER_SETTINGS: settings,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [out, err, rc] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect(out + err).toContain(`PostgreSQL durability: ${settings}`);
+			expect(rc, "a server that ignored any setting must stop the job before tests").not.toBe(0);
+		}
+	} finally {
+		remove(root);
+	}
+});
+
 test("the deployment pins every base and Compose image by digest", () => {
 	const bases = [...readFileSync("Dockerfile", "utf8").matchAll(/^\s*FROM\s+(.+)$/gim)];
 	expect(bases.length).toBeGreaterThan(0);
@@ -1185,12 +1370,24 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 			"node:path",
 		].sort(),
 	);
-	expect(loaded("scripts/work/processes.ts").sort()).toEqual(["./run.ts", "node:fs", "node:fs/promises", "node:path"]);
+	expect(loaded("scripts/work/processes.ts").sort()).toEqual([
+		"../pg.ts",
+		"./run.ts",
+		"./test-databases.ts",
+		"node:fs",
+		"node:fs/promises",
+		"node:path",
+	]);
 	expect(loaded("scripts/work/run.ts")).toEqual([]);
 	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
 	expect(loaded("scripts/chromium-diagnostics.ts").sort()).toEqual(["node:fs", "node:path"]);
-	expect(loaded("scripts/preflight.ts").sort()).toEqual(["node:fs", "node:path"]);
-	expect(loaded("test/preflight.ts")).toEqual(["../scripts/preflight.ts"]);
+	expect(loaded("scripts/preflight.ts").sort()).toEqual(["./pg.ts", "node:fs", "node:path"]);
+	expect(loaded("test/preflight.ts").sort()).toEqual([
+		"../scripts/pg.ts",
+		"../scripts/preflight.ts",
+		"../scripts/work/processes.ts",
+		"bun:test",
+	]);
 	const check = readFileSync("scripts/check.ts", "utf8");
 	expect(check.indexOf('requireReady("check")')).toBeGreaterThan(0);
 	expect(check.indexOf('requireReady("check")')).toBeLessThan(check.indexOf("await import("));

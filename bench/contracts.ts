@@ -118,7 +118,12 @@ export async function call<T>(
 	output: z.ZodType<T>,
 	project = "benchmark",
 ): Promise<T> {
-	const reply = await invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: () => actor });
+	const reply = await invoke(app, OPS, {
+		op,
+		project: op === "admin" ? null : project,
+		input,
+		actor: async () => actor,
+	});
 	if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 	return output.parse(reply.result);
 }

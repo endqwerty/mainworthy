@@ -35,7 +35,8 @@ test("records the design baselines for on-disk hot paths", async () => {
 			if (row.budget !== null) budget(`${row.name}: ${row.criterion}`, row[row.criterion], row.budget, "ms");
 		}
 	});
-}, 20_000);
+	// The limit bounds building the PostgreSQL dataset (9 s here, 16 to 20 s on a CI runner), not the paths it measures.
+}, 60_000);
 
 test("records the quarantined-report baseline after 3000 earlier trunk commits", async () => {
 	await withQuarantineWorkload(async (workload) => {
@@ -62,18 +63,18 @@ test("records the 500-result trunk-page baseline beside 8000 changes", async () 
 test("records project removal's indexed constraint-work baseline", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
-		removalFixture(app.db, 5_000, 20_000);
+		await app.database.write((db) => removalFixture(db, 5_000, 20_000));
 		const began = performance.now();
-		app.db.transaction(() => {
-			app.db.exec("PRAGMA defer_foreign_keys = ON");
-			removeProject(app.db, "removing", undefined, "deferred");
-		});
+		await app.database.write((db) =>
+			db.transaction(() => db.checkedBulk(() => removeProject(db, "removing", undefined, "deferred"))),
+		);
 		const lockedMs = performance.now() - began;
-		expect(app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project").all()).toEqual([
-			{ project: 901, n: 20_000 },
-		]);
-		expect(app.db.raw.query("SELECT count(*) AS n FROM result_excuses").get()).toEqual({ n: 20_000 });
-		expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		await app.database.read(async (db) => {
+			expect(await db.allDynamic("SELECT project, count(*) AS n FROM results GROUP BY project")).toEqual([
+				{ project: 901, n: 20_000 },
+			]);
+			expect(await db.allDynamic("SELECT count(*) AS n FROM result_excuses")).toEqual([{ n: 20_000 }]);
+		});
 		budget("reset 5000 results retaining 20000 unrelated results: constraints and writes elapsed", lockedMs, 250, "ms");
 		console.log(
 			`reset constraints and writes: ${lockedMs.toFixed(1)} ms; 5000 removed, 20000 unrelated results retained`,

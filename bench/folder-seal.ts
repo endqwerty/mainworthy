@@ -12,15 +12,26 @@ if (process.argv[2] === "--sample") {
 	const { harness }: typeof import("../test/helpers.ts") = await import(`${root}/test/helpers.ts`);
 	const h = await harness({ preset: "standard" });
 	try {
-		const project = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM projects WHERE key = 'scratch'").get();
-		assert(project);
-		const insert = h.app.db.raw.prepare(
-			"INSERT INTO folders(project, parent, name, rank, rev) VALUES (?, NULL, ?, ?, 0)",
+		const { sql }: typeof import("../src/server/kernel/db.ts") = await import(`${root}/src/server/kernel/db.ts`);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const project = await db.one(
+						sql<readonly [], { id: number }>("SELECT id FROM projects WHERE key = 'scratch'"),
+					);
+					await db.run(
+						sql<{ project: number; names: string[]; ranks: string[] }>(
+							"INSERT INTO folders(project, parent, name, rank, rev) SELECT $project, NULL, name, rank, 0 FROM unnest($names::text[], $ranks::text[]) AS seed(name, rank)",
+						),
+						{
+							project: project.id,
+							names: Array.from({ length: count }, (_, i) => `Folder ${i}`),
+							ranks: Array.from({ length: count }, (_, i) => `rank-${i}`),
+						},
+					);
+				}),
 		);
-		h.app.db.raw.transaction(() => {
-			for (let i = 0; i < count; i++) insert.run(project.id, `Folder ${i}`, `rank-${i}`);
-		})();
-		const agent = h.actor("folder-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("folder-writer", "agent", ["read", "produce"]);
 		const edits: Edit[] = Array.from({ length: count }, (_, i) =>
 			kind === "create"
 				? { op: "folder", name: `New ${i}` }
@@ -33,18 +44,27 @@ if (process.argv[2] === "--sample") {
 		const used = process.cpuUsage(cpu);
 		assert.equal(reply.status, "open");
 		assert.equal(reply.proposal, "P-1");
-		const stored = h.app.db.raw.query<{ resolved: string }, []>("SELECT resolved FROM proposals WHERE no = 1").get();
+		const stored = await h.app.database.read(
+			async (db) => await db.get(sql<readonly [], { resolved: string }>("SELECT resolved FROM proposals WHERE no = 1")),
+		);
 		assert(stored);
 		assert.deepEqual(
 			JSON.parse(stored.resolved).map((edit: { name: string }) => edit.name),
 			edits.map((edit) => ("name" in edit ? edit.name : null)),
 		);
-		assert.equal(h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM folders").get()?.n, count);
+		assert.equal(
+			(
+				await h.app.database.read(
+					async (db) => await db.one(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM folders")),
+				)
+			).n,
+			count,
+		);
 		console.log(
 			JSON.stringify({ kind, count, ms, cpuMs: (used.user + used.system) / 1000, sealed: edits.length, errors: 0 }),
 		);
 	} finally {
-		h.close();
+		await h.close();
 	}
 } else {
 	const baseline = process.argv[2];

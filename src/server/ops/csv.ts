@@ -4,7 +4,7 @@ import type { Edit } from "../../core/ops.ts";
 import { type CsvImportReply, REPLIES } from "../../core/replies.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
 import { currentPolicy } from "../policy/policy.ts";
-import { findCase } from "../suite/suite.ts";
+import { findCases } from "../suite/suite.ts";
 import { defineOp } from "./registry.ts";
 import { proposeSteps } from "./writes.ts";
 
@@ -17,16 +17,21 @@ export const csvImportOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: null,
-	*steps(ctx, input): Generator<undefined, CsvImportReply, void> {
-		const policy = currentPolicy(ctx.db, ctx.project.id);
+	async *steps(ctx, input): AsyncGenerator<undefined, CsvImportReply, void> {
+		const policy = await currentPolicy(ctx.db, ctx.project.id);
 		let plan: ReturnType<typeof mapCsv>;
 		try {
 			plan = mapCsv(input.csv, input.mapping, policy.settings.fields ?? {}, input.preset);
 		} catch (error) {
 			throw invalid(error instanceof Error ? error.message : String(error));
 		}
+		const existing = await findCases(
+			ctx.db,
+			ctx.project.id,
+			plan.rows.flatMap((row) => (row.alias ? [row.alias] : [])),
+		);
 		for (const row of plan.rows) {
-			if (row.alias && findCase(ctx.db, ctx.project.id, row.alias)) {
+			if (row.alias && existing.get(row.alias)) {
 				row.errors.push(`case alias ${row.alias} is already in use`);
 				row.body = null;
 			}

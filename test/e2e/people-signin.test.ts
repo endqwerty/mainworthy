@@ -789,9 +789,17 @@ test.skipIf(!browserAvailable)(
 	async () => {
 		const local = await startServer({ mode: "server" });
 		let browser: PageHarness | null = null;
+		const missing: string[] = [];
 		try {
 			await local.api("propose", { edits: [{ op: "create", outline: "Kept case\n  Original step" }] });
-			browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
+			browser = await openPage(local, {
+				path: "/p/scratch/suite/c/1",
+				setup: async (page) => {
+					page.on("response", (response) => {
+						if (response.status() === 404) missing.push(new URL(response.url()).pathname);
+					});
+				},
+			});
 			const { page } = browser;
 			await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
 			await page.keyboard.press("e");
@@ -817,7 +825,7 @@ test.skipIf(!browserAvailable)(
 				expect(await step.inputValue()).toBe("Keep my unsaved text");
 			}
 			expect(browser.dialogs).toEqual([]);
-			expect(browser.errors).toEqual([]);
+			expect(browser.errors, JSON.stringify(missing)).toEqual([]);
 		} finally {
 			await browser?.close();
 			await local.stop();

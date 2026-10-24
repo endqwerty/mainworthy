@@ -8,7 +8,8 @@
 		"mainworthy": "src/cli/main.ts"
 	},
 	"scripts": {
-		"dev": "bun --watch src/cli/main.ts serve",
+		"dev": "bun scripts/pg.ts dev",
+		"pg": "bun scripts/pg.ts",
 		"start": "NODE_ENV=production bun src/cli/main.ts serve",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
@@ -18,7 +19,7 @@
 		"performance": "bun scripts/check.ts test --only=performance",
 		"browser": "playwright-core install chromium-headless-shell",
 		"prebuild": "bun scripts/licences.ts --check-bun",
-		"build": "NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/app/start-worker.ts --outfile dist/mainworthy"
+		"build": "NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts --outfile dist/mainworthy"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/core": "^2.3.1",

@@ -6,21 +6,24 @@ import { parseCase } from "../src/core/markdown.ts";
 import { emptyBody } from "../src/core/model.ts";
 import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
+import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { Database, isForeignKeyViolation, type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { invalid } from "../src/server/kernel/errors.ts";
+
 import { type CurrentPolicy, currentPolicy, policyAt } from "../src/server/policy/policy.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 /** Replaces the default loose project with one under another preset, and another choice for tests with no case. */
 const use = async (preset: string, unlinked?: "ask" | "track" | "create"): Promise<void> => {
-	h.close();
+	await h.close();
 	h = await harness({ preset, ...(unlinked ? { unlinked } : {}) });
 };
 
@@ -103,7 +106,7 @@ describe("named role grants", () => {
 		};
 		expect(await propose()).toMatchObject(refused);
 		expect((await queue()).items).toEqual([]);
-		const reviewer = h.actor("role-holder", "human", ["read"]);
+		const reviewer = await h.actor("role-holder", "human", ["read"]);
 		await h.call("admin", { do: "project.create", key: "other" });
 		await h.call("admin", {
 			do: "grant.set",
@@ -127,7 +130,7 @@ describe("named role grants", () => {
 	});
 
 	test("a personal role uses team permissions and loses eligibility when membership ends", async () => {
-		h.actor("team-approver", "human", ["read"]);
+		await h.actor("team-approver", "human", ["read"]);
 		await h.call("admin", { do: "team.create", name: "Reviewers" });
 		await h.call("admin", { do: "team.grant.set", team: "Reviewers", project: "scratch", can: ["produce", "answer"] });
 		await h.call("admin", { do: "team.member.add", team: "Reviewers", person: "team-approver" });
@@ -147,7 +150,7 @@ describe("named role grants", () => {
 			can: ["read"],
 			roles: ["approver"],
 		});
-		expect(actorByName(h.app.db, "team-approver", 1)).toMatchObject({
+		expect(await h.app.database.read(async (db) => await actorByName(db, "team-approver", 1))).toMatchObject({
 			can: ["read", "record", "produce", "answer"],
 			roles: ["approver"],
 		});
@@ -166,7 +169,7 @@ describe("named role grants", () => {
 	});
 
 	test("a settings-only proposal keeps the role-holder requirement", async () => {
-		h.actor("settings-approver", "human", ["read", "produce", "answer"]);
+		await h.actor("settings-approver", "human", ["read", "produce", "answer"]);
 		await h.call("admin", {
 			do: "grant.set",
 			actor: "settings-approver",
@@ -211,7 +214,7 @@ describe("named role grants", () => {
 	});
 
 	test("a policy rechecks role holders when its waiting proposal is accepted", async () => {
-		const reviewer = h.actor("role-holder", "human", ["read", "produce", "answer"]);
+		const reviewer = await h.actor("role-holder", "human", ["read", "produce", "answer"]);
 		const grant = async (roles: string[]) =>
 			await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles });
 		await grant(["approver"]);
@@ -238,7 +241,7 @@ describe("named role grants", () => {
 	});
 
 	test("an agent with a role counts only when the clause permits agent answers", async () => {
-		const agent = h.actor("role-agent", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("role-agent", "agent", ["read", "produce", "answer"]);
 		await h.call("admin", {
 			do: "grant.set",
 			actor: agent.name,
@@ -262,14 +265,14 @@ describe("named role grants", () => {
 			await h.call<{ status: string }[]>(
 				"decide",
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason: "reviewed" },
-				actorByName(h.app.db, agent.name, 1) ?? agent,
+				(await h.app.database.read(async (db) => await actorByName(db, agent.name, 1))) ?? agent,
 			),
 		).toMatchObject([{ status: "decided" }]);
 		expect(await title("C-1")).toBe("An agent may review this");
 	});
 
 	test("a grant keeps its roles per project and removing it removes those roles", async () => {
-		const reviewer = h.actor("reviewer", "human", ["read", "produce", "answer"]);
+		const reviewer = await h.actor("reviewer", "human", ["read", "produce", "answer"]);
 		await h.call("admin", { do: "project.create", key: "other" });
 		await h.call("admin", {
 			do: "grant.set",
@@ -279,7 +282,14 @@ describe("named role grants", () => {
 			roles: ["approver", "lead", "approver"],
 		});
 		await h.call("admin", { do: "token.create", actor: reviewer.name, kind: "human" });
-		expect(invitedPerson(h.app, { name: reviewer.name, can: [], project: 0 })).toMatchObject({
+		expect(
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(
+						async () => await invitedPerson(h.app, db, { name: reviewer.name, can: [], project: 0 }),
+					),
+			),
+		).toMatchObject({
 			name: reviewer.name,
 			isNew: false,
 		});
@@ -297,8 +307,14 @@ describe("named role grants", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["auditor"],
 		});
-		expect(actorByName(h.app.db, reviewer.name, 1)?.roles).toEqual(["auditor", "approver", "lead"]);
-		expect(actorByName(h.app.db, reviewer.name, 2)?.roles).toEqual(["auditor"]);
+		expect((await h.app.database.read(async (db) => await actorByName(db, reviewer.name, 1)))?.roles).toEqual([
+			"auditor",
+			"approver",
+			"lead",
+		]);
+		expect((await h.app.database.read(async (db) => await actorByName(db, reviewer.name, 2)))?.roles).toEqual([
+			"auditor",
+		]);
 		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
 		await h.call("admin", { do: "grant.remove", actor: reviewer.name, project: "scratch" });
 		expect((await actors()).find((actor) => actor.name === reviewer.name)?.grants).toEqual([
@@ -331,7 +347,7 @@ describe("named role grants", () => {
 	});
 
 	test("a named role requires that project role, answer permission, independence and a reason", async () => {
-		const reviewer = h.actor("reviewer", "human", ["read", "produce", "answer"]);
+		const reviewer = await h.actor("reviewer", "human", ["read", "produce", "answer"]);
 		const clauses = PRESETS.strict.clauses.map((clause) =>
 			clause.id === "adopt-any"
 				? { ...clause, ask: { who: "role:approver", agents: "none", notProducer: true, reason: "required" } }
@@ -343,7 +359,11 @@ describe("named role grants", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["approver"],
 		});
-		await h.call("propose", { edits: [{ op: "policy", base: currentPolicy(h.app.db, 1).version, clauses }] });
+		await h.call("propose", {
+			edits: [
+				{ op: "policy", base: (await h.app.database.read(async (db) => await currentPolicy(db, 1))).version, clauses },
+			],
+		});
 		const policyQuestion = first((await queue({ kind: "adopt" })).items);
 		await h.call("decide", { q: policyQuestion.q, onEvidence: policyQuestion.evidenceHash, answer: { is: "accept" } });
 		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
@@ -373,12 +393,17 @@ describe("named role grants", () => {
 			roles: ["approver"],
 		});
 		// The harness carries actors by value; re-read authority exactly as a real request does.
-		const current = () => actorByName(h.app.db, reviewer.name, 1) ?? reviewer;
-		expect((await answer(current())).status).toBe("invalid");
+		const current = async () =>
+			(await h.app.database.read(async (db) => await actorByName(db, reviewer.name, 1))) ?? reviewer;
+		expect((await answer(await current())).status).toBe("invalid");
 		expect(await h.raw("get", { refs: ["C-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		expect((await answer(current(), "independent review complete")).status).toBe("decided");
+		expect((await answer(await current(), "independent review complete")).status).toBe("decided");
 		expect(await title("C-1")).toBe("Role reviewed case");
-		const own = await h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Own proposal" }] }, current());
+		const own = await h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "create", outline: "Own proposal" }] },
+			await current(),
+		);
 		const ownQuestion = first((await queue({ kind: "adopt" })).items);
 		expect(own.status).toBe("open");
 		expect(
@@ -391,7 +416,7 @@ describe("named role grants", () => {
 						answer: { is: "accept" },
 						reason: "my own review",
 					},
-					current(),
+					await current(),
 				),
 			).status,
 		).toBe("forbidden");
@@ -517,18 +542,34 @@ describe("rule answers", () => {
 			clause.id === "adopt-any" ? { ...clause, answer: { is: "merge", body: emptyBody("Forced") } } : clause,
 		);
 		// An already accepted policy from a release that allowed this rule.
-		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE policies SET clauses = $1"), [JSON.stringify(clauses)]),
+				),
+		);
 		// Stop the broken implementation before unbounded recursion can occupy the test worker.
-		h.app.db.raw.exec(`CREATE TEMP TRIGGER bound_merge_proposals BEFORE INSERT ON proposals
-			WHEN (SELECT count(*) FROM proposals) >= 4
-			BEGIN SELECT RAISE(ABORT, 'merge rule generated repeated proposals'); END`);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.exec(
+							`CREATE FUNCTION bound_merge_proposals_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF (SELECT count(*) FROM proposals) >= 4 THEN RAISE EXCEPTION 'merge rule generated repeated proposals'; END IF; RETURN NEW; END $$; CREATE TRIGGER bound_merge_proposals BEFORE INSERT ON proposals FOR EACH ROW EXECUTE FUNCTION bound_merge_proposals_fn()`,
+						),
+				),
+		);
 		expect(
 			await h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Edited" } }] }),
 		).toMatchObject({
 			ok: true,
 			result: { status: "open", proposal: "P-2" },
 		});
-		expect(h.app.db.raw.query("SELECT count(*) AS n FROM proposals").get()).toEqual({ n: 2 });
+		expect(
+			await h.app.database.read(
+				async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM proposals")),
+			),
+		).toEqual({ n: 2 });
 		expect(await title("C-1")).toBe("Original");
 		const question = first((await queue({ kind: "adopt" })).items);
 		expect(
@@ -564,7 +605,11 @@ describe("rule answers", () => {
 			status: "adopted",
 		});
 		expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([{ title: "Resolved", version: 3 }]);
-		expect(h.app.db.raw.query("SELECT count(*) AS n FROM proposals").get()).toEqual({ n: 5 });
+		expect(
+			await h.app.database.read(
+				async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM proposals")),
+			),
+		).toEqual({ n: 5 });
 		expect((await queue({ kind: "adopt" })).items).toEqual([]);
 	});
 
@@ -577,13 +622,25 @@ describe("rule answers", () => {
 	test("a pending proposal holding such a clause is refused when decided, and the policy stays", async () => {
 		const { policy, edit } = await edited({ is: "create", folder: "Imported" });
 		expect(await h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true, result: { status: "open" } });
-		const stored = h.app.db.raw.query<{ id: number; resolved: string }, []>("SELECT id, resolved FROM proposals").all();
+		const stored = await h.app.database.read(
+			async (db) =>
+				await db.all(sql<readonly [], { id: number; resolved: string }>("SELECT id, resolved FROM proposals")),
+		);
 		expect(stored).toHaveLength(1);
 		const [row] = stored;
 		const resolved = JSON.parse(row?.resolved ?? "[]") as { op: string; policy: Policy }[];
 		for (const entry of resolved)
 			if (entry.op === "policy") entry.policy.clauses = JSON.parse(bad(JSON.stringify(entry.policy.clauses)));
-		h.app.db.raw.query("UPDATE proposals SET resolved = ? WHERE id = ?").run(JSON.stringify(resolved), row?.id ?? 0);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE proposals SET resolved = $1 WHERE id = $2"), [
+							JSON.stringify(resolved),
+							row?.id ?? 0,
+						]),
+				),
+		);
 		const question = first((await queue({ kind: "adopt" })).items);
 		expect(
 			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
@@ -593,25 +650,52 @@ describe("rule answers", () => {
 		);
 	});
 
-	test("an archive whose current policy holds such a clause is refused whole", () => {
-		const row = h.app.db.raw
-			.query<{ version: number; clauses: string }, []>("SELECT version, clauses FROM policies ORDER BY version DESC")
-			.get();
-		h.app.db.raw
-			.query("UPDATE policies SET clauses = ? WHERE version = ?")
-			.run(bad(row?.clauses ?? "[]"), row?.version ?? 0);
+	test("an archive whose current policy holds such a clause is refused whole", async () => {
+		const row = await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly [], { version: number; clauses: string }>(
+						"SELECT version, clauses FROM policies ORDER BY version DESC",
+					),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE policies SET clauses = $1 WHERE version = $2"), [
+							bad(row?.clauses ?? "[]"),
+							row?.version ?? 0,
+						]),
+				),
+		);
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
-		const restored = new Db(":memory:");
+		await h.app.database.write(
+			async (db) => await db.transaction(async () => await exportArchive(db, (chunk) => chunks.push(chunk))),
+		);
+		const restoredFixture = await testDatabase();
+		const restored = await Database.open({ url: restoredFixture.url });
 		try {
-			migrate(restored, ":memory:");
-			expect(() => importArchive(restored, linesOf(chunks.join("")))).toThrow(
+			await expect(restored.write(async (db) => await importArchive(db, linesOf(chunks.join(""))))).rejects.toThrow(
 				"archive policy of project scratch is refused: Clause map-track needs a valid map rule answer.",
 			);
-			expect(restored.raw.query("SELECT count(*) AS n FROM projects").get()).toEqual({ n: 0 });
-			expect(restored.raw.query("SELECT count(*) AS n FROM policies").get()).toEqual({ n: 0 });
+			expect(
+				await restored.read(
+					async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM projects")),
+				),
+			).toEqual({
+				n: 0,
+			});
+			expect(
+				await restored.read(
+					async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM policies")),
+				),
+			).toEqual({
+				n: 0,
+			});
 		} finally {
-			restored.close();
+			await restored.close();
+			await restoredFixture.close();
 		}
 	});
 });
@@ -773,8 +857,14 @@ describe("agent edits", () => {
 		const clauses = policy.clauses.map((clause) =>
 			clause.id === "adopt-scoped-agent" ? { ...clause, when: ["author:agent", predicate] } : clause,
 		);
-		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE policies SET clauses = $1"), [JSON.stringify(clauses)]),
+				),
+		);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
 		const proposed = await h.call<Proposed>(
 			"propose",
 			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent edit" } }] },
@@ -807,10 +897,27 @@ describe("agent edits", () => {
 		const clauses = policy.clauses.map((clause) =>
 			clause.id === "adopt-scoped-agent" ? { ...clause, when: ["author:agent", predicate] } : clause,
 		);
-		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
-		h.app.db.raw.query("UPDATE folders SET name = ? WHERE name = 'Original'").run(folder);
-		h.app.db.raw.query("UPDATE cases SET tags = ?").run(JSON.stringify([tag]));
-		const agent = h.actor("unicode-writer", "agent", ["read", "produce", "answer"]);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE policies SET clauses = $1"), [JSON.stringify(clauses)]),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE folders SET name = $1 WHERE name = 'Original'"), [folder]),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () => await db.run(sql<readonly SqlValue[]>("UPDATE cases SET tags = $1"), [JSON.stringify([tag])]),
+				),
+		);
+		const agent = await h.actor("unicode-writer", "agent", ["read", "produce", "answer"]);
 		expect(
 			(
 				await h.call<Proposed>(
@@ -835,7 +942,7 @@ describe("agent edits", () => {
 
 	test("canonical folder predicates preserve spaces and literal dot-dot segments", async () => {
 		await scopePolicy(["folder:check out/.."]);
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce"]);
 		expect(
 			(
 				await h.call<Proposed>(
@@ -853,7 +960,7 @@ describe("agent edits", () => {
 
 	test("folder clauses hold an agent's nested and mixed proposal for a person", async () => {
 		await scopePolicy(["folder:checkout"]);
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
 		expect(
 			(await h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Outside", folder: "Other" }] }, agent))
 				.status,
@@ -890,7 +997,7 @@ describe("agent edits", () => {
 
 	test("tag clauses cover inline tags and prevent removing a protected tag to escape review", async () => {
 		await scopePolicy(["tag:critical"]);
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce"]);
 		expect(
 			(await h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Inline #critical" }] }, agent)).status,
 		).toBe("open");
@@ -912,7 +1019,7 @@ describe("agent edits", () => {
 	test("repeated link edits retain the scope of every proposed tag change", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
 		await scopePolicy(["tag:critical"]);
-		const agent = h.actor("link-writer", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("link-writer", "agent", ["read", "produce", "answer"]);
 		const proposed = await h.call<Proposed>(
 			"propose",
 			{
@@ -945,7 +1052,7 @@ describe("agent edits", () => {
 			],
 		});
 		await scopePolicy(["folder:checkout"]);
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce"]);
 		for (const edit of [
 			{ op: "place", cases: ["C-1"], folder: "Other" },
 			{ op: "place", cases: ["C-2"], folder: "Checkout/Coupons" },
@@ -959,7 +1066,7 @@ describe("agent edits", () => {
 		await h.call("propose", {
 			edits: [{ op: "create", outline: "Protected", folder: "Parent/Checkout", tags: ["critical"] }],
 		});
-		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("scoped-writer", "agent", ["read", "produce"]);
 		for (const predicate of ["folder:parent/checkout", "tag:critical"]) {
 			await scopePolicy([predicate]);
 			expect(
@@ -974,7 +1081,7 @@ describe("agent edits", () => {
 		async (childFirst) => {
 			await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
 			await scopePolicy(["folder:checkout/secure"]);
-			const agent = h.actor("writer", "agent", ["read", "produce"]);
+			const agent = await h.actor("writer", "agent", ["read", "produce"]);
 			const renames = [
 				{ op: "folder", folder: "Public", name: "Checkout" },
 				{ op: "folder", folder: "Public/Temp", name: "Secure" },
@@ -1012,7 +1119,7 @@ describe("agent edits", () => {
 			],
 		});
 		await scopePolicy(["folder:checkout/secure"]);
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		const edit =
 			op === "create"
 				? { op, outline: "New case", folder: "Public/Temp" }
@@ -1036,7 +1143,7 @@ describe("agent edits", () => {
 	test("combined renames of empty folders still require review", async () => {
 		await h.call("propose", { edits: [{ op: "folder", name: "Temp", parent: "Public" }] });
 		await scopePolicy(["folder:checkout/secure"]);
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		expect(
 			await h.call<Proposed>(
 				"propose",
@@ -1057,7 +1164,7 @@ describe("agent edits", () => {
 	test("a temporary protected path in a batch still requires review", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
 		await scopePolicy(["folder:checkout/secure"]);
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		expect(
 			await h.call<Proposed>(
 				"propose",
@@ -1077,7 +1184,7 @@ describe("agent edits", () => {
 	test("a pending child rename rechecks its final path after an ancestor changes", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
 		await scopePolicy(["folder:checkout/secure"], true);
-		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce", "answer"]);
 		const proposed = await h.call<Proposed>(
 			"propose",
 			{ edits: [{ op: "folder", folder: "Public/Temp", name: "Secure" }] },
@@ -1114,7 +1221,7 @@ describe("agent edits", () => {
 			await scopePolicy([predicate], true);
 			await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Other" }] });
 			const caseRef = predicate.startsWith("folder:") ? "C-1" : "C-2";
-			const agent = h.actor(`scoped-${caseRef}`, "agent", ["read", "produce", "answer"]);
+			const agent = await h.actor(`scoped-${caseRef}`, "agent", ["read", "produce", "answer"]);
 			const proposal = await h.call<Proposed>(
 				"propose",
 				{ edits: [{ op: "edit", case: caseRef, base: 1, body: { title: "Agent title" } }] },
@@ -1139,7 +1246,7 @@ describe("agent edits", () => {
 	});
 
 	test("loose: an agent's edit is adopted by the rule and marked as the agent's", async () => {
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		const reply = await h.call<Proposed>(
 			"propose",
 			{ edits: [{ op: "create", outline: "Agent wrote this\n  Do it > Done" }] },
@@ -1152,7 +1259,7 @@ describe("agent edits", () => {
 
 	test("standard: an agent's edit waits for a person; the agent cannot accept it; a person's own edit does not wait", async () => {
 		await use("standard");
-		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce", "answer"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Human wrote this\n  Do it > Done" }] });
 		const reply = await h.call<Proposed>(
 			"propose",
@@ -1183,7 +1290,7 @@ describe("agent edits", () => {
 
 	test("standard: a rejected proposal changes nothing and stays in the ledger", async () => {
 		await use("standard");
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Keep me" }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Clobbered" } }] }, agent);
 		const q = first((await queue()).items);
@@ -1202,7 +1309,7 @@ describe("agent edits", () => {
 
 	test("a person's edit made meanwhile is never overwritten by an agent's older proposal", async () => {
 		await use("standard");
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent's title" } }] }, agent);
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's title" } }] });
@@ -1261,7 +1368,13 @@ describe("policy proposal bases", () => {
 				{ op: "policy", preset: "strict" },
 			],
 		});
-		h.app.db.raw.query("UPDATE proposals SET resolved = json_remove(resolved, '$[1].base')").run();
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly []>("UPDATE proposals SET resolved = (resolved::jsonb #- '{1,base}')::text")),
+				),
+		);
 		expect(await accept(waiting)).toMatchObject({
 			status: "conflict",
 			needs: "this proposal was made before policy versions; redo it on the current policy",
@@ -1272,10 +1385,11 @@ describe("policy proposal bases", () => {
 	});
 
 	test("P2: simultaneous saves on one version cannot both replace the policy", async () => {
-		const sam = h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
+		const sam = await h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
 		const base = await current();
 		const proposals = await Promise.all(
-			[h.owner, sam].map(
+			await mapAsync(
+				[h.owner, sam],
 				async (actor, index) =>
 					await h.call<Proposed>(
 						"propose",
@@ -1308,7 +1422,7 @@ describe("policy proposal bases", () => {
 	});
 
 	test("P6: accepting a waiting proposal cannot revert a policy adopted meanwhile", async () => {
-		const sam = h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
+		const sam = await h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
 		const before = await current();
 		const setup = await h.call<Proposed>("propose", {
 			edits: [
@@ -1392,7 +1506,13 @@ describe("changing the policy", () => {
 			expect(await h.call<GateStatus>("gate", { commit: "aaaa0001" })).toEqual(before);
 			expect(await title("C-1")).toBe("A case");
 		}
-		expect(h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM policies").get()?.n).toBe(4);
+		expect(
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM policies")),
+				)
+			)?.n,
+		).toBe(4);
 	});
 
 	test("strict: a person's own edit waits for someone, with a reason", async () => {
@@ -1466,7 +1586,7 @@ describe("changing the policy", () => {
 
 describe("findings", () => {
 	test("a claimed new-case suggestion keeps its content and creates the case once when accepted", async () => {
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Checkout applies a coupon" }] });
 		const suggest = {
 			case: {
@@ -1484,7 +1604,9 @@ describe("findings", () => {
 		expect(await h.call<typeof claimed>("claim", claim, agent)).toEqual(claimed);
 		const q = first((await queue({ kind: "finding" })).items);
 		expect(q.evidence).toMatchObject({ suggest });
-		const stored = h.app.db.raw.query<{ suggest: string }, []>("SELECT suggest FROM findings").all();
+		const stored = await h.app.database.read(
+			async (db) => await db.all(sql<readonly [], { suggest: string }>("SELECT suggest FROM findings")),
+		);
 		expect(stored.map((row) => JSON.parse(row.suggest))).toEqual([suggest]);
 		const accept = {
 			cmd: "accept-new-case",
@@ -1513,7 +1635,7 @@ describe("findings", () => {
 
 	test("an agent's review opens one question per finding, is not raised twice, and an accepted suggestion becomes the agent's proposal", async () => {
 		await use("standard");
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", {
 			edits: [{ op: "create", outline: "Checkout applies a coupon\n  Apply SAVE10 > Total updates" }],
 		});
@@ -1567,7 +1689,7 @@ describe("policy adoption reconsiders open questions", () => {
 	test("new rules settle waiting proposals, findings and failures without another report", async () => {
 		await use("standard");
 		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		const pending = await h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Coupon works" }] }, agent);
 		await h.call(
 			"claim",
@@ -1902,11 +2024,20 @@ describe("unlinked tests", () => {
 		expect((await queue()).counts.map).toBe(files);
 		expect(await setUnlinked("track")).toMatchObject({ effects: { ruled: files } });
 		expect((await queue()).counts.open).toBe(0);
+		const ledger = await h.app.database.read(
+			async (db) =>
+				await db.one(
+					sql<readonly [], { n: number; decisions: number }>(
+						"SELECT count(*) AS n, count(DISTINCT d.id) AS decisions FROM questions q JOIN decisions d ON d.id = q.decision JOIN actors a ON a.id = (d.signers::jsonb->0->>'by')::bigint WHERE q.kind = 'map' AND q.state = 'decided' AND (q.ask::jsonb)->>'who' = 'rule' AND d.kind = 'map' AND (d.answer::jsonb)->>'is' = 'track' AND d.basis = q.basis AND d.on_evidence = q.evidence_hash AND d.holds::jsonb = jsonb_build_array(jsonb_build_object('until', 'basis-changes', 'basis', q.basis)) AND d.expires_at IS NULL AND d.supersedes IS NULL AND d.effects::jsonb = '{}'::jsonb AND a.kind = 'rule'",
+					),
+				),
+		);
+		expect(ledger).toEqual({ n: files, decisions: files });
 	});
 
 	test("in the queue a test with no case comes after every question that wants a judgement, however new it is", async () => {
 		await use("standard", "ask");
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
 		await h.call("report", ciReport({ commit: "bbbb0030", n: 1, file: "tests/first.spec.ts" }));
 		await h.call(
@@ -1934,7 +2065,7 @@ describe("unlinked tests", () => {
 	test("create: a report makes a case for each test with none and links it; nobody is asked, and nothing is made twice", async () => {
 		await use("standard");
 		await setUnlinked("create");
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
 		const receipt = await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "bbbb0004", n: 3, file: "tests/checkout/coupon.spec.ts" }),
@@ -1969,7 +2100,7 @@ describe("unlinked tests", () => {
 
 	test("create under standard: an agent's new case waits for a person, so its report leaves the file's question open", async () => {
 		await use("standard", "create");
-		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		const agent = await h.actor("runner", "agent", ["read", "produce"]);
 		await h.call("report", ciReport({ commit: "bbbb0017", n: 2 }), agent);
 		expect((await queue()).counts.map).toBe(1);
 		expect((await h.call<{ count: number }>("find", { in: "cases" })).count).toBe(0);
@@ -2038,12 +2169,16 @@ describe("unlinked tests", () => {
 	test("a policy stored before the setting existed keeps asking as its clauses say", async () => {
 		await use("standard");
 		const old = PRESETS.standard.clauses.filter((clause) => !["map-track", "map-create"].includes(clause.id));
-		h.app.db.raw
-			.query("UPDATE policies SET clauses = ?, settings = ?")
-			.run(
-				JSON.stringify(old),
-				JSON.stringify({ basis: "exact-or-assumed", holds: { flakyDays: 14, infraThisTargetOnly: true } }),
-			);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE policies SET clauses = $1, settings = $2"), [
+							JSON.stringify(old),
+							JSON.stringify({ basis: "exact-or-assumed", holds: { flakyDays: 14, infraThisTargetOnly: true } }),
+						]),
+				),
+		);
 		await h.call("report", ciReport({ commit: "bbbb0010", n: 2 }));
 		expect((await queue()).counts.map).toBe(1);
 		const projects = await h.call<{ policy: string; unlinked: string }[]>("admin", { do: "project.list" });
@@ -2061,7 +2196,7 @@ describe("what an agent reads", () => {
 		cursor: string;
 	};
 	const reviewFixture = async () => {
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", {
 			edits: ["Coupon applies", "Coupon expires"].map((title) => ({
 				op: "create",
@@ -2149,7 +2284,7 @@ describe("what an agent reads", () => {
 
 	test("impact names the cases a change touches and why; since returns only what moved; get skips what the caller holds", async () => {
 		await use("standard", "ask");
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" },
@@ -2249,7 +2384,7 @@ describe("what an agent reads", () => {
 
 describe("forgetting a person", () => {
 	test("removes who they were and keeps what they did; their token stops working", async () => {
-		const dana = h.actor("dana", "human", ["read", "produce", "answer"]);
+		const dana = await h.actor("dana", "human", ["read", "produce", "answer"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Written by Dana" }] }, dana);
 		const forgotten = await h.call<{ forgotten: string; tokensRevoked: number }>("admin", {
 			do: "actor.forget",
@@ -2260,7 +2395,12 @@ describe("forgetting a person", () => {
 		expect(first(versions.versions).by).toBe(forgotten.forgotten);
 		expect(await title("C-1")).toBe("Written by Dana"); // the record itself is untouched
 		expect(
-			h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM tokens WHERE revoked_at IS NULL").get()?.n,
+			(
+				await h.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM tokens WHERE revoked_at IS NULL")),
+				)
+			)?.n,
 		).toBe(0);
 		expect(await h.raw("admin", { do: "actor.forget", name: "robin" })).toMatchObject({
 			ok: false,
@@ -2271,7 +2411,7 @@ describe("forgetting a person", () => {
 
 describe("a conflicted proposal", () => {
 	test("its agent author may withdraw it and try again, but cannot push it through", async () => {
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "A person's title" } }] });
 		const stale = await h.call<Proposed>(
@@ -2309,7 +2449,7 @@ describe("project custom field definitions", () => {
 	const policy = async () => await h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
 	const accept = async (proposal: Proposed) => {
 		const q = first((await queue({ kind: "adopt" })).items.filter((q) => q.q === proposal.question));
-		return h.call<{ status: string; needs?: string }[]>("decide", {
+		return await h.call<{ status: string; needs?: string }[]>("decide", {
 			q: q.q,
 			onEvidence: q.evidenceHash,
 			answer: { is: "accept" },
@@ -2478,7 +2618,7 @@ describe("project custom field definitions", () => {
 			edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "obsolete", legacy: "Keep me" } } }],
 		});
 		await accept(await h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
-		const agent = h.actor("markdown-editor", "agent", ["read", "produce"]);
+		const agent = await h.actor("markdown-editor", "agent", ["read", "produce"]);
 		const propose = async (title: string, base: number) =>
 			await h.call<Proposed>(
 				"propose",
@@ -2503,7 +2643,7 @@ describe("project custom field definitions", () => {
 
 	test("a pending content proposal is revalidated against definitions at adoption", async () => {
 		await accept(await h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
-		const agent = h.actor("field-writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("field-writer", "agent", ["read", "produce"]);
 		const pending = await h.call<Proposed>(
 			"propose",
 			{ edits: [{ op: "create", body: { title: "Waiting", fields: { risk: "medium" } } }] },
@@ -2517,7 +2657,7 @@ describe("project custom field definitions", () => {
 	test("pending edits inherit unchanged old values and merge current values at adoption", async () => {
 		await h.call("propose", { edits: [{ op: "create", body: { title: "Before definitions" } }] });
 		await accept(await h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
-		const agent = h.actor("field-editor", "agent", ["read", "produce"]);
+		const agent = await h.actor("field-editor", "agent", ["read", "produce"]);
 		const pending = await h.call<Proposed>(
 			"propose",
 			{
@@ -2550,7 +2690,7 @@ describe("project custom field definitions", () => {
 			edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "high" } } }],
 		});
 		await accept(await h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
-		const agent = h.actor("field-editor", "agent", ["read", "produce"]);
+		const agent = await h.actor("field-editor", "agent", ["read", "produce"]);
 		const pending = await h.call<Proposed>(
 			"propose",
 			{
@@ -2585,21 +2725,32 @@ describe("project custom field definitions", () => {
 		await h.call("propose", { edits: [{ op: "create", md }] });
 		expect(first(await h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" })).md).toContain("legacy: Keep me");
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
-		const restored = new Db(":memory:");
+		await h.app.database.write(
+			async (db) => await db.transaction(async () => await exportArchive(db, (chunk) => chunks.push(chunk))),
+		);
+		const restoredFixture = await testDatabase();
+		const restored = await Database.open({ url: restoredFixture.url });
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
-			expect(currentPolicy(restored, 1)).toEqual(await policy());
-			expect(policyAt(restored, 1, 1)?.settings.fields).toBeUndefined();
-			expect(policyAt(restored, 1, 2)?.settings.fields).toEqual((await policy()).settings.fields);
+			await restored.write(async (db) => await importArchive(db, linesOf(chunks.join(""))));
+			expect(await restored.read(async (db) => await currentPolicy(db, 1))).toEqual(await policy());
+			expect((await restored.read(async (db) => await policyAt(db, 1, 1)))?.settings.fields).toBeUndefined();
+			expect((await restored.read(async (db) => await policyAt(db, 1, 2)))?.settings.fields).toEqual(
+				(await policy()).settings.fields,
+			);
 			for (const table of ["versions", "policies", "proposals", "decisions"]) {
-				expect(restored.raw.query(`SELECT * FROM ${table}`).all()).toEqual(
-					h.app.db.raw.query(`SELECT * FROM ${table}`).all(),
+				expect(
+					await restored.read(
+						async (db) => await db.all(sql<readonly [], Record<string, unknown>>(`SELECT * FROM ${table}`)),
+					),
+				).toEqual(
+					await h.app.database.read(
+						async (db) => await db.all(sql<readonly [], Record<string, unknown>>(`SELECT * FROM ${table}`)),
+					),
 				);
 			}
 		} finally {
-			restored.close();
+			await restored.close();
+			await restoredFixture.close();
 		}
 	});
 
@@ -2682,4 +2833,46 @@ describe("project custom field definitions", () => {
 			false,
 		);
 	});
+});
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T, index: number) => Promise<R>) {
+	const out: R[] = [];
+	for (const [index, row] of rows.entries()) out.push(await callback(row, index));
+	return out;
+}
+
+test("a statement refusal in one answer leaves both neighboring batch answers committed", async () => {
+	await use("standard");
+	await h.call(
+		"report",
+		ciReport({ commit: "answer-savepoint", n: 3, fail: { 0: "first cause", 1: "refused cause", 2: "last cause" } }),
+	);
+	const questions = (await h.call<InboxReply>("inbox", { kind: "failure" })).items;
+	expect(questions).toHaveLength(3);
+	const refused = questions[1];
+	if (!refused) throw new Error("missing refusal question");
+	const original = HANDLERS.failure.effect;
+	HANDLERS.failure.effect = async function* (ctx, witness, question, answer, tools) {
+		if (`Q-${question.no}` === refused.q) {
+			try {
+				await ctx.db.run(sql("INSERT INTO depends_on(run, decision, expires_at) VALUES (0, 0, NULL)"));
+			} catch (error) {
+				if (isForeignKeyViolation(error)) throw invalid("the answer effect was refused");
+				throw error;
+			}
+		}
+		return yield* original(ctx, witness, question, answer, tools);
+	};
+	try {
+		const replies = await h.call<{ status: string }[]>("decide", {
+			all: questions.map((question) => ({ q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } })),
+		});
+		expect(replies.map((reply) => reply.status)).toEqual(["decided", "invalid", "decided"]);
+	} finally {
+		HANDLERS.failure.effect = original;
+	}
+	expect(await h.call("gate", { commit: "answer-savepoint" })).toMatchObject({ tally: { excused: 2, unexplained: 1 } });
+	expect((await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((question) => question.q)).toEqual([
+		refused.q,
+	]);
 });

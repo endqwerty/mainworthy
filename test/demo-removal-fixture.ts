@@ -1,9 +1,9 @@
-import type { Db } from "../src/server/kernel/db.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
 
 /** Two projects with independent results: only the retained project has excuses. */
-export function removalFixture(db: Db, size: number, retainedSize = size): void {
-	db.transaction(() => {
-		db.exec(`
+export async function removalFixture(db: WriteDb, size: number, retainedSize = size): Promise<void> {
+	await db.transaction(async () => {
+		await db.exec(`
 			INSERT INTO orgs (id, name, created_at) VALUES (900, 'Removal fixture', 1);
 			INSERT INTO actors (id, org, kind, name, created_at) VALUES (900, 900, 'human', 'fixture', 1);
 			INSERT INTO projects (id, org, key, name, created_at, identity) VALUES
@@ -23,28 +23,17 @@ export function removalFixture(db: Db, size: number, retainedSize = size): void 
 			INSERT INTO decisions (id, project, question, kind, answer, signers, basis, holds, at, seq)
 				VALUES (900, 901, 900, 'failure', '{}', '[]', '{}', '{}', 1, 1);
 		`);
-		const insert = db.raw.prepare(`
-			INSERT INTO results (id, project, test, seq, ord, batch, target, method, actor, basis, outcome, at)
-			VALUES (?, ?, ?, 1, ?, ?, ?, 'auto', 900, 'unresolved', 'fail', 1)
-		`);
-		const excuse = db.raw.prepare("INSERT INTO result_excuses (result, decision, class) VALUES (?, 900, 'excused')");
-		try {
-			for (let i = 1; i <= size; i++) insert.run(i, 900, 900, i, 900, 900);
-			for (let i = 1; i <= retainedSize; i++) {
-				insert.run(size + i, 901, 901, i, 901, 901);
-				excuse.run(size + i);
-			}
-		} finally {
-			insert.finalize();
-			excuse.finalize();
-		}
-	});
-}
 
-/** Undo migration 37 when an upgrade fixture reconstructs a schema from before it. */
-export function dropResetIndexes(db: Db): void {
-	const indexes = db.raw
-		.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'index' AND name GLOB '*_reset'")
-		.all();
-	for (const { name } of indexes) db.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
+		await db.runDynamic(
+			`INSERT INTO results (id, project, test, seq, ord, batch, target, method, actor, basis, outcome, at)
+   SELECT n, 900, 900, 1, n, 900, 900, 'auto', 900, 'unresolved', 'fail', 1 FROM generate_series(1, $1::bigint) n
+   UNION ALL SELECT $1::bigint + n, 901, 901, 1, n, 901, 901, 'auto', 900, 'unresolved', 'fail', 1 FROM generate_series(1, $2::bigint) n`,
+			[size, retainedSize],
+		);
+		await db.runDynamic(
+			`INSERT INTO result_excuses (result, decision, class)
+   SELECT $1::bigint + n, 900, 'excused' FROM generate_series(1, $2::bigint) n`,
+			[size, retainedSize],
+		);
+	});
 }

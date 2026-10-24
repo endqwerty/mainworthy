@@ -1,6 +1,7 @@
 // What a seeded project holds, read back through the operations: the suite, the days before today, and today.
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { observeDatabase } from "../../bench/profile.ts";
 import { ResultTrail } from "../core/results.ts";
 import { Client } from "./client.ts";
 import { demoCases } from "./demo/cases.ts";
@@ -88,9 +89,23 @@ test("a demo archive imports with readable open and settled failure questions", 
 });
 
 test("a seeded project holds a suite in folders, a fortnight of history and six questions for today", async () => {
-	await withInstance(async ({ client }) => {
+	await withInstance(async ({ client, instance }) => {
 		const before = Date.now();
-		const seeded = await seed(client, { project: "demo", cases: 120 });
+		let evidenceReads = 0;
+		let ruleLookups = 0;
+		const restore = observeDatabase(instance.app.database, (text, params) => {
+			if (text.includes("FROM flips f")) evidenceReads++;
+			if (text === "SELECT * FROM actors WHERE org = $1 AND name = $2" && "name" in params && params.name === "policy")
+				ruleLookups++;
+		});
+		let seeded: Awaited<ReturnType<typeof seed>>;
+		try {
+			seeded = await seed(client, { project: "demo", cases: 120 });
+		} finally {
+			restore();
+		}
+		expect(evidenceReads).toBeLessThanOrEqual(40);
+		expect(ruleLookups).toBe(0);
 		const demo = on(client, "demo");
 		const pipeline = z
 			.array(z.object({ last: z.array(z.object({ steps: ResultTrail.nullable() })) }))
@@ -327,7 +342,7 @@ test("seed fills the project an instance starts with while nothing was written t
 		expect(await titlesOf(touched)).toEqual([]);
 	});
 	await withInstance(async ({ client }) => {
-		const seeded = await seed(client, { project: "scratch", cases: 3 });
+		const seeded = await seed(client, { project: "scratch", cases: 3, days: 0 });
 		expect(seeded.questions).toHaveLength(5);
 	});
 });

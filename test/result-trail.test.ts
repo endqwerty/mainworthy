@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ResultStep } from "../src/core/results.ts";
-import { dropResetIndexes } from "./demo-removal-fixture.ts";
-import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
+import { sql } from "../src/server/kernel/db.ts";
+import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-afterEach(() => h?.close());
+afterEach(async () => await h?.close());
 const trail: ResultStep[] = [
 	{ step: "s1", outcome: "pass", durationMs: 0, actions: [{ text: "Open the cart", outcome: "pass", durationMs: 0 }] },
 	{
@@ -53,7 +53,11 @@ test.each([
 		results: [{ test: { key: "checkout" }, outcome: "pass", steps }],
 	});
 	expect(reply).toMatchObject({ ok: false, error: { code: "invalid", message: expect.stringContaining(limit) } });
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM batches").get()).toEqual({ n: 0 });
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM batches")),
+		),
+	).toEqual({ n: 0 });
 });
 
 test("a screenshot index must name one of this result's attachments", async () => {
@@ -140,19 +144,12 @@ test("trail limits include UTF-8 bytes and the whole report", async () => {
 	).toMatchObject({ ok: false, error: { message: expect.stringContaining("1048576 bytes of trails per report") } });
 });
 
-test("migration preserves old simple trails and recovery preserves accepted rich ones", async () => {
+test("simple trails remain readable and recovery preserves accepted rich ones", async () => {
 	h = await harness();
 	await h.call("report", {
 		target: { session: "old" },
 		results: [{ test: { key: "old" }, outcome: "fail", steps: [{ step: "a1.b2", outcome: "fail" }] }],
 	});
-	dropResetIndexes(h.app.db);
-	dropReceiptSchema(h.app.db);
-	h.app.db.exec(
-		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; UPDATE meta SET value = '33' WHERE key = 'schema_version'",
-	);
-	const { migrate } = await import("../src/server/kernel/migrate.ts");
-	migrate(h.app.db, ":memory:");
 	expect(
 		(await h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] }))[0]?.last[0],
 	).toMatchObject({
@@ -162,19 +159,22 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 	const { acceptReport } = await import("../src/server/ops/writes.ts");
 	const { findProject, makeCtx, stampSeq } = await import("../src/server/kernel/ctx.ts");
 	const { recoverAccepted } = await import("../src/server/ops/jobs.ts");
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
-		if (!project) throw new Error("missing project");
-		const ctx = makeCtx(h.app, project, h.owner, true);
-		acceptReport(ctx, {
-			target: { session: "accepted" },
-			results: [{ test: { key: "rich" }, outcome: "error", steps: trail }],
-		});
-		stampSeq(ctx);
-	});
-	expect(recoverAccepted(h.app)).toBe(1);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				if (!project) throw new Error("missing project");
+				const ctx = makeCtx(h.app, db, project, h.owner, true);
+				await acceptReport(ctx, {
+					target: { session: "accepted" },
+					results: [{ test: { key: "rich" }, outcome: "error", steps: trail }],
+				});
+				await stampSeq(ctx);
+			}),
+	);
+	expect(await recoverAccepted(h.app)).toBe(1);
 	expect((await h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-2"] }))[0]?.last[0]?.steps).toEqual(trail);
-	expect(recoverAccepted(h.app)).toBe(0);
+	expect(await recoverAccepted(h.app)).toBe(0);
 });
 
 test("screenshots keep their input index after later files append, and non-images are refused", async () => {

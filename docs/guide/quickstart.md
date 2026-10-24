@@ -5,6 +5,11 @@ Then answer its question and read the gate in about ten minutes.
 
 ## Start a local instance
 
+An instance needs PostgreSQL 18. `compose.yaml` runs it alongside the app. Running elsewhere is possible but
+not yet supported. For this source-tree tutorial, install PostgreSQL 18 binaries and use `bun run dev` to
+start the checkout's development cluster, or set `MAINWORTHY_DATABASE_URL` to a dedicated empty PostgreSQL database.
+The Local product layer has ended; loopback authentication remains available for development.
+
 You need the `mainworthy` command. First, install Bun 1.4 or newer.
 From the source tree, run `bun install`, then `bun run build`. The executable is `dist/mainworthy`.
 Where this tutorial says `mainworthy`, use `dist/mainworthy` or add `dist` to your `PATH`.
@@ -27,7 +32,7 @@ To start the tutorial instance, follow these steps.
 	$ export MAINWORTHY_DATA=$(mktemp -d)
 	$ export MAINWORTHY_PORT=7701
 	$ export MAINWORTHY_OWNER=robin
-	$ mainworthy serve
+	$ bun run dev
 	```
 
 	The server prints its address and data directory, then this line:

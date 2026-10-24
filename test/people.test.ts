@@ -1,11 +1,9 @@
+import { pgRun, withWrite } from "./identity-db.ts";
 // People sign in as themselves, on a real listener: an invitation, a password, what a signed-in person may see
 // and end, and what is kept of all that. Time is the test's own clock. Passkeys are in `test/passkeys.test.ts`.
 
-import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
 import type { SessionInfo } from "../src/core/api.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
@@ -13,8 +11,6 @@ import { PersonalTokenCreated, PersonalTokenRow } from "../src/core/people.ts";
 import { bootstrap } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import { databasePath } from "../src/server/kernel/db.ts";
-import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import {
 	authenticator,
 	bearer,
@@ -31,7 +27,6 @@ import {
 	PUBLIC,
 	type Sent,
 	said,
-	scratch,
 	sha256,
 	signIn,
 	T0,
@@ -49,7 +44,7 @@ const FIRST = "correct horse battery staple";
 const SECOND = "a second quite long passphrase";
 
 test("TOTP enrolment begins only in a signed-in context and waits for a code", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-robin", FIRST);
 	expect((await w.op("credential", { do: "totp.begin" })).status).toBe(403);
 	const begun = await w.op("credential", { do: "totp.begin" }, { cookie });
@@ -58,7 +53,7 @@ test("TOTP enrolment begins only in a signed-in context and waits for a code", a
 		ok: true,
 		result: { secret: expect.any(String), qr: expect.objectContaining({ path: expect.any(String) }) },
 	});
-	expect(w.rows("SELECT id FROM credentials WHERE kind = 'totp'")).toEqual([]);
+	expect(await w.rows("SELECT id FROM credentials WHERE kind = 'totp'")).toEqual([]);
 });
 
 type Enrolment = {
@@ -99,7 +94,7 @@ async function secondStep(w: World, name: string, headers: Sent = {}) {
 }
 
 test("TOTP password sign-in has a bound second step, single-use codes and single-use recovery", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-login", FIRST);
 	const older = await signIn(w, "totp-login", FIRST);
 	const enrolled = await enrol(w, cookie);
@@ -110,7 +105,7 @@ test("TOTP password sign-in has a bound second step, single-use codes and single
 	expect(await w.status({ cookie })).toBe(200);
 	const listed = await w.ok<{ kind: string }[]>("credential", { do: "list" }, { cookie });
 	expect(listed.map((row) => row.kind)).toEqual(["password", "totp"]);
-	const stored = w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'totp'")[0]?.data ?? "";
+	const stored = (await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'totp'"))[0]?.data ?? "";
 	for (const recovery of enrolled.recoveryCodes) expect(stored.includes(recovery)).toBe(false);
 	const step = await secondStep(w, "totp-login");
 	const proof = { challenge: step.challenge, code: appCode(enrolled.secret, w.clock.now()) };
@@ -141,7 +136,7 @@ test("TOTP password sign-in has a bound second step, single-use codes and single
 });
 
 test("TOTP failed codes remain limited across fresh correct passwords and across concurrent attempts", async () => {
-	const w = world({ proxied: true });
+	const w = await world({ proxied: true });
 	const cookie = await joined(w, "totp-limit", FIRST);
 	const enrolled = await enrol(w, cookie);
 	const visitor = from("203.0.113.27");
@@ -183,7 +178,7 @@ test("TOTP failed codes remain limited across fresh correct passwords and across
 
 for (const path of ["sign-in", "change"] as const) {
 	test(`queued password ${path} attempts stop when the name becomes blocked`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "queued-robin", FIRST);
 		const attempt = (password: string) =>
 			path === "sign-in"
@@ -216,7 +211,7 @@ for (const path of ["sign-in", "change"] as const) {
 	});
 	for (const expires of [false, true]) {
 		test(`an in-flight password ${path} preserves a newer block${expires ? " after it expires" : " while it is active"}`, async () => {
-			const w = world();
+			const w = await world();
 			const cookie = await joined(w, "running-robin", FIRST);
 			const started = Promise.withResolvers<void>();
 			const finish = Promise.withResolvers<void>();
@@ -265,7 +260,7 @@ for (const path of ["sign-in", "change"] as const) {
 }
 
 test("TOTP pending proofs expire and cannot finish after password replacement or credential removal", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-stale", FIRST);
 	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
 	const other = await signIn(w, "totp-stale", FIRST);
@@ -326,10 +321,10 @@ test("TOTP pending proofs expire and cannot finish after password replacement or
 });
 
 test("TOTP is never a primary credential, and admin-required instances refuse password-only entry", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-admin", FIRST, { can: ["read", "admin"] });
 	const enrolled = await enrol(w, cookie);
-	const password = w.rows<{ id: number }>("SELECT id FROM credentials WHERE kind = 'password'")[0];
+	const password = (await w.rows<{ id: number }>("SELECT id FROM credentials WHERE kind = 'password'"))[0];
 	expect((await w.op("credential", { do: "remove", id: password?.id }, { cookie })).status).toBe(400);
 	w.instance.app.config.requireAdminMfa = true;
 	expect((await w.op("credential", { do: "remove", id: enrolled.id }, { cookie })).status).toBe(403);
@@ -344,7 +339,7 @@ test("TOTP is never a primary credential, and admin-required instances refuse pa
 });
 
 test("TOTP admin policy ends existing password sessions on startup and promotion while verified passkeys work", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-promoted", FIRST);
 	w.instance.app.config.requireAdminMfa =
 		defaultConfig({ MAINWORTHY_REQUIRE_ADMIN_MFA: "true" }).requireAdminMfa === true;
@@ -357,7 +352,7 @@ test("TOTP admin policy ends existing password sessions on startup and promotion
 	w.instance.app.config.requireAdminMfa = false;
 	const old = await joined(w, "totp-startup", FIRST, { can: ["read", "admin"] });
 	w.instance.app.config.requireAdminMfa = true;
-	await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+	await bootstrap(w.instance.app);
 	expect(await w.status({ cookie: old })).toBe(401);
 	const invitation = await invite(w, { name: "totp-passkey", can: ["read", "admin"] });
 	const shown = must(
@@ -384,7 +379,7 @@ test("TOTP admin policy ends existing password sessions on startup and promotion
 for (const project of [undefined, "other"]) {
 	for (const path of ["personal grant", "team grant", "team membership"]) {
 		test(`TOTP review: ${path} promotion on ${project ?? "every project"} ends password sessions`, async () => {
-			const w = world();
+			const w = await world();
 			await w.ok("admin", { do: "project.create", key: "other" });
 			const cookie = await joined(w, "promoted", FIRST);
 			const ordinary = await joined(w, "ordinary", FIRST);
@@ -406,7 +401,7 @@ for (const project of [undefined, "other"]) {
 	}
 
 	test(`TOTP review: team admin on ${project ?? "every project"} is covered by startup and password refusal`, async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "other" });
 		const cookie = await joined(w, "team-startup", FIRST);
 		await w.ok("admin", { do: "team.create", name: "Admins" });
@@ -414,12 +409,12 @@ for (const project of [undefined, "other"]) {
 		await w.ok("admin", { do: "team.member.add", team: "Admins", person: "team-startup" });
 		w.instance.app.config.requireAdminMfa = true;
 		expect((await signIn(w, "team-startup", FIRST)).status).toBe(403);
-		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		await bootstrap(w.instance.app);
 		expect(await w.status({ cookie })).toBe(401);
 	});
 
 	test(`TOTP review: team admin on ${project ?? "every project"} needs a passkey invitation and keeps TOTP`, async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "other" });
 		await joined(w, "team-recover", FIRST);
 		await w.ok("admin", { do: "team.create", name: "Admins" });
@@ -448,7 +443,7 @@ for (const project of [undefined, "other"]) {
 }
 
 test("TOTP review: an admin keeps the last usable passkey when their password is refused", async () => {
-	const w = world();
+	const w = await world();
 	w.instance.app.config.requireAdminMfa = true;
 	const invitation = await invite(w, { name: "last-passkey", can: ["admin"] });
 	const device = authenticator();
@@ -486,7 +481,7 @@ test("TOTP review: an admin keeps the last usable passkey when their password is
 });
 
 test("TOTP review: enrolment typos have their own limit and do not block password second steps", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "setup-typos", FIRST);
 	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
 	const acceptedCodes = [-30_000, 0, 30_000].map((offset) => appCode(setup.secret, w.clock.now() + offset));
@@ -518,7 +513,7 @@ test("TOTP review: enrolment typos have their own limit and do not block passwor
 });
 
 test("TOTP review: enrolment neither shares nor resets the sign-in code limit", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "separate-limits", FIRST);
 	const enrolled = await enrol(w, cookie);
 	const step = await secondStep(w, "separate-limits");
@@ -549,18 +544,18 @@ test("TOTP review: enrolment neither shares nor resets the sign-in code limit", 
 });
 
 test("TOTP secret replies are not recorded, archives exclude them, and import clears pending proofs", async () => {
-	const w = world();
+	const w = await world();
 	const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 	const recovery = await invite(w, { name: OWNER });
 	const accepted = await w.post("/api/login", { invitation: recovery.code, password: FIRST });
 	const cookie = accepted.cookie;
 	expect((await w.op("credential", { do: "totp.begin", cmd: "totp-secret-replay" }, { cookie })).status).toBe(400);
 	const enrolled = await enrol(w, cookie);
-	expect(w.rows("SELECT id FROM commands WHERE op = 'credential'")).toEqual([]);
+	expect(await w.rows("SELECT id FROM commands WHERE op = 'credential'")).toEqual([]);
 	const exported = await (await fetch(`${w.instance.url}/api/export`, { headers: { cookie } })).text();
 	expect(exported.includes(enrolled.secret)).toBe(false);
 	for (const code of enrolled.recoveryCodes) expect(exported.includes(code)).toBe(false);
-	const stored = w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'totp'")[0]?.data ?? "";
+	const stored = (await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'totp'"))[0]?.data ?? "";
 	const parsed: unknown = JSON.parse(stored);
 	for (const code of enrolled.recoveryCodes) expect(JSON.stringify(parsed).includes(sha256(code))).toBe(true);
 	const step = await secondStep(w, OWNER);
@@ -575,30 +570,31 @@ test("TOTP secret replies are not recorded, archives exclude them, and import cl
 			)
 		).status,
 	).toBe(401);
-	expect(w.rows("SELECT id FROM credentials")).toEqual([]);
+	expect(await w.rows("SELECT id FROM credentials")).toEqual([]);
 });
 
 test("TOTP delays legacy password NFC rehash until the second step succeeds", async () => {
-	const w = world();
+	const w = await world();
 	const typed = "cafe\u0301 password for TOTP";
 	const cookie = await joined(w, "totp-nfc", typed);
 	const enrolled = await enrol(w, cookie);
 	const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
-	await w.instance.app.gate.run(() =>
-		w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+	await withWrite(
+		w.instance.app,
+		async (db) => await pgRun(w.instance.app, "UPDATE credentials SET data = ? WHERE kind = 'password'", [oldHash], db),
 	);
 	const entered = await w.post<SecondStep>("/api/login", { name: "totp-nfc", password: typed });
 	expect(must(entered).signedIn).toBe(false);
-	expect(w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'")[0]?.data === oldHash).toBe(
-		true,
-	);
+	expect(
+		(await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'"))[0]?.data === oldHash,
+	).toBe(true);
 	const signed = await w.post(
 		"/api/login",
 		{ challenge: must(entered).secondFactor.challenge, code: appCode(enrolled.secret, w.clock.now()) },
 		{ cookie: entered.cookie },
 	);
 	expect(signed.status).toBe(200);
-	const data = w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'")[0]?.data ?? "";
+	const data = (await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'"))[0]?.data ?? "";
 	expect(await Bun.password.verify(typed.normalize("NFC"), data)).toBe(true);
 	expect(await Bun.password.verify(typed, data)).toBe(false);
 	expect(await w.status({ cookie: signed.cookie })).toBe(200);
@@ -612,11 +608,11 @@ type SessionRow = {
 	ended_at: number | null;
 	ended_why: string | null;
 };
-const sessions = (w: World): SessionRow[] =>
-	w.rows("SELECT id, actor, token, credential, ended_at, ended_why FROM sessions ORDER BY id");
+const sessions = async (w: World): Promise<SessionRow[]> =>
+	await w.rows("SELECT id, actor, token, credential, ended_at, ended_why FROM sessions ORDER BY id");
 type CredentialRow = { id: number; actor: number; kind: string; data: string; revoked_at: number | null };
-const credentials = (w: World): CredentialRow[] =>
-	w.rows("SELECT id, actor, kind, data, revoked_at FROM credentials ORDER BY id");
+const credentials = async (w: World): Promise<CredentialRow[]> =>
+	await w.rows("SELECT id, actor, kind, data, revoked_at FROM credentials ORDER BY id");
 const me = async (w: World, headers: Sent): Promise<SessionInfo> => {
 	const reply = await w.get<SessionInfo>("/api/session", headers);
 	if (!reply.body.ok) throw new Error(`no session: ${reply.text}`);
@@ -630,7 +626,7 @@ type Listed = { id: number; openedWith: string; current: boolean; userAgent: str
 
 describe("an invitation", () => {
 	test("the minute job deletes invitations 30 days after use, revocation or expiry, keeping open ones", async () => {
-		const w = world();
+		const w = await world();
 		const used = await invite(w, { name: "robin", expires: "30d" });
 		const revoked = await invite(w, { name: "sam", expires: "30d" });
 		const expired = await invite(w, { name: "pat", expires: "1d" });
@@ -640,7 +636,7 @@ describe("an invitation", () => {
 		w.clock.advance(30 * DAY - 1);
 		const open = await invite(w, { name: "lee" });
 		await w.instance.minute();
-		expect(w.rows<{ id: number }>("SELECT id FROM invitations ORDER BY id")).toEqual([
+		expect(await w.rows<{ id: number }>("SELECT id FROM invitations ORDER BY id")).toEqual([
 			{ id: used.id },
 			{ id: revoked.id },
 			{ id: expired.id },
@@ -649,14 +645,14 @@ describe("an invitation", () => {
 		w.clock.advance(1);
 		await w.instance.minute();
 		expect(await w.ok("invitation", { do: "list" })).toMatchObject([{ id: open.id, state: "open" }]);
-		expect(w.rows("SELECT id FROM invitations ORDER BY id")).toEqual([{ id: open.id }]);
+		expect(await w.rows("SELECT id FROM invitations ORDER BY id")).toEqual([{ id: open.id }]);
 		for (const ended of [used, revoked, expired])
 			expect((await w.post("/api/login", { invitation: ended.code, password: FIRST })).status).toBe(401);
 		expect((await w.post("/api/login", { invitation: open.code, password: FIRST })).status).toBe(200);
 	});
 
 	test("an admin invites a person: the code is in the reply once and nowhere in the database, the log or the stored command", async () => {
-		const w = world();
+		const w = await world();
 		const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "info"), spyOn(console, "log")];
 		try {
 			const input = { do: "create", name: "robin", can: ["read", "answer"], project: "scratch", cmd: "invite-robin-1" };
@@ -672,10 +668,12 @@ describe("an invitation", () => {
 				expiresAt: T0 + 3 * DAY,
 			});
 			// What is stored is the SHA-256 of the code, so a copy of the database invites nobody.
-			expect(w.rows<{ hash: string }>("SELECT hash FROM invitations").map((row) => row.hash)).toEqual([sha256(code)]);
-			await w.instance.app.gate.run(() => undefined);
-			expect(w.disk().includes(code)).toBe(false);
-			expect(w.rows("SELECT outcome FROM commands WHERE id = 'invite-robin-1'")).toEqual([
+			expect((await w.rows<{ hash: string }>("SELECT hash FROM invitations")).map((row) => row.hash)).toEqual([
+				sha256(code),
+			]);
+			await withWrite(w.instance.app, async (_db) => undefined);
+			expect((await w.disk()).includes(code)).toBe(false);
+			expect(await w.rows("SELECT outcome FROM commands WHERE id = 'invite-robin-1'")).toEqual([
 				{ outcome: '"(reply not kept: it held a secret)"' },
 			]);
 			// The same command again is not answered with the code a second time, and makes no second invitation.
@@ -695,7 +693,7 @@ describe("an invitation", () => {
 	});
 
 	test("accepting with a password signs the person in: the session rests on the password, and the person holds the grant the invitation named and nothing else", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin", can: ["read", "answer"], project: "scratch" });
 		const accepted = await w.post<{ signedIn: boolean }>("/api/login", { invitation: code, password: FIRST });
 		expect(accepted.status).toBe(200);
@@ -715,9 +713,9 @@ describe("an invitation", () => {
 			"scratch: read,answer",
 		]);
 		// The session has the password under it and no token.
-		expect(credentials(w)).toMatchObject([{ id: 1, kind: "password", revoked_at: null }]);
-		expect(credentials(w)[0]?.data).toMatch(/^\$argon2id\$/);
-		expect(sessions(w)).toMatchObject([{ id: 1, token: null, credential: 1, ended_at: null }]);
+		expect(await credentials(w)).toMatchObject([{ id: 1, kind: "password", revoked_at: null }]);
+		expect((await credentials(w))[0]?.data).toMatch(/^\$argon2id\$/);
+		expect(await sessions(w)).toMatchObject([{ id: 1, token: null, credential: 1, ended_at: null }]);
 		// What the grant does not name is refused, on the project and on the instance.
 		expect((await w.post("/api/p/scratch/find", {}, { cookie: accepted.cookie })).status).toBe(200);
 		const proposed = await w.post(
@@ -734,7 +732,7 @@ describe("an invitation", () => {
 
 	test("an invitation is used once: a second acceptance, an expired one, a revoked one and a wrong code are refused with the same reply", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const used = await invite(w, { name: "robin" });
 		expect((await w.post("/api/login", { invitation: used.code, password: FIRST })).status).toBe(200);
 		const expired = await invite(w, { name: "sam", expires: "1d" });
@@ -754,8 +752,8 @@ describe("an invitation", () => {
 		expect(new Set(asked).size).toBe(1);
 		expect(asked[0]).toStartWith('404 {"ok":false,"error":{"code":"not_found"');
 		// Nothing of the three refused people was made: no credential, no session.
-		expect(credentials(w)).toHaveLength(1);
-		expect(sessions(w)).toHaveLength(1);
+		expect(await credentials(w)).toHaveLength(1);
+		expect(await sessions(w)).toHaveLength(1);
 		// One millisecond before its end an invitation still works.
 		const late = await invite(w, { name: "lee", expires: "1d" });
 		clock.advance(DAY - 1);
@@ -763,7 +761,7 @@ describe("an invitation", () => {
 	});
 
 	test("two acceptances of one invitation at the same moment: one signs in, the other is refused, and one password is stored", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin" });
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		const gate = holdGate(w.instance);
@@ -776,8 +774,8 @@ describe("an invitation", () => {
 			await gate.release();
 			const replies = [await one, await two];
 			expect(replies.map((reply) => reply.status).sort()).toEqual([200, 401]);
-			expect(credentials(w)).toHaveLength(1);
-			expect(sessions(w)).toHaveLength(1);
+			expect(await credentials(w)).toHaveLength(1);
+			expect(await sessions(w)).toHaveLength(1);
 			expect(logged.mock.calls.map((call) => String(call[0]))).toEqual(["[mainworthy] sign-in refused: invitation"]);
 			// The password that is stored is the one whose acceptance signed in.
 			const winner = replies[0]?.status === 200 ? FIRST : SECOND;
@@ -789,12 +787,12 @@ describe("an invitation", () => {
 	});
 
 	test("the page of an invitation learns who it is for and when it ends, and asking changes nothing", async () => {
-		const w = world({ publicUrl: null });
+		const w = await world({ publicUrl: null });
 		const { code, link } = await invite(w, { name: "robin" });
 		// With no public address the link is relative, and the reply says so.
 		expect(link).toBe(`/invite#${code}`);
-		await w.instance.app.gate.run(() => undefined);
-		const before = w.written();
+		await withWrite(w.instance.app, async (_db) => undefined);
+		const before = await w.written();
 		for (let i = 0; i < 2; i++) {
 			const shown = await w.post("/api/login/challenge", { invitation: code });
 			expect(shown.body).toEqual({
@@ -802,13 +800,13 @@ describe("an invitation", () => {
 				result: { invitation: { name: "robin", purpose: "join", expiresAt: T0 + 3 * DAY }, passkey: null },
 			});
 		}
-		await w.instance.app.gate.run(() => undefined);
-		expect(w.written().equals(before)).toBe(true);
+		await withWrite(w.instance.app, async (_db) => undefined);
+		expect((await w.written()).equals(before)).toBe(true);
 		expect((await w.post("/api/login", { invitation: code, password: FIRST })).status).toBe(200);
 	});
 
 	test("an acceptance says what is wrong with a password before it looks at the invitation, and needs a password or a passkey", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin" });
 		const replies: string[] = [];
 		for (const body of [
@@ -829,7 +827,7 @@ describe("an invitation", () => {
 	};
 
 	test("a browser signed in as somebody else is refused until it names who it asked about, and only the session it held ends then", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const elsewhere = (await signIn(w, "robin", FIRST)).cookie;
 		const pat = await joined(w, "pat", FIRST);
@@ -852,7 +850,7 @@ describe("an invitation", () => {
 		// Robin's other browser and Pat's are nobody's to end here.
 		expect(await w.status({ cookie: elsewhere })).toBe(200);
 		expect(await w.status({ cookie: pat })).toBe(200);
-		expect(sessions(w)).toMatchObject([
+		expect(await sessions(w)).toMatchObject([
 			{ ended_why: "signed-out" },
 			{ ended_at: null },
 			{ ended_at: null },
@@ -863,7 +861,7 @@ describe("an invitation", () => {
 	test("saying yes to one person signs no other person out: the browser is asked again, about who it holds now", async () => {
 		// The page asked "you are signed in as robin, go on as sam?". Before the answer was sent another tab signed
 		// Pat in, so the request carries Pat's cookie and a yes that was about Robin.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const pat = await joined(w, "pat", FIRST);
 		const { code } = await invite(w, { name: "sam" });
@@ -876,7 +874,7 @@ describe("an invitation", () => {
 		expect(refused.setCookies).toEqual([]);
 		expect(await w.status({ cookie: pat })).toBe(200);
 		expect(await w.status({ cookie: robin })).toBe(200);
-		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+		expect((await sessions(w)).filter((row) => row.ended_at !== null)).toEqual([]);
 		// A name in other letters is another name.
 		const shouted = await w.post("/api/login", { invitation: code, password: SECOND, replace: "PAT" }, { cookie: pat });
 		expect(shouted.status).toBe(409);
@@ -892,7 +890,7 @@ describe("an invitation", () => {
 	});
 
 	test("replace is a name: a bare yes is refused as wrong input, before the invitation is looked at", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const { code } = await invite(w, { name: "sam" });
 		const replies: string[] = [];
@@ -909,12 +907,12 @@ describe("an invitation", () => {
 		}
 		expect(replies).toEqual(Array.from({ length: 6 }, () => "400 invalid"));
 		expect(await w.status({ cookie: robin })).toBe(200);
-		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+		expect((await sessions(w)).filter((row) => row.ended_at !== null)).toEqual([]);
 	});
 
 	test("a name given where nobody else is signed in ends nothing: no session, or the invited person's own", async () => {
 		// The page may have asked a moment before a sign-out.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const forSam = await invite(w, { name: "sam" });
 		const joinedNow = await w.post("/api/login", { invitation: forSam.code, password: SECOND, replace: "robin" });
@@ -937,32 +935,38 @@ describe("an invitation", () => {
 		// No request moves a session to another person today: a cookie names one session, and a session keeps its
 		// person. The commit is not allowed to rest on that. So the test moves the row itself while it holds the
 		// gate, behind which the acceptance waits with a yes that was about Robin.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		await joined(w, "pat", FIRST);
 		const { code } = await invite(w, { name: "sam" });
-		const [robins, pats] = sessions(w);
+		const [robins, pats] = await sessions(w);
 		const gate = holdGate(w.instance);
 		const waiting = waitingAtGate(w.instance, 1);
 		const accepting = w.post("/api/login", { invitation: code, password: SECOND, replace: "robin" }, { cookie: robin });
 		await waiting;
-		w.instance.app.db.raw
-			.query("UPDATE sessions SET actor = ?, credential = ? WHERE id = ?")
-			.run(pats?.actor ?? 0, pats?.credential ?? 0, robins?.id ?? 0);
+		await gate.run(
+			async (db) =>
+				await pgRun(
+					w.instance.app,
+					"UPDATE sessions SET actor = ?, credential = ? WHERE id = ?",
+					[pats?.actor ?? 0, pats?.credential ?? 0, robins?.id ?? 0],
+					db,
+				),
+		);
 		await gate.release();
 		const refused = await accepting;
 		expect(refusal(refused)).toBe('409 conflict {"signedInAs":"pat"}');
 		expect(refused.setCookies).toEqual([]);
 		// The session is Pat's now and still works, and the invitation is still good.
 		expect((await me(w, { cookie: robin })).actor).toBe("pat");
-		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+		expect((await sessions(w)).filter((row) => row.ended_at !== null)).toEqual([]);
 		expect((await w.post("/api/login", { invitation: code, password: SECOND })).status).toBe(200);
 	});
 
 	test.each(["end", "idle"] as const)(
 		"a concurrent sign-in whose cookie an invitation response replaces stays listed until %s",
 		async (until) => {
-			const w = world();
+			const w = await world();
 			const robin = await joined(w, "robin", FIRST);
 			const pat = await joined(w, "pat", FIRST);
 			const { code } = await invite(w, { name: "sam" });
@@ -1017,7 +1021,7 @@ describe("an invitation", () => {
 	);
 
 	test("who may invite whom: a new person is any admin's to invite, a person who exists is the owner's or their own", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
 		const sam = await joined(w, "sam", SECOND);
 		// Robin administers and is not the owner.
@@ -1049,7 +1053,7 @@ describe("an invitation", () => {
 
 describe("a name and a password", () => {
 	test("canonical password spellings sign in after joining, changing a password and recovering", async () => {
-		const w = world();
+		const w = await world();
 		const first = "cafe\u0301 password for robin";
 		const second = "the next cafe\u0301 password";
 		const recovered = "recovered cafe\u0301 password";
@@ -1065,35 +1069,39 @@ describe("a name and a password", () => {
 	});
 
 	test("an old password keeps working and is rehashed to NFC without ending its existing sessions", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		const cookie = await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
-		await w.instance.app.gate.run(() =>
-			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		await withWrite(
+			w.instance.app,
+			async (db) =>
+				await pgRun(w.instance.app, "UPDATE credentials SET data = ? WHERE kind = 'password'", [oldHash], db),
 		);
 		expect((await signIn(w, "robin", "the wrong password")).status).toBe(401);
-		expect(credentials(w).map((row) => row.data)).toEqual([oldHash]);
+		expect((await credentials(w)).map((row) => row.data)).toEqual([oldHash]);
 		const signedIn = await signIn(w, "robin", typed);
 		expect(signedIn.status).toBe(200);
-		const stored = credentials(w)[0]?.data ?? "";
+		const stored = (await credentials(w))[0]?.data ?? "";
 		expect(await Bun.password.verify("café password for robin", stored)).toBe(true);
 		expect(await Bun.password.verify(typed, stored)).toBe(false);
 		expect((await signIn(w, "robin", "café password for robin")).status).toBe(200);
 		expect((await signIn(w, "robin", typed)).status).toBe(200);
 		expect([await w.status({ cookie }), await w.status({ cookie: signedIn.cookie })]).toEqual([200, 200]);
-		expect(credentials(w).map((row) => ({ id: row.id, revokedAt: row.revoked_at }))).toEqual([
+		expect((await credentials(w)).map((row) => ({ id: row.id, revokedAt: row.revoked_at }))).toEqual([
 			{ id: 1, revokedAt: null },
 		]);
 	});
 
 	test("a password change accepts an old password's original spelling without a preceding sign-in", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		const cookie = await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
-		await w.instance.app.gate.run(() =>
-			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		await withWrite(
+			w.instance.app,
+			async (db) =>
+				await pgRun(w.instance.app, "UPDATE credentials SET data = ? WHERE kind = 'password'", [oldHash], db),
 		);
 		expect(
 			(await w.post("/api/account/password", { current: typed, next: "the next cafe\u0301 password" }, { cookie }))
@@ -1105,23 +1113,28 @@ describe("a name and a password", () => {
 	});
 
 	test("a legacy password check queued behind a change cannot rehash over the new password", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
 		const newHash = await Bun.password.hash(SECOND, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
-		await w.instance.app.gate.run(() =>
-			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		await withWrite(
+			w.instance.app,
+			async (db) =>
+				await pgRun(w.instance.app, "UPDATE credentials SET data = ? WHERE kind = 'password'", [oldHash], db),
 		);
 		const gate = holdGate(w.instance);
 		try {
 			const waiting = waitingAtGate(w.instance, 1);
 			const signingIn = signIn(w, "robin", typed);
 			await waiting;
-			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(newHash);
+			await gate.run(
+				async (db) =>
+					await pgRun(w.instance.app, "UPDATE credentials SET data = ? WHERE kind = 'password'", [newHash], db),
+			);
 			await gate.release();
 			expect((await signingIn).status).toBe(401);
-			expect(credentials(w).map((row) => row.data)).toEqual([newHash]);
+			expect((await credentials(w)).map((row) => row.data)).toEqual([newHash]);
 			expect((await signIn(w, "robin", SECOND)).status).toBe(200);
 		} finally {
 			await gate.release();
@@ -1129,7 +1142,7 @@ describe("a name and a password", () => {
 	});
 
 	test("sign in; a wrong password, an unknown name, a forgotten person and a person with no password are the same reply, and each costs a verification", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		await joined(w, "sam", SECOND);
 		await w.ok("admin", { do: "actor.forget", name: "sam" });
@@ -1177,7 +1190,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a body that is not one way of signing in is refused like a wrong password", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -1211,7 +1224,7 @@ describe("a name and a password", () => {
 	});
 
 	test("changing a password needs the current one, ends the other sessions that rested on it, and keeps the one that made the change", async () => {
-		const w = world();
+		const w = await world();
 		const first = await joined(w, "robin", FIRST);
 		const second = (await signIn(w, "robin", FIRST)).cookie;
 		const byToken = (await w.post("/api/login", { token: await tokenFor(w, { actor: "robin", kind: "human" }) }))
@@ -1231,7 +1244,7 @@ describe("a name and a password", () => {
 			expect(
 				(await change({ current: FIRST, next: SECOND }, { cookie: first, origin: "http://evil.example" })).status,
 			).toBe(401);
-			expect(credentials(w)).toMatchObject([{ id: 1, revoked_at: null }]);
+			expect(await credentials(w)).toMatchObject([{ id: 1, revoked_at: null }]);
 			expect(await w.status({ cookie: second })).toBe(200);
 
 			const changed = await change({ current: FIRST, next: SECOND });
@@ -1245,11 +1258,11 @@ describe("a name and a password", () => {
 			expect((await signIn(w, "robin", SECOND)).status).toBe(200);
 			// The old password's row is kept, revoked and without its hash; the session that made the change rests
 			// on the new one.
-			expect(credentials(w)).toMatchObject([
+			expect(await credentials(w)).toMatchObject([
 				{ id: 1, revoked_at: expect.any(Number), data: "" },
 				{ id: 2, revoked_at: null },
 			]);
-			expect(sessions(w).slice(0, 3)).toMatchObject([
+			expect((await sessions(w)).slice(0, 3)).toMatchObject([
 				{ id: 1, credential: 2, ended_at: null },
 				{ id: 2, credential: 1, ended_why: "ended" },
 				{ id: 3, credential: null, ended_at: null },
@@ -1260,7 +1273,7 @@ describe("a name and a password", () => {
 	});
 
 	test("two changes of one password at the same moment: one wins, the other is refused, and the stored password is the winner's", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const other = (await signIn(w, "robin", FIRST)).cookie;
 		let gate = holdGate(w.instance);
@@ -1277,7 +1290,7 @@ describe("a name and a password", () => {
 		expect([await w.status({ cookie }), await w.status({ cookie: other })]).toEqual([200, 401]);
 		const winner = replies[0]?.status === 200 ? "the first of two new ones" : "the second of two new ones";
 		const loser = replies[0]?.status === 200 ? "the second of two new ones" : "the first of two new ones";
-		expect(credentials(w).filter((row) => row.revoked_at === null)).toHaveLength(1);
+		expect((await credentials(w)).filter((row) => row.revoked_at === null)).toHaveLength(1);
 		const again = await signIn(w, "robin", winner);
 		expect(again.status).toBe(200);
 		// Two browsers: whichever writes second finds its own session ended by the first, and changes nothing.
@@ -1292,7 +1305,7 @@ describe("a name and a password", () => {
 		await waiting;
 		await gate.release();
 		expect([(await here).status, (await there).status].sort()).toEqual([200, 401]);
-		expect(credentials(w).filter((row) => row.revoked_at === null)).toHaveLength(1);
+		expect((await credentials(w)).filter((row) => row.revoked_at === null)).toHaveLength(1);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			for (const old of [loser, winner, FIRST]) expect((await signIn(w, "robin", old)).status).toBe(401);
@@ -1302,7 +1315,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a password never appears in the database, in a log line or in a reply", async () => {
-		const w = world();
+		const w = await world();
 		const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "info"), spyOn(console, "log")];
 		for (const spy of logged) spy.mockImplementation(() => {});
 		const typed = [
@@ -1324,8 +1337,8 @@ describe("a name and a password", () => {
 			await w.post("/api/login", { invitation: recovery.code, password: recoveredWith });
 			// A password sent to the registry by mistake is refused there, and is not kept as a command either.
 			await w.op("credential", { do: "list", password: joinedWith, cmd: "mistaken-cmd-1" }, { cookie });
-			await w.instance.app.gate.run(() => undefined);
-			const disk = w.disk();
+			await withWrite(w.instance.app, async (_db) => undefined);
+			const disk = await w.disk();
 			const log = JSON.stringify(logged.flatMap((spy) => spy.mock.calls));
 			const said = w.replies.join("\n");
 			for (const password of typed) {
@@ -1336,7 +1349,7 @@ describe("a name and a password", () => {
 			// The same search finds what is there, so it would find a password too.
 			expect(disk.includes("robin")).toBe(true);
 			expect(log).toContain("wrong-password");
-			expect(w.rows("SELECT id FROM commands")).toEqual([]);
+			expect(await w.rows("SELECT id FROM commands")).toEqual([]);
 			// A recovery code is not in them either.
 			expect(disk.includes(recovery.code)).toBe(false);
 			expect(log).not.toContain(recovery.code);
@@ -1346,7 +1359,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a recovery invitation revokes every credential and ends every session of the person when it is accepted, and not before", async () => {
-		const w = world();
+		const w = await world();
 		const first = await joined(w, "robin", FIRST);
 		const byToken = (await w.post("/api/login", { token: await tokenFor(w, { actor: "robin", kind: "human" }) }))
 			.cookie;
@@ -1356,7 +1369,7 @@ describe("a name and a password", () => {
 		// Made, and not yet accepted: nothing of Robin's has changed.
 		expect([await w.status({ cookie: first }), await w.status({ cookie: byToken })]).toEqual([200, 200]);
 		expect((await signIn(w, "robin", FIRST)).status).toBe(200);
-		expect(credentials(w).map((row) => row.revoked_at)).toEqual([null, null]);
+		expect((await credentials(w)).map((row) => row.revoked_at)).toEqual([null, null]);
 		const shown = await w.post("/api/login/challenge", { invitation: recovery.code });
 		expect(shown.body).toMatchObject({ ok: true, result: { invitation: { name: "robin", purpose: "recover" } } });
 
@@ -1377,17 +1390,15 @@ describe("a name and a password", () => {
 		expect((await signIn(w, "robin", SECOND)).status).toBe(200);
 		expect((await signIn(w, "sam", FIRST)).status).toBe(200);
 		// Robin's old password is revoked, the new one stands, and Sam's was not touched.
-		expect(credentials(w).map((row) => `${row.actor} ${row.revoked_at === null ? "live" : "revoked"}`)).toEqual([
-			"3 revoked",
-			"4 live",
-			"3 live",
-		]);
+		expect((await credentials(w)).map((row) => `${row.actor} ${row.revoked_at === null ? "live" : "revoked"}`)).toEqual(
+			["3 revoked", "4 live", "3 live"],
+		);
 		// What Robin may do was not changed by recovering.
 		expect((await me(w, { cookie: accepted.cookie })).projects.map((project) => project.can)).toEqual([["read"]]);
 	});
 
 	test("accepted recovery revokes the person's personal CLI and admin-issued tokens, leaving other actors alone", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const personal = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "my CLI" }, { cookie }),
@@ -1415,7 +1426,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a personal token revoked by recovery cannot write a proposal queued behind recovery", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST, { can: ["read", "produce"], project: "scratch" });
 		const personal = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "queued CLI" }, { cookie }),
@@ -1437,15 +1448,15 @@ describe("a name and a password", () => {
 			await gate.release();
 			expect((await accepting).status).toBe(200);
 			expect(said(await proposal)).toBe("401 unauthenticated");
-			expect(w.rows("SELECT id FROM cases")).toEqual([]);
-			expect(w.rows("SELECT id FROM commands WHERE id = 'recovery-queued-proposal'")).toEqual([]);
+			expect(await w.rows("SELECT id FROM cases")).toEqual([]);
+			expect(await w.rows("SELECT id FROM commands WHERE id = 'recovery-queued-proposal'")).toEqual([]);
 		} finally {
 			await gate.release();
 		}
 	});
 
 	test("owner recovery also revokes the configured owner token, even when it is the last one", async () => {
-		const w = world();
+		const w = await world();
 		const before = await w.post("/api/login", { token: TOKEN });
 		const recovery = await invite(w, { name: OWNER });
 		expect(await w.status(bearer(TOKEN))).toBe(200);
@@ -1456,13 +1467,13 @@ describe("a name and a password", () => {
 			await w.status({ cookie: before.cookie }),
 			await w.status({ cookie: accepted.cookie }),
 		]).toEqual([401, 401, 200]);
-		const restarted = await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		const restarted = await bootstrap(w.instance.app);
 		expect(restarted.warnings.join("\n")).toContain("was revoked");
 		expect(await w.status(bearer(TOKEN))).toBe(401);
 		expect((await signIn(w, OWNER, SECOND)).status).toBe(200);
 		const replacement = "replacement-owner-secret-0123456789";
 		w.instance.app.config.ownerToken = replacement;
-		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		await bootstrap(w.instance.app);
 		expect([
 			await w.status(bearer(TOKEN)),
 			await w.status(bearer(replacement)),
@@ -1473,7 +1484,7 @@ describe("a name and a password", () => {
 
 describe("what a signed-in caller sees and ends", () => {
 	test("session list shows the caller's sessions and marks the current one; session end ends one's own and not somebody else's", async () => {
-		const w = world();
+		const w = await world();
 		const laptop = await joined(w, "robin", FIRST);
 		const phone = (await signIn(w, "robin", FIRST, { "user-agent": "Phone/1.0" })).cookie;
 		const sam = await joined(w, "sam", SECOND);
@@ -1510,11 +1521,11 @@ describe("what a signed-in caller sees and ends", () => {
 			current: true,
 		});
 		expect(await w.status({ cookie: phone })).toBe(401);
-		expect(sessions(w).map((row) => row.ended_why)).toEqual(["ended", "ended", null]);
+		expect((await sessions(w)).map((row) => row.ended_why)).toEqual(["ended", "ended", null]);
 	});
 
 	test("an admin who is a person lists and ends anyone's sessions, and an agent with admin does not", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const admin = await joined(w, "sam", SECOND, { can: ["read", "admin"] });
 		const agent = await tokenFor(w, { actor: "helper", kind: "agent", can: ["read", "admin"] });
@@ -1542,7 +1553,7 @@ describe("what a signed-in caller sees and ends", () => {
 
 	test("a session that is no longer alive is not in the list: ended, past a lifetime, or its token revoked", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const token = await tokenFor(w, { actor: "robin", kind: "human", can: ["read"] });
 		const robin = (await w.post("/api/login", { token })).cookie;
 		const cookie = await joined(w, "sam", FIRST);
@@ -1560,7 +1571,7 @@ describe("what a signed-in caller sees and ends", () => {
 	});
 
 	test("a caller with a token and no grant at all runs a self operation and no other, and a pipeline runs none", async () => {
-		const w = world();
+		const w = await world();
 		const token = await tokenFor(w, { actor: "robin", kind: "human", can: ["read"], project: "scratch" });
 		await w.ok("admin", { do: "grant.remove", actor: "robin", project: "scratch" });
 		const info = await me(w, bearer(token));
@@ -1588,20 +1599,22 @@ describe("what a signed-in caller sees and ends", () => {
 	});
 
 	test("forgetting a person ends their sessions and revokes their credentials and their invitations", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const pending = await invite(w, { name: "robin" });
 		expect(await w.status({ cookie })).toBe(200);
 		await w.ok("admin", { do: "actor.forget", name: "robin" });
 		expect(await w.status({ cookie })).toBe(401);
-		expect(sessions(w)).toMatchObject([{ ended_why: "forgotten" }]);
+		expect(await sessions(w)).toMatchObject([{ ended_why: "forgotten" }]);
 		// Revoked, and what they held is erased: no hash of a forgotten person's password stays behind.
-		expect(credentials(w)).toEqual([{ id: 1, actor: 3, kind: "password", data: "", revoked_at: expect.any(Number) }]);
-		expect(w.rows("SELECT used_at, revoked_at FROM invitations ORDER BY id")).toMatchObject([
+		expect(await credentials(w)).toEqual([
+			{ id: 1, actor: 3, kind: "password", data: "", revoked_at: expect.any(Number) },
+		]);
+		expect(await w.rows("SELECT used_at, revoked_at FROM invitations ORDER BY id")).toMatchObject([
 			{ used_at: expect.any(Number), revoked_at: null },
 			{ used_at: null, revoked_at: expect.any(Number) },
 		]);
-		expect(w.rows("SELECT actor FROM passkey_users")).toEqual([]);
+		expect(await w.rows("SELECT actor FROM passkey_users")).toEqual([]);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			expect((await signIn(w, "robin", FIRST)).status).toBe(401);
@@ -1618,7 +1631,7 @@ describe("what a signed-in caller sees and ends", () => {
 	test.each([false, true])(
 		"forgetting erases stored attribution and access labels without losing replay protection, legacy evidence: %s",
 		async (legacy) => {
-			const w = world();
+			const w = await world();
 			const name = "erasure-person";
 			const cookie = await joined(w, name, FIRST);
 			await tokenFor(w, { actor: name, kind: "human", label: `${name}'s script`, cmd: "create-secret-01" });
@@ -1675,28 +1688,33 @@ describe("what a signed-in caller sees and ends", () => {
 				["adopt", name],
 				["finding", name],
 			]);
-			const storedEvidence = w.rows<{ evidence: string }>("SELECT evidence FROM questions ORDER BY id");
+			const storedEvidence = await w.rows<{ evidence: string }>("SELECT evidence FROM questions ORDER BY id");
 			expect(storedEvidence.map((row) => JSON.parse(row.evidence))).toMatchObject([{ authorId: 3 }, { finderId: 3 }]);
 			expect(JSON.stringify(storedEvidence)).not.toContain(name);
 			if (legacy) {
-				await w.instance.app.gate.run(() => {
-					w.instance.app.db.raw
-						.query(
-							"UPDATE questions SET evidence = json_set(json_remove(evidence, '$.authorId'), '$.author', ?) WHERE kind = 'adopt'",
-						)
-						.run(name);
-					w.instance.app.db.raw
-						.query("UPDATE questions SET evidence = json_set(evidence, '$.finder', ?) WHERE kind = 'finding'")
-						.run(name);
+				await withWrite(w.instance.app, async (db) => {
+					await pgRun(
+						w.instance.app,
+						"UPDATE questions SET evidence = jsonb_set(evidence::jsonb - 'authorId', '{author}', to_jsonb(?::text))::text WHERE kind = 'adopt'",
+						[name],
+						db,
+					);
+					await pgRun(
+						w.instance.app,
+						"UPDATE questions SET evidence = jsonb_set(evidence::jsonb, '{finder}', to_jsonb(?::text))::text WHERE kind = 'finding'",
+						[name],
+						db,
+					);
 				});
 			}
-			const questionBindings = () => w.rows("SELECT id, evidence_hash, basis, rev FROM questions ORDER BY id");
-			const bindings = questionBindings();
-			const ledger = () =>
-				w.rows<{ id: string; actor: number; op: string; request: string }>(
+			const questionBindings = async () =>
+				await w.rows("SELECT id, evidence_hash, basis, rev FROM questions ORDER BY id");
+			const bindings = await questionBindings();
+			const ledger = async () =>
+				await w.rows<{ id: string; actor: number; op: string; request: string }>(
 					"SELECT id, actor, op, request FROM commands ORDER BY id",
 				);
-			const before = ledger();
+			const before = await ledger();
 			w.clock.advance(HOUR);
 			const forgotten = await w.ok<{ forgotten: string; tokensRevoked: number }>("admin", {
 				do: "actor.forget",
@@ -1704,15 +1722,15 @@ describe("what a signed-in caller sees and ends", () => {
 				cmd: "forget-person-01",
 			});
 			expect(forgotten).toEqual({ forgotten: "forgotten-3", tokensRevoked: 1 });
-			expect(ledger().filter((row) => row.id !== "forget-person-01")).toEqual(before);
-			const tables = w.rows<{ name: string }>(
-				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+			expect((await ledger()).filter((row) => row.id !== "forget-person-01")).toEqual(before);
+			const tables = await w.rows<{ name: string }>(
+				"SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
 			);
 			for (const table of tables) {
-				const rows = w.rows(`SELECT * FROM "${table.name.replaceAll('"', '""')}"`);
+				const rows = await w.rows(`SELECT * FROM "${table.name.replaceAll('"', '""')}"`);
 				expect(JSON.stringify(rows), table.name).not.toContain(name);
 			}
-			expect(questionBindings()).toEqual(bindings);
+			expect(await questionBindings()).toEqual(bindings);
 			expect((await inbox()).map((q) => [q.kind, q.evidence.author ?? q.evidence.finder])).toEqual([
 				["adopt", "forgotten-3"],
 				["finding", "forgotten-3"],
@@ -1728,11 +1746,13 @@ describe("what a signed-in caller sees and ends", () => {
 				);
 				expect(answered.body).toMatchObject({ ok: true, result: [{ status: "decided" }] });
 			}
-			expect(w.rows("SELECT label, revoked_at FROM tokens WHERE actor = 3 ORDER BY id")).toEqual([
+			expect(await w.rows("SELECT label, revoked_at FROM tokens WHERE actor = 3 ORDER BY id")).toEqual([
 				{ label: "", revoked_at: T0 },
 				{ label: "", revoked_at: T0 + HOUR },
 			]);
-			expect(w.rows("SELECT handle, data, label, revoked_at FROM credentials WHERE actor = 3 ORDER BY id")).toEqual([
+			expect(
+				await w.rows("SELECT handle, data, label, revoked_at FROM credentials WHERE actor = 3 ORDER BY id"),
+			).toEqual([
 				{ handle: null, data: "", label: "", revoked_at: T0 + HOUR },
 				{ handle: devices[0]?.id, data: "", label: "", revoked_at: T0 },
 				{ handle: devices[1]?.id, data: "", label: "", revoked_at: T0 + HOUR },
@@ -1760,18 +1780,20 @@ describe("what a signed-in caller sees and ends", () => {
 	);
 
 	test("a name that starts with forgotten- from an older build does not stop the actor with that id being forgotten", async () => {
-		const w = world();
+		const w = await world();
 		await tokenFor(w, { actor: "dana", kind: "agent" });
 		const app = w.instance.app;
 		// An archive made before such names were refused: two actors hold the pseudonyms dana would be given.
 		for (const name of ["forgotten-3", "forgotten-3-2"])
-			await app.gate.run(() =>
-				app.db.raw.query("INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', ?, 0)").run(name),
+			await withWrite(
+				app,
+				async (db) =>
+					await pgRun(app, "INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', ?, 0)", [name], db),
 			);
-		const names = (): string[] =>
-			w.rows<{ name: string }>("SELECT name FROM actors ORDER BY id").map((row) => row.name);
+		const names = async (): Promise<string[]> =>
+			(await w.rows<{ name: string }>("SELECT name FROM actors ORDER BY id")).map((row) => row.name);
 		expect(await w.ok("admin", { do: "actor.forget", name: "dana" })).toMatchObject({ forgotten: "forgotten-3-3" });
-		expect(names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-3", "forgotten-3-2"]);
+		expect(await names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-3", "forgotten-3-2"]);
 		// Forgetting the one named forgotten-3 (id 4) gives it forgotten-4, and forgetting dana again, by the name
 		// history calls her, keeps hers, though forgotten-3 is free by now.
 		expect(await w.ok("admin", { do: "actor.forget", name: "forgotten-3" })).toMatchObject({
@@ -1781,107 +1803,24 @@ describe("what a signed-in caller sees and ends", () => {
 		expect(await w.ok("admin", { do: "actor.forget", name: "forgotten-3-3" })).toMatchObject({
 			forgotten: "forgotten-3-3",
 		});
-		expect(names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-4", "forgotten-3-2"]);
+		expect(await names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-4", "forgotten-3-2"]);
 		// The second time is not a second forgetting: she was forgotten at the first.
-		expect(w.rows<{ disabled_at: number }>("SELECT disabled_at FROM actors WHERE id = 3")).toEqual([
+		expect(await w.rows<{ disabled_at: number }>("SELECT disabled_at FROM actors WHERE id = 3")).toEqual([
 			{ disabled_at: T0 },
 		]);
 	});
 });
 
 describe("an upgrade and an import", () => {
-	test("a database made by the build before people starts on this one, with its token and its session still working", async () => {
-		// Made by the build at c608261 (schema version 2): a server-mode instance at `T0` whose owner `robin`
-		// signs in with the token below and holds the session of the first cookie, with a person `sam` who holds
-		// a token and the second cookie, and one case. `VACUUM INTO`, then gzip, as `fixtures/sessions` was made.
-		const fixture = {
-			token: "owner-secret-0123456789",
-			cookie: "mainworthy_sid=FwU6M5rkZFSpHz_l7fUwV-Hy6LOUymriT_FzHABQlbc",
-			samToken: "cb_71gp9xmZ0fP19gB7kr6HioSeI1SJAAsB",
-			samCookie: "mainworthy_sid=vcOncTPabNK38ZkRMlL8y4MZ8s71hCSfkcbuppgf2G0",
-		};
-		const dataDir = scratch();
-		const path = databasePath(dataDir);
-		writeFileSync(path, Bun.gunzipSync(readFileSync(join(import.meta.dir, "fixtures", "people", "instance-v2.db.gz"))));
-		const { start } = await import("../src/app/start.ts");
-		const clock = clockAt(T0 + HOUR);
-		const instance = start(
-			{
-				dataDir,
-				host: "127.0.0.1",
-				port: 0,
-				mode: "server",
-				owner: "robin",
-				ownerToken: fixture.token,
-				commit: null,
-				sessionIdleMs: 14 * DAY,
-				sessionMaxMs: 90 * DAY,
-				proxy: null,
-				passwordCost: { memoryCost: 8, timeCost: 1 },
-			},
-			() => ({ ui: null }),
-			{ readers: 0, now: clock.now },
-		);
-		try {
-			const copy = new Database(`${path}.v2.bak`, { readonly: true });
-			expect(copy.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({ value: "2" });
-			copy.close();
-			expect(instance.app.reader.raw.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
-				value: String(SCHEMA_VERSION),
-			});
-			const status = async (headers: Sent): Promise<number> =>
-				(await fetch(`${instance.url}/api/session`, { headers })).status;
-			expect([
-				await status(bearer(fixture.token)),
-				await status({ cookie: fixture.cookie }),
-				await status(bearer(fixture.samToken)),
-				await status({ cookie: fixture.samCookie }),
-			]).toEqual([200, 200, 200, 200]);
-			const found = await fetch(`${instance.url}/api/p/scratch/find`, {
-				method: "POST",
-				headers: { cookie: fixture.cookie, "content-type": "application/json" },
-				body: "{}",
-			});
-			expect(await found.json()).toMatchObject({
-				ok: true,
-				result: { count: 1, items: [{ title: "Coupon applies" }] },
-			});
-			// The session the old build opened is in its owner's list, opened with a token.
-			const listed = await fetch(`${instance.url}/api/session`, {
-				method: "POST",
-				headers: { cookie: fixture.cookie, "content-type": "application/json" },
-				body: JSON.stringify({ do: "list" }),
-			});
-			expect(await listed.json()).toMatchObject({ ok: true, result: [{ id: 1, openedWith: "token", current: true }] });
-			// And the person who was there before can be given a password on the upgraded database.
-			const post = async (route: string, body: unknown, headers: Sent = {}) =>
-				fetch(`${instance.url}${route}`, {
-					method: "POST",
-					headers: { "content-type": "application/json", ...headers },
-					body: JSON.stringify(body),
-				});
-			const invited = (await (
-				await post("/api/invitation", { do: "create", name: "sam" }, bearer(fixture.token))
-			).json()) as { result: { code: string; purpose: string } };
-			expect(invited.result.purpose).toBe("recover");
-			expect((await post("/api/login", { invitation: invited.result.code, password: FIRST })).status).toBe(200);
-			expect((await post("/api/login", { name: "sam", password: FIRST })).status).toBe(200);
-			expect(await status({ cookie: fixture.samCookie })).toBe(401);
-			expect(await status(bearer(fixture.samToken))).toBe(401);
-		} finally {
-			await instance.stop();
-		}
-	});
-
 	test("a sign-in that waits at the gate across an import does not sign in whoever took the ids afterwards", async () => {
-		const w = world();
+		const w = await world();
 		const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		// An import is taken only by an instance that holds its owner and nothing else, so the owner is the
 		// person whose ids an import gives away. The owner has a password, by a recovery link of their own.
 		const recovery = await invite(w, { name: OWNER });
 		const recovered = await w.post("/api/login", { invitation: recovery.code, password: FIRST });
 		expect(recovered.status).toBe(200);
-		const before = { actor: credentials(w)[0]?.actor, credential: credentials(w)[0]?.id };
+		const before = { actor: (await credentials(w))[0]?.actor, credential: (await credentials(w))[0]?.id };
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		const gate = holdGate(w.instance);
 		try {
@@ -1896,13 +1835,13 @@ describe("an upgrade and an import", () => {
 			// password under the credential id the old one had. It is another password.
 			const { hashPassword } = await import("../src/server/identity/passwords.ts");
 			const others = await hashPassword(SECOND, { memoryCost: 8, timeCost: 1 });
-			const taken = w.instance.app.gate.run(() => {
-				const raw = w.instance.app.db.raw;
-				raw
-					.query(
-						"INSERT INTO credentials (id, actor, kind, data, label, created_at) VALUES (?, ?, 'password', ?, 'password', ?)",
-					)
-					.run(before.credential ?? 0, before.actor ?? 0, others, T0);
+			const taken = withWrite(w.instance.app, async (db) => {
+				await pgRun(
+					w.instance.app,
+					"INSERT INTO credentials (id, actor, kind, data, label, created_at) VALUES (?, ?, 'password', ?, 'password', ?)",
+					[before.credential ?? 0, before.actor ?? 0, others, T0],
+					db,
+				);
 			});
 			// Behind both: the sign-in, which has verified the old password against the row as it was.
 			waiting = waitingAtGate(w.instance, 1);
@@ -1913,8 +1852,8 @@ describe("an upgrade and an import", () => {
 			await taken;
 			const refused = await signingIn;
 			expect(`${refused.status} ${refused.setCookies.length} ${refused.text}`).toBe(`401 0 ${REFUSED}`);
-			expect(sessions(w)).toEqual([]);
-			expect(credentials(w)).toMatchObject([{ id: before.credential, actor: before.actor, revoked_at: null }]);
+			expect(await sessions(w)).toEqual([]);
+			expect(await credentials(w)).toMatchObject([{ id: before.credential, actor: before.actor, revoked_at: null }]);
 			expect(logged.mock.calls.map((call) => String(call[0]))).toEqual([
 				"[mainworthy] sign-in refused: changed-meanwhile",
 			]);
@@ -1941,7 +1880,7 @@ describe("the limit on failed attempts", () => {
 
 	test("the fifth wrong password for a name blocks the name from every address: the right password is 429 then and is not looked at, and a success clears the name", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		await joined(w, "robin", FIRST);
 		const verified = spyOn(Bun.password, "verify");
 		try {
@@ -1978,7 +1917,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a name nobody has is counted exactly as a wrong password is, so the count does not say which names exist", async () => {
-		const w = world({ proxied: true });
+		const w = await world({ proxied: true });
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			const replies: Record<string, string[]> = { robin: [], nobody: [] };
@@ -1994,7 +1933,7 @@ describe("the limit on failed attempts", () => {
 
 	test("five wrong passwords from one address block the address for every name and for a token, and a success clears the name and never the address", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			// Five names, one guess each: no name is near its limit, the address is at its own.
@@ -2017,7 +1956,7 @@ describe("the limit on failed attempts", () => {
 
 	test("the current password of a password change is counted under the address and the name, as a sign-in is", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		const cookie = await joined(w, "robin", FIRST);
 		const change = (current: string, n: number) =>
 			w.post("/api/account/password", { current, next: SECOND }, { cookie, ...address(n) });
@@ -2030,7 +1969,7 @@ describe("the limit on failed attempts", () => {
 			// never counted.
 			expect(said(await signIn(w, "robin", FIRST, address(7)))).toBe("429 limited, retry after 1");
 			expect(await w.status({ cookie, ...address(6) })).toBe(200);
-			expect(credentials(w)).toMatchObject([{ id: 1, revoked_at: null }]);
+			expect(await credentials(w)).toMatchObject([{ id: 1, revoked_at: null }]);
 			clock.advance(1000);
 			expect(said(await change(FIRST, 6))).toBe("200");
 			// Five wrong ones from one address block the address, whoever's session sends them.
@@ -2040,7 +1979,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a wrong invitation code is counted under the address, at acceptance and where the page looks at it; a right one passes a blocked address", async () => {
-		const w = world({ proxied: true });
+		const w = await world({ proxied: true });
 		const { code } = await invite(w, { name: "robin" });
 		const wrong = (n: number): string => `${String(n).padStart(2, "0")}${"x".repeat(41)}`;
 		await quietly(async () => {
@@ -2071,7 +2010,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a request from the loopback address, which behind a proxy is everybody's, is counted by the name and not by the address", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			for (let n = 1; n <= 12; n++)
@@ -2084,11 +2023,11 @@ describe("the limit on failed attempts", () => {
 
 	test("a session opened with a password says where it was opened and last used from, and one whose token has reached its end is not listed", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
 		const accepted = await w.post("/api/login", { invitation: code, password: FIRST }, address(1));
 		const byPassword = await signIn(w, "robin", FIRST, address(2));
-		expect(w.rows("SELECT id, created_addr, last_seen_addr FROM sessions ORDER BY id")).toEqual([
+		expect(await w.rows("SELECT id, created_addr, last_seen_addr FROM sessions ORDER BY id")).toEqual([
 			{ id: 1, created_addr: "203.0.113.1", last_seen_addr: "203.0.113.1" },
 			{ id: 2, created_addr: "203.0.113.2", last_seen_addr: "203.0.113.2" },
 		]);
@@ -2122,7 +2061,7 @@ describe("the limit on failed attempts", () => {
 
 describe("what the pages of the web UI asked of the server", () => {
 	test("the session says whether the caller owns the instance, which decides who may make a recovery link for somebody else", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
 		const agent = await tokenFor(w, { actor: "helper", kind: "agent", can: ["read", "admin"] });
 		const owner = (await w.post("/api/login", { token: TOKEN })).cookie;
@@ -2141,7 +2080,7 @@ describe("what the pages of the web UI asked of the server", () => {
 	});
 
 	test("the list of invitations says what each person may do and where, as the list of actors does", async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "checkout" });
 		await invite(w, { name: "robin", can: ["read", "produce"], project: "checkout" });
 		await invite(w, { name: "sam" });
@@ -2174,7 +2113,7 @@ describe("what the pages of the web UI asked of the server", () => {
 
 	test("a password an invitation was accepted with says when it was last used: the moment it signed its person in", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const { code } = await invite(w, { name: "robin" });
 		clock.advance(HOUR);
 		const accepted = await w.post("/api/login", { invitation: code, password: FIRST });
@@ -2184,7 +2123,7 @@ describe("what the pages of the web UI asked of the server", () => {
 	});
 
 	test("an operation of the instance is called at /api/<operation> and nowhere else: under a project's path it is refused", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const { OP_LIST } = await import("../src/server/ops/index.ts");
 		const instance = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
@@ -2204,7 +2143,7 @@ describe("what the pages of the web UI asked of the server", () => {
 		// Nothing was made under the wrong path.
 		const made = await w.post("/api/p/scratch/invitation", { do: "create", name: "sam" }, bearer(TOKEN));
 		expect(said(made)).toBe("404 not_found");
-		expect(w.rows("SELECT id FROM invitations")).toHaveLength(1);
+		expect(await w.rows("SELECT id FROM invitations")).toHaveLength(1);
 		// And an operation of a project has no path without one.
 		expect(said(await w.post("/api/find", {}, bearer(TOKEN)))).toBe("400 invalid");
 	});
@@ -2212,7 +2151,7 @@ describe("what the pages of the web UI asked of the server", () => {
 
 describe("a sign-in body the server cannot read", () => {
 	test("one that is too large, or is not JSON, is answered as any body that is no way of signing in: not with a sentence about tokens", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -2241,7 +2180,7 @@ describe("a sign-in body the server cannot read", () => {
 
 describe("a person's own command-line token", () => {
 	test("the local owner creates an expiring token without a browser sign-in", async () => {
-		const w = world({ mode: "local" });
+		const w = await world({ mode: "local" });
 		const made = PersonalTokenCreated.parse(await w.ok("credential", { do: "token.create", label: "Local CLI" }, {}));
 		expect(made).toMatchObject({ actor: OWNER, expiresAt: T0 + 30 * DAY });
 		expect(await w.status(bearer(made.token))).toBe(200);
@@ -2250,7 +2189,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a non-admin creates once, uses current grants, lists only their tokens and revokes them", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "personal", FIRST, { can: ["read", "produce"], project: "scratch" });
 		const headers = { cookie, origin: w.instance.url };
 		const input = { do: "token.create", label: "Laptop CLI", cmd: "personal-token-once" };
@@ -2278,7 +2217,7 @@ describe("a person's own command-line token", () => {
 		await w.ok("admin", { do: "project.create", key: "other", name: "Other" });
 		expect(said(await w.post("/api/p/other/find", {}, bearer(token.token)))).toBe("404 not_found");
 
-		expect(w.disk().includes(Buffer.from(token.token))).toBe(false);
+		expect((await w.disk()).includes(Buffer.from(token.token))).toBe(false);
 		expect(said(await w.op("credential", input, headers))).toBe("409 conflict");
 		const listed = await w.ok<{ id: number; label: string; revoked: boolean }[]>(
 			"credential",
@@ -2288,7 +2227,7 @@ describe("a person's own command-line token", () => {
 		expect(listed).toMatchObject([{ id: token.id, label: "Laptop CLI", revoked: false }]);
 		expect(listed).toHaveLength(1);
 		expect(listed).toMatchObject([{ lastUsedAt: T0 }]);
-		expect(w.rows("SELECT outcome FROM commands WHERE id = 'personal-token-once'")).toEqual([
+		expect(await w.rows("SELECT outcome FROM commands WHERE id = 'personal-token-once'")).toEqual([
 			{ outcome: '"(reply not kept: it held a secret)"' },
 		]);
 		expect(JSON.stringify(listed)).not.toContain(token.token);
@@ -2309,7 +2248,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a personal token follows team grants and membership without changing personal grants", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "team-cli", FIRST, { can: ["read"], project: "scratch" });
 		const made = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "Team CLI" }, { cookie, origin: w.instance.url }),
@@ -2338,7 +2277,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("expiry is bounded, caller identity cannot be supplied, and token sign-ins cannot renew themselves", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "expiry-person", FIRST);
 		const headers = { cookie, origin: w.instance.url };
 		for (const expires of ["0d", "never", "366d", "9999w"])
@@ -2376,7 +2315,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a passkey session can create, and the owner's last token stays", async () => {
-		const w = world();
+		const w = await world();
 		const invitation = await invite(w, { name: "passkey-cli", can: ["read"], project: "scratch" });
 		const options = await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", {
 			invitation: invitation.code,

@@ -1,18 +1,224 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
-import { mustTarget, uncorrectedResults } from "../src/server/evidence/evidence.ts";
-import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import type { ResultStep } from "../src/core/results.ts";
+import {
+	batchById,
+	excuseForResult,
+	excusesForResults,
+	mustTarget,
+	resultById,
+} from "../src/server/evidence/evidence.ts";
+import { type Ctx, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Database, declaredSql, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
-import { plannedCounting, runsFor } from "../src/server/runs/runs.ts";
+import {
+	countedTests,
+	fillsOf,
+	mustRun,
+	plannedCounting,
+	type RunTestWrite,
+	runsFor,
+	upsertRunTests,
+} from "../src/server/runs/runs.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
+
+test("counting sibling failures reads their standing in batches", async () => {
+	h = await harness();
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+	await h.call(
+		"report",
+		{
+			target: { commit: "sibling-standing", branch: "main" },
+			results: Array.from({ length: 100 }, (_, index) => ({
+				test: { key: `sibling-${index}` },
+				outcome: "fail",
+				failure: { message: "same cause" },
+			})),
+		},
+		ci,
+	);
+	const project = await h.app.database.read((db) => findProject(db, "scratch"));
+	if (!project) throw new Error("no project");
+	const run = await h.app.database.read((db) => mustRun(db, project.id, "R-1"));
+	h.app.database.resetStatementCount();
+	const counted = await h.app.database.read((db) => countedTests(db, run));
+	expect(counted).toHaveLength(100);
+	expect(counted.every((row) => row.standing === "unexplained")).toBe(true);
+	expect(h.app.database.statementCount).toBeLessThanOrEqual(12);
+});
+
+test("a large planned report rebuilds complete slot evidence in bounded reads", async () => {
+	h = await harness();
+	await seed(101);
+	await h.call("plan", {
+		name: "Two checks per case",
+		select: { folders: ["checkout"] },
+		require: ["first", "second"].map((id) => ({
+			id,
+			kind: "exercise",
+			methods: ["human"],
+			minActors: 1,
+			basis: "exact",
+		})),
+	});
+	h.app.database.resetStatementCount();
+	await h.call("report", {
+		run: "R-1",
+		results: Array.from({ length: 101 }, (_, index) => ({
+			test: { case: `C-${index + 1}` },
+			outcome: index % 2 === 0 ? "pass" : "skip",
+			steps: [{ step: "x1", outcome: index % 2 === 0 ? "pass" : "skip" }],
+		})),
+	});
+	const statements = h.app.database.statementCount;
+	const rows = (await h.call<{ items: Slot[] }>("find", { in: "slots", run: "R-1", limit: 300 })).items;
+	expect(rows).toHaveLength(202);
+	expect(rows.filter((slot) => slot.state === "satisfied")).toHaveLength(102);
+	expect(rows.filter((slot) => slot.state === "skipped")).toHaveLength(100);
+	expect(rows.every((slot) => slot.fills.length === 1 && slot.fills[0]?.admitted === "exact")).toBe(true);
+	expect((await run("R-1")).tally).toMatchObject({ pass: 102, skipped: 100, missing: 100 });
+	expect(statements).toBeLessThanOrEqual(1150);
+});
+
+test("slot batches retain complete trails, job lanes and fresh corrections across evidence slices", async () => {
+	h = await harness();
+	await seed(1);
+	await h.call("plan", {
+		name: "Two producers",
+		select: { cases: ["C-1"] },
+		require: [{ id: "exercise", kind: "exercise", methods: ["auto"], minActors: 2, basis: "exact" }],
+	});
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+	const trail: ResultStep[] = [
+		{ step: "x1", outcome: "pass", durationMs: 8, actions: [{ text: "Full trail", durationMs: 3 }] },
+	];
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "alpha",
+			results: Array.from({ length: 201 }, (_, index) => ({
+				test: { key: `many-${index}` },
+				annotation: { case: "C-1", version: 1 },
+				outcome: "pass",
+				steps: trail,
+			})),
+		},
+		ci,
+	);
+	const slot = first(await slots("R-1"));
+	expect(slot.state).toBe("missing");
+	const before = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(before).toHaveLength(201);
+	expect(before.every((fill) => fill.job === "alpha" && fill.admitted === "exact" && fill.atStep === null)).toBe(true);
+	expect(before.map((fill) => fill.steps)).toEqual(Array.from({ length: 201 }, () => trail));
+	expect(before.map((fill) => fill.ord)).toEqual(Array.from({ length: 201 }, (_, index) => index));
+	const failureTrail: ResultStep[] = [
+		{ step: "x1", outcome: "fail", actions: [{ text: "Retained failure detail", outcome: "fail" }] },
+	];
+	const failed = await h.call<ReportReceipt>(
+		"report",
+		{
+			run: "R-1",
+			job: "beta",
+			results: [
+				{ test: { key: "many-0" }, annotation: { case: "C-1", version: 1 }, outcome: "fail", steps: failureTrail },
+			],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("failing");
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "alpha",
+			results: [{ test: { key: "many-0" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("failing");
+	const held = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(held).toHaveLength(203);
+	expect(held.find((fill) => fill.id === first(failed.results))).toMatchObject({
+		job: "beta",
+		outcome: "fail",
+		atStep: "x1",
+		steps: failureTrail,
+	});
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "beta",
+			results: [
+				{
+					test: { key: "many-0" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "pass",
+					corrects: first(failed.results),
+				},
+			],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("missing");
+	const corrected = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(corrected).toHaveLength(203);
+	expect(corrected.some((fill) => fill.id === first(failed.results))).toBe(false);
+	expect((await run("R-1")).tally).toMatchObject({ missing: 1, unexplained: 0, disputed: 0 });
+});
+
+test("batched result standing preserves target priority, exact ties, null expiry and slot isolation", async () => {
+	const fixture = await testDatabase({ schema: "empty" });
+	const database = await Database.open({ url: fixture.url });
+	try {
+		await database.write((db) =>
+			db.transaction(() =>
+				db.exec(`
+ CREATE TABLE excuses(project bigint,signature bigint,scope text,target bigint,decision bigint,class text,expires_at bigint);
+ CREATE TABLE result_excuses(result bigint,slot bigint,decision bigint,class text,expires_at bigint);
+ INSERT INTO excuses VALUES (1,1,'line:main',0,2,'excused',200),(1,1,'line:main',10,1,'attributed',NULL);
+ INSERT INTO result_excuses VALUES (1,NULL,1,'excused',400),(2,NULL,3,'attributed',NULL),
+ (3,NULL,3,'excused',300),(4,NULL,4,'excused',NULL),(5,NULL,5,'attributed',500),(6,3,999,'attributed',NULL);
+ `),
+			),
+		);
+		const requests = [
+			{ id: 1, signature: 1, target: 10, scope: "line:main" },
+			{ id: 2, signature: 1, target: 11, scope: "line:main" },
+			{ id: 3, signature: 1, target: 10, scope: "line:main" },
+			{ id: 4, signature: 2, target: 10, scope: "line:main" },
+			{ id: 5, signature: null, target: 10, scope: "line:main" },
+			{ id: 6, signature: 1, target: 10, scope: "line:elsewhere" },
+			{ id: 7, signature: 1, target: 0, scope: "line:main" },
+		];
+		await database.read(async (db) => {
+			const batch = await excusesForResults(db, 1, requests);
+			expect([...batch].sort(([left], [right]) => left - right)).toEqual([
+				[1, { decision: 1, class: "attributed", expires_at: null }],
+				[2, { decision: 3, class: "attributed", expires_at: null }],
+				[3, { decision: 3, class: "excused", expires_at: 300 }],
+				[4, { decision: 4, class: "excused", expires_at: null }],
+				[5, { decision: 5, class: "attributed", expires_at: 500 }],
+				[7, { decision: 2, class: "excused", expires_at: 200 }],
+			]);
+			for (const row of requests)
+				expect(batch.get(row.id) ?? null).toEqual(await excuseForResult(db, { ...row, project: 1 }, row.scope));
+			expect(await excusesForResults(db, 1, [])).toEqual(new Map());
+		});
+	} finally {
+		await database.close();
+		await fixture.close();
+	}
+});
 
 type Slot = {
 	id: number;
@@ -154,7 +360,13 @@ describe("a run typed by hand", () => {
 		await record("R-1", "C-1", "pass", { corrects: first(failed.results) });
 		expect(first(await slots("R-1")).state).toBe("satisfied");
 		expect(await run("R-1")).toMatchObject({ verdict: "passed", state: "closed" });
-		expect(h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
+		expect(
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM results")),
+				)
+			)?.n,
+		).toBe(2);
 	});
 
 	test("blocked and skipped are not proof: the run stays pending", async () => {
@@ -176,7 +388,13 @@ describe("a run typed by hand", () => {
 		expect(first(await slots("R-1"))).toMatchObject({ case: "C-1", version: 1 });
 		const receipt = await record("R-1", "C-1", "pass");
 		expect(receipt.basis.exact).toBe(1);
-		expect(h.app.db.raw.query<{ v: number }, []>("SELECT basis_version AS v FROM results").get()?.v).toBe(1);
+		expect(
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly [], { v: number }>("SELECT basis_version AS v FROM results")),
+				)
+			)?.v,
+		).toBe(1);
 	});
 
 	test("a closed run takes no more results until its sign-off is withdrawn", async () => {
@@ -275,38 +493,47 @@ describe("planned lookups beside change history", () => {
 		await plan("second z", "zzzz0001");
 		await plan("open z", "zzzz0001", "C-2");
 		await h.call("report", report("aaaa0001", "first"));
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		const refs = (ids: number[]) =>
-			ids.map(
-				(id) => `R-${h.app.db.raw.query<{ no: number }, [number]>("SELECT no FROM runs WHERE id = ?").get(id)?.no}`,
+		const refs = async (ids: number[]) =>
+			await mapAsync(
+				ids,
+				async (id) =>
+					`R-${(await h.app.database.read(async (db) => await db.get(sql<readonly SqlValue[], { no: number }>("SELECT no FROM runs WHERE id = $1"), [id])))?.no}`,
 			);
-		expect(refs(plannedCounting(h.app.db, project.id, "zzzz0001"))).toEqual(["R-6", "R-2", "R-7"]);
-		expect(refs(plannedCounting(h.app.db, project.id, "aaaa0001"))).toEqual(["R-3"]);
-		expect(plannedCounting(h.app.db, project.id, "absent01")).toEqual([]);
-		const horizons = () =>
-			h.app.db.raw
-				.query<{ no: number; accepted_seq: number; applied_seq: number; outstanding: number }, []>(
-					"SELECT no, accepted_seq, applied_seq, outstanding FROM runs WHERE origin = 'planned' ORDER BY no",
-				)
-				.all();
-		const before = horizons();
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const ctx = makeCtx(h.app, project, h.owner, true);
-				const result = fn(ctx);
-				stampSeq(ctx);
-				return result;
-			});
-		const batch = inTx((ctx) => acceptReport(ctx, report("zzzz0001", "late"))).batch;
-		const target = mustTarget(h.app.db, batch.target);
-		expect(inTx((ctx) => runsFor(ctx, target, null, h.owner.kind)).map((row) => `R-${row.no}`)).toEqual([
-			"R-5",
-			"R-6",
-			"R-2",
-			"R-7",
-		]);
-		const waiting = horizons();
+		expect(
+			await refs(await h.app.database.read(async (db) => await plannedCounting(db, project.id, "zzzz0001"))),
+		).toEqual(["R-6", "R-2", "R-7"]);
+		expect(
+			await refs(await h.app.database.read(async (db) => await plannedCounting(db, project.id, "aaaa0001"))),
+		).toEqual(["R-3"]);
+		expect(await h.app.database.read(async (db) => await plannedCounting(db, project.id, "absent01"))).toEqual([]);
+		const horizons = async () =>
+			await h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<readonly [], { no: number; accepted_seq: number; applied_seq: number; outstanding: number }>(
+							"SELECT no, accepted_seq, applied_seq, outstanding FROM runs WHERE origin = 'planned' ORDER BY no",
+						),
+					),
+			);
+		const before = await horizons();
+		const inTx = async <T>(fn: (ctx: Ctx) => T): Promise<T> =>
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						const ctx = makeCtx(h.app, db, project, h.owner, true);
+						const result = await fn(ctx);
+						await stampSeq(ctx);
+						return result;
+					}),
+			);
+		const batch = (await inTx(async (ctx) => await acceptReport(ctx, report("zzzz0001", "late")))).batch;
+		const target = await h.app.database.read(async (db) => await mustTarget(db, batch.target));
+		expect(
+			(await inTx(async (ctx) => await runsFor(ctx, target, null, h.owner.kind))).map((row) => `R-${row.no}`),
+		).toEqual(["R-5", "R-6", "R-2", "R-7"]);
+		const waiting = await horizons();
 		for (const no of [2, 6, 7])
 			expect(waiting.find((row) => row.no === no)).toEqual({
 				no,
@@ -315,8 +542,8 @@ describe("planned lookups beside change history", () => {
 				outstanding: 1,
 			});
 		for (const no of [3, 4]) expect(waiting.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
-		inTx((ctx) => processBatch(ctx, batch.id));
-		const after = horizons();
+		await inTx(async (ctx) => await processBatch(ctx, batch.id));
+		const after = await horizons();
 		for (const no of [2, 6, 7])
 			expect(after.find((row) => row.no === no)).toEqual({
 				no,
@@ -329,43 +556,6 @@ describe("planned lookups beside change history", () => {
 			expect(await run(ref)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
 		for (const ref of ["R-4", "R-7"])
 			expect(await run(ref)).toMatchObject({ state: "open", verdict: "pending", tally: { pass: 0, missing: 1 } });
-	});
-
-	test("planned lookups exclude change history in their query plans", () => {
-		const queries = declaredSql().filter(
-			(text) => text.startsWith("SELECT") && text.includes("FROM runs WHERE project = $project AND origin = 'planned'"),
-		);
-		expect(queries).toHaveLength(2);
-		for (const text of queries) {
-			const details = h.app.db.raw
-				.query<{ detail: string }, [{ project: number; commit: string }]>(`EXPLAIN QUERY PLAN ${text}`)
-				.all({ project: 1, commit: "zzzz0001" })
-				.map((row) => row.detail);
-			expect(
-				details.some((detail) =>
-					detail.includes(
-						text.startsWith("SELECT id")
-							? "USING INDEX runs_planned_commit (project=? AND <expr>=?)"
-							: "USING INDEX runs_planned_receiving (project=?)",
-					),
-				),
-				text,
-			).toBe(true);
-		}
-	});
-
-	test("checking one result for corrections uses its index without a temporary index", () => {
-		const query = `SELECT count(*) FROM results r WHERE ${uncorrectedResults("r.id")}`;
-		const details = h.app.db.raw
-			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${query}`)
-			.all()
-			.map((row) => row.detail);
-		expect(details).toContain("SEARCH correction USING COVERING INDEX results_corrects (corrects=?)");
-		const opcodes = h.app.db.raw
-			.query<{ opcode: string }, []>(`EXPLAIN ${query}`)
-			.all()
-			.map((row) => row.opcode);
-		expect(opcodes).not.toContain("OpenEphemeral");
 	});
 });
 
@@ -432,13 +622,18 @@ describe("a run that accepts a build", () => {
 		expect(await signoffs()).toHaveLength(2);
 		expect(replacement.q).not.toBe(original.q);
 		expect(
-			h.app.db.raw
-				.query<{ prior: number; supersedes: number; approval: number }, [number]>(
-					`SELECT prior.no AS prior, next.supersedes, ended.supersedes AS approval FROM questions q
+			await h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<
+							readonly SqlValue[],
+							{ prior: number; supersedes: number; approval: number }
+						>(`SELECT prior.no AS prior, next.supersedes, ended.supersedes AS approval FROM questions q
 			 JOIN questions prior ON prior.id = q.prior JOIN decisions next ON next.id = q.decision
-			 JOIN decisions ended ON ended.id = prior.decision WHERE q.no = ?`,
-				)
-				.all(Number(replacement.q.slice(2))),
+			 JOIN decisions ended ON ended.id = prior.decision WHERE q.no = $1`),
+						[Number(replacement.q.slice(2))],
+					),
+			),
 		).toEqual([
 			{
 				prior: Number(original.q.slice(2)),
@@ -549,13 +744,17 @@ describe("a run that accepts a build", () => {
 				}
 				const signoffs = async () => (await h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" })).items;
 				const original = await signoffs();
-				const horizon = () =>
-					h.app.db.raw
-						.query<{ applied_seq: number; outstanding: number }, [number]>(
-							"SELECT applied_seq, outstanding FROM runs WHERE no = ?",
-						)
-						.get(Number(planned.run.slice(2)));
-				const before = horizon();
+				const horizon = async () =>
+					await h.app.database.read(
+						async (db) =>
+							await db.get(
+								sql<readonly SqlValue[], { applied_seq: number; outstanding: number }>(
+									"SELECT applied_seq, outstanding FROM runs WHERE no = $1",
+								),
+								[Number(planned.run.slice(2))],
+							),
+					);
+				const before = await horizon();
 				expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 				expect(first(original).decision?.answer).toEqual({ is: "approve" });
 				const receipt = await h.call<ReportReceipt>("report", {
@@ -583,7 +782,7 @@ describe("a run that accepts a build", () => {
 				});
 				expect(await signoffs()).toEqual(original);
 				expect((await h.call<InboxReply>("inbox", { kind: "signoff" })).items).toEqual([]);
-				expect(horizon()).toEqual(before);
+				expect(await horizon()).toEqual(before);
 				expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 					verdict: "passed",
 					stale: false,
@@ -623,9 +822,12 @@ describe("a run that accepts a build", () => {
 		expect(await run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
 		expect((await h.call<InboxReply>("inbox", { kind: "signoff" })).items).toEqual([]);
 		expect(
-			h.app.db.raw
-				.query<{ state: string }, [number]>("SELECT state FROM questions WHERE no = ?")
-				.get(Number(repeated.q.slice(2))),
+			await h.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly SqlValue[], { state: string }>("SELECT state FROM questions WHERE no = $1"), [
+						Number(repeated.q.slice(2)),
+					]),
+			),
 		).toEqual({ state: "dissolved" });
 		expect(first((await h.call<InboxReply>("inbox", { kind: "failure" })).items).title).toBe("new failure");
 	});
@@ -647,23 +849,29 @@ describe("a run that accepts a build", () => {
 			});
 			await h.call("report", input(1));
 			const original = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
-			const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-				h.app.db.transaction(() => {
-					const project = findProject(h.app.db, "scratch");
-					if (!project) throw new Error("no project");
-					const ctx = makeCtx(h.app, project, h.owner, true);
-					const result = fn(ctx);
-					stampSeq(ctx);
-					return result;
-				});
-			const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
+			const inTx = async <T>(fn: (ctx: Ctx) => T): Promise<T> =>
+				await h.app.database.write(
+					async (db) =>
+						await db.transaction(async () => {
+							const project = await findProject(db, "scratch");
+							if (!project) throw new Error("no project");
+							const ctx = makeCtx(h.app, db, project, h.owner, true);
+							const result = await fn(ctx);
+							await stampSeq(ctx);
+							return result;
+						}),
+				);
+			const batches = await mapAsync(
+				[2, 3],
+				async (attempt) => (await inTx(async (ctx) => await acceptReport(ctx, input(attempt)))).batch,
+			);
 			if (reverse) batches.reverse();
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 				verdict: "pending",
 				stale: true,
 				reason: "pending: 2 reports accepted and not yet applied",
 			});
-			inTx((ctx) => processBatch(ctx, first(batches).id));
+			await inTx(async (ctx) => await processBatch(ctx, first(batches).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 				verdict: "pending",
 				reason: "pending: 1 report accepted and not yet applied",
@@ -671,7 +879,7 @@ describe("a run that accepts a build", () => {
 			expect(first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items).q).toBe(
 				original.q,
 			);
-			inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
+			await inTx(async (ctx) => await processBatch(ctx, first(batches.slice(1)).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
 			expect((await run(planned.run)).state).toBe("closed");
 			const signoffs = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
@@ -750,7 +958,7 @@ describe("a run that accepts a build", () => {
 			answer: { is: "mistaken" },
 		});
 		expect(own[0]?.status).toBe("forbidden");
-		const lead = h.actor("mira", "human", ["read", "produce", "answer", "plan"]);
+		const lead = await h.actor("mira", "human", ["read", "produce", "answer", "plan"]);
 		const settled = await h.call<{ status: string }[]>(
 			"decide",
 			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "mistaken" } },
@@ -768,7 +976,7 @@ describe("an agent's evidence", () => {
 	});
 
 	test("is recorded and visible, and does not fill a slot unless the run asks for it and the case declares it", async () => {
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		await h.call("plan", { name: "default", select: { cases: ["C-1"] } });
 		await record("R-1", "C-1", "pass", {}, agent);
 		expect(first(await slots("R-1")).state).toBe("missing");
@@ -792,7 +1000,7 @@ describe("an agent's evidence", () => {
 	});
 
 	test("a review is recorded but is never a runtime pass", async () => {
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("plan", { name: "default", select: { cases: ["C-1"] } });
 		const hash = (await h.call<{ hash: string }[]>("get", { refs: ["C-1"] }))[0]?.hash;
 		const claimed = await h.call<{ reviewed: number; opened: string[] }>(
@@ -815,7 +1023,7 @@ describe("deploy announcements and release runs", () => {
 	});
 
 	test("a pipeline binds a build to attested code and records each deployment; a command retry writes nothing", async () => {
-		const ci = h.actor("deploy", "ci", ["record"]);
+		const ci = await h.actor("deploy", "ci", ["record"]);
 		const input = { deploy: "1.4-rc3", env: "staging", digest, code, cmd: "deploy-rc3-1" };
 		const announced = await h.call<AnnounceReply>("announce", input, ci);
 		expect(announced).toMatchObject({ build: "1.4-rc3", digest, env: "staging", code, by: "deploy" });
@@ -849,8 +1057,8 @@ describe("deploy announcements and release runs", () => {
 	});
 
 	test("only pipelines and admins attest artifacts; an unknown build or incomplete attestation is refused", async () => {
-		const member = h.actor("tester", "human", ["record"]);
-		const agent = h.actor("reviewer", "agent", ["record", "produce"]);
+		const member = await h.actor("tester", "human", ["record"]);
+		const agent = await h.actor("reviewer", "agent", ["record", "produce"]);
 		for (const actor of [member, agent]) {
 			expect(await h.raw("announce", { deploy: "rc3", env: "staging", digest, code }, actor)).toMatchObject({
 				ok: false,
@@ -929,7 +1137,7 @@ describe("deploy announcements and release runs", () => {
 			select: { cases: ["C-1"] },
 			accepts: { build: "rc3", env: "staging" },
 		});
-		const ci = h.actor("tests", "ci", ["record"]);
+		const ci = await h.actor("tests", "ci", ["record"]);
 		// A pass on the attested commit proves no execution of the artifact.
 		await h.call(
 			"report",
@@ -971,21 +1179,24 @@ describe("deploy announcements and release runs", () => {
 
 	test("a release planned during an accepted upload stays pending, then counts the recovered failure", async () => {
 		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		const ci = h.actor("tests", "ci", ["record"]);
+		const ci = await h.actor("tests", "ci", ["record"]);
 		const target = { build: "rc3", env: "staging" };
 		const result = { test: { key: "checkout" }, annotation: { case: "C-1", version: 1 } };
 		await h.call("report", { target, results: [{ ...result, outcome: "pass" }] }, ci);
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
-				target,
-				attempt: 2,
-				results: [{ ...result, outcome: "fail", failure: { message: "artifact smoke failed" } }],
-			});
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, ci, true);
+					await acceptReport(ctx, {
+						target,
+						attempt: 2,
+						results: [{ ...result, outcome: "fail", failure: { message: "artifact smoke failed" } }],
+					});
+					await stampSeq(ctx);
+				}),
+		);
 		const planned = await h.call<PlanReply>("plan", {
 			name: "Release during upload",
 			select: { cases: ["C-1"] },
@@ -996,7 +1207,7 @@ describe("deploy announcements and release runs", () => {
 			reason: "pending: 1 report accepted and not yet applied",
 		});
 		expect((await run(planned.run)).state).toBe("open");
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "blocked",
 			tally: { unexplained: 1 },
@@ -1019,7 +1230,7 @@ describe("deploy announcements and release runs", () => {
 			],
 		});
 		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		const ci = h.actor("smoke", "ci", ["record"]);
+		const ci = await h.actor("smoke", "ci", ["record"]);
 		const results = [{ test: { key: "health" }, outcome: "pass" }];
 		await h.call("report", { target: { build: "rc3", env: "production" }, job: "smoke", results }, ci);
 		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
@@ -1034,12 +1245,15 @@ describe("deploy announcements and release runs", () => {
 	});
 
 	test("forgetting an announcer removes its display name from saved replies and resolves provenance by id", async () => {
-		const ci = h.actor("retired-deployer", "ci", ["record"]);
+		const ci = await h.actor("retired-deployer", "ci", ["record"]);
 		await h.call("announce", { deploy: "rc3", env: "staging", digest, code, cmd: "forgotten-deploy-1" }, ci);
 		const forgotten = await h.call<{ forgotten: string }>("admin", { do: "actor.forget", name: "retired-deployer" });
-		const saved = h.app.db.raw
-			.query<{ outcome: string }, []>("SELECT outcome FROM commands WHERE id = 'forgotten-deploy-1'")
-			.get();
+		const saved = await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly [], { outcome: string }>("SELECT outcome FROM commands WHERE id = 'forgotten-deploy-1'"),
+				),
+		);
 		expect(JSON.parse(saved?.outcome ?? "{}")).toMatchObject({ by: forgotten.forgotten });
 		expect((await h.call<{ items: unknown[] }>("find", { in: "deployments" })).items).toMatchObject([
 			{ by: forgotten.forgotten, attestation: { by: forgotten.forgotten } },
@@ -1050,23 +1264,29 @@ describe("deploy announcements and release runs", () => {
 		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
 		await h.call("announce", { deploy: "rc3", env: "production" });
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
-		const restored = new Db(":memory:");
+		await h.app.database.write(
+			async (db) => await db.transaction(async () => await exportArchive(db, (chunk) => chunks.push(chunk))),
+		);
+		const restoredFixture = await testDatabase();
+		const restored = await Database.open({ url: restoredFixture.url });
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
+			await restored.write(async (db) => await importArchive(db, linesOf(chunks.join(""))));
 			expect(
-				restored.raw
-					.query(
-						"SELECT b.label, a.digest, a.code, d.env FROM deployments d JOIN builds b ON b.id = d.build JOIN artifacts a ON a.id = b.artifact ORDER BY d.id",
-					)
-					.all(),
+				await restored.read(
+					async (db) =>
+						await db.all(
+							sql<readonly [], Record<string, unknown>>(
+								"SELECT b.label, a.digest, a.code, d.env FROM deployments d JOIN builds b ON b.id = d.build JOIN artifacts a ON a.id = b.artifact ORDER BY d.id",
+							),
+						),
+				),
 			).toEqual([
 				{ label: "rc3", digest, code: JSON.stringify(code), env: "staging" },
 				{ label: "rc3", digest, code: JSON.stringify(code), env: "production" },
 			]);
 		} finally {
-			restored.close();
+			await restored.close();
+			await restoredFixture.close();
 		}
 	});
 });
@@ -1104,10 +1324,14 @@ describe("a person's refusal of a rule's answer", () => {
 		const asked = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
 		await h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
 		// The walk back through earlier questions stopped after 100 (issue #369): the rule approved at cycle 101.
+		let lastReportStatements = 0;
 		for (let cycle = 1; cycle <= 101; cycle++) {
 			await report(2 * cycle, "fail");
+			const before = h.app.database.statementCount;
 			await report(2 * cycle + 1, "pass");
+			lastReportStatements = h.app.database.statementCount - before;
 		}
+		expect(lastReportStatements).toBeLessThan(500);
 		expect((await run(planned.run)).state).toBe("open");
 		const decided = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
 		expect(decided.map((q) => q.decision?.answer)).not.toContainEqual({ is: "approve" });
@@ -1115,4 +1339,76 @@ describe("a person's refusal of a rule's answer", () => {
 			verdict: "passed",
 		});
 	}, 30_000);
+});
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T, index: number) => Promise<R>) {
+	const out: R[] = [];
+	for (const [index, row] of rows.entries()) out.push(await callback(row, index));
+	return out;
+}
+
+test("batched run lanes leave the same rows as ordered scalar upserts", async () => {
+	h = await harness();
+	const outcomes = ["fail", "skip", "pass", "error", "blocked", "fail", "pass", "skip", "error"] as const;
+	const attempts = [1, 2, 2, 2, 3, 3, 1, 4, 4];
+	const writes: RunTestWrite[] = [];
+	for (const [index, outcome] of outcomes.entries()) {
+		const input = ciReport({ commit: "batch-lane-parity", n: 2, attempt: attempts[index] ?? 1 });
+		const receipt = await h.call<ReportReceipt>("report", {
+			...input,
+			results: input.results.map((row) => ({
+				...row,
+				outcome,
+				note: `observation ${index}`,
+				...(outcome === "fail" || outcome === "error" ? { failure: { message: "same cause" } } : {}),
+			})),
+		});
+		for (const id of receipt.results) {
+			const result = await h.app.database.read(async (db) => await resultById(db, id));
+			if (!result) throw new Error("missing parity result");
+			const batch = await h.app.database.read(async (db) => await batchById(db, result.batch));
+			if (!batch) throw new Error("missing parity batch");
+			writes.push({
+				run: 1,
+				test: result.test,
+				result: result.id,
+				outcome: result.outcome,
+				signature: result.signature,
+				attempt: result.attempt,
+				flipped: index % 2,
+				lane: `${result.target}:${batch.job}:${result.actor}`,
+				target: result.target,
+			});
+		}
+	}
+	const scalar = declaredSql().find(
+		(statement) => statement.text.startsWith("INSERT INTO run_tests") && statement.text.includes("VALUES"),
+	);
+	if (!scalar?.names) throw new Error("missing scalar lane statement");
+	const names = scalar.names;
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const clear = sql("DELETE FROM run_tests");
+				const snapshot = sql<readonly [], RunTestWrite>("SELECT * FROM run_tests ORDER BY run, test, lane");
+				await db.run(clear);
+				for (const row of writes) {
+					const params: Record<string, SqlValue> = { ...row };
+					const values = names.map((name) => {
+						const value = params[name];
+						if (value === undefined) throw new Error(`missing ${name}`);
+						return value;
+					});
+					await db.run(sql<readonly SqlValue[]>(scalar.text), values);
+				}
+				const expected = await db.all(snapshot);
+				await db.run(clear);
+				await upsertRunTests(db, writes);
+				expect(await db.all(snapshot)).toEqual(expected);
+				// The same replacement rules apply when a caller delivers several slices.
+				await db.run(clear);
+				for (let start = 0; start < writes.length; start += 5) await upsertRunTests(db, writes.slice(start, start + 5));
+				expect(await db.all(snapshot)).toEqual(expected);
+			}),
+	);
 });

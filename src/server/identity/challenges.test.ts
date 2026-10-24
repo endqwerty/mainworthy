@@ -1,6 +1,7 @@
 // The challenges of passkey ceremonies: found by what they were issued for and inside their time, spent once,
 // bounded in number, and gone after an import. The clock is the test's own.
 import { afterEach, expect, test } from "bun:test";
+import { testDatabase } from "../../../test/db.ts";
 import { type App, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
 import { Ceremonies } from "./ceremonies.ts";
 import { clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
@@ -46,15 +47,20 @@ const PARTY = { id: "mainworthy.example", origin: "https://mainworthy.example" }
 const SIGN_IN = { purpose: "sign-in", context: CONTEXT.browser("c".repeat(64)) } as const;
 const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const apps: App[] = [];
-afterEach(() => {
-	for (const app of apps.splice(0)) app.close();
+const fixtures: Awaited<ReturnType<typeof testDatabase>>[] = [];
+afterEach(async () => {
+	for (const app of apps.splice(0)) await app.close();
+	for (const f of fixtures.splice(0)) await f.close();
 });
 
-function instance(): { app: App; advance: (ms: number) => void } {
+async function instance(): Promise<{ app: App; advance: (ms: number) => void }> {
 	let now = 1_800_000_000_000;
-	const app = openApp(
+	const fixture = await testDatabase();
+	fixtures.push(fixture);
+	const app = await openApp(
 		{
 			dataDir: ":memory:",
+			databaseUrl: fixture.url,
 			host: "127.0.0.1",
 			port: 0,
 			mode: "local",
@@ -75,8 +81,8 @@ function instance(): { app: App; advance: (ms: number) => void } {
 	};
 }
 
-test("a challenge is found for the purpose it was issued for, with the relying party it was issued under, until its time runs out", () => {
-	const { app, advance } = instance();
+test("a challenge is found for the purpose it was issued for, with the relying party it was issued under, until its time runs out", async () => {
+	const { app, advance } = await instance();
 	const signIn = issueChallenge(app, SIGN_IN, PARTY);
 	const begun = { purpose: "register", userHandle: "aGFuZGxl", context: CONTEXT.session("5".repeat(64)) } as const;
 	const register = issueChallenge(app, begun, PARTY);
@@ -110,9 +116,9 @@ test("a challenge is found for the purpose it was issued for, with the relying p
 	expect(findChallenge(app, register, "register")).toBeNull();
 });
 
-test("a spent challenge answers nothing again, and another instance's challenge is not this one's", () => {
-	const { app } = instance();
-	const other = instance().app;
+test("a spent challenge answers nothing again, and another instance's challenge is not this one's", async () => {
+	const { app } = await instance();
+	const other = (await instance()).app;
 	const challenge = issueChallenge(app, SIGN_IN, PARTY);
 	expect(findChallenge(other, challenge, "sign-in")).toBeNull();
 	spendChallenge(other, challenge);
@@ -128,8 +134,8 @@ test("a spent challenge answers nothing again, and another instance's challenge 
 	expect(findChallenge(other, kept, "sign-in")).not.toBeNull();
 });
 
-test("the challenges under way are bounded: past ten thousand the ones whose time ran out go first, then the oldest", () => {
-	const { app, advance } = instance();
+test("the challenges under way are bounded: past ten thousand the ones whose time ran out go first, then the oldest", async () => {
+	const { app, advance } = await instance();
 	const first = issueChallenge(app, SIGN_IN, PARTY);
 	const second = issueChallenge(app, SIGN_IN, PARTY);
 	for (let i = 2; i < 10_000; i++) issueChallenge(app, SIGN_IN, PARTY);

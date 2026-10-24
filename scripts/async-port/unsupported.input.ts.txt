@@ -1,0 +1,16 @@
+import type { ReadDb } from "./src/server/kernel/db.ts";
+declare const db: ReadDb;
+function lookup() { return db.get("SELECT x"); }
+export function defaults(value = lookup()) { return value; }
+export function promiseChain() { return lookup().then((value) => value); }
+export function removed() { return db.snapshot(() => 1); }
+export function unrelatedPromises() {
+	return Promise.all([Promise.resolve(1), Promise.resolve(2)]);
+}
+function* steps() {
+	yield lookup();
+}
+export function mixed() {
+	lookup();
+	return steps();
+}

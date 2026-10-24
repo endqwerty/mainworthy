@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import { testDatabase } from "../../test/db.ts";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
 import { Policy } from "../core/kinds.ts";
@@ -681,7 +682,15 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		expect(passed.code).toBe(0);
 		expect(passed.stdout).toContain("passed:");
 		expect(passed.stdout).not.toContain("needs an answer");
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
 		// The same files again are answered with the first receipt, gate line included: it still says blocked, and
 		// the command says on stderr that it is the old one and where the verdict now is.
 		const again = await run([
@@ -733,8 +742,24 @@ test("repeated report returns the same receipt, writes one batch, and names the 
 		expect(first.code).toBe(0);
 		expect(again.code).toBe(0);
 		expect(again.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM results", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(2);
 		const machine = outputWith(Receipt, await run([...argv, "--json", "--compact"]));
 		expect(machine.fresh).toBe(false);
 		expect(machine.counts.total).toBe(2);
@@ -937,7 +962,15 @@ test("standard policy records both a proposal and a decision and prints its clau
 			await run(["policy", "show", "--json"]),
 		);
 		expect(snapshot).toEqual({ version: 2, preset: "standard" });
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM decisions", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
 	});
 });
 
@@ -1258,6 +1291,32 @@ test("a command that writes after it ended, or outlives its time, fails where it
 	).rejects.toThrow();
 	untouched();
 	expect(await quiet()).toEqual({ stdout: "", stderr: "", code: 0 });
+});
+
+test("an in-process CLI command preserves the test database service for concurrent fixtures", async () => {
+	const previous = process.env.MAINWORTHY_TEST_PG;
+	if (!previous) throw new Error("test preflight did not configure PostgreSQL");
+	const service = new URL(previous);
+	service.searchParams.set("application_name", "fixture-during-cli");
+	process.env.MAINWORTHY_TEST_PG = service.toString();
+	try {
+		const result = await inThisProcess(
+			"fixture during command",
+			async () => {
+				const fixture = await testDatabase();
+				try {
+					process.stdout.write(new URL(fixture.url).searchParams.get("application_name") ?? "missing service");
+				} finally {
+					await fixture.close();
+				}
+				return 0;
+			},
+			{ environment: { PATH: process.env.PATH ?? "" }, cwd: process.cwd(), input: "" },
+		);
+		expect(result).toEqual({ code: 0, stdout: "fixture-during-cli", stderr: "" });
+	} finally {
+		process.env.MAINWORTHY_TEST_PG = previous;
+	}
 });
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
@@ -1708,7 +1767,15 @@ test("all native formats use the real report receipt, preserve unlinked tests, a
 			expect(result.code).toBe(4);
 			expect(result.stderr).toContain("invalid:");
 		}
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(4);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(4);
 		const mixed = await run([
 			"report",
 			RED_XML,
@@ -2016,7 +2083,7 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 
 test("seed sent again preserves evidence, renews one lease, and permits a second project", async () => {
 	await withInstance(async ({ run, client }) => {
-		const first = outputWith(Seeded, await run(["seed", "demo", "--cases", "12", "--json"]));
+		const first = outputWith(Seeded, await run(["seed", "demo", "--cases", "12", "--days", "0", "--json"]));
 		const seq = (await projects(client)).find((project) => project.key === "demo")?.seq;
 		if (seq === undefined) throw new Error("no demo");
 		const demo = client.with({ project: "demo" });
@@ -2031,7 +2098,7 @@ test("seed sent again preserves evidence, renews one lease, and permits a second
 			return lease;
 		};
 		const before = await work();
-		const again = await run(["seed", "demo", "--cases", "12", "--json"]);
+		const again = await run(["seed", "demo", "--cases", "12", "--days", "0", "--json"]);
 		expect(again.code).toBe(0);
 		expect(outputWith(Seeded, again)).toEqual(first);
 		expect(await casesIn(client, "demo")).toBe(12);
@@ -2040,13 +2107,13 @@ test("seed sent again preserves evidence, renews one lease, and permits a second
 		expect(renewed).toMatchObject({ kind: "held", actor: "robin", since: before.since });
 		expect(renewed.until).toBeGreaterThan(before.until);
 		// Another count is another request: it is refused in words about the seed, and adds no case.
-		const other = await run(["seed", "demo", "--cases", "20"]);
+		const other = await run(["seed", "demo", "--cases", "20", "--days", "0"]);
 		expect(other.code).toBe(4);
 		expect(other.stderr).toContain("was seeded with another number of cases");
 		expect(await casesIn(client, "demo")).toBe(12);
 		// The command ids and the two actors of the first seed do not stand in the way of a second project.
 		// It takes two files of unit tests where the first took sixty: the five questions and two more.
-		const beside = await run(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--json"]);
+		const beside = await run(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--days", "0", "--json"]);
 		expect(beside.stderr).toBe("");
 		expect(outputWith(Seeded, beside)).toMatchObject({ project: "demo-2", cases: 3 });
 		expect(outputWith(Seeded, beside).questions).toHaveLength(7);
@@ -2113,7 +2180,7 @@ test("seed is refused to a caller who does not administer before anything is mad
 			expect((await projects(client)).map((project) => project.key)).toEqual(["scratch"]);
 			expect(await casesIn(client, "scratch")).toBe(0);
 			expect(await grantsOf(client, "pipeline")).toBeUndefined();
-			const seeded = await run(["seed", "demo", "--cases", "3"]);
+			const seeded = await run(["seed", "demo", "--cases", "3", "--days", "0"]);
 			expect(seeded.stderr).toBe("");
 			expect(seeded.code).toBe(0);
 			expect(await casesIn(client, "demo")).toBe(3);
@@ -2541,7 +2608,9 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				expect(linked.stderr.startsWith(result.stderr)).toBe(true);
 				expect(JSON.parse(linked.stdout).fresh).toBe(false);
 				expect(
-					instance.app.db.raw.query<{ key: string; file: string }, []>("SELECT key, file FROM tests ORDER BY id").all(),
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ key: string; file: string }>("SELECT key, file FROM tests ORDER BY id", []),
+					),
 				).toEqual(expected);
 			}
 		}
@@ -2568,7 +2637,15 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				`${JSON.stringify(relativeRootFile)}: Jest/Vitest root must be absolute: "relative/root"`,
 			);
 		}
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(6);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(6);
 		for (const [format, counts] of [
 			["pytest", { total: 8, pass: 3, fail: 2, skip: 2, error: 1, blocked: 0 }],
 			["playwright", { total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 }],

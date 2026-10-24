@@ -17,26 +17,25 @@ The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screensh
 [change](docs/ui/screenshots/changes-light.png), a [case with its diff](docs/ui/screenshots/case-light.png), the
 [reports](docs/ui/screenshots/reports-light.png) and [settings](docs/ui/screenshots/settings-light.png).
 
-## Start (no account, no configuration)
+## Start from the source tree
 
-To start from the source tree, follow these steps:
+An instance needs PostgreSQL 18. To start one from the source tree, follow these steps:
 
-1. Install Bun 1.4 or newer.
+1. Install Bun 1.4 or newer, and PostgreSQL 18 (`brew install postgresql@18`, or your system's package).
 2. Install the packages from the source tree.
 
 	```
 	$ bun install
 	```
 
-3. Start the server.
+3. Start the server. `bun run dev` starts a PostgreSQL cluster for this checkout under `~/.cache`, then the
+   server on `http://127.0.0.1:7357`. To use a database of your own instead, set `MAINWORTHY_DATABASE_URL`.
 
 	```
-	$ bun run start
-	Mainworthy 0.1.0 · local · data in ~/.mainworthy · http://127.0.0.1:7357
-	project "scratch" · you are robin@this-machine · policy: loose
+	$ bun run dev
 	```
 
-4. Open the URL that the server prints. Local mode signs you in as the owner.
+4. Open the URL that the server prints. On loopback it signs you in as the owner.
 
 To look around a filled project, run `mainworthy seed demo`. The command writes a shop's suite with two weeks of results and runs and a queue to work through.
 
@@ -131,10 +130,10 @@ The policy also decides what happens to a test with no case. Mainworthy tracks i
 for it, or raises a question for its file. All three presets send policy changes to an admin and conflicting
 edits back to their authors. The web UI compares the presets in Settings, under Policy and under Projects.
 
-## Deploy (one container, one volume)
+## Deploy (the app and PostgreSQL)
 
 ```
-$ docker compose up -d           # then sign in with the owner token (see compose.yaml)
+$ docker compose up -d           # PostgreSQL 18 and the app; sign in with the owner token (see compose.yaml)
 ```
 
 Coolify on a home server: [docs/deploy.md](docs/deploy.md).

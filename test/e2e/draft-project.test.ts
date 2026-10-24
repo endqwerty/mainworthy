@@ -11,6 +11,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
+import { testDatabase } from "../db.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 for (const stage of ["waiting for review", "before its first merge"] as const)
@@ -19,10 +20,18 @@ for (const stage of ["waiting for review", "before its first merge"] as const)
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-state-project-"));
 			const token = "draft-state-project-owner-token";
-			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
+			const database = await testDatabase();
+			const instance = await start(
+				{
+					...defaultConfig({}),
+					databaseUrl: database.url,
+					dataDir,
+					port: 0,
+					owner: "robin",
+					ownerToken: token,
+					mode: "local",
+				},
 				() => ({ ui }),
-				{ readers: 0 },
 			);
 			const server: Server = {
 				url: instance.url,
@@ -82,7 +91,11 @@ for (const stage of ["waiting for review", "before its first merge"] as const)
 				if (stage === "waiting for review") expect(before.conflict).toBeUndefined();
 				else expect(before.conflict?.sentMerges).toEqual([]);
 				await page.goto("about:blank");
-				removeProject(instance.app.db, "scratch");
+				await instance.app.database.write(async (db) => {
+					await db.transaction(async () => {
+						await removeProject(db, "scratch");
+					});
+				});
 				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 				await seed();
 				if (stage === "waiting for review") {
@@ -130,6 +143,7 @@ for (const stage of ["waiting for review", "before its first merge"] as const)
 			} finally {
 				await view?.close();
 				await instance.stop();
+				await database.close();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},
@@ -143,10 +157,18 @@ for (const attempt of ["save", "merge"] as const)
 			async () => {
 				const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-project-"));
 				const token = "draft-project-test-owner-token";
-				const instance = start(
-					{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
+				const database = await testDatabase();
+				const instance = await start(
+					{
+						...defaultConfig({}),
+						databaseUrl: database.url,
+						dataDir,
+						port: 0,
+						owner: "robin",
+						ownerToken: token,
+						mode: "local",
+					},
 					() => ({ ui }),
-					{ readers: 0 },
 				);
 				const server: Server = {
 					url: instance.url,
@@ -220,7 +242,11 @@ for (const attempt of ["save", "merge"] as const)
 								)
 							: null;
 					if (project !== "unbound") {
-						removeProject(instance.app.db, "scratch");
+						await instance.app.database.write(async (db) => {
+							await db.transaction(async () => {
+								await removeProject(db, "scratch");
+							});
+						});
 						await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 						await seed();
 						if (attempt === "merge") {
@@ -321,6 +347,7 @@ for (const attempt of ["save", "merge"] as const)
 				} finally {
 					await view?.close();
 					await instance.stop();
+					await database.close();
 					await rm(dataDir, { recursive: true, force: true });
 				}
 			},

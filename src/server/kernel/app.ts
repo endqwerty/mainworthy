@@ -1,18 +1,16 @@
 // The running instance: its database, its clock and its change channel. Created once per process (or per test).
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Envelope } from "../../core/api.ts";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
-import type { CallerReference } from "./caller.ts";
-import { Db, databasePath } from "./db.ts";
+import { Database } from "./db.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
-import { openDatabase } from "./migrate.ts";
+import { migrate } from "./migrate.ts";
 
 export type Config = {
-	/** Where the database and attachments live. */
+	/** Where attachments live. */
 	dataDir: string;
+	databaseUrl: string;
 	host: string;
 	port: number;
 	/**
@@ -106,75 +104,34 @@ export const SESSION_LIFETIMES = { sessionIdleMs: 14 * 86_400_000, sessionMaxMs:
 /** What changed, pushed to clients after a command commits. Losing one is repaired by a refetch. */
 export type ChangeEvent = { project: string; seq: number; op: string; actor: string; touched: string[] };
 
-/**
- * Lets one writer in at a time. SQLite has one writer anyway; this makes the others wait in a queue instead of
- * blocking the thread, so a long write (a ten-thousand-result report, applied in slices) never stalls a read.
- */
-export type WriteGate = { run: <T>(fn: () => T | Promise<T>) => Promise<T> };
-
-export type ReadCall = {
-	op: string;
-	project: string | null;
-	input: unknown;
-	caller: CallerReference;
-	/** The instance clock relative to wall time, including time spent waiting for a reader. */
-	clockOffset: number;
-};
-export type ReadPool = {
-	run: (call: ReadCall, fallback: () => Envelope<unknown> | Promise<Envelope<unknown>>) => Promise<Envelope<unknown>>;
-	refresh: () => void;
-	stop: () => Promise<void>;
-};
-
-function writeGate(): WriteGate {
-	let tail: Promise<unknown> = Promise.resolve();
-	return {
-		run<T>(fn: () => T | Promise<T>): Promise<T> {
-			const next = tail.then(fn, fn);
-			tail = next.catch(() => undefined);
-			return next;
-		},
-	};
-}
-
 export type App = {
 	blobs: BlobStore;
-	/** The one connection that writes. Use it only inside a command (see `invoke`) or under `gate`. */
-	db: Db;
-	/**
-	 * A second connection for reads. It sees only what is committed, so a read during a long write gets a
-	 * consistent answer at once. With an in-memory database (tests) it is the same connection as `db`.
-	 */
-	reader: Db;
-	readers: ReadPool | null;
-	gate: WriteGate;
+	database: Database;
 	config: Config;
 	now: () => number;
 	/** Subscribes to change events. Returns the unsubscribe function. */
 	subscribe: (listener: (event: ChangeEvent) => void) => () => void;
 	/** A failed subscriber is logged without its error text; the other subscribers still receive the event. */
 	publish: (event: ChangeEvent) => void;
-	close: () => void;
+	close: () => Promise<void>;
 };
 
 /** The data directory of an instance that names none. */
 export const defaultDataDir = (env: Record<string, string | undefined>): string => join(env.HOME ?? ".", ".mainworthy");
 
-export function openApp(
-	config: Config,
-	options: { memory?: boolean; now?: () => number; reader?: boolean; copyWorkspace?: string } = {},
-): App {
-	const path = options.memory ? ":memory:" : databasePath(config.dataDir);
-	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
-	const db = options.reader ? new Db(path, { reader: true }) : openDatabase(path, options);
-	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
+export async function openApp(config: Config, options: { memory?: boolean; now?: () => number } = {}): Promise<App> {
+	if (!config.databaseUrl) throw new Error("MAINWORTHY_DATABASE_URL is required; see compose.yaml");
+	const database = await Database.open({ url: config.databaseUrl });
+	try {
+		await migrate(database);
+	} catch (error) {
+		await database.close();
+		throw error;
+	}
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {
 		blobs: options.memory ? memoryBlobs() : diskBlobs(config.dataDir),
-		db,
-		reader,
-		readers: null,
-		gate: writeGate(),
+		database,
 		config,
 		now: options.now ?? Date.now,
 		subscribe(listener) {
@@ -190,10 +147,9 @@ export function openApp(
 				}
 			}
 		},
-		close() {
+		async close() {
 			listeners.clear();
-			if (reader !== db) reader.close();
-			db.close();
+			await database.close();
 		},
 	};
 }
@@ -286,6 +242,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
 	return {
 		dataDir: env.MAINWORTHY_DATA ?? defaultDataDir(env),
+		databaseUrl: env.MAINWORTHY_DATABASE_URL ?? "",
 		host,
 		port: Number(env.MAINWORTHY_PORT ?? env.PORT ?? 7357),
 		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",

@@ -552,11 +552,11 @@ async function upload(args: string[]): Promise<void> {
 
 const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
 	gen: () => gen(),
-	serve: () => serve(),
-	test: (args) => test(args[0]),
+	serve: async () => await serve(),
+	test: async (args) => await test(args[0]),
 	project: () => project(),
 	build: () => build(),
-	uitest: (args) => uitest(args[0]),
+	uitest: async (args) => await uitest(args[0]),
 	install: (args) => install(args),
 	upload: (args) => upload(args),
 };

@@ -13,7 +13,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf, takeStart } from "./attempts.ts";
 import { findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
@@ -278,10 +278,10 @@ class Stop extends Error {
 }
 
 /** Runs `work` under the gate in one transaction. A `Stop` thrown in it rolls everything back and is its answer. */
-function commit<T>(app: App, work: () => T): Promise<T | Refused> {
-	return app.gate.run(() => {
+async function commit<T>(app: App, work: (db: WriteDb) => Promise<T>): Promise<T | Refused> {
+	return await app.database.write(async (db) => {
 		try {
-			return app.db.transaction(work);
+			return await db.transaction(async () => await work(db));
 		} catch (error) {
 			if (error instanceof Stop) return error.refused;
 			throw error;
@@ -302,8 +302,8 @@ type About = { userAgent: string | null; address: string | null; proven?: () => 
  * Opens the session of a sign-in on the credential that proved it, as that row stands in this transaction.
  * `cookie` is the secret the browser will hold. Null when the row no longer holds what it held a moment ago.
  */
-function openOn(app: App, row: CredentialRow, cookie: string, about: About) {
-	return openSessionOnCredential(app, {
+async function openOn(app: App, db: WriteDb, row: CredentialRow, cookie: string, about: About) {
+	return await openSessionOnCredential(app, db, {
 		credential: { id: row.id, actor: row.actor, data: row.data },
 		sessionHash: hashOf(cookie),
 		userAgent: about.userAgent?.slice(0, 256) ?? null,
@@ -367,8 +367,8 @@ export async function signInWithPassword(
 	const keys = counted(addressKey(about.address), account);
 	const answer = limiter.check(keys, app.now());
 	if (answer.kind === "blocked") return waiting(answer);
-	const person = app.reader.get(Q.personByName, { name: input.name });
-	const stored = person ? livePassword(app.reader, person.id) : null;
+	const person = await app.database.read(async (readDb) => await readDb.get(Q.personByName, { name: input.name }));
+	const stored = person ? await app.database.read(async (readDb) => await livePassword(readDb, person.id)) : null;
 	let right: PasswordMatch;
 	let rehashed: string | null = null;
 	try {
@@ -392,12 +392,12 @@ export async function signInWithPassword(
 	}
 	about.proven?.();
 	const cookie = newSessionSecret();
-	return commit(app, () => {
+	return await commit(app, async (db) => {
 		// The name is looked up again and must lead to a password with the very hash that was verified.
-		const now = app.db.get(Q.personByName, { name: input.name });
-		const current = now ? livePassword(app.db, now.id) : null;
+		const now = await db.get(Q.personByName, { name: input.name });
+		const current = now ? await livePassword(db, now.id) : null;
 		if (!now || !current || current.data !== stored.data) return no("changed-meanwhile");
-		const factor = liveTotp(app.db, now.id);
+		const factor = await liveTotp(db, now.id);
 		if (factor) {
 			const ceremony = newSessionSecret();
 			return {
@@ -413,11 +413,11 @@ export async function signInWithPassword(
 				ceremony,
 			} as const;
 		}
-		if (app.config.requireAdminMfa && hasAdminGrant(app.db, now.id)) return no("second-factor-required");
-		const opened = openOn(app, current, cookie, about);
+		if (app.config.requireAdminMfa && (await hasAdminGrant(db, now.id))) return no("second-factor-required");
+		const opened = await openOn(app, db, current, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
-		if (rehashed === null) noteCredentialUse(app.db, current.id, app.now());
-		else if (!rehashPassword(app.db, current, rehashed, app.now())) throw new Stop(no("changed-meanwhile"));
+		if (rehashed === null) await noteCredentialUse(db, current.id, app.now());
+		else if (!(await rehashPassword(db, current, rehashed, app.now()))) throw new Stop(no("changed-meanwhile"));
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
 }
@@ -450,19 +450,19 @@ export type PasswordChange =
 export async function changePassword(
 	app: App,
 	input: {
-		who: () => { id: number; name: string } | null;
-		session: () => number | null;
-		context: () => string | null;
+		who: (db?: ReadDb) => Promise<{ id: number; name: string } | null>;
+		session: (db: ReadDb) => Promise<number | null>;
+		context: (db: ReadDb) => Promise<string | null>;
 		current: string | undefined;
 		next: string;
 		address: string | null;
 	},
 ): Promise<PasswordChange> {
-	const caller = input.who();
+	const caller = await input.who();
 	if (!caller) return { ok: false, why: "not-signed-in" };
-	const person = app.reader.get(Q.personById, { id: caller.id });
+	const person = await app.database.read(async (readDb) => await readDb.get(Q.personById, { id: caller.id }));
 	if (!person) return { ok: false, why: "not-a-person" };
-	const held = livePassword(app.reader, person.id);
+	const held = await app.database.read(async (readDb) => await livePassword(readDb, person.id));
 	let hash: string;
 	try {
 		if (held) {
@@ -481,47 +481,48 @@ export async function changePassword(
 		if (error instanceof PasswordWorkBusy) return { ok: false, why: "busy" };
 		throw error;
 	}
-	return app.gate.run(() =>
-		app.db.transaction((): PasswordChange => {
-			// The session, read on committed rows: nothing else writes while this holds the gate.
-			const still = input.who();
-			const session = input.session();
-			const now = app.db.get(Q.personById, { id: person.id });
-			if (!still || session === null || !now || still.id !== now.id || now.name !== person.name)
-				return { ok: false, why: "not-signed-in" };
-			// The same password as was verified, by its hash, or none as before: else somebody changed it meanwhile.
-			const current = livePassword(app.db, now.id);
-			if ((current?.data ?? null) !== (held?.data ?? null)) return { ok: false, why: "changed-meanwhile" };
-			const at = app.now();
-			const proof = { actor: now.id, context: input.context() };
-			if (current && !dateSessionProof(app, proof)) return { ok: false, why: "not-signed-in" };
-			try {
-				requireRecentProof(app, proof, true);
-			} catch (error) {
-				if (error instanceof OpError && error.code === "recent_proof_required")
-					return { ok: false, why: "recent-proof" };
-				throw error;
-			}
-			if (current) revokeCredential(app.db, current.id, at);
-			const made = insertPassword(app.db, { actor: now.id, hash, at });
-			credentialNotice(app, now.id, current ? "Your password was changed" : "A password was added");
-			if (!current) return { ok: true, sessionsEnded: 0 };
-			restSession(app.db, { session, from: current.id, to: made });
-			return { ok: true, sessionsEnded: endSessionsOn(app.db, current.id, at) };
-		}),
+	return await app.database.write(
+		async (db) =>
+			await db.transaction(async (): Promise<PasswordChange> => {
+				// The session, read on committed rows: nothing else writes while this holds the gate.
+				const still = await input.who(db);
+				const session = await input.session(db);
+				const now = await db.get(Q.personById, { id: person.id });
+				if (!still || session === null || !now || still.id !== now.id || now.name !== person.name)
+					return { ok: false, why: "not-signed-in" };
+				// The same password as was verified, by its hash, or none as before: else somebody changed it meanwhile.
+				const current = await livePassword(db, now.id);
+				if ((current?.data ?? null) !== (held?.data ?? null)) return { ok: false, why: "changed-meanwhile" };
+				const at = app.now();
+				const proof = { actor: now.id, context: await input.context(db) };
+				if (current && !(await dateSessionProof(app, db, proof))) return { ok: false, why: "not-signed-in" };
+				try {
+					await requireRecentProof(app, db, proof, true);
+				} catch (error) {
+					if (error instanceof OpError && error.code === "recent_proof_required")
+						return { ok: false, why: "recent-proof" };
+					throw error;
+				}
+				if (current) await revokeCredential(db, current.id, at);
+				const made = await insertPassword(db, { actor: now.id, hash, at });
+				await credentialNotice(app, db, now.id, current ? "Your password was changed" : "A password was added");
+				if (!current) return { ok: true, sessionsEnded: 0 };
+				await restSession(db, { session, from: current.id, to: made });
+				return { ok: true, sessionsEnded: await endSessionsOn(db, current.id, at) };
+			}),
 	);
 }
 
 // ── A passkey ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export function beginCredentialProof(app: App, input: ProofContext): AssertionOptions {
-	const session = proofSession(app, input);
+export async function beginCredentialProof(app: App, db: ReadDb, input: ProofContext): Promise<AssertionOptions> {
+	const session = await proofSession(app, input, db);
 	if (!session || input.context === null) throw forbidden("confirm a credential from a session that is signed in");
 	const party = mustHavePasskeys(app);
 	return assertionOptions({
 		rpId: party.id,
 		challenge: issueChallenge(app, { purpose: "prove", actor: input.actor, context: input.context }, party),
-		allow: liveCredentials(app.db, input.actor).flatMap((row) => storedPasskey(row) ?? []),
+		allow: (await liveCredentials(db, input.actor)).flatMap((row) => storedPasskey(row) ?? []),
 	});
 }
 
@@ -532,26 +533,31 @@ export async function proveCredential(
 	app: App,
 	input: ProofContext & { proof: CredentialProof; address: string | null },
 ): Promise<{ ok: true } | Refused | Limited> {
-	if (!proofSession(app, input, app.reader)) return no("context");
-	const person = app.reader.get(Q.personById, { id: input.actor });
+	if (!(await app.database.read(async (db) => await proofSession(app, input, db)))) return no("context");
+	const person = await app.database.read(async (readDb) => await readDb.get(Q.personById, { id: input.actor }));
 	if (!person) return no("unknown-name");
 	const proof = input.proof;
 	if ("passkey" in proof) {
 		const attempt = byAddress(app, input.address);
-		const first = judgeAssertion(app, app.reader, proof.passkey, null, input);
+		const first = await app.database.read(
+			async (readDb) => await judgeAssertion(app, readDb, proof.passkey, null, input),
+		);
 		if (!first.ok) return attempt.wrong(first);
-		return commit(app, () => {
-			if (!proofSession(app, input)) return no("context");
-			const now = judgeAssertion(app, app.db, proof.passkey, null, input);
+		return await commit(app, async (db) => {
+			if (!(await proofSession(app, input, db))) return no("context");
+			const now = await judgeAssertion(app, db, proof.passkey, null, input);
 			if (!now.ok) return attempt.wrong(now);
 			if (now.row.data !== first.row.data || now.row.handle !== first.row.handle) return no("changed-meanwhile");
-			if (!countPasskeyUse(app.db, now.row, now.shown, app.now()) || !dateSessionProof(app, input))
+			if (!(await countPasskeyUse(db, now.row, now.shown, app.now())) || !(await dateSessionProof(app, db, input)))
 				throw new Stop(no("changed-meanwhile"));
 			spendChallenge(app, now.challenge);
 			return { ok: true } as const;
 		});
 	}
-	const row = "password" in proof ? livePassword(app.reader, person.id) : liveTotp(app.reader, person.id);
+	const row =
+		"password" in proof
+			? await app.database.read(async (readDb) => await livePassword(readDb, person.id))
+			: await app.database.read(async (readDb) => await liveTotp(readDb, person.id));
 	if ("password" in proof) {
 		try {
 			const checked = await checkPassword(app, {
@@ -566,12 +572,12 @@ export async function proveCredential(
 			if (error instanceof PasswordWorkBusy) return no("busy");
 			throw error;
 		}
-		return commit(app, () => {
-			const current = livePassword(app.db, person.id);
-			if (!proofSession(app, input) || current?.id !== row.id || current.data !== row.data)
+		return await commit(app, async (db) => {
+			const current = await livePassword(db, person.id);
+			if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 				return no("changed-meanwhile");
-			if (!dateSessionProof(app, input)) return no("context");
-			noteCredentialUse(app.db, current.id, app.now());
+			if (!(await dateSessionProof(app, db, input))) return no("context");
+			await noteCredentialUse(db, current.id, app.now());
 			return { ok: true } as const;
 		});
 	}
@@ -583,9 +589,9 @@ export async function proveCredential(
 		attempt.limiter.failed(attempt.keys, app.now());
 		return no("wrong-code");
 	}
-	return commit(app, () => {
-		const current = liveTotp(app.db, person.id);
-		if (!proofSession(app, input) || current?.id !== row.id || current.data !== row.data)
+	return await commit(app, async (db) => {
+		const current = await liveTotp(db, person.id);
+		if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 			return no("changed-meanwhile");
 		const limit = attempt.limiter.check(attempt.keys, app.now());
 		if (limit.kind === "blocked") return waiting(limit);
@@ -593,7 +599,10 @@ export async function proveCredential(
 		// is the one the code was spent on.
 		const accepted = acceptTotp(stored, proof.code, app.now());
 		if (!accepted) return no("wrong-code");
-		if (!updateTotp(app.db, current, JSON.stringify(accepted), app.now()) || !dateSessionProof(app, input))
+		if (
+			!(await updateTotp(db, current, JSON.stringify(accepted), app.now())) ||
+			!(await dateSessionProof(app, db, input))
+		)
 			throw new Stop(no("changed-meanwhile"));
 		attempt.limiter.succeeded([attempt.account]);
 		return { ok: true } as const;
@@ -643,13 +652,13 @@ export function passkeySignInOptions(
  * A recent-proof challenge already knows its person and offers their credentials, so its user handle may be
  * absent; one returned must still match. Its session context and credential ownership identify the person.
  */
-function judgeAssertion(
+async function judgeAssertion(
 	app: App,
-	db: Db,
+	db: ReadDb,
 	answer: unknown,
 	ceremony: string | null,
 	proof?: ProofContext,
-): { ok: true; row: CredentialRow; person: Person; shown: Assertion; challenge: string } | Refused {
+): Promise<{ ok: true; row: CredentialRow; person: Person; shown: Assertion; challenge: string } | Refused> {
 	const parsed = AssertionResponse.safeParse(answer);
 	const challenge = challengeOf(answer);
 	if (!parsed.success || challenge === null) return no("input");
@@ -661,19 +670,19 @@ function judgeAssertion(
 			: ceremony === null || found.ceremony.context !== CONTEXT.browser(hashOf(ceremony))
 	)
 		return no("context");
-	const row = passkeyByCredentialId(db, parsed.data.id);
+	const row = await passkeyByCredentialId(db, parsed.data.id);
 	if (!row) return no("unknown-passkey");
 	if (
 		proof &&
 		(row.actor !== proof.actor || found.ceremony.purpose !== "prove" || found.ceremony.actor !== proof.actor)
 	)
 		return no("context");
-	const person = row.revoked_at === null ? db.get(Q.personById, { id: row.actor }) : null;
+	const person = row.revoked_at === null ? await db.get(Q.personById, { id: row.actor }) : null;
 	const stored = storedPasskey(row);
 	// A removed passkey's row holds no key any more, and a forgotten person's passkeys were revoked with them.
 	if (!person || !stored) return no("revoked-passkey");
 	const handle = parsed.data.userHandle ?? null;
-	if ((!proof && handle === null) || (handle !== null && handle !== userHandleOf(db, person.id)))
+	if ((!proof && handle === null) || (handle !== null && handle !== (await userHandleOf(db, person.id))))
 		return no("user-handle");
 	const verdict = verifyAssertion(
 		parsed.data,
@@ -711,15 +720,15 @@ export async function signInWithPasskey(
 ): Promise<Entry> {
 	const { answer, ceremony } = input;
 	const attempt = byAddress(app, about.address);
-	const first = judgeAssertion(app, app.reader, answer, ceremony);
+	const first = await app.database.read(async (readDb) => await judgeAssertion(app, readDb, answer, ceremony));
 	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, () => {
-		const now = judgeAssertion(app, app.db, answer, ceremony);
+	const entry = await commit(app, async (db) => {
+		const now = await judgeAssertion(app, db, answer, ceremony);
 		if (!now.ok) return now;
-		const opened = openOn(app, now.row, cookie, about);
-		if (!opened || !countPasskeyUse(app.db, now.row, now.shown, app.now())) throw new Stop(no("changed-meanwhile"));
+		const opened = await openOn(app, db, now.row, cookie, about);
+		if (!opened || !(await countPasskeyUse(db, now.row, now.shown, app.now()))) throw new Stop(no("changed-meanwhile"));
 		spendChallenge(app, now.challenge);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
@@ -753,25 +762,25 @@ function registrationFor(input: {
  * issued where this answer comes from (`context`): the same session, or the same invitation. The credential
  * id must be on no row, live or revoked, of anybody.
  */
-function judgeRegistration(
+async function judgeRegistration(
 	app: App,
-	db: Db,
+	db: ReadDb,
 	input: { person: Person; answer: unknown; context: string },
-): { ok: true; passkey: Passkey; challenge: string } | Refused {
+): Promise<{ ok: true; passkey: Passkey; challenge: string } | Refused> {
 	const { person, answer, context } = input;
 	const challenge = challengeOf(answer);
 	if (challenge === null) return no("input");
 	const found = findChallenge(app, challenge, "register");
-	const handle = userHandleOf(db, person.id);
+	const handle = await userHandleOf(db, person.id);
 	if (!found || handle === null || found.ceremony.userHandle !== handle) return no("challenge");
 	if (found.ceremony.context !== context) return no("context");
 	const verdict = verifyRegistration(answer, found.expected);
 	if (!verdict.ok) return no(verdict.reason);
-	if (passkeyByCredentialId(db, verdict.value.credentialId)) return no("credential-exists");
+	if (await passkeyByCredentialId(db, verdict.value.credentialId)) return no("credential-exists");
 	return { ok: true, passkey: verdict.value, challenge };
 }
-function mustBePerson(db: Db, actor: number): Person {
-	const person = db.get(Q.personById, { id: actor });
+async function mustBePerson(db: ReadDb, actor: number): Promise<Person> {
+	const person = await db.get(Q.personById, { id: actor });
 	if (!person) throw invalid("only a person has a password or a passkey");
 	return person;
 }
@@ -783,17 +792,21 @@ function mustBePerson(db: Db, actor: number): Person {
  * `context` is where the caller is signed in (`Session.context`): the registration is completed there and
  * nowhere else, so another session of the same person does not store a passkey this one asked for.
  */
-export function beginPasskey(app: App, input: { actor: number; context: string }): RegistrationOptions {
-	requireRecentProof(app, input, true);
+export async function beginPasskey(
+	app: App,
+	db: WriteDb,
+	input: { actor: number; context: string },
+): Promise<RegistrationOptions> {
+	await requireRecentProof(app, db, input, true);
 	const party = mustHavePasskeys(app);
-	const person = mustBePerson(app.db, input.actor);
-	const userHandle = ensureUserHandle(app.db, person.id, app.now());
+	const person = await mustBePerson(db, input.actor);
+	const userHandle = await ensureUserHandle(db, person.id, app.now());
 	return registrationFor({
 		party,
 		person,
 		userHandle,
 		challenge: issueChallenge(app, { purpose: "register", userHandle, context: input.context }, party),
-		exclude: liveCredentials(app.db, person.id),
+		exclude: await liveCredentials(db, person.id),
 	});
 }
 
@@ -801,14 +814,15 @@ export function beginPasskey(app: App, input: { actor: number; context: string }
  * Stores the passkey a signed-in person registered, and spends its challenge, in the operation's transaction.
  * The refusal says what the verifier found, as a code: the caller is the person whose own key it is.
  */
-export function addPasskey(
+export async function addPasskey(
 	app: App,
+	db: WriteDb,
 	input: { actor: number; context: string; answer: unknown; label: string },
-): { id: number; label: string } {
-	requireRecentProof(app, input, true);
+): Promise<{ id: number; label: string }> {
+	await requireRecentProof(app, db, input, true);
 	mustHavePasskeys(app);
-	const person = mustBePerson(app.db, input.actor);
-	const judged = judgeRegistration(app, app.db, { person, answer: input.answer, context: input.context });
+	const person = await mustBePerson(db, input.actor);
+	const judged = await judgeRegistration(app, db, { person, answer: input.answer, context: input.context });
 	if (!judged.ok) {
 		if (judged.why === "credential-exists")
 			throw conflict("this passkey is registered on this instance already; a passkey is registered once");
@@ -816,8 +830,13 @@ export function addPasskey(
 			`the passkey was not accepted (${judged.why}). Begin again: a registration answers the challenge it was given, once, within five minutes`,
 		);
 	}
-	const row = insertPasskey(app.db, { actor: person.id, passkey: judged.passkey, label: input.label, at: app.now() });
-	credentialNotice(app, person.id, "A passkey was added");
+	const row = await insertPasskey(db, {
+		actor: person.id,
+		passkey: judged.passkey,
+		label: input.label,
+		at: app.now(),
+	});
+	await credentialNotice(app, db, person.id, "A passkey was added");
 	spendChallenge(app, judged.challenge);
 	return { id: row.id, label: row.label };
 }
@@ -825,8 +844,8 @@ export function addPasskey(
 // ── Credentials, as a signed-in person sees them ───────────────────────────────────────────────────────────
 
 /** A person's ways of signing in. Never a hash, a key or a credential id: a list is read on a screen. */
-export function listCredentials(db: Db, actor: number) {
-	return liveCredentials(db, actor).map((row) => ({
+export async function listCredentials(db: ReadDb, actor: number) {
+	return (await liveCredentials(db, actor)).map((row) => ({
 		id: row.id,
 		kind: row.kind,
 		label: row.label,
@@ -836,8 +855,8 @@ export function listCredentials(db: Db, actor: number) {
 }
 
 /** The person a credential signs in, when it still works; else null. */
-export function credentialOwner(db: Db, id: number): number | null {
-	const row = credentialById(db, id);
+export async function credentialOwner(db: ReadDb, id: number): Promise<number | null> {
+	const row = await credentialById(db, id);
 	return row && row.revoked_at === null ? row.actor : null;
 }
 
@@ -853,21 +872,26 @@ const REMOVED: Record<CredentialRow["kind"], string> = {
  * Removes one way a person signs in, and ends the sessions that rest on it. The last one stays: with none, the
  * person could not sign in to add another, and only an admin's recovery link would let them back.
  */
-export function removeCredential(app: App, id: number, proof: ProofContext): { removed: true; sessionsEnded: number } {
-	const row = credentialById(app.db, id);
+export async function removeCredential(
+	app: App,
+	db: WriteDb,
+	id: number,
+	proof: ProofContext,
+): Promise<{ removed: true; sessionsEnded: number }> {
+	const row = await credentialById(db, id);
 	if (!row || row.revoked_at !== null) throw notFound(`credential ${id}`);
-	requireRecentProof(app, proof);
-	const requiresFactor = app.config.requireAdminMfa && hasAdminGrant(app.db, row.actor);
-	if (row.kind === "totp" && requiresFactor && livePassword(app.db, row.actor))
+	await requireRecentProof(app, db, proof);
+	const requiresFactor = app.config.requireAdminMfa && (await hasAdminGrant(db, row.actor));
+	if (row.kind === "totp" && requiresFactor && (await livePassword(db, row.actor)))
 		throw forbidden(
 			"this instance requires a second factor for admins with a password; remove the password first to use only passkeys",
 		);
-	const passwordWorks = !requiresFactor || liveTotp(app.db, row.actor) !== null;
+	const passwordWorks = !requiresFactor || (await liveTotp(db, row.actor)) !== null;
 	// An identity is a way in only at the provider the instance is configured with now.
 	const provider = app.config.oidc ? `${app.config.oidc.issuer}#` : null;
 	const identityWorks = (held: CredentialRow): boolean =>
 		provider !== null && held.handle?.startsWith(provider) === true && (!requiresFactor || providerVouches(app));
-	const waysIn = liveCredentials(app.db, row.actor).filter(
+	const waysIn = (await liveCredentials(db, row.actor)).filter(
 		(held) =>
 			held.kind === "passkey" ||
 			(held.kind === "password" && passwordWorks) ||
@@ -878,17 +902,18 @@ export function removeCredential(app: App, id: number, proof: ProofContext): { r
 			"this is the last way to sign in because this instance requires a second factor for admins; add another passkey or enrol an authenticator first, then remove this passkey",
 		);
 	if (row.kind !== "totp" && waysIn.filter((held) => held.id !== row.id).length === 0) {
-		const name = app.db.get(Q.nameOf, { id: row.actor })?.name ?? "this person";
+		const name = (await db.get(Q.nameOf, { id: row.actor }))?.name ?? "this person";
 		throw invalid(
 			`this is the last way ${name} signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new ${name})`,
 		);
 	}
 	const at = app.now();
-	revokeCredential(app.db, id, at);
-	credentialNotice(app, row.actor, `${REMOVED[row.kind]} was removed`);
+	await revokeCredential(db, id, at);
+	await credentialNotice(app, db, row.actor, `${REMOVED[row.kind]} was removed`);
 	return {
 		removed: true,
-		sessionsEnded: row.kind === "totp" ? endSessionsOf(app.db, row.actor, at, "ended") : endSessionsOn(app.db, id, at),
+		sessionsEnded:
+			row.kind === "totp" ? await endSessionsOf(db, row.actor, at, "ended") : await endSessionsOn(db, id, at),
 	};
 }
 
@@ -900,17 +925,18 @@ export function removeCredential(app: App, id: number, proof: ProofContext): { r
  * accepted, so one link is good for a person at a time. The person's passkey handle is made here if there is
  * none, so that showing the invitation later writes no row.
  */
-export function createInvitation(
+export async function createInvitation(
 	app: App,
+	db: WriteDb,
 	input: { actor: number; by: number; purpose: InvitationPurpose; lastsMs: number; context: string | null },
-): { id: number; code: string; link: string; expiresAt: number } {
-	if (input.context !== null) requireRecentProof(app, { actor: input.by, context: input.context });
+): Promise<{ id: number; code: string; link: string; expiresAt: number }> {
+	if (input.context !== null) await requireRecentProof(app, db, { actor: input.by, context: input.context });
 	const at = app.now();
-	revokeInvitationsOf(app.db, input.actor, at);
-	ensureUserHandle(app.db, input.actor, at);
+	await revokeInvitationsOf(db, input.actor, at);
+	await ensureUserHandle(db, input.actor, at);
 	const code = newSessionSecret();
 	const expiresAt = at + input.lastsMs;
-	const id = insertInvitation(app.db, {
+	const id = await insertInvitation(db, {
 		actor: input.actor,
 		hash: hashOf(code),
 		purpose: input.purpose,
@@ -923,10 +949,14 @@ export function createInvitation(
 }
 
 /** An invitation that can be accepted now, with the person it is for; else null, whatever the reason. */
-function openInvitation(app: App, db: Db, hash: string): { invitation: InvitationRow; person: Person } | null {
-	const invitation = invitationByHash(db, hash);
+async function openInvitation(
+	app: App,
+	db: ReadDb,
+	hash: string,
+): Promise<{ invitation: InvitationRow; person: Person } | null> {
+	const invitation = await invitationByHash(db, hash);
 	if (!invitation || !isOpen(invitation, app.now())) return null;
-	const person = db.get(Q.personById, { id: invitation.actor });
+	const person = await db.get(Q.personById, { id: invitation.actor });
 	return person ? { invitation, person } : null;
 }
 
@@ -942,11 +972,11 @@ function openInvitation(app: App, db: Db, hash: string): { invitation: Invitatio
  *
  * A right code is proof of the invitation, so its page stays reachable during either address block.
  */
-export function showInvitation(
+export async function showInvitation(
 	app: App,
 	code: string,
 	address: string | null,
-):
+): Promise<
 	| {
 			ok: true;
 			shown: {
@@ -955,14 +985,15 @@ export function showInvitation(
 			};
 	  }
 	| Refused
-	| Limited {
+	| Limited
+> {
 	const attempt = byAddress(app, address);
 	const hash = hashOf(code);
-	const found = openInvitation(app, app.reader, hash);
+	const found = await app.database.read(async (readDb) => await openInvitation(app, readDb, hash));
 	if (!found) return attempt.wrong(no("invitation"));
 	const { invitation, person } = found;
 	const party = publicAddress(app.config)?.party;
-	const handle = userHandleOf(app.reader, person.id);
+	const handle = await app.database.read(async (readDb) => await userHandleOf(readDb, person.id));
 	const passkey =
 		party && handle !== null ? invitationChallenge(app, { codeHash: hash, userHandle: handle }, party) : null;
 	return {
@@ -989,8 +1020,8 @@ export function showInvitation(
 }
 
 /** Who a browser is signed in as, by its session cookie, and null when the cookie names no session that is alive. */
-function holderOf(app: App, cookie: string): { id: number; name: string } | null {
-	const actor = findSession(app, hashOf(cookie))?.actor;
+async function holderOf(app: App, cookie: string, db?: ReadDb): Promise<{ id: number; name: string } | null> {
+	const actor = (await findSession(app, hashOf(cookie), db ? { db } : {}))?.actor;
 	return actor ? { id: actor.id, name: actor.name } : null;
 }
 
@@ -1010,7 +1041,7 @@ export type Accepted = Entry | { ok: false; why: "other-session"; signedInAs: st
  * session, or the invited person's own, `replace` ends nothing.
  * The new session rests on the passkey when there is one, else on the password.
  */
-export function acceptInvitation(
+export async function acceptInvitation(
 	app: App,
 	input: {
 		code: string;
@@ -1023,7 +1054,7 @@ export function acceptInvitation(
 	about: About,
 ): Promise<Accepted> {
 	const { code, ...rest } = input;
-	return acceptByHash(app, hashOf(code), { ...rest, identity: null }, about);
+	return await acceptByHash(app, hashOf(code), { ...rest, identity: null }, about);
 }
 
 /**
@@ -1044,11 +1075,11 @@ async function acceptByHash(
 	},
 	about: About,
 ): Promise<Accepted> {
-	const judge = (db: Db) => {
-		const found = openInvitation(app, db, hash);
+	const judge = async (db: ReadDb) => {
+		const found = await openInvitation(app, db, hash);
 		if (!found) return no("invitation");
 		if (input.passkey === undefined) return { ok: true, ...found, registration: null } as const;
-		const registration = judgeRegistration(app, db, {
+		const registration = await judgeRegistration(app, db, {
 			person: found.person,
 			answer: input.passkey,
 			context: CONTEXT.invitation(hash),
@@ -1056,20 +1087,20 @@ async function acceptByHash(
 		return registration.ok ? ({ ok: true, ...found, registration } as const) : registration;
 	};
 	const attempt = byAddress(app, about.address);
-	const first = judge(app.reader);
+	const first = await app.database.read(async (readDb) => await judge(readDb));
 	// A code that accepts nothing is a wrong guess at one, and is counted. A good code with a passkey that was
 	// not accepted is somebody who holds the invitation, and is not.
 	if (!first.ok) return first.why === "invitation" ? attempt.wrong(first) : first;
 	// Somebody other than `person` whom the browser's cookie signs in now, and whether the page said their name.
 	// Nothing of this is carried over the wait at the gate: it is asked here, and asked again in the commit.
-	const elsewhere = (person: { id: number }): { name: string; agreed: boolean } | null => {
-		const holder = input.browser === null ? null : holderOf(app, input.browser);
+	const elsewhere = async (person: { id: number }, db?: ReadDb): Promise<{ name: string; agreed: boolean } | null> => {
+		const holder = input.browser === null ? null : await holderOf(app, input.browser, db);
 		return holder && holder.id !== person.id ? { name: holder.name, agreed: input.replace === holder.name } : null;
 	};
 	const unasked = (held: { name: string; agreed: boolean } | null): Accepted | null =>
 		held && !held.agreed ? { ok: false, why: "other-session", signedInAs: held.name } : null;
 	// Said before a password is hashed for an acceptance that cannot go through as it stands.
-	const early = unasked(elsewhere(first.person));
+	const early = unasked(await elsewhere(first.person));
 	if (early) return early;
 	about.proven?.();
 	let passwordHash: string | null = null;
@@ -1080,51 +1111,52 @@ async function acceptByHash(
 		throw error;
 	}
 	const cookie = newSessionSecret();
-	return commit(app, (): Accepted => {
-		const now = judge(app.db);
+	return await commit(app, async (db): Promise<Accepted> => {
+		const now = await judge(db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
 		const vouched = input.identity !== null && providerVouches(app);
-		if (!registration && !vouched && app.config.requireAdminMfa && hasAdminGrant(app.db, person.id))
+		if (!registration && !vouched && app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)))
 			return no("second-factor-required");
 		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
 		// holds the gate. The name is the one that person has now.
-		const held = elsewhere(person);
+		const held = await elsewhere(person, db);
 		const refused = unasked(held);
 		if (refused) return refused;
 		const at = app.now();
 		// By the hash of its code, and only while it is still good: of two acceptances one finds it spent.
-		if (!spendInvitation(app.db, hash, at)) throw new Stop(no("invitation"));
+		if (!(await spendInvitation(db, hash, at))) throw new Stop(no("invitation"));
 		if (invitation.purpose === "recover") {
-			revokeCredentialsOf(app.db, person.id, at);
-			revokeTokensOf(app.db, person.id, at);
-			endSessionsOf(app.db, person.id, at, "ended");
-			app.db.afterCommit(() => clearMailLinksOf(app, person.id));
-		} else if (liveCredentials(app.db, person.id).length > 0) throw new Stop(no("has-credentials"));
+			await revokeCredentialsOf(db, person.id, at);
+			await revokeTokensOf(db, person.id, at);
+			await endSessionsOf(db, person.id, at, "ended");
+			db.afterCommit(() => clearMailLinksOf(app, person.id));
+		} else if ((await liveCredentials(db, person.id)).length > 0) throw new Stop(no("has-credentials"));
 		let root: CredentialRow | null = null;
 		if (passwordHash !== null)
-			root = credentialById(app.db, insertPassword(app.db, { actor: person.id, hash: passwordHash, at }));
+			root = await credentialById(db, await insertPassword(db, { actor: person.id, hash: passwordHash, at }));
 		if (input.identity) {
-			if (oidcByHandle(app.db, input.identity.handle)) throw new Stop(no("credential-exists"));
-			root = insertOidc(app.db, { actor: person.id, ...input.identity, at });
+			if (await oidcByHandle(db, input.identity.handle)) throw new Stop(no("credential-exists"));
+			root = await insertOidc(db, { actor: person.id, ...input.identity, at });
 		}
 		if (registration)
-			root = insertPasskey(app.db, {
+			root = await insertPasskey(db, {
 				actor: person.id,
 				passkey: registration.passkey,
 				label: input.label ?? "passkey",
 				at,
 			});
 		if (!root) throw new Stop(no("input"));
-		const opened = openOn(app, root, cookie, about);
+		const opened = await openOn(app, db, root, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
 		// What was just stored signed its person in, and says so: a list does not call it "never used".
-		for (const row of liveCredentials(app.db, person.id)) noteCredentialUse(app.db, row.id, at);
+		for (const row of await liveCredentials(db, person.id)) await noteCredentialUse(db, row.id, at);
 		// The browser was somebody else's until now, and the page said whose. That session ends as a sign-out does.
-		if (input.browser !== null && held) endSession(app, hashOf(input.browser), "signed-out");
+		if (input.browser !== null && held) await endSession(app, db, hashOf(input.browser), "signed-out");
 		if (registration) spendChallenge(app, registration.challenge);
-		credentialNotice(
+		await credentialNotice(
 			app,
+			db,
 			person.id,
 			invitation.purpose === "recover"
 				? "Your sign-in methods were replaced through account recovery"
@@ -1185,18 +1217,21 @@ export async function beginOidcSignIn(app: App, start: OidcStart, address: strin
 	if (start.purpose === "join") {
 		const attempt = byAddress(app, address);
 		const hash = hashOf(start.code);
-		const found = openInvitation(app, app.reader, hash);
+		const found = await app.database.read(async (readDb) => await openInvitation(app, readDb, hash));
 		if (!found) return attempt.wrong(no("invitation"));
-		const holder = start.browser === null ? null : holderOf(app, start.browser);
+		const holder = start.browser === null ? null : await holderOf(app, start.browser);
 		if (holder && holder.id !== found.person.id && start.replace !== holder.name)
 			return { ok: false, why: "other-session", signedInAs: holder.name };
 		purpose = { purpose: "join", invitation: hash, replace: start.replace };
 	} else if (start.purpose === "link") {
-		if (!app.reader.get(Q.personById, { id: start.actor })) return { ok: false, why: "not-a-person" };
-		await app.gate.run(() =>
-			app.db.transaction(() =>
-				requireRecentProof(app, { actor: start.actor, context: CONTEXT.session(hashOf(start.browser)) }),
-			),
+		if (!(await app.database.read(async (db) => await db.get(Q.personById, { id: start.actor }))))
+			return { ok: false, why: "not-a-person" };
+		await app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await requireRecentProof(app, db, { actor: start.actor, context: CONTEXT.session(hashOf(start.browser)) }),
+				),
 		);
 		purpose = { purpose: "link", actor: start.actor, session: hashOf(start.browser) };
 	} else purpose = start;
@@ -1230,7 +1265,7 @@ export async function finishOidcSignIn(
 	const handle = oidcHandle(identity);
 	const label = identityLabel(app, identity);
 	if (purpose.purpose === "join") {
-		return acceptByHash(
+		return await acceptByHash(
 			app,
 			purpose.invitation,
 			{
@@ -1246,19 +1281,19 @@ export async function finishOidcSignIn(
 	}
 	if (purpose.purpose === "link") {
 		const linking = purpose;
-		return commit(app, (): OidcFinished => {
+		return await commit(app, async (db): Promise<OidcFinished> => {
 			// The browser that finishes is the session that began, and that session is still the person's.
-			const held = input.browser === null ? null : findSession(app, hashOf(input.browser), { db: app.db });
+			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });
 			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
 				return no("context");
-			requireRecentProof(app, { actor: linking.actor, context: CONTEXT.session(linking.session) });
-			if (oidcByHandle(app.db, handle)) return { ok: false, why: "linked-already" };
-			insertOidc(app.db, { actor: linking.actor, handle, label, at: app.now() });
-			credentialNotice(app, linking.actor, "An identity provider sign-in was added");
+			await requireRecentProof(app, db, { actor: linking.actor, context: CONTEXT.session(linking.session) });
+			if (await oidcByHandle(db, handle)) return { ok: false, why: "linked-already" };
+			await insertOidc(db, { actor: linking.actor, handle, label, at: app.now() });
+			await credentialNotice(app, db, linking.actor, "An identity provider sign-in was added");
 			return { ok: true, linked: true };
 		});
 	}
-	return openOidcSession(app, { identity }, about);
+	return await openOidcSession(app, { identity }, about);
 }
 
 async function openOidcSession(
@@ -1270,22 +1305,22 @@ async function openOidcSession(
 	if ("native" in input && !findNativeOidc(app, input.native)) return attempt.wrong(no("challenge"));
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, (): Entry => {
+	const entry = await commit(app, async (db): Promise<Entry> => {
 		const handoff = "native" in input ? takeNativeOidc(app, input.native) : null;
 		const identity = "identity" in input ? input.identity : handoff?.identity;
 		if (!identity) return no("challenge");
 		if ("native" in input && input.native.instance !== publicAddress(app.config)?.url) return no("context");
 		if (!app.config.oidc || identity.issuer !== app.config.oidc.issuer) return no("changed-meanwhile");
-		const row = oidcByHandle(app.db, oidcHandle(identity));
+		const row = await oidcByHandle(db, oidcHandle(identity));
 		if (handoff && (!row || row.id !== handoff.credential || row.actor !== handoff.actor))
 			return no("changed-meanwhile");
-		const person = row ? app.db.get(Q.personById, { id: row.actor }) : null;
+		const person = row ? await db.get(Q.personById, { id: row.actor }) : null;
 		if (!row || !person) return no("unknown-identity");
-		if (app.config.requireAdminMfa && hasAdminGrant(app.db, person.id) && !providerVouches(app))
+		if (app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)) && !providerVouches(app))
 			return no("second-factor-required");
-		const opened = openOn(app, row, cookie, about);
+		const opened = await openOn(app, db, row, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
-		noteCredentialUse(app.db, row.id, app.now());
+		await noteCredentialUse(db, row.id, app.now());
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } };
 	});
 	// An identity nobody linked is somebody trying; a person refused by the rule for admins, or a row that changed
@@ -1317,12 +1352,12 @@ export async function signInWithTotp(
 	const attempt = factorAttempt(app, { kind: "sign-in", name: initial.name, address: about.address });
 	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
 	const cookie = newSessionSecret();
-	return commit(app, () => {
+	return await commit(app, async (db) => {
 		const held = findTotp(app, input.challenge, "sign-in");
 		if (!held || held !== initial) return no("challenge");
-		const person = app.db.get(Q.personByName, { name: held.name });
-		const password = person ? livePassword(app.db, person.id) : null;
-		const factor = person ? liveTotp(app.db, person.id) : null;
+		const person = await db.get(Q.personByName, { name: held.name });
+		const password = person ? await livePassword(db, person.id) : null;
+		const factor = person ? await liveTotp(db, person.id) : null;
 		if (!password || password.data !== held.password || !factor || factor.id !== held.factor)
 			return no("changed-meanwhile");
 		const currentLimit = attempt.limiter.check(attempt.keys, app.now());
@@ -1333,11 +1368,11 @@ export async function signInWithTotp(
 			attempt.limiter.failed(attempt.keys, app.now());
 			return no("wrong-code");
 		}
-		const opened = openOn(app, password, cookie, about);
-		if (!opened || !updateTotp(app.db, factor, JSON.stringify(next), app.now()))
+		const opened = await openOn(app, db, password, cookie, about);
+		if (!opened || !(await updateTotp(db, factor, JSON.stringify(next), app.now())))
 			throw new Stop(no("changed-meanwhile"));
-		if (held.rehashed === null) noteCredentialUse(app.db, password.id, app.now());
-		else if (!rehashPassword(app.db, password, held.rehashed, app.now())) throw new Stop(no("changed-meanwhile"));
+		if (held.rehashed === null) await noteCredentialUse(db, password.id, app.now());
+		else if (!(await rehashPassword(db, password, held.rehashed, app.now()))) throw new Stop(no("changed-meanwhile"));
 		spendTotp(app, input.challenge);
 		attempt.limiter.succeeded([attempt.account]);
 		about.proven?.();
@@ -1345,10 +1380,10 @@ export async function signInWithTotp(
 	});
 }
 
-export function beginTotp(app: App, input: { actor: number; context: string }) {
-	requireRecentProof(app, input);
-	const person = mustBePerson(app.db, input.actor);
-	if (liveTotp(app.db, person.id))
+export async function beginTotp(app: App, db: WriteDb, input: { actor: number; context: string }) {
+	await requireRecentProof(app, db, input);
+	const person = await mustBePerson(db, input.actor);
+	if (await liveTotp(db, person.id))
 		throw conflict("an authenticator is enrolled already; remove it before enrolling another");
 	const secret = newTotpSecret();
 	return {
@@ -1357,16 +1392,17 @@ export function beginTotp(app: App, input: { actor: number; context: string }) {
 	};
 }
 
-export function confirmTotp(
+export async function confirmTotp(
 	app: App,
+	db: WriteDb,
 	input: { actor: number; session: number | null; context: string; challenge: string; code: string },
 ) {
-	requireRecentProof(app, input);
-	const person = mustBePerson(app.db, input.actor);
+	await requireRecentProof(app, db, input);
+	const person = await mustBePerson(db, input.actor);
 	const held = findTotp(app, input.challenge, "enrol");
 	if (!held || held.actor !== person.id || held.name !== person.name || held.context !== input.context)
 		throw invalid("this authenticator enrolment ended; begin again in the same session");
-	if (liveTotp(app.db, person.id)) throw conflict("an authenticator is enrolled already");
+	if (await liveTotp(db, person.id)) throw conflict("an authenticator is enrolled already");
 	const attempt = factorAttempt(app, { kind: "enrol", name: person.name, address: null });
 	if (attempt.answer.kind === "blocked")
 		throw new OpError("limited", `wait ${attempt.answer.retryAfterSeconds} seconds before trying another code`);
@@ -1377,13 +1413,13 @@ export function confirmTotp(
 	}
 	const recovery = recoveryCodes();
 	const at = app.now();
-	const id = insertTotp(app.db, {
+	const id = await insertTotp(db, {
 		actor: person.id,
 		data: JSON.stringify({ ...stored, recovery: recovery.hashes }),
 		at,
 	});
-	const sessionsEnded = endOtherSessions(app.db, person.id, input.session, at);
-	credentialNotice(app, person.id, "An authenticator was added");
+	const sessionsEnded = await endOtherSessions(db, person.id, input.session, at);
+	await credentialNotice(app, db, person.id, "An authenticator was added");
 	spendTotp(app, input.challenge);
 	attempt.limiter.succeeded([attempt.account]);
 	return { id, recoveryCodes: recovery.codes, sessionsEnded };
@@ -1424,7 +1460,7 @@ export async function finishNativeOidc(
 	if (!judged.ok) return refused(judged.native, judged.why);
 	if (judged.purpose.purpose !== "native") return null;
 	if (judged.identity.issuer !== app.config.oidc?.issuer) return null;
-	const row = oidcByHandle(app.reader, oidcHandle(judged.identity));
+	const row = await app.database.read(async (readDb) => await oidcByHandle(readDb, oidcHandle(judged.identity)));
 	if (!row) return refused(judged.purpose, "unknown-identity");
 	return issueNativeOidc(
 		app,
@@ -1433,5 +1469,5 @@ export async function finishNativeOidc(
 	);
 }
 
-export const exchangeNativeOidc = (app: App, input: NativeOidcExchange, about: About): Promise<Entry> =>
-	openOidcSession(app, { native: input }, about);
+export const exchangeNativeOidc = async (app: App, input: NativeOidcExchange, about: About): Promise<Entry> =>
+	await openOidcSession(app, { native: input }, about);

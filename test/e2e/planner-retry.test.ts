@@ -9,6 +9,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Run, Slot } from "../../src/web/runs/models.ts";
+import { testDatabase } from "../db.ts";
 import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const check = browserAvailable ? test : test.skip;
@@ -780,10 +781,18 @@ for (const reload of [false, true])
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-planner-identity-"));
 			const token = "planner-identity-test-owner-token";
-			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
+			const database = await testDatabase();
+			const instance = await start(
+				{
+					...defaultConfig({}),
+					databaseUrl: database.url,
+					dataDir,
+					port: 0,
+					owner: "robin",
+					ownerToken: token,
+					mode: "local",
+				},
 				() => ({ ui }),
-				{ readers: 0 },
 			);
 			const server: Server = {
 				url: instance.url,
@@ -810,7 +819,11 @@ for (const reload of [false, true])
 				await page.getByLabel("Run name").fill("Original project's plan");
 				await page.locator('.run-planner button[type="submit"]').click();
 				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
-				removeProject(instance.app.db, "scratch");
+				await instance.app.database.write(async (db) => {
+					await db.transaction(async () => {
+						await removeProject(db, "scratch");
+					});
+				});
 				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 				await seed();
 				if (reload) {
@@ -852,6 +865,7 @@ for (const reload of [false, true])
 			} finally {
 				await view?.close();
 				await instance.stop();
+				await database.close();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},

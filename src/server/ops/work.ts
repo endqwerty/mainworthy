@@ -8,8 +8,8 @@ import { leaseOf, mustRun, releaseWork, runRef, type SlotLease, takeWork, workSl
 import { caseById, caseRef } from "../suite/suite.ts";
 import { defineOp } from "./registry.ts";
 
-function busy(ctx: Ctx, lease: SlotLease): never {
-	const actor = actorLabel(ctx.db, lease.actor).name;
+async function busy(ctx: Ctx, lease: SlotLease): Promise<never> {
+	const actor = (await actorLabel(ctx.db, lease.actor)).name;
 	throw conflict(`Slot ${lease.slot} is held by ${actor} until ${new Date(lease.until).toISOString()}`, {
 		actor,
 		until: lease.until,
@@ -24,21 +24,21 @@ export const workOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: "Take next slot with run; renew with slot. Report or give-back releases.",
-	run(ctx, input): WorkReply {
-		const run = mustRun(ctx.db, ctx.project.id, input.run);
+	async run(ctx, input): Promise<WorkReply> {
+		const run = await mustRun(ctx.db, ctx.project.id, input.run);
 		if (input.do === "give-back") {
 			if (input.slot === undefined) throw invalid("giving back needs a slot");
-			const slot = workSlot(ctx, run, input.slot);
-			const lease = leaseOf(ctx, slot.id);
-			if (lease && workHeldByOther(lease, ctx.actor.id, ctx.app.now())) return busy(ctx, lease);
-			releaseWork(ctx, run, slot);
-			const row = caseById(ctx.db, slot.case_id);
+			const slot = await workSlot(ctx, run, input.slot);
+			const lease = await leaseOf(ctx, slot.id);
+			if (lease && workHeldByOther(lease, ctx.actor.id, ctx.app.now())) return await busy(ctx, lease);
+			await releaseWork(ctx, run, slot);
+			const row = await caseById(ctx.db, slot.case_id);
 			return { run: runRef(run), slot: slot.id, case: row ? caseRef(row) : null, work: { kind: "free" } };
 		}
-		const result = takeWork(ctx, run, input);
-		if (result.kind === "busy") return busy(ctx, result.lease);
+		const result = await takeWork(ctx, run, input);
+		if (result.kind === "busy") return await busy(ctx, result.lease);
 		if (result.kind === "empty") return { run: runRef(run), slot: null, case: null, work: { kind: "free" } };
-		const row = caseById(ctx.db, result.slot.case_id);
+		const row = await caseById(ctx.db, result.slot.case_id);
 		return {
 			run: runRef(run),
 			slot: result.slot.id,

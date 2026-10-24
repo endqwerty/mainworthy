@@ -9,6 +9,23 @@
 # First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
 # tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
 services:
+  postgres:
+    image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mainworthy
+      POSTGRES_DB: mainworthy
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mainworthy -d mainworthy"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - mainworthy-postgres:/var/lib/postgresql
+    networks: [database]
+
   mainworthy:
     build: .
     restart: unless-stopped
@@ -23,7 +40,7 @@ services:
       MAINWORTHY_LOCKDOWN: "1"
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:?Set the application network peer range}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:?Set the dedicated client header}
-      MAINWORTHY_LOCK_WAIT_SECONDS: ${MAINWORTHY_LOCK_WAIT_SECONDS:-30}
+      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
@@ -39,6 +56,10 @@ services:
       # a project `mainworthy seed` made is replaced. Unset means `demo`; set it empty in Coolify for none (hence
       # `-`, not `:-`, which would read an empty value as unset).
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO-demo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default, database]
     volumes:
       - mainworthy-data:/data
 
@@ -143,6 +164,11 @@ configs:
         }
       }
 
+networks:
+  database:
+    internal: true
+
 volumes:
+  mainworthy-postgres:
   mainworthy-data:
   tailscale-state:

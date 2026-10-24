@@ -3,6 +3,7 @@ import { AuditInput, type AuditRecord, compareAuditRecords, encodeAudit } from "
 import { REPLIES } from "../../core/replies.ts";
 import { mergeReceiptById, mergeReceiptPage } from "../decisions/questions.ts";
 import type { Ctx } from "../kernel/ctx.ts";
+import type { ReadDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { exportAudit } from "../transfer/audit.ts";
 import { defineOp } from "./registry.ts";
@@ -17,18 +18,19 @@ export const auditOp = defineOp({
 	scope: "project",
 	effect: "read",
 	mcp: null,
-	run: (ctx, input) => (input.receipt === undefined ? exportAudit(ctx, input) : exportReceiptAudit(ctx, input)),
+	run: async (ctx, input) =>
+		input.receipt === undefined ? await exportAudit(ctx, input) : await exportReceiptAudit(ctx, input),
 });
 
-function exportReceiptAudit(ctx: Ctx, input: AuditInput) {
+async function exportReceiptAudit(ctx: Ctx<ReadDb>, input: AuditInput) {
 	const to = input.to ?? ctx.now + 1;
 	if (to > ctx.now + 1 || to <= input.from)
 		throw invalid("audit needs from < to <= the server's current time plus one millisecond");
 
-	const receipt = mergeReceiptById(ctx.db, ctx.project.id, input.receipt ?? null);
+	const receipt = await mergeReceiptById(ctx.db, ctx.project.id, input.receipt ?? null);
 	if (!receipt || receipt.at < input.from || receipt.at >= to)
 		throw invalid("receipt is outside this project's selected audit range");
-	const page = mergeReceiptPage(ctx.db, ctx.project.id, receipt.id, input.cursor, input.limit ?? 50, "evidence");
+	const page = await mergeReceiptPage(ctx.db, ctx.project.id, receipt.id, input.cursor, input.limit ?? 50, "evidence");
 	const item = z.object({
 		ordinal: z.number(),
 		kind: z.enum(["result", "gate"]),

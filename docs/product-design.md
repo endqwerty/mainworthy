@@ -9,6 +9,10 @@ draft budgets to validate on the phase 1 benchmark.
 Companion records: [0007 guiding principles](decisions/0007-guiding-principles.md)
 and [0008 one evidence model](decisions/0008-one-evidence-model.md).
 
+The deployment-layer sketches below are historical. PostgreSQL 18 is now required, and the Local product layer
+has ended. `compose.yaml` runs the app and database. Running elsewhere is possible but not yet supported,
+per the amendment to decision 0026.
+
 Contents: 1 Thesis · 2 Why the incumbents are a poor use of money · 3 Principles
 (summary) · 4 The DX moves, made concrete · 5 Usage first · 6 Domain model ·
 7 Operation layer and module map · 8 Product surface · 9 First deliverable

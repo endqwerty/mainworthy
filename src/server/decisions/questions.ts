@@ -4,7 +4,7 @@ import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
 const causeFields = { signature: z.number(), scope: z.string() };
@@ -128,8 +128,8 @@ export type Signer = { by: number; clause: string; policy: number; reason: strin
 
 // Only the recorded endings of a hold belong in Settled after their question dissolves.
 const HOLD_ENDING = `d.supersedes IS NOT NULL AND (
- (json_extract(d.answer, '$.is') = 'expired' AND json_extract(d.signers, '$[0].clause') = 'hold-expired')
- OR (json_extract(d.answer, '$.is') = 'outdated' AND json_extract(d.signers, '$[0].clause') IN ('tracker-closed', 'passed'))
+ ((d.answer::jsonb)->>'is' = 'expired' AND (d.signers::jsonb)->0->>'clause' = 'hold-expired')
+ OR ((d.answer::jsonb)->>'is' = 'outdated' AND (d.signers::jsonb)->0->>'clause' IN ('tracker-closed', 'passed'))
 )`;
 
 type ReceiptRoot = { id: number; hash: string; count: number };
@@ -137,29 +137,34 @@ type ReceiptMember = { slot: number; child: number | null; payload: number | nul
 
 const Q = {
 	receiptDecision: sql<{ id: number }, { answer: string }>(
-		"SELECT json_extract(answer, '$.is') AS answer FROM decisions WHERE id=$id",
+		"SELECT (answer::jsonb)->>'is' AS answer FROM decisions WHERE id=$id",
 	),
 	node: sql<{ id: number }, ReceiptRoot>("SELECT id,hash,count FROM merge_receipt_nodes WHERE id=$id"),
 	nodeByHash: sql<{ project: number; hash: string }, ReceiptRoot>(
 		"SELECT id,hash,count FROM merge_receipt_nodes WHERE project=$project AND hash=$hash",
 	),
-	insertNode: sql<{ project: number; hash: string; level: number; count: number }>(
-		"INSERT INTO merge_receipt_nodes(project,hash,level,count) VALUES ($project,$hash,$level,$count)",
+	insertNode: sql<{ project: number; hash: string; level: number; count: number }, { id: number }>(
+		"INSERT INTO merge_receipt_nodes(project,hash,level,count) VALUES ($project,$hash,$level,$count) RETURNING id",
 	),
 	members: sql<{ node: number }, ReceiptMember>(
 		`SELECT m.slot,m.child,m.payload,coalesce(n.hash,p.hash) AS hash,coalesce(n.count,1) AS count FROM merge_receipt_members m LEFT JOIN merge_receipt_nodes n ON n.id=m.child LEFT JOIN merge_receipt_payloads p ON p.id=m.payload WHERE m.node=$node ORDER BY m.slot`,
 	),
-	insertMember: sql<{ node: number; slot: number; child: number | null; payload: number | null }>(
-		"INSERT INTO merge_receipt_members(node,slot,child,payload) VALUES ($node,$slot,$child,$payload)",
+	insertMembers: sql<{
+		node: number;
+		slots: readonly number[];
+		children: readonly (number | null)[];
+		payloads: readonly (number | null)[];
+	}>(
+		"INSERT INTO merge_receipt_members(node,slot,child,payload) SELECT $node,u.slot,u.child,u.payload FROM unnest($slots::bigint[],$children::bigint[],$payloads::bigint[]) AS u(slot,child,payload)",
 	),
 	payload: sql<{ id: number }, { hash: string; body: string }>(
 		"SELECT hash,body FROM merge_receipt_payloads WHERE id=$id",
 	),
-	insertPayload: sql<{ project: number; hash: string; body: string }>(
-		"INSERT INTO merge_receipt_payloads(project,hash,body) VALUES ($project,$hash,$body) ON CONFLICT(project,hash) DO NOTHING",
+	insertPayloads: sql<{ project: number; hashes: readonly string[]; bodies: readonly string[] }>(
+		"INSERT INTO merge_receipt_payloads(project,hash,body) SELECT $project,u.hash,u.body FROM unnest($hashes::text[],$bodies::text[]) WITH ORDINALITY AS u(hash,body,position) ORDER BY u.position ON CONFLICT(project,hash) DO NOTHING",
 	),
-	payloadByHash: sql<{ project: number; hash: string }, { id: number }>(
-		"SELECT id FROM merge_receipt_payloads WHERE project=$project AND hash=$hash",
+	payloadsByHashes: sql<{ project: number; hashes: readonly string[] }, { id: number; hash: string }>(
+		"SELECT id,hash FROM merge_receipt_payloads WHERE project=$project AND hash=ANY($hashes::text[])",
 	),
 	cache: sql<{ run: number; project: number }, { root: number | null }>(
 		"SELECT root FROM merge_receipt_heads WHERE run=$run AND project=$project",
@@ -174,15 +179,18 @@ const Q = {
 	snapshotByHash: sql<{ project: number; hash: string }, { id: number; count: number; evidence_count: number }>(
 		"SELECT id,count,evidence_count FROM merge_receipt_snapshots WHERE project=$project AND hash=$hash",
 	),
-	insertSnapshot: sql<{
-		project: number;
-		hash: string;
-		result_root: number | null;
-		gate_root: number | null;
-		count: number;
-		evidence_count: number;
-	}>(
-		"INSERT INTO merge_receipt_snapshots(project,hash,result_root,gate_root,count,evidence_count) VALUES ($project,$hash,$result_root,$gate_root,$count,$evidence_count)",
+	insertSnapshot: sql<
+		{
+			project: number;
+			hash: string;
+			result_root: number | null;
+			gate_root: number | null;
+			count: number;
+			evidence_count: number;
+		},
+		{ id: number }
+	>(
+		"INSERT INTO merge_receipt_snapshots(project,hash,result_root,gate_root,count,evidence_count) VALUES ($project,$hash,$result_root,$gate_root,$count,$evidence_count) RETURNING id",
 	),
 	roots: sql<{ project: number; receipt: number }, { result_root: number | null; gate_root: number | null }>(
 		"SELECT s.result_root,s.gate_root FROM merge_receipts r JOIN merge_receipt_snapshots s ON s.id=r.evidence WHERE r.project=$project AND r.id=$receipt",
@@ -190,16 +198,19 @@ const Q = {
 	mergeReceipt: sql<{ id: number; project: number }, { id: number; snapshot: string }>(
 		"SELECT id, snapshot FROM merge_receipts WHERE id = $id AND project = $project",
 	),
-	insertMergeReceipt: sql<{
-		project: number;
-		change: number;
-		actor: number;
-		at: number;
-		seq: number;
-		snapshot: string;
-		evidence: number;
-	}>(
-		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot, evidence) VALUES ($project, $change, $actor, $at, $seq, $snapshot, $evidence)",
+	insertMergeReceipt: sql<
+		{
+			project: number;
+			change: number;
+			actor: number;
+			at: number;
+			seq: number;
+			snapshot: string;
+			evidence: number;
+		},
+		{ id: number }
+	>(
+		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot, evidence) VALUES ($project, $change, $actor, $at, $seq, $snapshot, $evidence) RETURNING id",
 	),
 	latest: sql<{ project: number; fingerprint: string }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
@@ -210,36 +221,39 @@ const Q = {
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND q.fingerprint = $fingerprint
 		   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL
-		        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))
+		        AND (d.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')))
 		 ORDER BY q.epoch DESC, q.id DESC`,
 	),
 	byNo: sql<{ project: number; no: number }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND no = $no",
 	),
 	byId: sql<{ id: number }, StoredQuestionRow>("SELECT * FROM questions WHERE id = $id"),
-	insert: sql<{
-		project: number;
-		no: number;
-		kind: string;
-		subject: string;
-		fingerprint: string;
-		epoch: number;
-		prior: number | null;
-		title: string;
-		producer: string;
-		evidence: string;
-		hash: string;
-		basis: string;
-		seq: number;
-		ask: string;
-		blocks: string;
-		rank: number;
-		at: number;
-	}>(
+	insert: sql<
+		{
+			project: number;
+			no: number;
+			kind: string;
+			subject: string;
+			fingerprint: string;
+			epoch: number;
+			prior: number | null;
+			title: string;
+			producer: string;
+			evidence: string;
+			hash: string;
+			basis: string;
+			seq: number;
+			ask: string;
+			blocks: string;
+			rank: number;
+			at: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO questions (project, no, kind, subject, fingerprint, epoch, prior, title, producer, evidence, evidence_hash,
 		                        basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
 		 VALUES ($project, $no, $kind, $subject, $fingerprint, $epoch, $prior, $title, $producer, $evidence, $hash,
-		         $basis, $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq)`,
+		         $basis, $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq) RETURNING id`,
 	),
 	attach: sql<{
 		id: number;
@@ -261,32 +275,42 @@ const Q = {
 	),
 	setAsk: sql<{ id: number; ask: string }>("UPDATE questions SET ask = $ask WHERE id = $id"),
 	forgetAuthor: sql<{ name: string; pseudonym: string }>(
-		`UPDATE questions SET evidence = json_set(evidence, '$.author', $pseudonym)
-		 WHERE kind = 'adopt' AND json_extract(evidence, '$.author') = $name`,
+		`UPDATE questions SET evidence = jsonb_set(evidence::jsonb, '{author}', to_jsonb($pseudonym::text))::text
+		 WHERE kind = 'adopt' AND (evidence::jsonb)->>'author' = $name`,
 	),
 	forgetFinder: sql<{ name: string; pseudonym: string }>(
-		`UPDATE questions SET evidence = json_set(evidence, '$.finder', $pseudonym)
-		 WHERE kind = 'finding' AND json_extract(evidence, '$.finder') = $name`,
+		`UPDATE questions SET evidence = jsonb_set(evidence::jsonb, '{finder}', to_jsonb($pseudonym::text))::text
+		 WHERE kind = 'finding' AND (evidence::jsonb)->>'finder' = $name`,
 	),
 	setParties: sql<{ id: number; parties: string }>(
-		"UPDATE questions SET evidence = json_set(evidence, '$.parties', json($parties)) WHERE id = $id",
+		"UPDATE questions SET evidence = jsonb_set(evidence::jsonb, '{parties}', $parties::text::jsonb)::text WHERE id = $id",
 	),
 	setFacts: sql<{ id: number; facts: string; parties: string }>(
-		`UPDATE questions SET evidence = json_set(evidence, '$.facts', json($facts), '$.parties', json($parties))
+		`UPDATE questions SET evidence = jsonb_set(jsonb_set(evidence::jsonb, '{facts}', $facts::text::jsonb), '{parties}', $parties::text::jsonb)::text
 		 WHERE id = $id`,
 	),
-	addRef: sql<{ project: number; ref: string; question: number }>(
-		"INSERT OR IGNORE INTO question_refs (project, ref, question) VALUES ($project, $ref, $question)",
+	addRefs: sql<{ project: number; refs: readonly string[]; question: number }>(
+		`INSERT INTO question_refs (project, ref, question)
+ SELECT $project, requested.ref, $question FROM unnest($refs::text[]) AS requested(ref) ON CONFLICT DO NOTHING`,
+	),
+	refsForItems: sql<{ ids: readonly number[] }, { question: number; ref: string }>(
+		"SELECT question, ref FROM question_refs WHERE question = ANY($ids::bigint[]) ORDER BY question, ref",
+	),
+	answersForItems: sql<{ ids: readonly number[] }, AnswerRow>(
+		"SELECT * FROM answers WHERE question = ANY($ids::bigint[]) ORDER BY id",
 	),
 	refsOf: sql<{ question: number }, { ref: string }>(
 		"SELECT ref FROM question_refs WHERE question = $question ORDER BY ref",
 	),
-	refsOfQuestions: sql<{ questions: string }, { ref: string }>(
-		`SELECT DISTINCT r.ref FROM json_each($questions) asked
-		 CROSS JOIN question_refs r ON r.question = asked.value`,
+	refsOfQuestions: sql<{ questions: readonly number[] }, { ref: string }>(
+		`SELECT DISTINCT r.ref FROM unnest($questions::bigint[]) AS asked(value)
+		 JOIN question_refs r ON r.question = asked.value`,
 	),
-	openSummariesOnRefs: sql<{ project: number; refs: string }, { ref: string; no: number; evidence_hash: string }>(
-		`SELECT asked.value AS ref, q.no, q.evidence_hash FROM json_each($refs) asked CROSS JOIN questions q ON q.id IN (
+	openSummariesOnRefs: sql<
+		{ project: number; refs: readonly string[] },
+		{ ref: string; no: number; evidence_hash: string }
+	>(
+		`SELECT asked.value AS ref, q.no, q.evidence_hash FROM unnest($refs::text[]) WITH ORDINALITY AS asked(value, key) JOIN questions q ON q.id IN (
 			SELECT r.question FROM question_refs r WHERE r.project = $project AND r.ref = asked.value
 			ORDER BY r.question DESC LIMIT 200
 		 ) WHERE q.state = 'open' ORDER BY CAST(asked.key AS INTEGER), q.id DESC`,
@@ -301,24 +325,26 @@ const Q = {
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id`,
 	),
+	inheritedRunRefs: sql<{ project: number }, { ref: string }>(
+		"SELECT DISTINCT ref FROM question_refs WHERE project = $project AND ref LIKE 'inherited:R-%'",
+	),
 	// A cause answer that says the target needs a fix and still stands: it ends when its cause passes.
 	attributedOnRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
-		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question JOIN decisions d ON d.id = q.decision
-		 WHERE r.project = $project AND r.ref = $ref AND q.kind = 'failure' AND q.state = 'decided'
-		   AND json_extract(q.subject, '$.slot') IS NULL AND json_extract(q.subject, '$.perResult') IS NULL
-		   AND json_extract(d.answer, '$.is') IN (${ATTRIBUTED.map((is) => `'${is}'`).join(", ")})
-		 ORDER BY q.id`,
+		"WITH answered AS MATERIALIZED (SELECT q.* FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.project = $project AND q.kind = 'failure' AND q.state = 'decided' AND (q.subject::jsonb)->>'slot' IS NULL AND (q.subject::jsonb)->>'perResult' IS NULL AND (d.answer::jsonb)->>'is' IN (" +
+			ATTRIBUTED.map((is) => "'" + is + "'").join(", ") +
+			")) SELECT q.* FROM answered q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
 	),
 	openOnRef: sql<
 		{ project: number; ref: string },
 		{ id: number; no: number; kind: Kind; subject: string; blocks: string }
 	>(
-		`SELECT q.id, q.no, q.kind, q.subject, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
-		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
+		"WITH current_questions AS MATERIALIZED (SELECT id, no, kind, subject, blocks FROM questions WHERE project = $project AND state = 'open') SELECT q.* FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
+	),
+	openCountsOnRefs: sql<{ project: number; refs: readonly string[] }, { ref: string; n: number }>(
+		"WITH current_questions AS MATERIALIZED (SELECT id FROM questions WHERE project = $project AND state = 'open') SELECT r.ref, count(*) AS n FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = ANY($refs::text[]) GROUP BY r.ref",
 	),
 	openCountOnRef: sql<{ project: number; ref: string }, { n: number }>(
-		`SELECT count(*) AS n FROM question_refs r JOIN questions q ON q.id = r.question
-		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
+		"WITH current_questions AS MATERIALIZED (SELECT id FROM questions WHERE project = $project AND state = 'open') SELECT count(*) AS n FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref",
 	),
 	// The queue is ordered by rank and id together: one report can raise many questions that share a rank, so a page
 	// cut on the rank alone would skip the rest of them. (`questions_queue` ends in the id, so no sort is needed.)
@@ -344,6 +370,14 @@ const Q = {
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
 		 AND q.kind = $kind AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
+	),
+	freshMaps: sql<{ ids: readonly number[]; project: number }, StoredQuestionRow>(
+		"SELECT q.* FROM questions q WHERE q.project = $project AND q.id = ANY($ids::bigint[]) AND q.kind = 'map' AND q.state = 'open' AND q.owner = 0 AND q.prior IS NULL AND q.decision IS NULL AND q.blocks = '[]' AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.question = q.id) AND NOT EXISTS (SELECT 1 FROM question_refs r WHERE r.question = q.id AND r.ref LIKE 'R-%') ORDER BY q.id",
+	),
+	trackFreshMaps: sql<{ rows: string; project: number; at: number; seq: number }, { no: number }>(
+		"WITH asked AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint, ask text, holds text, signers text)), " +
+			"made AS (INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence) SELECT $project, q.id, 'map', '{\"is\":\"track\"}', x.signers, q.basis, x.holds, NULL, NULL, $at, $seq, q.evidence_hash FROM asked x JOIN questions q ON q.id = x.id ORDER BY q.id RETURNING id, question) " +
+			"UPDATE questions q SET ask = x.ask, state = 'decided', decision = made.id, rev = $seq FROM made JOIN asked x ON x.id = made.question WHERE q.id = made.question RETURNING q.no",
 	),
 	openIdsOfKind: sql<{ project: number; kind: string }, { id: number }>(
 		"SELECT id FROM questions WHERE project = $project AND state = 'open' AND owner = 0 AND kind = $kind ORDER BY id",
@@ -371,26 +405,57 @@ const Q = {
 		 VALUES ($question, $actor, $answer, $reason, $hash, $counts, $at, $seq)`,
 	),
 	answersOf: sql<{ question: number }, AnswerRow>("SELECT * FROM answers WHERE question = $question ORDER BY id"),
-	insertDecision: sql<{
-		hash: string;
-		project: number;
-		question: number;
-		kind: string;
-		answer: string;
-		signers: string;
-		basis: string;
-		holds: string;
-		expires: number | null;
-		supersedes: number | null;
-		at: number;
-		seq: number;
-	}>(
+	insertDecision: sql<
+		{
+			hash: string;
+			project: number;
+			question: number;
+			kind: string;
+			answer: string;
+			signers: string;
+			basis: string;
+			holds: string;
+			expires: number | null;
+			supersedes: number | null;
+			at: number;
+			seq: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
-		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash)`,
+		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash) RETURNING id`,
+	),
+	independentFailureDecisions: sql<{ project: number; ids: readonly number[] }, DecisionRow>(
+		`SELECT d.* FROM questions q JOIN decisions d ON d.id = q.decision
+		 WHERE q.project = $project AND q.id = ANY($ids::bigint[]) AND q.state = 'decided'
+		 AND NOT EXISTS (SELECT 1 FROM questions other WHERE other.project = q.project
+		   AND other.fingerprint = q.fingerprint AND other.id != q.id AND other.state IN ('open', 'decided'))`,
+	),
+	endPassedHolds: sql<{ rows: string; project: number; at: number; seq: number }, { no: number }>(
+		`WITH ending AS MATERIALIZED (
+		 SELECT * FROM jsonb_to_recordset($rows::text::jsonb)
+		 AS x(question bigint, decision bigint, answer text, signers text, ord bigint)
+		), made AS (
+		 INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
+		 SELECT $project, q.id, q.kind, x.answer, x.signers, q.basis, '[]', NULL, x.decision, $at, $seq, q.evidence_hash
+		 FROM ending x JOIN questions q ON q.id = x.question ORDER BY x.ord RETURNING id, question
+		)
+		 UPDATE questions q SET state = 'dissolved', decision = made.id, rev = $seq
+		 FROM made WHERE q.id = made.question RETURNING q.no`,
 	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
+	decisionsByIds: sql<{ ids: readonly number[] }, DecisionRow>(
+		"SELECT * FROM decisions WHERE id = ANY($ids::bigint[])",
+	),
 	holdEndingById: sql<{ id: number }, DecisionRow>(`SELECT d.* FROM decisions d WHERE d.id = $id AND ${HOLD_ENDING}`),
+	nearestJudgment: sql<{ question: number }, DecisionRow>(`
+ WITH RECURSIVE history AS (
+  SELECT id,prior,ARRAY[id] AS path,0 AS depth FROM questions WHERE id=$question
+  UNION ALL SELECT q.id,q.prior,h.path||q.id,h.depth+1 FROM questions q JOIN history h ON q.id=h.prior WHERE NOT q.id=ANY(h.path)
+ ) SELECT d.* FROM history h JOIN decisions d ON d.question=h.id
+ WHERE coalesce((d.answer::jsonb)->>'is','') NOT IN ('expired','outdated','withdrawn')
+ ORDER BY h.depth,d.id DESC LIMIT 1`),
 	decisionsOf: sql<{ question: number }, DecisionRow>("SELECT * FROM decisions WHERE question = $question ORDER BY id"),
 	expired: sql<{ project: number; now: number }, DecisionRow>(
 		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
@@ -399,20 +464,24 @@ const Q = {
 	defects: sql<{ project: number }, DecisionRow>(
 		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
 		 WHERE d.project = $project AND q.state = 'decided' AND d.kind = 'failure'
-		 AND json_extract(d.answer, '$.is') = 'defect' AND json_type(d.answer, '$.ref') = 'text'`,
+		 AND (d.answer::jsonb)->>'is' = 'defect' AND jsonb_typeof((d.answer::jsonb)->'ref') = 'string'`,
 	),
 };
 
 /** Old evidence kept display names. Attribution is outside the material basis and target hashed by raise. */
-export function forgetQuestionNames(db: Db, name: string, pseudonym: string): void {
-	db.run(Q.forgetAuthor, { name, pseudonym });
-	db.run(Q.forgetFinder, { name, pseudonym });
+export async function forgetQuestionNames(db: WriteDb, name: string, pseudonym: string): Promise<void> {
+	await db.run(Q.forgetAuthor, { name, pseudonym });
+	await db.run(Q.forgetFinder, { name, pseudonym });
 }
 
 export const questionRef = (row: { no: number }): string => ref("question", row.no);
 
-export function latestByFingerprint(db: Db, project: number, fingerprint: string): QuestionRow | null {
-	const row = db.get(Q.latest, { project, fingerprint });
+export async function latestByFingerprint(
+	db: ReadDb,
+	project: number,
+	fingerprint: string,
+): Promise<QuestionRow | null> {
+	const row = await db.get(Q.latest, { project, fingerprint });
 	return row ? readQuestion(row) : null;
 }
 
@@ -420,22 +489,30 @@ export function latestByFingerprint(db: Db, project: number, fingerprint: string
  * Every question about a cause that is open or decided with the decision still in force, newest first. Usually
  * one. More when an answer held for certain targets only and the cause was asked about again for the others.
  */
-export const liveByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow[] =>
-	db.all(Q.live, { project, fingerprint }).map(readQuestion);
+export const liveByFingerprint = async (db: ReadDb, project: number, fingerprint: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.live, { project, fingerprint })).map(readQuestion);
 
-export function questionById(db: Db, id: number): QuestionRow | null {
-	const row = db.get(Q.byId, { id });
+export async function questionById(db: ReadDb, id: number): Promise<QuestionRow | null> {
+	const row = await db.get(Q.byId, { id });
 	return row ? readQuestion(row) : null;
 }
 
-export function mustQuestion(db: Db, project: number, text: string): QuestionRow {
+export async function mustQuestion(db: ReadDb, project: number, text: string): Promise<QuestionRow> {
 	const match = /^(?:Q-)?(\d+)$/i.exec(text.trim());
-	const row = match ? db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
+	const row = match ? await db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
 	if (!row) throw notFound(`question ${text}`);
 	return readQuestion(row);
 }
 
-export function insertQuestion(
+async function addRefs(ctx: Ctx, question: number, refs: readonly string[]): Promise<number> {
+	let added = 0;
+	for (let start = 0; start < refs.length; start += 200)
+		added += (await ctx.db.run(Q.addRefs, { project: ctx.project.id, question, refs: refs.slice(start, start + 200) }))
+			.changes;
+	return added;
+}
+
+export async function insertQuestion(
 	ctx: Ctx,
 	input: QuestionSubjectInput & {
 		fingerprint: string;
@@ -451,9 +528,9 @@ export function insertQuestion(
 		rank: number;
 		refs: readonly string[];
 	},
-): QuestionRow {
-	const no = ctx.nextNo("question");
-	const { lastId } = ctx.db.run(Q.insert, {
+): Promise<QuestionRow> {
+	const no = await ctx.nextNo("question");
+	const { id: insertedId } = await ctx.db.one(Q.insert, {
 		project: ctx.project.id,
 		no,
 		kind: input.kind,
@@ -472,20 +549,20 @@ export function insertQuestion(
 		rank: input.rank,
 		at: ctx.now,
 	});
-	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: lastId });
+	await addRefs(ctx, insertedId, input.refs);
 	ctx.touched.add(ref("question", no));
-	const row = questionById(ctx.db, lastId);
+	const row = await questionById(ctx.db, insertedId);
 	if (!row) throw new Error("question was not stored");
 	return row;
 }
 
-export function attachEvidence(
+export async function attachEvidence(
 	ctx: Ctx,
 	question: QuestionRow,
 	input: { title: string; evidence: unknown; hash: string; basis: string; blocks: number[]; refs: readonly string[] },
-): QuestionRow {
+): Promise<QuestionRow> {
 	const blocks = [...new Set([...json<number[]>(question.blocks), ...input.blocks])];
-	ctx.db.run(Q.attach, {
+	await ctx.db.run(Q.attach, {
 		id: question.id,
 		title: input.title,
 		evidence: JSON.stringify(input.evidence),
@@ -494,84 +571,95 @@ export function attachEvidence(
 		blocks: JSON.stringify(blocks),
 		seq: ctx.seq,
 	});
-	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+	await addRefs(ctx, question.id, input.refs);
 	ctx.touched.add(questionRef(question));
-	return questionById(ctx.db, question.id) ?? question;
+	return (await questionById(ctx.db, question.id)) ?? question;
 }
 
 /** Adds things a question is about, so each of them lists it. Returns how many it did not name before. */
-export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): number {
-	let added = 0;
-	for (const about of refs)
-		added += ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id }).changes;
+export async function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<number> {
+	const added = await addRefs(ctx, question.id, refs);
 	if (added > 0) ctx.touched.add(questionRef(question));
 	return added;
 }
 
-export function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {
-	ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
-	for (const about of refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+export async function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<void> {
+	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
+	await addRefs(ctx, question.id, refs);
 }
 
-export function setQuestionState(
+export async function setQuestionState(
 	ctx: Ctx,
 	question: QuestionRow,
 	state: QuestionRow["state"],
 	decision: number | null,
-): void {
-	ctx.db.run(Q.setState, { id: question.id, state, decision, seq: ctx.seq });
+): Promise<void> {
+	await ctx.db.run(Q.setState, { id: question.id, state, decision, seq: ctx.seq });
 	ctx.touched.add(questionRef(question));
 }
 
-export const setQuestionAsk = (ctx: Ctx, question: QuestionRow, ask: Ask): void => {
-	ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
+export const setQuestionAsk = async (ctx: Ctx, question: QuestionRow, ask: Ask): Promise<void> => {
+	await ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
 };
 
 /** Adds to the parties a question keeps: whoever a dispute about its cause is kept from. */
-export const addQuestionParties = (ctx: Ctx, question: QuestionRow, parties: readonly number[]): void => {
+export const addQuestionParties = async (
+	ctx: Ctx,
+	question: QuestionRow,
+	parties: readonly number[],
+): Promise<void> => {
 	const kept = json<{ parties?: number[] }>(question.evidence).parties ?? [];
 	const all = [...new Set([...kept, ...parties])];
-	if (all.length !== kept.length) ctx.db.run(Q.setParties, { id: question.id, parties: JSON.stringify(all) });
+	if (all.length !== kept.length) await ctx.db.run(Q.setParties, { id: question.id, parties: JSON.stringify(all) });
 };
 
 /**
  * Keeps on a question the policy facts its answer was given under and the parties to the dispute it settled, so
  * that changing or withdrawing the answer is held to the same clause and kept from the same people.
  */
-export const setQuestionFacts = (
+export const setQuestionFacts = async (
 	ctx: Ctx,
 	question: QuestionRow,
 	facts: readonly string[],
 	parties: readonly number[],
-): void => {
-	ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts), parties: JSON.stringify(parties) });
+): Promise<void> => {
+	await ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts), parties: JSON.stringify(parties) });
 };
 
-export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, { question }).map((r) => r.ref);
-export const refsOfQuestions = (db: Db, questions: readonly number[]): string[] =>
-	questions.length ? db.all(Q.refsOfQuestions, { questions: JSON.stringify(questions) }).map((row) => row.ref) : [];
+export const refsOf = async (db: ReadDb, question: number): Promise<string[]> =>
+	(await db.all(Q.refsOf, { question })).map((r) => r.ref);
+export const inheritedRunRefs = async (db: ReadDb, project: number): Promise<Set<string>> =>
+	new Set((await db.all(Q.inheritedRunRefs, { project })).map((row) => row.ref.slice("inherited:".length)));
+export const refsOfQuestions = async (db: ReadDb, questions: readonly number[]): Promise<string[]> =>
+	questions.length ? (await db.all(Q.refsOfQuestions, { questions })).map((row) => row.ref) : [];
 /** Open summaries among each ref's latest 200 questions, matching questionsOn's bound and order. */
-export function openQuestionSummariesOnRefs(db: Db, project: number, refs: readonly string[]) {
+export async function openQuestionSummariesOnRefs(db: ReadDb, project: number, refs: readonly string[]) {
 	const byRef = new Map<string, { q: string; evidence: string }[]>();
-	for (const row of db.all(Q.openSummariesOnRefs, { project, refs: JSON.stringify(refs) })) {
+	for (const row of await db.all(Q.openSummariesOnRefs, { project, refs })) {
 		const items = byRef.get(row.ref) ?? [];
 		items.push({ q: questionRef(row), evidence: row.evidence_hash });
 		byRef.set(row.ref, items);
 	}
 	return byRef;
 }
-export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.onRef, { project, ref: about }).map(readQuestion);
-export const openQuestionsOn = (db: Db, project: number, about: string) =>
-	db.all(Q.openOnRef, { project, ref: about }).map((row) => ({ ...row, ...readSubject(row) }));
+export const questionsOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.onRef, { project, ref: about })).map(readQuestion);
+export const openQuestionsOn = async (db: ReadDb, project: number, about: string) =>
+	(await db.all(Q.openOnRef, { project, ref: about })).map((row) => ({ ...row, ...readSubject(row) }));
 /** The failure questions about a thing whose standing answer says the target needs a fix (`ATTRIBUTED`). */
-export const attributedQuestionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.attributedOnRef, { project, ref: about }).map(readQuestion);
+export const attributedQuestionsOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.attributedOnRef, { project, ref: about })).map(readQuestion);
 /** Every question about a thing, oldest first, however many there are. */
-export const everyQuestionOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.allOnRef, { project, ref: about }).map(readQuestion);
-export const openCountOn = (db: Db, project: number, about: string): number =>
-	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
+export const everyQuestionOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.allOnRef, { project, ref: about })).map(readQuestion);
+export const openCountsOn = async (
+	db: ReadDb,
+	project: number,
+	refs: readonly string[],
+): Promise<Map<string, number>> =>
+	new Map((await db.all(Q.openCountsOnRefs, { project, refs })).map((row) => [row.ref, row.n]));
+export const openCountOn = async (db: ReadDb, project: number, about: string): Promise<number> =>
+	(await db.get(Q.openCountOnRef, { project, ref: about }))?.n ?? 0;
 
 /** A position in the queue: the rank and id of the last question seen. A client holds it as an opaque string. */
 export type QueueCursor = { rank: number; id: number };
@@ -586,50 +674,78 @@ export function parseQueueCursor(text: string): QueueCursor | undefined {
 	return Number.isSafeInteger(rank) && Number.isSafeInteger(id) ? { rank, id } : undefined;
 }
 
-export function queuePage(
-	db: Db,
+export async function queuePage(
+	db: ReadDb,
 	input: { project: number; state: "open"; kind: Kind | undefined; after: QueueCursor | null; limit: number },
 ) {
 	const at = input.after ?? { rank: Number.MIN_SAFE_INTEGER, id: Number.MIN_SAFE_INTEGER };
 	const base = { project: input.project, state: input.state, rank: at.rank, id: at.id, limit: input.limit };
-	return (input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base)).map(readQuestion);
+	return (input.kind ? await db.all(Q.queueOfKind, { ...base, kind: input.kind }) : await db.all(Q.queue, base)).map(
+		readQuestion,
+	);
 }
 
 /** A page of the ledger, newest first, after the position `before` (the revision and id of the last row seen). */
-export function ledgerPage(
-	db: Db,
+export async function ledgerPage(
+	db: ReadDb,
 	input: { project: number; kind: Kind | undefined; before: { rev: number; id: number } | null; limit: number },
 ) {
 	const at = input.before ?? { rev: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER };
 	const base = { project: input.project, rev: at.rev, id: at.id, limit: input.limit };
-	return (input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base)).map(
+	return (input.kind ? await db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : await db.all(Q.ledger, base)).map(
 		readQuestion,
 	);
 }
 
 /** The ids of every open question of a kind in the queue, oldest first, however many there are. */
-export const openQuestionIds = (db: Db, project: number, kind: Kind): number[] =>
-	db.all(Q.openIdsOfKind, { project, kind }).map((row) => row.id);
+/** A first mapping question with no prior judgement or affected run has no history to reconsider. */
+export const freshMapQuestions = async (db: ReadDb, project: number, ids: readonly number[]): Promise<QuestionRow[]> =>
+	(await db.all(Q.freshMaps, { project, ids })).map(readQuestion);
 
-export function openCounts(db: Db, project: number): Record<string, number> {
-	const counts: Record<string, number> = { open: db.get(Q.openCount, { project })?.n ?? 0 };
-	for (const row of db.all(Q.openByKind, { project })) counts[row.kind] = row.n;
+/** Track has no link or run effect; each question still receives its own immutable decision and hold. */
+export async function trackFreshMapQuestions(
+	ctx: Ctx,
+	rows: readonly { question: QuestionRow; ask: Ask; signers: Signer[]; holds: HoldTerm[] }[],
+): Promise<void> {
+	const updated = await ctx.db.all(Q.trackFreshMaps, {
+		project: ctx.project.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		rows: JSON.stringify(
+			rows.map((row) => ({
+				id: row.question.id,
+				ask: JSON.stringify(row.ask),
+				signers: JSON.stringify(row.signers),
+				holds: JSON.stringify(row.holds),
+			})),
+		),
+	});
+	if (updated.length !== rows.length) throw new Error("map tracking did not record every decision");
+	for (const row of rows) ctx.touched.add(questionRef(row.question));
+}
+export const openQuestionIds = async (db: ReadDb, project: number, kind: Kind): Promise<number[]> =>
+	(await db.all(Q.openIdsOfKind, { project, kind })).map((row) => row.id);
+
+export async function openCounts(db: ReadDb, project: number): Promise<Record<string, number>> {
+	const counts: Record<string, number> = { open: (await db.get(Q.openCount, { project }))?.n ?? 0 };
+	for (const row of await db.all(Q.openByKind, { project })) counts[row.kind] = row.n;
 	return counts;
 }
 
 /** Questions changed at or after a position (a revision and a question id within it), in that order. */
-export const questionsChangedSince = (
-	db: Db,
+export const questionsChangedSince = async (
+	db: ReadDb,
 	project: number,
 	from: { rev: number; id: number },
 	limit: number,
-): QuestionRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit }).map(readQuestion);
+): Promise<QuestionRow[]> =>
+	(await db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit })).map(readQuestion);
 
-export function insertAnswer(
+export async function insertAnswer(
 	ctx: Ctx,
 	input: { question: number; answer: unknown; reason: string | null; hash: string; counts: boolean },
-): void {
-	ctx.db.run(Q.insertAnswer, {
+): Promise<void> {
+	await ctx.db.run(Q.insertAnswer, {
 		question: input.question,
 		actor: ctx.actor.id,
 		answer: JSON.stringify(input.answer),
@@ -641,9 +757,23 @@ export function insertAnswer(
 	});
 }
 
-export const answersOf = (db: Db, question: number): AnswerRow[] => db.all(Q.answersOf, { question });
+export async function itemReads(
+	db: ReadDb,
+	ids: readonly number[],
+): Promise<Map<number, { answers: AnswerRow[]; refs: string[] }>> {
+	const out = new Map<number, { answers: AnswerRow[]; refs: string[] }>(
+		ids.map((id) => [id, { answers: [], refs: [] }]),
+	);
+	if (ids.length) {
+		for (const row of await db.all(Q.answersForItems, { ids })) out.get(row.question)?.answers.push(row);
+		for (const row of await db.all(Q.refsForItems, { ids })) out.get(row.question)?.refs.push(row.ref);
+	}
+	return out;
+}
+export const answersOf = async (db: ReadDb, question: number): Promise<AnswerRow[]> =>
+	await db.all(Q.answersOf, { question });
 
-export function insertDecision(
+export async function insertDecision(
 	ctx: Ctx,
 	input: {
 		question: QuestionRow;
@@ -652,9 +782,9 @@ export function insertDecision(
 		holds: HoldTerm[];
 		supersedes: number | null;
 	},
-): DecisionRow {
+): Promise<DecisionRow> {
 	const expires = input.holds.flatMap((term) => (term.until === "time" ? [term.at] : []));
-	const { lastId } = ctx.db.run(Q.insertDecision, {
+	const { id: insertedId } = await ctx.db.one(Q.insertDecision, {
 		hash: input.question.evidence_hash,
 		project: ctx.project.id,
 		question: input.question.id,
@@ -668,108 +798,173 @@ export function insertDecision(
 		at: ctx.now,
 		seq: ctx.seq,
 	});
-	const row = ctx.db.get(Q.decisionById, { id: lastId });
+	const row = await ctx.db.get(Q.decisionById, { id: insertedId });
 	if (!row) throw new Error("decision was not stored");
 	return row;
 }
 
-export const setDecisionEffects = (ctx: Ctx, decision: number, effects: unknown): void => {
-	ctx.db.run(Q.setEffects, { id: decision, effects: JSON.stringify(effects) });
+export const setDecisionEffects = async (ctx: Ctx, decision: number, effects: unknown): Promise<void> => {
+	await ctx.db.run(Q.setEffects, { id: decision, effects: JSON.stringify(effects) });
 };
 
-export const decisionById = (db: Db, id: number): DecisionRow | null => db.get(Q.decisionById, { id });
-export const holdEndingById = (db: Db, id: number): DecisionRow | null => db.get(Q.holdEndingById, { id });
-export const decisionsOf = (db: Db, question: number): DecisionRow[] => db.all(Q.decisionsOf, { question });
-export const expiredDecisions = (db: Db, project: number, now: number): DecisionRow[] =>
-	db.all(Q.expired, { project, now });
+/** Decisions whose question has no other live occurrence of its cause. */
+export const independentFailureDecisions = async (
+	db: ReadDb,
+	project: number,
+	ids: readonly number[],
+): Promise<DecisionRow[]> => await db.all(Q.independentFailureDecisions, { project, ids });
 
-export const liveDefectDecisions = (db: Db, project: number): DecisionRow[] => db.all(Q.defects, { project });
+/** Each proven passing cause keeps its own immutable ending, in the same order as individual endings. */
+export async function endPassedHolds(
+	ctx: Ctx,
+	rows: readonly { question: QuestionRow; decision: DecisionRow; fixed: boolean; signer: Signer }[],
+): Promise<void> {
+	const updated = await ctx.db.all(Q.endPassedHolds, {
+		project: ctx.project.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		rows: JSON.stringify(
+			rows.map((row, ord) => ({
+				question: row.question.id,
+				decision: row.decision.id,
+				ord,
+				answer: JSON.stringify(row.fixed ? { is: "outdated", fixed: true } : { is: "outdated" }),
+				signers: JSON.stringify([row.signer]),
+			})),
+		),
+	});
+	if (updated.length !== rows.length) throw new Error("passing causes did not record every ending");
+	for (const row of rows) ctx.touched.add(questionRef(row.question));
+}
+
+export const decisionById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
+	await db.get(Q.decisionById, { id });
+export async function decisionsByIds(db: ReadDb, ids: readonly number[]): Promise<Map<number, DecisionRow>> {
+	const rows: DecisionRow[] = [];
+	const unique = [...new Set(ids)];
+	for (let at = 0; at < unique.length; at += 200)
+		rows.push(...(await db.all(Q.decisionsByIds, { ids: unique.slice(at, at + 200) })));
+	return new Map(rows.map((row) => [row.id, row]));
+}
+export const holdEndingById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
+	await db.get(Q.holdEndingById, { id });
+export const nearestJudgment = async (db: ReadDb, question: number): Promise<DecisionRow | null> =>
+	await db.get(Q.nearestJudgment, { question });
+
+export const decisionsOf = async (db: ReadDb, question: number): Promise<DecisionRow[]> =>
+	await db.all(Q.decisionsOf, { question });
+export const expiredDecisions = async (db: ReadDb, project: number, now: number): Promise<DecisionRow[]> =>
+	await db.all(Q.expired, { project, now });
+
+export const liveDefectDecisions = async (db: ReadDb, project: number): Promise<DecisionRow[]> =>
+	await db.all(Q.defects, { project });
 
 /** An immutable observation decision, independent of question answers and their holds. */
-export function insertMergeReceipt(
+export async function insertMergeReceipt(
 	ctx: Ctx,
 	change: number,
 	snapshot: Omit<MergeReceipt, "id">,
 	evidence: number,
-): number {
-	return ctx.db.run(Q.insertMergeReceipt, {
-		project: ctx.project.id,
-		change,
-		actor: ctx.actor.id,
-		at: ctx.now,
-		seq: ctx.seq,
-		snapshot: JSON.stringify(snapshot),
-		evidence,
-	}).lastId;
+): Promise<number> {
+	return (
+		await ctx.db.one(Q.insertMergeReceipt, {
+			project: ctx.project.id,
+			change,
+			actor: ctx.actor.id,
+			at: ctx.now,
+			seq: ctx.seq,
+			snapshot: JSON.stringify(snapshot),
+			evidence,
+		})
+	).id;
 }
 
-export function mergeReceiptById(db: Db, project: number, id: number | null): MergeReceipt | null {
+export async function mergeReceiptById(db: ReadDb, project: number, id: number | null): Promise<MergeReceipt | null> {
 	if (id === null) return null;
-	const row = db.get(Q.mergeReceipt, { id, project });
+	const row = await db.get(Q.mergeReceipt, { id, project });
 	return row ? MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }) : null;
 }
 
-export const receiptDecisionAnswer = (db: Db, id: number): string => {
-	const row = db.get(Q.receiptDecision, { id });
+export const receiptDecisionAnswer = async (db: ReadDb, id: number): Promise<string> => {
+	const row = await db.get(Q.receiptDecision, { id });
 	if (!row) throw new Error(`counted decision ${id} is missing`);
 	return row.answer;
 };
 const digest = (body: string) => new Bun.CryptoHasher("sha256").update(body).digest("hex");
-const rootOf = (db: Db, id: number | null): ReceiptRoot | null => (id === null ? null : db.get(Q.node, { id }));
+const rootOf = async (db: ReadDb, id: number | null): Promise<ReceiptRoot | null> =>
+	id === null ? null : await db.get(Q.node, { id });
 
-function payloadOf(ctx: Ctx, body: string): ReceiptRoot {
-	if (Buffer.byteLength(body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
-	const hash = digest(body);
+async function payloadsOf(ctx: Ctx, bodies: readonly string[]): Promise<ReceiptRoot[]> {
+	if (bodies.some((body) => Buffer.byteLength(body) > 32768))
+		throw invalid("merge receipt evidence item exceeds 32 KiB");
+	if (!bodies.length) return [];
+	const hashes = bodies.map(digest);
 	const project = ctx.project.id;
-	ctx.db.run(Q.insertPayload, { project, hash, body });
-	const row = ctx.db.get(Q.payloadByHash, { project, hash });
-	if (!row) throw new Error("receipt payload was not stored");
-	return { ...row, hash, count: 1 };
+	await ctx.db.run(Q.insertPayloads, { project, hashes, bodies });
+	const stored = new Map((await ctx.db.all(Q.payloadsByHashes, { project, hashes })).map((row) => [row.hash, row]));
+	return hashes.map((hash) => {
+		const row = stored.get(hash);
+		if (!row) throw new Error("receipt payload was not stored");
+		return { ...row, count: 1 };
+	});
 }
-function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): ReceiptRoot | null {
+async function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): Promise<ReceiptRoot | null> {
 	if (!members.length) return null;
 	members.sort((a, b) => a.slot - b.slot);
 	if (members.length > 32 || new Set(members.map((row) => row.slot)).size !== members.length)
 		throw new Error("receipt page keys are not unique");
 	const hash = receiptNodeHash(level, members);
 	const project = ctx.project.id;
-	const found = ctx.db.get(Q.nodeByHash, { project, hash });
+	const found = await ctx.db.get(Q.nodeByHash, { project, hash });
 	if (found) return found;
 	const count = members.reduce((sum, row) => sum + row.count, 0);
-	const id = ctx.db.run(Q.insertNode, { project, hash, level, count }).lastId;
-	for (const row of members)
-		ctx.db.run(Q.insertMember, { node: id, slot: row.slot, child: row.child, payload: row.payload });
+	const id = (await ctx.db.one(Q.insertNode, { project, hash, level, count })).id;
+	await ctx.db.run(Q.insertMembers, {
+		node: id,
+		slots: members.map((row) => row.slot),
+		children: members.map((row) => row.child),
+		payloads: members.map((row) => row.payload),
+	});
 	return { id, hash, count };
 }
 
 /** Copy only changed leaves and their ancestors. The iterator and recursion hold at most 32 entries per level. */
-function updateTree(
+async function updateTree(
 	ctx: Ctx,
 	root: ReceiptRoot | null,
-	buckets: Iterable<number>,
-	load: (bucket: number) => Iterable<{ key: number; body: string }>,
-): ReceiptRoot | null {
-	const iterator = buckets[Symbol.iterator]();
-	let next = iterator.next();
+	buckets: AsyncGenerator<number>,
+	load: (bucket: number) => AsyncGenerator<{ key: number; body: string }>,
+): Promise<ReceiptRoot | null> {
+	const iterator = buckets;
+	let next = await iterator.next();
 	if (next.done) return root;
-	function update(old: ReceiptRoot | null, level: number, base: number): ReceiptRoot | null {
+	async function update(old: ReceiptRoot | null, level: number, base: number): Promise<ReceiptRoot | null> {
 		if (level === 0) {
 			const members: ReceiptMember[] = [];
-			for (const row of load(base)) {
+			const rows: { key: number; body: string }[] = [];
+			for await (const row of load(base)) {
 				if (!Number.isSafeInteger(row.key) || row.key < 0)
 					throw invalid("receipt key must be a nonnegative safe integer");
-				const payload = payloadOf(ctx, row.body);
+				rows.push(row);
+			}
+			const payloads = await payloadsOf(
+				ctx,
+				rows.map((row) => row.body),
+			);
+			for (const [index, row] of rows.entries()) {
+				const payload = payloads[index];
+				if (!payload) throw new Error("receipt payload was not stored");
 				members.push({ slot: row.key % 32, child: null, payload: payload.id, hash: payload.hash, count: 1 });
 			}
-			next = iterator.next();
-			return nodeOf(ctx, 0, members);
+			next = await iterator.next();
+			return await nodeOf(ctx, 0, members);
 		}
-		const members = new Map((old ? ctx.db.all(Q.members, { node: old.id }) : []).map((row) => [row.slot, row]));
+		const members = new Map((old ? await ctx.db.all(Q.members, { node: old.id }) : []).map((row) => [row.slot, row]));
 		const span = 32 ** (level - 1);
 		while (!next.done && next.value < base + 32 ** level) {
 			const slot = Math.floor((next.value - base) / span);
 			const held = members.get(slot);
-			const child = update(
+			const child = await update(
 				held?.child ? { id: held.child, hash: held.hash, count: held.count } : null,
 				level - 1,
 				base + slot * span,
@@ -777,14 +972,14 @@ function updateTree(
 			if (child) members.set(slot, { slot, child: child.id, payload: null, hash: child.hash, count: child.count });
 			else members.delete(slot);
 		}
-		return nodeOf(ctx, level, [...members.values()]);
+		return await nodeOf(ctx, level, [...members.values()]);
 	}
-	return update(root, 10, 0);
+	return await update(root, 10, 0);
 }
-function* dirtyBuckets(db: Db, run: number): Generator<number> {
+async function* dirtyBuckets(db: ReadDb, run: number): AsyncGenerator<number> {
 	let after = -1;
 	for (;;) {
-		const page = db.all(Q.dirty, { run, after });
+		const page = await db.all(Q.dirty, { run, after });
 		if (!page.length) return;
 		for (const row of page) {
 			yield row.bucket;
@@ -793,64 +988,68 @@ function* dirtyBuckets(db: Db, run: number): Generator<number> {
 	}
 }
 /** Disposable roots are reused only while source-change triggers leave their dirty set empty. */
-export function storeReceiptResults(
+export async function storeReceiptResults(
 	ctx: Ctx,
 	run: number,
-	buckets: () => Iterable<number>,
-	load: (bucket: number) => Iterable<{ key: number; body: string }>,
-): ReceiptRoot | null {
-	const cached = ctx.db.get(Q.cache, { run, project: ctx.project.id });
-	const root = updateTree(
-		ctx,
-		cached ? rootOf(ctx.db, cached.root) : null,
-		cached ? dirtyBuckets(ctx.db, run) : buckets(),
-		load,
-	);
-	ctx.db.run(Q.setCache, { run, project: ctx.project.id, root: root?.id ?? null });
-	ctx.db.run(Q.clearDirty, { run });
+	buckets: () => AsyncGenerator<number>,
+	load: (bucket: number) => AsyncGenerator<{ key: number; body: string }>,
+): Promise<ReceiptRoot | null> {
+	const cached = await ctx.db.get(Q.cache, { run, project: ctx.project.id });
+	const dirty = dirtyBuckets(ctx.db, run);
+	const fresh = buckets();
+	const root = await updateTree(ctx, cached ? await rootOf(ctx.db, cached.root) : null, cached ? dirty : fresh, load);
+	await ctx.db.run(Q.setCache, { run, project: ctx.project.id, root: root?.id ?? null });
+	await ctx.db.run(Q.clearDirty, { run });
 	return root;
 }
 /** Gate identity is separate: a new question reference cannot duplicate result memberships. */
-export function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: Iterable<string>) {
-	const iterator = gate[Symbol.iterator]();
-	let next = iterator.next();
+export async function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: AsyncGenerator<string>) {
+	const iterator = gate;
+	let next = await iterator.next();
 	let key = 0;
-	function* buckets(): Generator<number> {
+	async function* buckets(): AsyncGenerator<number> {
 		while (!next.done) yield Math.floor(key / 32);
 	}
-	function* load(bucket: number): Generator<{ key: number; body: string }> {
+	async function* load(bucket: number): AsyncGenerator<{ key: number; body: string }> {
 		while (!next.done && Math.floor(key / 32) === bucket) {
 			yield { key: key++, body: next.value };
-			next = iterator.next();
+			next = await iterator.next();
 		}
 	}
-	const gates = updateTree(ctx, null, buckets(), load);
+	const changed = buckets();
+	const gates = await updateTree(ctx, null, changed, load);
 	const hash = receiptSnapshotHash(results?.hash ?? null, gates?.hash ?? null);
 	const project = ctx.project.id;
-	const found = ctx.db.get(Q.snapshotByHash, { project, hash });
+	const found = await ctx.db.get(Q.snapshotByHash, { project, hash });
 	if (found) return { ...found, hash };
 	const count = results?.count ?? 0;
 	const evidence_count = count + (gates?.count ?? 0);
-	const id = ctx.db.run(Q.insertSnapshot, {
-		project,
-		hash,
-		result_root: results?.id ?? null,
-		gate_root: gates?.id ?? null,
-		count,
-		evidence_count,
-	}).lastId;
+	const id = (
+		await ctx.db.one(Q.insertSnapshot, {
+			project,
+			hash,
+			result_root: results?.id ?? null,
+			gate_root: gates?.id ?? null,
+			count,
+			evidence_count,
+		})
+	).id;
 	return { id, hash, count, evidence_count };
 }
-function* treePage(db: Db, node: ReceiptRoot | null, skip: number): Generator<{ hash: string; body: string }> {
+async function* treePage(
+	db: ReadDb,
+	node: ReceiptRoot | null,
+	skip: number,
+): AsyncGenerator<{ hash: string; body: string }> {
 	if (!node) return;
-	for (const row of db.all(Q.members, { node: node.id })) {
+	for (const row of await db.all(Q.members, { node: node.id })) {
 		if (skip >= row.count) {
 			skip -= row.count;
 			continue;
 		}
 		if (row.child !== null) yield* treePage(db, { id: row.child, hash: row.hash, count: row.count }, skip);
 		else if (row.payload !== null) {
-			const payload = db.get(Q.payload, { id: row.payload });
+			const payload = await db.get(Q.payload, { id: row.payload });
 			if (!payload) throw new Error("receipt payload is missing");
 			yield payload;
 		}
@@ -858,16 +1057,16 @@ function* treePage(db: Db, node: ReceiptRoot | null, skip: number): Generator<{ 
 	}
 }
 /** Rank cursors are stable because historical roots and subtree counts are immutable. */
-export function mergeReceiptPage(
-	db: Db,
+export async function mergeReceiptPage(
+	db: ReadDb,
 	project: number,
 	receipt: number,
 	cursor: string | undefined,
 	limit: number,
 	collection: "results" | "evidence" = "results",
 ) {
-	const manifest = mergeReceiptById(db, project, receipt);
-	const roots = db.get(Q.roots, { project, receipt });
+	const manifest = await mergeReceiptById(db, project, receipt);
+	const roots = await db.get(Q.roots, { project, receipt });
 	if (!manifest || !roots) throw notFound("merge receipt");
 	const match = cursor ? /^(\d+)\.(results|evidence)\.(\d+)$/.exec(cursor) : null;
 	if (
@@ -876,18 +1075,18 @@ export function mergeReceiptPage(
 	)
 		throw invalid("that is not a cursor of this receipt collection");
 	const start = match ? Number(match[3]) + 1 : 0;
-	const resultRoot = rootOf(db, roots.result_root);
-	const gateRoot = rootOf(db, roots.gate_root);
-	function* rows(): Generator<{ kind: "result" | "gate"; hash: string; body: string }> {
+	const resultRoot = await rootOf(db, roots.result_root);
+	const gateRoot = await rootOf(db, roots.gate_root);
+	async function* rows(): AsyncGenerator<{ kind: "result" | "gate"; hash: string; body: string }> {
 		if (collection === "evidence" && start < (gateRoot?.count ?? 0))
-			for (const row of treePage(db, gateRoot, start)) yield { kind: "gate", ...row };
+			for await (const row of treePage(db, gateRoot, start)) yield { kind: "gate", ...row };
 		const after = collection === "results" ? start : Math.max(0, start - (gateRoot?.count ?? 0));
-		for (const row of treePage(db, resultRoot, after)) yield { kind: "result", ...row };
+		for await (const row of treePage(db, resultRoot, after)) yield { kind: "result", ...row };
 	}
 	const page: { ordinal: number; kind: "result" | "gate"; hash: string; body: string }[] = [];
 	let bytes = 0;
 	let more = false;
-	for (const row of rows()) {
+	for await (const row of rows()) {
 		if (page.length >= Math.min(limit, 50) || bytes + Buffer.byteLength(row.body) > 65536) {
 			more = true;
 			break;

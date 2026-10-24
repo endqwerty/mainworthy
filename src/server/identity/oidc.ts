@@ -65,7 +65,7 @@ const generations = new WeakMap<App, number>();
 /** The provider's configuration, discovered once; a failed discovery is tried again by the next ceremony. */
 function configurationOf(app: App): Promise<Held> {
 	const held = configurations.get(app);
-	if (held) return held;
+	if (held !== undefined) return held;
 	const oidc = app.config.oidc;
 	if (!oidc) return Promise.reject(new Error("no identity provider"));
 	const issuer = new URL(oidc.issuer);

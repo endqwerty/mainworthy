@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { cluster } from "../../scripts/pg.ts";
 import { lineage, ownedChildren, processTable, registerOwnedChild } from "../../scripts/work/processes.ts";
+import { databaseAdmin } from "../../src/server/kernel/db.ts";
 import { FORWARD_STDIN } from "./support.ts";
 
 const alive = (pid: number): boolean => {
@@ -24,6 +26,17 @@ async function until(check: () => boolean | Promise<boolean>, ms = 4_000): Promi
 	return false;
 }
 
+async function fixtureDatabases(supervisor: number): Promise<string[]> {
+	const { adminUrl } = await cluster();
+	return await databaseAdmin(adminUrl, async (admin) =>
+		(
+			await admin.all<{ name: string }>(
+				"SELECT datname AS name FROM pg_database WHERE starts_with(datname, $1::text)",
+				[`mw_test_${supervisor}_`],
+			)
+		).map((row) => row.name),
+	);
+}
 async function worker(executable?: string) {
 	const owner = Bun.spawn(
 		[
@@ -43,6 +56,7 @@ async function worker(executable?: string) {
 			stderr: "inherit",
 			env: {
 				...process.env,
+				MAINWORTHY_TEST_DATABASES: "",
 				BUN_FEATURE_FLAG_NO_ORPHANS: "1",
 				...(executable ? { MAINWORTHY_E2E_SERVER: executable } : {}),
 			},
@@ -68,6 +82,7 @@ async function worker(executable?: string) {
 		const direct = (await processTable()).find(
 			(proc) => proc.ppid === owner.pid && proc.command.includes("test/e2e/serve.ts"),
 		);
+		if (supervisor) expect(await fixtureDatabases(supervisor.pid)).toHaveLength(1);
 		const data = /"data":"([^"]+)"/.exec(supervisor?.command ?? "")?.[1];
 		const pid = data ? Number(await readFile(join(data, "fixture-pid"), "utf8")) : (direct?.pid ?? 0);
 		if (!pid) throw new Error("worker did not start a fixture");
@@ -121,6 +136,7 @@ async function released(server: Awaited<ReturnType<typeof worker>>) {
 			await until(() => !alive(server.supervisor ?? 0)),
 			compatibility(server, "supervisor did not exit after cleanup"),
 		).toBe(true);
+	if (server.supervisor) expect(await fixtureDatabases(server.supervisor)).toEqual([]);
 	const port = Number(new URL(server.url).port);
 	const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() });
 	await probe.stop(true);

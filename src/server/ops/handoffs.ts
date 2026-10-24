@@ -24,5 +24,5 @@ export const handoffStatusOp = defineOp({
 	scope: "project",
 	effect: "read",
 	mcp: null,
-	run: (ctx, input) => handoffStatus(ctx, input.question),
+	run: async (ctx, input) => await handoffStatus(ctx, input.question),
 });

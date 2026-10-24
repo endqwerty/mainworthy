@@ -31,22 +31,13 @@ that a pipeline must call needs `record`.
 
 ## Add a migration
 
-A schema change is a new migration. A shipped migration is never edited.
+The PostgreSQL baseline is `src/server/kernel/schema.sql`. SQLite migrations and their upgrade-copy
+mechanism have been removed. Change the baseline and the catalog snapshot in `test/schema.test.ts`
+together, and add a test for the behaviour that needs the schema change. The schema test prepares declared
+statements against that baseline. Startup applies it idempotently under a dedicated migration advisory lock.
 
-To add a migration, follow these steps:
-
-1. Add `src/server/kernel/migrations/NNNN_name.sql` with the next free number. If another branch lands a migration
-   first, take the next number again when you rebase.
-2. Register it in `MIGRATIONS` in `src/server/kernel/migrate.ts` as `{ version, name, sql, archive }`.
-3. Set `archive: true` if the migration changes the shape of an exported table or writes data into one. A change
-   confined to tables that archives leave out does not break an archive. The comment on `MIGRATIONS` gives the
-   rule for a nullable column.
-4. Write a test of the behaviour the migration exists for.
-
-The database applies pending migrations when it opens, all in one transaction. Before it changes a database file
-it writes a backup beside it, `<file>.v<N>.bak`. The migration tests in `test/architecture.test.ts` keep versions
-contiguous, keep each entry equal to its file, check the `archive` marks against the SQL and upgrade every older
-schema to the fresh one. Whether a shipped migration was edited is left to review.
+This engine conversion starts with a fresh database. It supplies no SQLite-file conversion. Archive import still requires format 1 and schema 43.
+Before a future schema change ships, state its stored-data and archive compatibility explicitly.
 
 Nothing is compatible before 1.0. A migration may break stored data, tokens or archives when that makes the
 result simpler. Say what breaks in a `.changes/` fragment with category `Breaks`. Build no migration path.

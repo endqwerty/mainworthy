@@ -92,8 +92,10 @@ async function linked(w: World, idp: Provider, name: string, subject: string): P
 }
 
 type Row = { id: number; actor: number; kind: string; handle: string | null; label: string; revoked_at: number | null };
-const oidcRows = (w: World) =>
-	w.rows<Row>("SELECT id, actor, kind, handle, label, revoked_at FROM credentials WHERE kind = 'oidc' ORDER BY id");
+const oidcRows = async (w: World) =>
+	await w.rows<Row>(
+		"SELECT id, actor, kind, handle, label, revoked_at FROM credentials WHERE kind = 'oidc' ORDER BY id",
+	);
 
 describe("the configuration", () => {
 	const env = {
@@ -131,18 +133,18 @@ describe("the configuration", () => {
 
 	test("the sign-in page is told the provider's name, and nothing on an instance without one", async () => {
 		const idp = await provider();
-		expect(must(await world({ oidc: idp.config() }).get("/api/login/methods"))).toMatchObject({
+		expect(must(await (await world({ oidc: idp.config() })).get("/api/login/methods"))).toMatchObject({
 			oidc: { name: "Example ID" },
 		});
-		expect(must(await world().get("/api/login/methods"))).toMatchObject({ oidc: null });
-		expect((await world().post("/api/login/oidc", {})).status).toBe(400);
+		expect(must(await (await world()).get("/api/login/methods"))).toMatchObject({ oidc: null });
+		expect((await (await world()).post("/api/login/oidc", {})).status).toBe(400);
 	});
 });
 
 describe("linking and signing in", () => {
 	test("a person links an identity from their settings, then signs in with it; the session rests on that credential", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "sub-robin");
 		const [asked] = idp.asked;
 		expect(asked?.get("redirect_uri")).toBe(CALLBACK);
@@ -151,7 +153,7 @@ describe("linking and signing in", () => {
 		expect(asked?.get("code_challenge_method")).toBe("S256");
 		expect(asked?.get("state")?.length).toBeGreaterThanOrEqual(43);
 		expect(asked?.get("nonce")?.length).toBeGreaterThanOrEqual(43);
-		expect(oidcRows(w)).toEqual([
+		expect(await oidcRows(w)).toEqual([
 			{
 				id: 2,
 				actor: expect.any(Number),
@@ -166,7 +168,7 @@ describe("linking and signing in", () => {
 		expect(must(signedIn)).toEqual({ signedIn: true });
 		const cookie = sessionOf(signedIn);
 		expect(must(await w.get<{ actor: string }>("/api/session", jar(cookie))).actor).toBe("robin");
-		expect(w.rows<{ credential: number }>("SELECT credential FROM sessions ORDER BY id DESC LIMIT 1")).toEqual([
+		expect(await w.rows<{ credential: number }>("SELECT credential FROM sessions ORDER BY id DESC LIMIT 1")).toEqual([
 			{ credential: 2 },
 		]);
 		// The person's list of sessions says what opened this one.
@@ -181,7 +183,7 @@ describe("linking and signing in", () => {
 
 	test("an identity nobody linked signs nobody in, and is not given a person by its email", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await joined(w, "robin", PASSWORD);
 		const lines = await logged(async () => {
 			const begun = await begin(w);
@@ -189,13 +191,13 @@ describe("linking and signing in", () => {
 			expect((await finish(w, query, jar(begun.ceremony))).text).toBe(REFUSED);
 		});
 		expect(lines).toEqual(["[mainworthy] sign-in refused: unknown-identity"]);
-		expect(oidcRows(w)).toEqual([]);
+		expect(await oidcRows(w)).toEqual([]);
 	});
 
 	test("the provider's answer is taken once, in the browser that began, inside the ceremony's time", async () => {
 		const clock = clockAt();
 		const idp = await provider();
-		const w = world({ clock, oidc: idp.config() });
+		const w = await world({ clock, oidc: idp.config() });
 		await linked(w, idp, "robin", "sub-robin");
 		const lines = await logged(async () => {
 			// Without the ceremony cookie, or with another browser's.
@@ -232,7 +234,7 @@ describe("linking and signing in", () => {
 
 	test("an ID token with another key, issuer, audience or nonce, or one that ran out, is refused; so is the provider's error", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "sub-robin");
 		const twists = [
 			{ key: "other" as const },
@@ -259,12 +261,12 @@ describe("linking and signing in", () => {
 				"[mainworthy] sign-in refused: provider",
 			]),
 		);
-		expect(w.rows<{ n: number }>("SELECT count(*) AS n FROM sessions WHERE credential = 2")).toEqual([{ n: 0 }]);
+		expect(await w.rows<{ n: number }>("SELECT count(*) AS n FROM sessions WHERE credential = 2")).toEqual([{ n: 0 }]);
 	});
 
 	test("a ceremony begun for one purpose finishes as that purpose: a sign-in's answer links nothing", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const cookie = await joined(w, "robin", PASSWORD);
 		// Begun without a session (a sign-in), finished by a browser that holds one: still a sign-in, refused.
 		const begun = await begin(w);
@@ -272,14 +274,14 @@ describe("linking and signing in", () => {
 		await logged(async () => {
 			expect((await finish(w, query, jar(cookie, begun.ceremony))).text).toBe(REFUSED);
 		});
-		expect(oidcRows(w)).toEqual([]);
+		expect(await oidcRows(w)).toEqual([]);
 	});
 });
 
 describe("linking", () => {
 	test("only a browser signed in as a person links an identity, and only to that person's own session", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		expect((await w.post("/api/login/oidc", { link: true })).status).toBe(401);
 		expect((await w.post("/api/login/oidc", { link: true }, bearer(TOKEN))).status).toBe(403);
 		const robin = await joined(w, "robin", PASSWORD);
@@ -290,12 +292,12 @@ describe("linking", () => {
 		await logged(async () => {
 			expect((await finish(w, query, jar(sam, begun.ceremony))).text).toBe(REFUSED);
 		});
-		expect(oidcRows(w)).toEqual([]);
+		expect(await oidcRows(w)).toEqual([]);
 	});
 
 	test("an identity belongs to one person: linking it again, or to another person, is refused", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await linked(w, idp, "robin", "sub-robin");
 		const sam = await joined(w, "sam", PASSWORD);
 		for (const cookie of [robin, sam]) {
@@ -304,22 +306,22 @@ describe("linking", () => {
 			const reply = await finish(w, query, jar(cookie, begun.ceremony));
 			expect(reply.status).toBe(409);
 		}
-		expect(oidcRows(w).length).toBe(1);
+		expect((await oidcRows(w)).length).toBe(1);
 	});
 
 	test("an identity removed, or of a person who was forgotten, keeps no subject and can be linked again", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await linked(w, idp, "robin", "sub-robin");
-		const [row] = oidcRows(w);
+		const [row] = await oidcRows(w);
 		expect(must(await w.op("credential", { do: "remove", id: row?.id }, jar(robin)))).toMatchObject({ removed: true });
-		expect(oidcRows(w)).toEqual([expect.objectContaining({ handle: null, revoked_at: expect.any(Number) })]);
+		expect(await oidcRows(w)).toEqual([expect.objectContaining({ handle: null, revoked_at: expect.any(Number) })]);
 		const sam = await linked(w, idp, "sam", "sub-robin");
 		expect(sam).not.toBe("");
 		await w.ok("admin", { do: "actor.forget", name: "sam" });
-		expect(oidcRows(w).map((held) => held.handle)).toEqual([null, null]);
+		expect((await oidcRows(w)).map((held) => held.handle)).toEqual([null, null]);
 		expect(
-			w.rows(
+			await w.rows(
 				"SELECT id FROM credentials WHERE handle LIKE '%sub-robin%' OR data LIKE '%sub-robin%' OR label LIKE '%sam@%'",
 			),
 		).toEqual([]);
@@ -329,14 +331,14 @@ describe("linking", () => {
 describe("invitations", () => {
 	test("an invitation is accepted through the provider: the identity is the person's, and the invitation is spent", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
 		const begun = await begin(w, { invitation: code });
 		const query = await authorize(idp, begun, { subject: "sub-robin", email: "robin@example.com" });
 		const accepted = await finish(w, query, jar(begun.ceremony));
 		expect(must(accepted)).toEqual({ signedIn: true });
 		expect(must(await w.get<{ actor: string }>("/api/session", jar(sessionOf(accepted)))).actor).toBe("robin");
-		expect(oidcRows(w).map((row) => row.handle)).toEqual([`${idp.issuer}#sub-robin`]);
+		expect((await oidcRows(w)).map((row) => row.handle)).toEqual([`${idp.issuer}#sub-robin`]);
 		// Spent: the code begins nothing more.
 		expect((await w.post("/api/login/oidc", { invitation: code })).status).toBe(404);
 		expect(must(await viaProvider(w, idp, "sub-robin"))).toEqual({ signedIn: true });
@@ -344,7 +346,7 @@ describe("invitations", () => {
 
 	test("a browser signed in as somebody else is asked first, as with a password", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const sam = await joined(w, "sam", PASSWORD);
 		const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
 		const asked = await w.post("/api/login/oidc", { invitation: code }, jar(sam));
@@ -359,7 +361,7 @@ describe("invitations", () => {
 
 	test("a recovery invitation accepted through the provider replaces every other way in", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const old = await joined(w, "robin", PASSWORD);
 		const { code, purpose } = await invite(w, { name: "robin" });
 		expect(purpose).toBe("recover");
@@ -368,7 +370,7 @@ describe("invitations", () => {
 		expect(must(await finish(w, query, jar(begun.ceremony)))).toEqual({ signedIn: true });
 		expect((await w.get("/api/session", jar(old))).status).toBe(401);
 		expect((await signIn(w, "robin", PASSWORD)).status).toBe(401);
-		expect(w.rows<{ kind: string }>("SELECT kind FROM credentials WHERE revoked_at IS NULL")).toEqual([
+		expect(await w.rows<{ kind: string }>("SELECT kind FROM credentials WHERE revoked_at IS NULL")).toEqual([
 			{ kind: "oidc" },
 		]);
 	});
@@ -377,7 +379,7 @@ describe("invitations", () => {
 describe("the rules about ways in", () => {
 	test("linking rechecks recent proof at both ends, and a provider-only session cannot add a local credential", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await joined(w, "robin", PASSWORD);
 		w.clock.advance(9 * 60_000 + 59_000);
 		const linking = await begin(w, { link: true }, jar(robin));
@@ -386,7 +388,7 @@ describe("the rules about ways in", () => {
 		expect((await finish(w, query, jar(robin, linking.ceremony))).body).toMatchObject({
 			error: { code: "recent_proof_required" },
 		});
-		expect(oidcRows(w)).toEqual([]);
+		expect(await oidcRows(w)).toEqual([]);
 		expect((await w.post("/api/login/oidc", { link: true }, jar(robin))).body).toMatchObject({
 			error: { code: "recent_proof_required" },
 		});
@@ -405,7 +407,7 @@ describe("the rules about ways in", () => {
 
 	test("an identity is a way in: with it the password can be removed, and removing it ends the sessions resting on it", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await linked(w, idp, "robin", "sub-robin");
 		const viaIdp = sessionOf(await viaProvider(w, idp, "sub-robin"));
 		const listed = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
@@ -424,7 +426,7 @@ describe("the rules about ways in", () => {
 	test("with a second factor required for admins, an admin signs in through the provider only when the operator says it enforces one", async () => {
 		for (const mfa of [false, true]) {
 			const idp = await provider();
-			const w = world({ oidc: idp.config({ mfa }), requireAdminMfa: true });
+			const w = await world({ oidc: idp.config({ mfa }), requireAdminMfa: true });
 			const { code } = await invite(w, { name: "robin", can: ["read", "admin"], project: "scratch" });
 			const begun = await begin(w, { invitation: code });
 			const query = await authorize(idp, begun, { subject: "sub-robin" });
@@ -442,7 +444,7 @@ describe("admins and a second factor", () => {
 		for (const path of ["a personal grant", "a team grant", "a start"])
 			test(`an admin by ${path} keeps a session through the provider only when it enforces a second factor (${mfa})`, async () => {
 				const idp = await provider();
-				const w = world({ oidc: idp.config({ mfa }) });
+				const w = await world({ oidc: idp.config({ mfa }) });
 				const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
 				const begun = await begin(w, { invitation: code });
 				const query = await authorize(idp, begun, { subject: "sub-robin" });
@@ -452,7 +454,7 @@ describe("admins and a second factor", () => {
 					await w.ok("admin", { do: "grant.set", actor: "robin", project: "scratch", can: ["read", "admin"] });
 					await w.ok("admin", { do: "grant.set", actor: "sam", project: "scratch", can: ["read", "admin"] });
 					w.instance.app.config.requireAdminMfa = true;
-					await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+					await bootstrap(w.instance.app);
 				} else {
 					w.instance.app.config.requireAdminMfa = true;
 					for (const name of ["robin", "sam"])
@@ -475,7 +477,7 @@ describe("a provider that is gone or replaced", () => {
 	test("an identity of no configured provider is no way in: the last password stays", async () => {
 		for (const now of ["gone", "replaced"] as const) {
 			const idp = await provider();
-			const w = world({ oidc: idp.config() });
+			const w = await world({ oidc: idp.config() });
 			const robin = await linked(w, idp, "robin", "sub-robin");
 			// As a start without the provider, or with another one, would have it.
 			if (now === "gone") delete w.instance.app.config.oidc;
@@ -491,7 +493,7 @@ describe("a provider that is gone or replaced", () => {
 describe("a slow provider", () => {
 	test("an import while the code is being exchanged ends that ceremony too", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "sub-robin");
 		let arrived = (): void => {};
 		const reached = new Promise<void>((resolve) => {
@@ -525,7 +527,7 @@ describe("a slow provider", () => {
 describe("an import", () => {
 	test("ends every ceremony that was under way", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		const begun = await begin(w);
 		const query = await authorize(idp, begun, { subject: "sub-robin" });
@@ -574,7 +576,7 @@ describe("native provider sign-in", () => {
 		});
 	test("exchanges a code once for an ordinary credential-backed session, with no browser cookie", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await linked(w, idp, "robin", "native-robin");
 		const code = await handoff(w, idp);
 		const reply = await exchange(w, code);
@@ -589,7 +591,7 @@ describe("native provider sign-in", () => {
 
 	test("rejects interception, another request's verifier, wrong instance and callback without spending the code", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "native-robin");
 		const code = await handoff(w, idp);
 		for (const more of [
@@ -599,7 +601,7 @@ describe("native provider sign-in", () => {
 		]) {
 			expect((await exchange(w, code, more)).status).toBeOneOf([400, 401]);
 		}
-		const other = world({ oidc: idp.config() });
+		const other = await world({ oidc: idp.config() });
 		expect((await exchange(other, code)).text).toBe(REFUSED);
 		expect(must(await exchange(w, code))).toEqual({ signedIn: true });
 	});
@@ -607,7 +609,7 @@ describe("native provider sign-in", () => {
 	test("expires at one minute and is cancelled by an import", async () => {
 		const idp = await provider();
 		const clock = clockAt();
-		const w = world({ clock, oidc: idp.config() });
+		const w = await world({ clock, oidc: idp.config() });
 		await linked(w, idp, "robin", "native-robin");
 		const expired = await handoff(w, idp);
 		clock.advance(60_000);
@@ -619,7 +621,7 @@ describe("native provider sign-in", () => {
 
 	test("refuses an arbitrary redirect and an instance other than the public origin at begin", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		for (const more of [{ callback: "https://elsewhere.example" }, { instance: "https://elsewhere.example" }]) {
 			expect(
 				(await w.post("/api/login/oidc/native", { challenge: challenge(), state, callback, instance: PUBLIC, ...more }))
@@ -629,7 +631,7 @@ describe("native provider sign-in", () => {
 	});
 	test("concurrent exchanges open exactly one session and an unrelated browser cookie cannot change its person", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "native-robin");
 		const sam = await joined(w, "sam", PASSWORD);
 		const code = await handoff(w, idp);
@@ -646,7 +648,7 @@ describe("native provider sign-in", () => {
 
 	test("a revoked credential or changed provider cannot open a session from a pending code", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		const robin = await linked(w, idp, "robin", "native-robin");
 		const code = await handoff(w, idp);
 		const credentials = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
@@ -663,7 +665,7 @@ describe("native provider sign-in", () => {
 
 	test("admin MFA is checked again when the native session is opened", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "native-robin");
 		const code = await handoff(w, idp);
 		await w.ok("admin", { do: "grant.set", actor: "robin", project: "scratch", can: ["read", "admin"] });
@@ -677,7 +679,7 @@ describe("native provider sign-in", () => {
 		"refused native callbacks count toward the shared address limit: %s",
 		async (subject) => {
 			const idp = await provider();
-			const w = world({ oidc: idp.config(), proxied: true });
+			const w = await world({ oidc: idp.config(), proxied: true });
 			await linked(w, idp, "robin", "native-robin");
 			const address = from("203.0.113.10");
 			const finishNative = async () => {
@@ -724,7 +726,7 @@ describe("native provider sign-in", () => {
 
 	test("the native callback cannot complete a browser ceremony, and provider refusal returns no code", async () => {
 		const idp = await provider();
-		const w = world({ oidc: idp.config() });
+		const w = await world({ oidc: idp.config() });
 		await linked(w, idp, "robin", "native-robin");
 		const browser = await begin(w);
 		const query = await authorize(idp, browser, { subject: "native-robin" });

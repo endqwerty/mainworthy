@@ -3,7 +3,7 @@
 import { type Ask, type Clause, clauseOf, type Facts, Policy, type Unlinked } from "../../core/kinds.ts";
 import { PRESETS, type PresetName, policyProblem, presetOf, storedPolicy } from "../../core/presets.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 
@@ -12,6 +12,9 @@ type PolicyRow = { project: number; version: number; preset: string; clauses: st
 const Q = {
 	current: sql<{ project: number }, PolicyRow>(
 		"SELECT project, version, preset, clauses, settings FROM policies WHERE project = $project ORDER BY version DESC LIMIT 1",
+	),
+	currentMany: sql<{ projects: readonly number[] }, PolicyRow>(
+		"SELECT DISTINCT ON (project) project, version, preset, clauses, settings FROM policies WHERE project = ANY($projects::bigint[]) ORDER BY project, version DESC",
 	),
 	at: sql<{ project: number; version: number }, PolicyRow>(
 		"SELECT project, version, preset, clauses, settings FROM policies WHERE project = $project AND version = $version",
@@ -36,15 +39,21 @@ export type CurrentPolicy = Policy & { version: number };
 
 const read = (row: PolicyRow): CurrentPolicy => ({ version: row.version, ...storedPolicy(row) });
 
-export function currentPolicy(db: Db, project: number): CurrentPolicy {
-	const row = db.get(Q.current, { project });
+export async function currentPolicy(db: ReadDb, project: number): Promise<CurrentPolicy> {
+	const row = await db.get(Q.current, { project });
 	if (!row) throw new Error(`project ${project} has no policy`);
 	return read(row);
 }
 
+export async function currentPolicies(db: ReadDb, projects: readonly number[]): Promise<Map<number, CurrentPolicy>> {
+	const policies = new Map((await db.all(Q.currentMany, { projects })).map((row) => [row.project, read(row)]));
+	for (const project of projects) if (!policies.has(project)) throw new Error(`project ${project} has no policy`);
+	return policies;
+}
+
 /** The policy as it was at one version, or null: what a decision's signature says it was given under. */
-export function policyAt(db: Db, project: number, version: number): CurrentPolicy | null {
-	const row = db.get(Q.at, { project, version });
+export async function policyAt(db: ReadDb, project: number, version: number): Promise<CurrentPolicy | null> {
+	const row = await db.get(Q.at, { project, version });
 	return row ? read(row) : null;
 }
 
@@ -141,9 +150,9 @@ export function resolvePolicy(
 }
 
 /** The first policy of a new project. Not a decision: there is no earlier standing to change. */
-export function seedPolicy(ctx: Ctx, preset: PresetName, unlinked?: Unlinked): void {
+export async function seedPolicy(ctx: Ctx, preset: PresetName, unlinked?: Unlinked): Promise<void> {
 	const policy = resolvePolicy(PRESETS[preset], { unlinked });
-	ctx.db.run(Q.insert, {
+	await ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		version: 1,
 		preset: policy.preset,
@@ -160,11 +169,11 @@ export function seedPolicy(ctx: Ctx, preset: PresetName, unlinked?: Unlinked): v
  * Puts a policy in force. Standing: callable only with the witness of the decision that adopted it. A proposal made
  * before this check, or restored from an archive, may hold a policy that is refused today, so it is checked again here.
  */
-export function writePolicy(ctx: Ctx, witness: Witness, policy: Policy): number {
+export async function writePolicy(ctx: Ctx, witness: Witness, policy: Policy): Promise<number> {
 	const problem = policyProblem(policy);
 	if (problem) throw invalid(problem);
-	const version = currentPolicy(ctx.db, ctx.project.id).version + 1;
-	ctx.db.run(Q.insert, {
+	const version = (await currentPolicy(ctx.db, ctx.project.id)).version + 1;
+	await ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		version,
 		preset: policy.preset,

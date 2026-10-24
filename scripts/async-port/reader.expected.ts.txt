@@ -1,0 +1,21 @@
+import type { App } from "./src/server/kernel/app.ts";
+import type { ReadDb } from "./src/server/kernel/db.ts";
+function lookup(db: ReadDb) {
+	return db.get("SELECT x");
+}
+export function read(app: App) {
+	return app.database.read(async (readDb) => lookup(readDb));
+}
+export function direct(app: App) {
+	return app.database.read(async (readDb) => readDb.get("SELECT x"));
+}
+export function escape(app: App) {
+	return app.reader;
+}
+export function indexed(app: App) {
+	return app["reader"];
+}
+export function destructured(app: App) {
+	const { reader: handle } = app;
+	return handle;
+}

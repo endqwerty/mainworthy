@@ -1,21 +1,17 @@
-import { expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { afterEach, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import { type Instance, prepareStartup, start, startServing } from "../app/start.ts";
+import { type TestDatabase, testDatabase } from "../../test/db.ts";
+import { type Instance, start, startServing } from "../app/start.ts";
 import { API_VERSION, VERSION } from "../core/version.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
-import { Db, databasePath } from "../server/kernel/db.ts";
-import { lockInstance } from "../server/kernel/instance-lock.ts";
-import { openDatabase, SCHEMA_VERSION } from "../server/kernel/migrate.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { PATIENCE } from "../surfaces/http.ts";
 import { Client } from "./client.ts";
-import { runCli } from "./dispatch.ts";
 import { verifyLockdownStatus } from "./lockdown.ts";
 import { CLI_ENTRY, COMMIT, inThisProcess, withInstance } from "./test-support.ts";
 
@@ -28,384 +24,42 @@ const NO_PROXY_NAMED =
 /** The two variables, for a start that is about something else and should have nothing to say about the limit. */
 const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" };
 
-test.each([
-	{ kind: "start", source: "option" },
-	{ kind: "start", source: "environment" },
-	{ kind: "startServing", source: "option" },
-	{ kind: "startServing", source: "environment" },
-	{ kind: "start", source: "port" },
-	{ kind: "startServing", source: "port" },
-])("$kind refuses invalid $source configuration before touching an old database", async ({ kind, source }) => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-readers-before-upgrade-"));
-	const path = databasePath(directory);
-	const fixture = Bun.gunzipSync(
-		readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url)),
+const databases: TestDatabase[] = [];
+async function fixtureUrl(): Promise<string> {
+	const db = await testDatabase();
+	databases.push(db);
+	return db.url;
+}
+afterEach(async () => {
+	for (const db of databases.splice(0)) await db.close();
+});
+
+test("startup requires a database URL and names compose.yaml", async () => {
+	await expect(start(defaultConfig({ MAINWORTHY_PORT: "0" }), () => ({ ui: null }))).rejects.toThrow(
+		"MAINWORTHY_DATABASE_URL is required; see compose.yaml",
 	);
-	writeFileSync(path, fixture);
-	const config = defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: source === "port" ? "-1" : "0" });
-	const previous = process.env.MAINWORTHY_READERS;
-	if (source === "environment") process.env.MAINWORTHY_READERS = "9";
-	const options = source === "option" ? { readers: 9 } : {};
-	const expected = source === "port" ? undefined : "MAINWORTHY_READERS";
-	try {
-		if (kind === "start") expect(() => start(config, () => ({ ui: null }), options)).toThrow(expected);
-		else await expect(startServing(config, () => ({ ui: null }), options)).rejects.toThrow(expected);
-		expect(readFileSync(path).equals(Buffer.from(fixture))).toBe(true);
-		expect(readdirSync(directory)).toEqual(["mainworthy.db"]);
-	} finally {
-		if (previous === undefined) delete process.env.MAINWORTHY_READERS;
-		else process.env.MAINWORTHY_READERS = previous;
-		await rm(directory, { recursive: true, force: true });
-	}
 });
 
-test("a progressing copy outlives the idle deadline, publishes a complete backup, and removes its workspace", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-progressing-copy-"));
-	const path = databasePath(directory);
-	writeFileSync(
-		path,
-		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
-	);
-	let owned = "";
-	const config = defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" });
-	// Keep application import/bootstrap time outside this fixture's short copy inactivity allowance.
-	const prepared = prepareStartup(config, {}, () => {});
-	try {
-		const instance = await startServing(config, () => ({ ui: null }), {
-			readers: 0,
-			startupIdleMs: 500,
-			spawn: (_url, data) => {
-				owned = data.workspace;
-				return new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
-					workerData: { ...data, mode: "progress", prepared },
-				});
-			},
-		});
-		try {
-			expect((await (await fetch(`${instance.url}/healthz`)).json()).ok).toBe(true);
-			expect(existsSync(owned)).toBe(false);
-			const copy = new Db(`${path}.v${SCHEMA_VERSION}.bak`, { reader: true });
-			try {
-				expect(copy.raw.query("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
-				expect(copy.raw.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
-					value: String(SCHEMA_VERSION),
-				});
-			} finally {
-				copy.close();
-			}
-		} finally {
-			await instance.stop();
-		}
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test.each(["failure", "stall"])("startup cleans only its own partial copy after worker %s", async (mode) => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-owned-copy-"));
-	const path = databasePath(directory);
-	const saved = `${path}.v1.bak.mainworthy-copy-Ab12Cd`;
-	await mkdir(saved);
-	writeFileSync(join(saved, "operator-saved"), "keep");
-	let owned = "";
-	try {
-		await expect(
-			startServing(defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }), () => ({ ui: null }), {
-				readers: 0,
-				startupIdleMs: 250,
-				spawn: (_url, data) => {
-					owned = data.workspace;
-					return new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
-						workerData: { ...data, mode },
-					});
-				},
-			}),
-		).rejects.toThrow(mode === "failure" ? "injected startup failure" : "idle deadline");
-		expect(existsSync(owned)).toBe(false);
-		expect(readFileSync(join(saved, "operator-saved"), "utf8")).toBe("keep");
-		lockInstance(directory)();
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test("startup cancellation removes its partial copy after the worker stops", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-aborted-copy-"));
-	const controller = new AbortController();
-	let owned = "";
-	const starting = startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
-		() => ({ ui: null }),
-		{
-			readers: 0,
-			signal: controller.signal,
-			spawn: (_url, data) => {
-				owned = data.workspace;
-				return new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
-					workerData: { ...data, mode: "stall" },
-				});
-			},
-		},
-	);
-	void starting.catch(() => {});
-	try {
-		const deadline = performance.now() + 3000;
-		while (!existsSync(join(owned, "mainworthy.db.v1.bak")) && performance.now() < deadline) await Bun.sleep(10);
-		expect(existsSync(join(owned, "mainworthy.db.v1.bak"))).toBe(true);
-		controller.abort(new Error("test startup cancellation"));
-		await expect(starting).rejects.toThrow("test startup cancellation");
-		expect(existsSync(owned)).toBe(false);
-		lockInstance(directory)();
-	} finally {
-		controller.abort();
-		await starting.catch(() => {});
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test("a failing listening callback closes liveness and releases the instance lock", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-listening-failed-"));
-	let url = "";
-	let opened: Instance | undefined;
-	try {
-		const starting = startServing(
-			defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
-			() => ({ ui: null }),
-			{
-				readers: 0,
-				onListening: (bound) => {
-					url = bound;
-					throw new Error("listening callback failed");
-				},
-			},
-		);
-		await expect(
-			starting.then((instance) => {
-				opened = instance;
-			}),
-		).rejects.toThrow("listening callback failed");
-		expect(Number(new URL(url).port)).toBeGreaterThan(0);
-		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
-		lockInstance(directory)();
-	} finally {
-		await opened?.stop();
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test("health keeps answering upgrading during synchronously blocked assertion recovery", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-recovery-health-"));
-	let url = "";
-	const pause = new SharedArrayBuffer(4);
-	const state = new Int32Array(pause);
-	const starting = startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
-		() => ({ ui: null }),
-		{
-			readers: 0,
-			onListening: (bound) => {
-				url = bound;
-			},
-			spawn: (_url, data) =>
-				new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
-					workerData: { ...data, mode: "recovery", pause },
-				}),
-		},
-	);
-	void starting.catch(() => {});
-	try {
-		const deadline = performance.now() + 3000;
-		while (Atomics.load(state, 0) !== 1 && performance.now() < deadline) await Bun.sleep(10);
-		expect(Atomics.load(state, 0)).toBe(1);
-		for (let i = 0; i < 5; i++) {
-			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) });
-			expect(await response.json()).toMatchObject({ ok: false, state: "upgrading" });
-			expect((await fetch(`${url}/api/session`)).status).toBe(503);
-		}
-	} finally {
-		Atomics.store(state, 0, 2);
-		Atomics.notify(state, 0);
-		const instance = await starting;
-		await instance.stop();
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test("serve answers upgrading health and refuses every other request while a migration waits for a writer", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrading-"));
-	let url = "";
-	const path = databasePath(directory);
-	const commit = "a".repeat(40);
-	writeFileSync(
-		path,
-		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
-	);
-	const writer = new Db(path);
-	writer.exec("BEGIN IMMEDIATE");
-	const starting = startServing(
+test("startup migrates an empty PostgreSQL database before creating its first project", async () => {
+	const db = await testDatabase({ schema: "empty" });
+	databases.push(db);
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-pg-start-"));
+	const instance = await startServing(
 		defaultConfig({
+			MAINWORTHY_DATABASE_URL: db.url,
 			MAINWORTHY_DATA: directory,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_OWNER: "robin",
-			MAINWORTHY_COMMIT: commit,
 		}),
 		() => ({ ui: null }),
-		{
-			readers: 0,
-			onListening: (bound) => {
-				url = bound;
-			},
-		},
-	);
-	void starting.catch(() => {});
-	try {
-		// The published copy proves the real migration has reached the held write lock.
-		const deadline = performance.now() + 3000;
-		while (!existsSync(`${path}.v1.bak`) && performance.now() < deadline) await Bun.sleep(10);
-		expect(existsSync(`${path}.v1.bak`)).toBe(true);
-		const health = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).catch(() => null);
-		expect(health?.status).toBe(200);
-		expect(await health?.json()).toMatchObject({ ok: false, state: "upgrading", commit });
-		const command = await inThisProcess(
-			"health during upgrade",
-			() => runCli(["health", "--url", url, "--json"], undefined),
-			{ environment: {}, cwd: directory, input: "" },
-		);
-		expect(command.code).toBe(0);
-		expect(JSON.parse(command.stdout)).toMatchObject({ healthy: true, state: "upgrading", commit });
-		await expect(
-			new Client({ url, token: "not-sent-during-upgrade", project: "scratch" }).call("find", {}),
-		).rejects.toThrow("is upgrading");
-		for (const [route, method] of [
-			["/", "GET"],
-			["/docs", "GET"],
-			["/api/session", "GET"],
-			["/mcp", "POST"],
-			["/unknown", "GET"],
-		] satisfies [string, string][]) {
-			const response = await fetch(`${url}${route}`, { method });
-			expect(response.status).toBe(503);
-			expect(response.headers.get("retry-after")).toBe("5");
-			expect(await response.json()).toMatchObject({ ok: false, error: { code: "upgrading" } });
-		}
-		writer.exec("ROLLBACK");
-		const readyBy = performance.now() + 3000;
-		let ready = false;
-		while (!ready && performance.now() < readyBy) {
-			ready = (await (await fetch(`${url}/healthz`)).json()).ok === true;
-			if (!ready) await Bun.sleep(10);
-		}
-		expect(ready).toBe(true);
-		expect((await fetch(`${url}/api/session`)).status).toBe(200);
-	} finally {
-		if (writer.raw.inTransaction) writer.exec("ROLLBACK");
-		const instance = await starting;
-		await instance.stop();
-		writer.close();
-		await rm(directory, { recursive: true, force: true });
-	}
-}, 12_000);
-
-test("a failed upgrade closes liveness, restores the umask and releases the instance lock", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-failed-"));
-	let url = "";
-	const path = databasePath(directory);
-	const db = openDatabase(path);
-	db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
-	db.close();
-	const mask = process.umask();
-	try {
-		await expect(
-			startServing(defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }), () => ({ ui: null }), {
-				onListening: (bound) => {
-					url = bound;
-				},
-			}),
-		).rejects.toThrow("newer than this build");
-		expect(process.umask()).toBe(mask);
-		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
-		lockInstance(directory)();
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-test("the upgrading listener retains the caller's idle timeout after installing app routes", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrading-idle-"));
-	const instance = await startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
-		() => ({ ui: null }),
-		{ readers: 0, patience: { ...PATIENCE, idleSeconds: 1 } },
-	);
-	const closed = Promise.withResolvers<void>();
-	let received = "";
-	const address = new URL(instance.url);
-	const socket = connect(Number(address.port), "127.0.0.1");
-	socket.on("connect", () => socket.write(`GET /healthz HTTP/1.1\r\nHost: ${address.host}\r\n\r\n`));
-	socket.on("data", (data) => {
-		received += data.toString();
-	});
-	socket.once("error", closed.reject);
-	socket.once("close", () => closed.resolve());
-	const deadline = setTimeout(() => closed.reject(new Error("the configured idle timeout was ignored")), 7000);
-	try {
-		await closed.promise;
-		expect(received).toContain('"ok":true');
-	} finally {
-		clearTimeout(deadline);
-		socket.destroy();
-		await instance.stop();
-		await rm(directory, { recursive: true, force: true });
-	}
-}, 12_000);
-
-test("a stalled worker stops liveness, and restarting keeps its already published copy", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-deadline-"));
-	let url = "";
-	const path = databasePath(directory);
-	writeFileSync(
-		path,
-		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
-	);
-	const starting = startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
-		() => ({ ui: null }),
-		{
-			readers: 0,
-			onListening: (bound) => {
-				url = bound;
-			},
-			startupIdleMs: 1000,
-			spawn: (_url, data) =>
-				new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
-					workerData: { ...data, mode: "published-stall" },
-				}),
-		},
 	);
 	try {
-		const health = await fetch(`${url}/healthz`);
-		expect(await health.json()).toMatchObject({ ok: false, state: "upgrading" });
-		await expect(starting).rejects.toThrow("idle deadline");
-		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
-		lockInstance(directory)();
+		expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
 		expect(
-			readdirSync(directory).filter((name) => name.includes("mainworthy-start-") || name.includes("mainworthy-copy-")),
-		).toEqual([]);
-		const backup = `${path}.v1.bak`;
-		const inode = statSync(backup).ino;
-		const bytes = readFileSync(backup);
-		const restarted = await startServing(
-			defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
-			() => ({ ui: null }),
-			{ readers: 0 },
-		);
-		try {
-			expect(statSync(backup).ino).toBe(inode);
-			expect(readFileSync(backup).equals(bytes)).toBe(true);
-		} finally {
-			await restarted.stop();
-		}
+			await new Client({ url: instance.url, token: undefined, project: "scratch" }).call("find", {}),
+		).toMatchObject({ items: [] });
 	} finally {
+		await instance.stop();
 		await rm(directory, { recursive: true, force: true });
 	}
 });
@@ -433,13 +87,13 @@ test.each([
 				await instance.stop();
 				const attempted: Instance[] = [];
 				try {
-					expect(() => {
-						attempted.push(start({ ...config, ownerToken: replacement }, () => ({ ui: null })));
+					await expect(async () => {
+						attempted.push(await start({ ...config, ownerToken: replacement }, () => ({ ui: null })));
 					}).toThrow("MAINWORTHY_OWNER_TOKEN must contain only visible ASCII characters without spaces");
 				} finally {
 					for (const started of attempted) await started.stop();
 				}
-				const restarted = start(config, () => ({ ui: null }));
+				const restarted = await start(config, () => ({ ui: null }));
 				try {
 					for (const headers of [{ authorization: `Bearer ${token}` }, { cookie }]) {
 						const session = await fetch(`${restarted.url}/api/session`, { headers });
@@ -524,6 +178,7 @@ for (const options of [
 				cwd: directory,
 				env: {
 					PATH: process.env.PATH ?? "",
+					MAINWORTHY_DATABASE_URL: await fixtureUrl(),
 					HOME: directory,
 					USER: "robin",
 					MAINWORTHY_PORT: "0",
@@ -601,7 +256,13 @@ test("bun run start serves the built bundle under the strict page policy, as the
 	// Nothing of this process's environment but the path: the script itself has to say which bundle it wants.
 	const child = Bun.spawn([process.execPath, "run", "start"], {
 		cwd: join(import.meta.dir, "../.."),
-		env: { PATH: process.env.PATH ?? "", HOME: home, USER: "robin", MAINWORTHY_PORT: "0" },
+		env: {
+			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+			HOME: home,
+			USER: "robin",
+			MAINWORTHY_PORT: "0",
+		},
 		stdout: "pipe",
 		stderr: "ignore",
 		stdin: "ignore",
@@ -644,7 +305,13 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 		const home = await mkdtemp(join(tmpdir(), "mainworthy-watch-"));
 		const child = Bun.spawn([process.execPath, "--watch", CLI_ENTRY, "serve"], {
 			cwd: home,
-			env: { PATH: process.env.PATH ?? "", HOME: home, USER: "robin", MAINWORTHY_PORT: "0" },
+			env: {
+				PATH: process.env.PATH ?? "",
+				MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+				HOME: home,
+				USER: "robin",
+				MAINWORTHY_PORT: "0",
+			},
 			stdout: "pipe",
 			stderr: "ignore",
 			stdin: "ignore",
@@ -677,92 +344,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 	}, 15_000);
 }
 
-test("an install under the former name is carried over on the next start, and its owner token still works", async () => {
-	const home = await mkdtemp(join(tmpdir(), "mainworthy-former-cli-"));
-	/** Starts the server in `home`, waits for its two start lines, and returns how to stop it and read its output. */
-	const serve = async (): Promise<{
-		url: string;
-		stop: () => Promise<{ code: number; stdout: string; stderr: string }>;
-	}> => {
-		const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
-			cwd: home,
-			env: {
-				PATH: process.env.PATH ?? "",
-				HOME: home,
-				USER: "robin",
-				MAINWORTHY_PORT: "0",
-				MAINWORTHY_MODE: "server",
-				...BEHIND_PROXY,
-			},
-			stdout: "pipe",
-			stderr: "pipe",
-			stdin: "ignore",
-		});
-		const timeout = setTimeout(() => child.kill("SIGKILL"), 8000);
-		const reader = child.stdout.getReader();
-		const decoder = new TextDecoder();
-		let stdout = "";
-		const read = async (until: () => boolean): Promise<void> => {
-			while (!until()) {
-				const chunk = await reader.read();
-				if (chunk.done) break;
-				stdout += decoder.decode(chunk.value, { stream: true });
-			}
-		};
-		await read(() => stdout.includes("policy:"));
-		const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
-		if (!url) throw new Error(`startup did not print the server URL: ${stdout}`);
-		// The command installs its signal handlers after it prints these lines. An answered request proves it has
-		// returned to the event loop, so a SIGTERM from here on is handled, not fatal (exit 143).
-		expect((await fetch(`${url}/healthz`)).status).toBe(200);
-		return {
-			url,
-			async stop() {
-				child.kill("SIGTERM");
-				const code = await child.exited;
-				clearTimeout(timeout);
-				await read(() => false);
-				const stderr = await new Response(child.stderr).text();
-				return { code, stdout, stderr: stderr.replace(/^Bundled page in [\d.]+(?:ms|s): .+\n/gm, "") };
-			},
-		};
-	};
-	try {
-		const initial = start(
-			defaultConfig({
-				HOME: home,
-				MAINWORTHY_OWNER: "robin",
-				MAINWORTHY_PORT: "0",
-				MAINWORTHY_MODE: "server",
-				...BEHIND_PROXY,
-			}),
-			() => ({ ui: null }),
-			{ readers: 0 },
-		);
-		const token = initial.generatedToken;
-		await initial.stop();
-		if (!token) throw new Error("the first start generated no owner token");
-		// The same files under the names the project used before 2026-10-13.
-		await rename(join(home, ".mainworthy", "mainworthy.db"), join(home, ".mainworthy", "casebook.db"));
-		await rename(join(home, ".mainworthy"), join(home, ".casebook"));
-
-		const running = await serve();
-		const session = await fetch(`${running.url}/api/session`, { headers: { authorization: `Bearer ${token}` } });
-		const second = await running.stop();
-		expect(second.code).toBe(0);
-		expect(session.status).toBe(200);
-		expect(second.stdout).not.toContain("owner token");
-		expect(second.stderr.trim().split("\n")).toEqual([
-			`mainworthy: moved ${join(home, ".casebook")} to ${join(home, ".mainworthy")}`,
-			`mainworthy: moved ${join(home, ".mainworthy", "casebook.db")} to ${join(home, ".mainworthy", "mainworthy.db")}`,
-		]);
-		expect(existsSync(join(home, ".casebook"))).toBe(false);
-	} finally {
-		await rm(home, { recursive: true, force: true });
-	}
-});
-
 test("a start says when the configured owner token is not the owner's, and refuses an owner name that is not a person's", async () => {
+	const databaseUrl = await fixtureUrl();
 	const home = await mkdtemp(join(tmpdir(), "mainworthy-owner-cli-"));
 	// Long enough that the start has nothing to say about its length (32 characters or more).
 	const OWNER = "owner-secret-0123456789abcdef-012345";
@@ -775,6 +358,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 			cwd: home,
 			env: {
 				PATH: process.env.PATH ?? "",
+				MAINWORTHY_DATABASE_URL: databaseUrl,
 				HOME: home,
 				USER: "robin",
 				MAINWORTHY_PORT: "0",
@@ -819,6 +403,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 	};
 	try {
 		const config = defaultConfig({
+			MAINWORTHY_DATABASE_URL: databaseUrl,
 			HOME: home,
 			MAINWORTHY_OWNER: "robin",
 			MAINWORTHY_OWNER_TOKEN: OWNER,
@@ -826,7 +411,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 			MAINWORTHY_MODE: "server",
 			...BEHIND_PROXY,
 		});
-		const initial = start(config, () => ({ ui: null }), { readers: 0 });
+		const initial = await start(config, () => ({ ui: null }));
 		let helper: string;
 		try {
 			const client = new Client({ url: initial.url, token: OWNER, project: "scratch" });
@@ -852,7 +437,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 		const third = await inThisProcess(
 			"invalid owner",
 			async () => {
-				const invalid = start({ ...config, owner: "helper" }, () => ({ ui: null }), { readers: 0 });
+				const invalid = await start({ ...config, owner: "helper" }, () => ({ ui: null }));
 				await invalid.stop();
 				return 0;
 			},
@@ -860,7 +445,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 		);
 		expect([third.code, third.stdout]).toEqual([4, ""]);
 		expect(third.stderr).toBe(
-			"invalid: MAINWORTHY_OWNER names helper, which is an agent on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; no actor and no token was changed (the database may have been brought to this build's schema first, with a copy of it as it was beside it)\n",
+			"invalid: MAINWORTHY_OWNER names helper, which is an agent on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; no actor and no token was changed (the database may have been brought to this build's schema first)\n",
 		);
 	} finally {
 		await rm(home, { recursive: true, force: true });
@@ -873,6 +458,7 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 			cwd: directory,
 			env: {
 				PATH: process.env.PATH ?? "",
+				MAINWORTHY_DATABASE_URL: await fixtureUrl(),
 				HOME: directory,
 				USER: "robin",
 				MAINWORTHY_PORT: new URL(instance.url).port,
@@ -903,6 +489,7 @@ test("a session lifetime that is not a duration stops the start with one line th
 		cwd: directory,
 		env: {
 			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATABASE_URL: await fixtureUrl(),
 			HOME: directory,
 			USER: "robin",
 			MAINWORTHY_PORT: "0",
@@ -950,7 +537,12 @@ test("a consumer closing stdout produces no stack trace or failed-gate exit", as
 			],
 			{
 				cwd: directory,
-				env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
+				env: {
+					PATH: process.env.PATH ?? "",
+					MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+					HOME: directory,
+					MAINWORTHY_URL: instance.url,
+				},
 				stdout: "pipe",
 				stderr: "pipe",
 				stdin: "ignore",
@@ -971,7 +563,12 @@ test("the source entry runs directly through its shebang", async () => {
 	await withInstance(async ({ directory, instance }) => {
 		const child = Bun.spawn([CLI_ENTRY, "open"], {
 			cwd: directory,
-			env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
+			env: {
+				PATH: process.env.PATH ?? "",
+				MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+				HOME: directory,
+				MAINWORTHY_URL: instance.url,
+			},
 			stdout: "pipe",
 			stderr: "pipe",
 			stdin: "ignore",
@@ -1000,7 +597,12 @@ test("closing a gate's stdout preserves pending, blocked, failed and passed exit
 				],
 				{
 					cwd: directory,
-					env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
+					env: {
+						PATH: process.env.PATH ?? "",
+						MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+						HOME: directory,
+						MAINWORTHY_URL: instance.url,
+					},
 					stdout: "pipe",
 					stderr: "pipe",
 					stdin: "ignore",
@@ -1059,4 +661,66 @@ test("lockdown accepts only the unprivileged application identity", () => {
 		expect(() => verifyLockdownStatus(lockedStatus.replace(new RegExp(`^${field}:.*$`, "m"), replacement))).toThrow();
 	}
 	expect(() => verifyLockdownStatus("")).toThrow();
+});
+
+test("the upgrading listener retains the caller's idle timeout after installing app routes", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrading-idle-"));
+	const instance = await startServing(
+		defaultConfig({
+			MAINWORTHY_DATABASE_URL: await fixtureUrl(),
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+		}),
+		() => ({ ui: null }),
+		{ patience: { ...PATIENCE, idleSeconds: 1 } },
+	);
+	const closed = Promise.withResolvers<void>();
+	let received = "";
+	const address = new URL(instance.url);
+	const socket = connect(Number(address.port), "127.0.0.1");
+	socket.on("connect", () => socket.write(`GET /healthz HTTP/1.1\r\nHost: ${address.host}\r\n\r\n`));
+	socket.on("data", (data) => {
+		received += data.toString();
+	});
+	socket.once("error", closed.reject);
+	socket.once("close", () => closed.resolve());
+	const deadline = setTimeout(() => closed.reject(new Error("the configured idle timeout was ignored")), 7000);
+	try {
+		await closed.promise;
+		expect(received).toContain('"ok":true');
+	} finally {
+		clearTimeout(deadline);
+		socket.destroy();
+		await instance.stop();
+		await rm(directory, { recursive: true, force: true });
+	}
+}, 12_000);
+
+test("a failing listening callback closes liveness", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-listening-failed-"));
+	let url = "";
+	let opened: Instance | undefined;
+	try {
+		const starting = startServing(
+			defaultConfig({ MAINWORTHY_DATABASE_URL: await fixtureUrl(), MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
+			() => ({ ui: null }),
+			{
+				onListening: (bound) => {
+					url = bound;
+					throw new Error("listening callback failed");
+				},
+			},
+		);
+		await expect(
+			starting.then((instance) => {
+				opened = instance;
+			}),
+		).rejects.toThrow("listening callback failed");
+		expect(Number(new URL(url).port)).toBeGreaterThan(0);
+		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
+	} finally {
+		await opened?.stop();
+		await rm(directory, { recursive: true, force: true });
+	}
 });

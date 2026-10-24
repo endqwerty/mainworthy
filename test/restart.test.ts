@@ -5,12 +5,22 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { start } from "../src/app/start.ts";
 import type { Envelope } from "../src/core/api.ts";
 import type { CommandFate, GateStatus, ReportReceipt } from "../src/core/ops.ts";
-import { defaultConfig } from "../src/server/kernel/app.ts";
 
 const ENTRY = resolve(import.meta.dir, "../src/cli/main.ts");
+
+import { type TestDatabase, testDatabase } from "./db.ts";
+
+const databases = new Map<string, TestDatabase>();
+async function databaseFor(dir: string): Promise<string> {
+	let db = databases.get(dir);
+	if (!db) {
+		db = await testDatabase();
+		databases.set(dir, db);
+	}
+	return db.url;
+}
 const dirs: string[] = [];
 const children: ReturnType<typeof Bun.spawn>[] = [];
 afterEach(async () => {
@@ -18,6 +28,8 @@ afterEach(async () => {
 		child.kill("SIGKILL");
 		await child.exited;
 	}
+	for (const db of databases.values()) await db.close();
+	databases.clear();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -32,15 +44,15 @@ import { start } from ${JSON.stringify(resolve(import.meta.dir, "../src/app/star
 import { defaultConfig } from ${JSON.stringify(resolve(import.meta.dir, "../src/server/kernel/app.ts"))};
 import { reportOp } from ${JSON.stringify(resolve(import.meta.dir, "../src/server/ops/writes.ts"))};
 const steps = reportOp.steps;
-reportOp.steps = function* (ctx, input) {
+reportOp.steps = async function* (ctx, input) {
  const running = steps(ctx, input);
- const accepted = running.next();
+ const accepted = await running.next();
  if (accepted.done) return accepted.value;
  yield accepted.value;
  console.log("accepted-and-held");
  for (;;) yield;
 };
-const instance = start(defaultConfig(process.env), () => ({ ui: null }), { readers: 2 });
+const instance = await start(defaultConfig(process.env), () => ({ ui: null }));
 console.log(instance.url);
 `,
 		);
@@ -48,12 +60,12 @@ console.log(instance.url);
 	const child = Bun.spawn([process.execPath, entry, "serve"], {
 		env: {
 			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATABASE_URL: await databaseFor(dataDir),
 			HOME: dataDir,
 			USER: "robin",
 			MAINWORTHY_DATA: dataDir,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_MODE: "local",
-			MAINWORTHY_READERS: "2",
 		},
 		stdout: "pipe",
 		stderr: "ignore",
@@ -88,38 +100,6 @@ console.log(instance.url);
 	}
 }
 
-test("another server process is refused and a killed server leaves no stale lock", async () => {
-	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-process-"));
-	dirs.push(dataDir);
-	const first = await serve(dataDir);
-	const started = performance.now();
-	const duplicate = Bun.spawn([process.execPath, ENTRY, "serve"], {
-		env: {
-			PATH: process.env.PATH ?? "",
-			MAINWORTHY_DATA: dataDir,
-			MAINWORTHY_PORT: "0",
-			MAINWORTHY_OWNER: "robin",
-			MAINWORTHY_MODE: "local",
-			MAINWORTHY_READERS: "0",
-			MAINWORTHY_LOCK_WAIT_SECONDS: "0.15",
-		},
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	children.push(duplicate);
-	const [code, stderr] = await Promise.all([duplicate.exited, new Response(duplicate.stderr).text()]);
-	expect(code).toBe(4);
-	expect(performance.now() - started).toBeGreaterThanOrEqual(150);
-	expect(stderr.split("waiting for another server on the data directory")).toHaveLength(2);
-	expect(stderr).toContain("another server is already using this data directory");
-	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
-	first.child.kill("SIGKILL");
-	await first.child.exited;
-	const restarted = await serve(dataDir);
-	expect((await fetch(`${restarted.url}/healthz`)).status).toBe(200);
-});
-
 test("an invalid public address is refused before waiting for another server's data directory", async () => {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-config-"));
 	dirs.push(dataDir);
@@ -127,13 +107,12 @@ test("an invalid public address is refused before waiting for another server's d
 	const refused = Bun.spawn([process.execPath, ENTRY, "serve"], {
 		env: {
 			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATABASE_URL: await databaseFor(dataDir),
 			MAINWORTHY_DATA: dataDir,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_OWNER: "robin",
 			MAINWORTHY_MODE: "local",
-			MAINWORTHY_READERS: "0",
 			MAINWORTHY_PUBLIC_URL: "http://192.0.2.1:7357",
-			MAINWORTHY_LOCK_WAIT_SECONDS: "0.15",
 		},
 		stdout: "pipe",
 		stderr: "pipe",
@@ -150,73 +129,6 @@ test("an invalid public address is refused before waiting for another server's d
 	expect(stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
 	expect(stderr).not.toContain("waiting for another server");
 	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
-});
-
-test("a replacement server waits for a stopping server to release the data directory", async () => {
-	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-handoff-"));
-	dirs.push(dataDir);
-	const first = start(
-		defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
-		() => ({ ui: null }),
-		{ readers: 0 },
-	);
-	let release = () => {};
-	const pending = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	const held = first.app.gate.run(() => pending);
-	const stopping = first.stop();
-	const replacement = Bun.spawn([process.execPath, ENTRY, "serve"], {
-		env: {
-			PATH: process.env.PATH ?? "",
-			MAINWORTHY_DATA: dataDir,
-			MAINWORTHY_PORT: "0",
-			MAINWORTHY_OWNER: "robin",
-			MAINWORTHY_MODE: "local",
-			MAINWORTHY_READERS: "0",
-			MAINWORTHY_LOCK_WAIT_SECONDS: "0.5",
-		},
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	children.push(replacement);
-	let stderr = "";
-	try {
-		const reader = replacement.stderr.getReader();
-		try {
-			while (!stderr.includes("waiting for another server on the data directory")) {
-				const chunk = await reader.read();
-				if (chunk.done) break;
-				stderr += new TextDecoder().decode(chunk.value);
-			}
-		} finally {
-			reader.releaseLock();
-		}
-		expect(stderr).toContain("waiting for another server on the data directory");
-	} finally {
-		release();
-		await held;
-		await stopping;
-	}
-	const reader = replacement.stdout.getReader();
-	let stdout = "";
-	let url: string | undefined;
-	try {
-		while (!url) {
-			const chunk = await reader.read();
-			if (chunk.done) throw new Error(`replacement failed: ${stdout} ${stderr}`);
-			stdout += new TextDecoder().decode(chunk.value);
-			url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
-		}
-	} finally {
-		reader.releaseLock();
-	}
-	expect((await fetch(`${url}/healthz`)).status).toBe(200);
-	replacement.kill("SIGTERM");
-	expect(await replacement.exited).toBe(0);
-	for await (const chunk of replacement.stderr) stderr += new TextDecoder().decode(chunk);
-	expect(stderr.split("waiting for another server on the data directory")).toHaveLength(2);
 });
 
 async function send<T>(url: string, op: string, input: unknown): Promise<Envelope<T>> {

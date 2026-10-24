@@ -9,6 +9,7 @@ import { FAIL_MULTIPLE } from "../scripts/budget.ts";
 import { BUDGETS, ensure } from "./contracts.ts";
 import { buildDataset, fingerprints, openDataset, Parameters } from "./dataset.ts";
 import { quantile, type UnderLoad, underLoad } from "./external.ts";
+import { publicLog } from "./log.ts";
 import { type Measurement, measure, percentile, type Sample, summarise, table, type Workload } from "./measure.ts";
 import { profile } from "./profile.ts";
 import {
@@ -61,7 +62,7 @@ export function machine(dir: string) {
 	const cores = cpus();
 	const command = (file: string, args: string[]) => {
 		try {
-			return execFileSync(file, args, { encoding: "utf8" }).trim();
+			return publicLog(execFileSync(file, args, { encoding: "utf8" }).trim());
 		} catch {
 			return "unavailable";
 		}
@@ -70,12 +71,17 @@ export function machine(dir: string) {
 		cpu: cores[0]?.model ?? "unknown",
 		cores: cores.length,
 		memoryGiB: totalmem() / 1_073_741_824,
-		filesystem: command("df", ["-PT", dir]),
+		filesystem: command("df", process.platform === "darwin" ? ["-P", dir] : ["-PT", dir]),
 		load: loadavg(),
 		bun: Bun.version,
 		platform: process.platform,
 		arch: process.arch,
-		competingProcesses: command("ps", ["-eo", "comm,%cpu,%mem", "--sort=-%cpu"]).split("\n").slice(0, 12),
+		competingProcesses: command(
+			"ps",
+			process.platform === "darwin" ? ["-axo", "comm,%cpu,%mem"] : ["-eo", "comm,%cpu,%mem", "--sort=-%cpu"],
+		)
+			.split("\n")
+			.slice(0, 12),
 	};
 }
 
@@ -120,7 +126,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		`Filesystem: ${hardware.filesystem}\nLoad at start: ${hardware.load.map((value) => value.toFixed(2)).join(" / ")}`,
 	);
 	const dataset = await buildDataset({ dir: cli.dir, parameters: cli.parameters });
-	const instance = openDataset(dataset, join(cli.dir, `isolated-${randomUUID()}`));
+	const instance = await openDataset(dataset, join(cli.dir, `isolated-${randomUUID()}`));
 	const rows: Measurement[] = [];
 	const repetitions: { name: string; results: Measurement[] }[] = [];
 	const loads: { after: string; load: number[] }[] = [];
@@ -149,12 +155,12 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			console.log(`  ${row.name} is within 2× its budget; repeating five complete runs on fresh clones.`);
 			const repeated: Measurement[] = [];
 			for (let round = 0; round < 5; round++) {
-				const peer = openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
+				const peer = await openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
 				try {
 					await prepareRecentChanges(peer);
 					repeated.push(await measure(await repeatWorkload(peer, row.name)));
 				} finally {
-					peer.close();
+					await peer.close();
 				}
 			}
 			repetitions.push({ name: row.name, results: repeated });
@@ -192,9 +198,9 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		else console.log("JUnit parsing skipped: src/surfaces/formats/junit.ts is absent.");
 		await run(executeWorkload(instance, cli.quick ? 50 : 200));
 	} finally {
-		instance.close();
+		await instance.close();
 	}
-	// Under load: the server runs as its own process, with its reader threads, and is driven from this one, so
+	// Under load: the server runs as its own process, with its connection pools, and is driven from this one, so
 	// the numbers are the server's own and not those of a thread shared with the load generator.
 	const windows = cli.quick ? 1 : 3;
 	const underLoads: UnderLoad[] = [];
@@ -202,7 +208,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		console.log(
 			`Under load ${round + 1}/${windows}: readers alone 5 s, then 16 readers + back-to-back reports + saves 15 s (server in its own process)`,
 		);
-		underLoads.push(await underLoad({ dataset: dataset.dir, seconds: 15, readers: null }));
+		underLoads.push(await underLoad({ dataset: dataset.dir, seconds: 15 }));
 	}
 	const sampled = (pick: (load: UnderLoad) => readonly number[]): Sample[] =>
 		underLoads.flatMap((load, round) => pick(load).map((ms) => ({ ms, error: null, round })));
@@ -262,7 +268,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		const values = underLoads.flatMap((load) => load.reads[name]);
 		console.log(`  ${name}: p95 ${quantile(values, 0.95)} ms, n=${values.length}`);
 	}
-	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
+	const profiling = await openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
 		await prepareRecentChanges(profiling);
 		const workloads = [
@@ -277,11 +283,11 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			diagnostic.push(result);
 			const hottest = result.queries[0];
 			console.log(
-				`Diagnostic ${result.name}: ${result.cpuMs.toFixed(1)} CPU ms / ${result.wallMs.toFixed(1)} wall ms, ${result.fileInputs} file inputs, ${result.majorFaults} major faults; top SQL ${hottest?.ms.toFixed(1) ?? "0"} ms in ${hottest?.calls ?? 0} calls; ${hottest?.plan.join("; ") ?? "no SELECT plan"}`,
+				`Diagnostic ${result.name}: ${result.cpuMs.toFixed(1)} CPU ms / ${result.wallMs.toFixed(1)} wall ms, ${result.fileInputs} file inputs, ${result.majorFaults} major faults; top SQL ${hottest?.ms.toFixed(1) ?? "0"} ms in ${hottest?.calls ?? 0} calls; ${hottest?.plan.join("; ") || "no SELECT plan"}`,
 			);
 		}
 	} finally {
-		profiling.close();
+		await profiling.close();
 	}
 	const failed = rows.filter((row) => !row.pass);
 	const repeatFailures = repetitions.reduce((n, repeated) => n + repeated.results.filter((row) => !row.pass).length, 0);
@@ -302,7 +308,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		rows,
 		repetitions,
 		underLoad: underLoads.map((load) => ({
-			readerThreads: load.readerThreads ?? "default",
+			readPool: load.readPool,
 			seconds: load.seconds,
 			reads: Object.values(load.reads).flat().length,
 			reports: load.reports.length,
@@ -314,12 +320,12 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		loadEnd: loadavg(),
 		durationSeconds,
 		limits: [
-			"SQLite pragmas are unchanged production values; baseline is closed before cloning.",
+			"PostgreSQL durability settings are unchanged production defaults; a closed snapshot is restored before timing.",
 			"All correctness and persisted-count assertions are outside isolated operation timers.",
 			"Twenty untimed recent edits on each clone exercise real diffs; small/quick cursors precede those edits and full cursors are 300 commands back.",
-			"HTTP load generator shares the server process and thread; synchronous SQL and read work delay server work and client callbacks. The current product yields between report apply slices.",
+			"HTTP load runs against a separate server process; the load generator and PostgreSQL share this machine.",
 			...(cli.quick
-				? ["Quick HTTP mix is one 15-second window; use the default run for five independent windows."]
+				? ["Quick HTTP mix is one 15-second window; use the default run for three independent windows."]
 				: []),
 			...(dataset.metadata.queueLimited
 				? [`Queue claim limited to the ${dataset.metadata.counts.open} open questions actually built.`]
@@ -329,7 +335,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	if (cli.json) {
 		mkdirSync(dirname(resolve(cli.json)), { recursive: true });
 		writeFileSync(cli.json, JSON.stringify(report, null, 2));
-		console.log(`Report: ${resolve(cli.json)}`);
+		console.log(publicLog(`Report: ${resolve(cli.json)}`));
 	}
 	console.log(
 		`Elapsed: ${durationSeconds.toFixed(2)} s; load at end ${loadavg()
@@ -339,7 +345,8 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			)}; ${failed.length} primary misses and ${repeatFailures} repeat misses; ${near.length} workloads at or above half their budget.`,
 	);
 	for (const row of failed)
-		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(`${row.name}: ${error}`);
+		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3))
+			console.error(publicLog(`${row.name}: ${error}`));
 	// A miss is reported above; only an error or ten times a budget fails the run (scripts/budget.ts).
 	const blocking = (row: Measurement): boolean =>
 		row.errors > 0 ||
@@ -352,7 +359,7 @@ if (import.meta.main) {
 	try {
 		process.exitCode = await runBenchmark();
 	} catch (error) {
-		console.error(error instanceof Error ? error.stack : error);
+		console.error(publicLog(error instanceof Error ? (error.stack ?? error.message) : String(error)));
 		process.exitCode = 1;
 	}
 }

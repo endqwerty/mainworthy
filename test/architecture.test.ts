@@ -1,24 +1,25 @@
 // The rules of the module map, as failing tests (principles P9 and P10). An agent that takes the shortest path that
 // compiles, and reaches across a boundary to do it, fails here with a message that says which rule and why.
-import { Statement as PreparedStatement } from "bun:sqlite";
-import { describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
-import { mustTarget, resultLocation } from "../src/server/evidence/evidence.ts";
-import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
-import { Db, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
-import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
+import { Database, declaredSql } from "../src/server/kernel/db.ts";
+import {
+	ARCHIVE_VERSION,
+	baselineSchema,
+	migrate,
+	SCHEMA_VERSION,
+	schemaVersion,
+} from "../src/server/kernel/migrate.ts";
 import { OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
 import "../src/server/ops/jobs.ts";
+import { testDatabase } from "./db.ts";
 
 const files = [...new Glob("src/**/*.{ts,tsx}").scanSync(".")].filter(
 	(file) => !file.endsWith(".test.ts") && !file.endsWith(".d.ts"),
@@ -41,756 +42,35 @@ const layerOf = (file: string): string => {
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
 };
 
-describe("fresh schema image", () => {
-	const contents = (db: Db) => {
-		const schema = db.raw
-			.query<{ type: string; name: string; tbl_name: string; sql: string | null }, []>(
-				"SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name",
-			)
-			.all();
-		return {
-			schema,
-			tables: schema
-				.filter((entry) => entry.type === "table")
-				.map(({ name }) => {
-					const quoted = `"${name.replaceAll('"', '""')}"`;
-					return {
-						name,
-						columns: db.raw.query(`PRAGMA table_xinfo(${quoted})`).all(),
-						indexes: db.raw.query(`PRAGMA index_list(${quoted})`).all(),
-						rows: db.raw.query(`SELECT * FROM ${quoted}`).all(),
-					};
-				}),
-			pragmas: [
-				"schema_version",
-				"user_version",
-				"application_id",
-				"page_size",
-				"auto_vacuum",
-				"journal_mode",
-				"synchronous",
-				"foreign_keys",
-				"busy_timeout",
-				"cache_size",
-				"temp_store",
-				"mmap_size",
-				"journal_size_limit",
-				"wal_autocheckpoint",
-				"query_only",
-			].map((name) => ({ name, value: db.raw.query(`PRAGMA ${name}`).all() })),
-		};
-	};
-
-	for (const memory of [true, false]) {
-		test(`matches real migrations and isolates later databases on ${memory ? "memory" : "disk"}`, () => {
-			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-"));
-			const config = defaultConfig({ MAINWORTHY_DATA: join(directory, "image"), USER: "robin" });
-			const path = memory ? ":memory:" : join(directory, "migrated.db");
-			const migrated = new Db(path);
-			const app = openApp(config, { memory });
-			try {
-				expect(migrate(migrated, path)).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
-				expect(schemaVersion(app.db)).toBe(SCHEMA_VERSION);
-				expect(app.db.raw.query("SELECT * FROM meta").all()).toEqual([
-					{ key: "schema_version", value: String(SCHEMA_VERSION) },
-				]);
-				expect(contents(app.db)).toEqual(contents(migrated));
-				expect(() => app.db.raw.query("SELECT $value").get({ wrong: 1 })).toThrow();
-				app.db.exec("INSERT INTO meta VALUES ('private', 'first app'); CREATE TABLE private_rows (value TEXT)");
-				const next = openApp({ ...config, dataDir: join(directory, "next") }, { memory });
-				try {
-					expect(contents(next.db)).toEqual(contents(migrated));
-				} finally {
-					next.close();
-				}
-			} finally {
-				app.close();
-				migrated.close();
-				rmSync(directory, { recursive: true, force: true });
-			}
-		});
-	}
-
-	test("a stale write-ahead log beside a deleted database is not replayed onto the new one", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-stale-wal-"));
-		const path = databasePath(directory);
+describe("the PostgreSQL baseline", () => {
+	test("the fixture applies the immutable ledger and isolates later clones", async () => {
+		const first = await testDatabase();
+		const second = await testDatabase();
+		const database = await Database.open({ url: first.url });
+		const peer = await Database.open({ url: second.url });
 		try {
-			const old = openDatabase(path);
-			old.exec("PRAGMA wal_autocheckpoint = 0; INSERT INTO meta VALUES ('late', 'from the old database')");
-			const wal = fs.readFileSync(`${path}-wal`);
-			old.close();
-			rmSync(path);
-			fs.writeFileSync(`${path}-wal`, wal);
-			const fresh = openDatabase(path);
-			try {
-				expect(fresh.raw.query("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
-				expect(fresh.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
-					{ key: "schema_version", value: String(SCHEMA_VERSION) },
-				]);
-			} finally {
-				fresh.close();
-			}
-		} finally {
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	test("existing version-zero files keep their data and run the migrations", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-existing-"));
-		const path = databasePath(directory);
-		const original = new Db(path);
-		original.exec("CREATE TABLE preserved (value TEXT); INSERT INTO preserved VALUES ('kept')");
-		original.close();
-		const db = openDatabase(path);
-		try {
-			expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
-			expect(db.raw.query("SELECT value FROM preserved").all()).toEqual([{ value: "kept" }]);
-		} finally {
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	for (const failFirst of [false, true]) {
-		test(`existing files retain upgrade backups ${failFirst ? "after a failed open" : "on the first open"}`, () => {
-			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-upgrade-"));
-			const path = databasePath(directory);
-			const migration = MIGRATIONS.at(-1);
-			if (!migration) throw new Error("expected a shipped migration");
-			const original = migration.sql;
-			const previous = migration.version - 1;
-			const db = new Db(path);
-			const removed = spyOn(console, "error").mockImplementation(() => {});
-			const older = [`${path}.v1.bak`, `${path}.v2.bak`];
-			const similar = join(directory, "mainworthyXdb.v1.bak");
-			const unrelatedDirectory = `${path}.v3.bak.dir`;
-			const unrelatedLink = `${path}.v4.bak.link`;
-			const unrelated = [
-				similar,
-				`${path}.other.v1.bak`,
-				`${path}.v1.bak.extra`,
-				`${path}.v01.bak`,
-				`${path}.v0.bak`,
-				`${path}.v-1.bak`,
-				`${path}.v1.5.bak`,
-				`${path}.v1.bak\n`,
-				`${path}.v${SCHEMA_VERSION + 1}.bak`,
-			];
-			try {
-				for (const file of [...older, ...unrelated]) fs.writeFileSync(file, "untouched");
-				fs.mkdirSync(unrelatedDirectory);
-				fs.symlinkSync(similar, unrelatedLink);
-				for (const entry of MIGRATIONS.slice(0, -1)) db.exec(entry.sql);
-				db.raw.query("INSERT INTO meta VALUES ('schema_version', ?)").run(String(previous));
-				db.exec("INSERT INTO meta VALUES ('preserved', 'kept')");
-				if (failFirst) {
-					migration.sql = `INSERT INTO meta VALUES ('before', 'temporary');
-				INSERT INTO meta VALUES ('preserved', 'duplicate');
-				INSERT INTO meta VALUES ('after', 'must not run');`;
-					expect(() => openDatabase(path)).toThrow("UNIQUE");
-					for (const file of older) expect(readFileSync(file, "utf8")).toBe("untouched");
-					expect(removed.mock.calls).toEqual([]);
-					expect(db.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
-						{ key: "preserved", value: "kept" },
-						{ key: "schema_version", value: String(previous) },
-					]);
-					const backup = new Db(`${path}.v${previous}.bak`, { reader: true });
-					try {
-						expect(backup.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
-							{ key: "preserved", value: "kept" },
-							{ key: "schema_version", value: String(previous) },
-						]);
-					} finally {
-						backup.close();
-					}
-				}
-				migration.sql = original;
-				const reopened = openDatabase(path);
-				try {
-					for (const file of older) expect(fs.existsSync(file)).toBe(failFirst);
-					for (const file of unrelated) expect(readFileSync(file, "utf8")).toBe("untouched");
-					expect(fs.lstatSync(unrelatedDirectory).isDirectory()).toBe(true);
-					expect(fs.lstatSync(unrelatedLink).isSymbolicLink()).toBe(true);
-					expect(removed.mock.calls.map((call) => call[0]).sort()).toEqual(
-						failFirst ? [] : older.map((file) => `[mainworthy] removed upgrade copy ${JSON.stringify(file)}`).sort(),
-					);
-					const kept = new Db(`${path}.v${previous}.bak`, { reader: true });
-					try {
-						expect(schemaVersion(kept)).toBe(previous);
-						expect(kept.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-					} finally {
-						kept.close();
-					}
-					expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
-					expect(reopened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				} finally {
-					reopened.close();
-				}
-				removed.mockClear();
-				const restarted = openDatabase(path);
-				try {
-					expect(schemaVersion(restarted)).toBe(SCHEMA_VERSION);
-					expect(fs.existsSync(`${path}.v${previous}.bak`)).toBe(true);
-					expect(removed.mock.calls).toEqual([]);
-				} finally {
-					restarted.close();
-				}
-				db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
-				expect(() => openDatabase(path)).toThrow("is newer than this build");
-				expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
-			} finally {
-				removed.mockRestore();
-				migration.sql = original;
-				db.close();
-				rmSync(directory, { recursive: true, force: true });
-			}
-		});
-	}
-
-	test("a completed upgrade removes only exact interrupted copy files and empty copy workspaces (#538)", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-copies-"));
-		const path = databasePath(directory);
-		const db = new Db(path);
-		const log = spyOn(console, "error").mockImplementation(() => {});
-		const uuid = "12345678-1234-1234-1234-123456789abc";
-		const temporary = `${path}.v1.bak.${uuid}.tmp`;
-		const journalOnly = `${path}.v2.bak.${uuid}.tmp-journal`;
-		const workspace = `${path}.v1.bak.mainworthy-copy-Ab12Cd`;
-		const empty = `${path}.v2.bak.mainworthy-copy-Xy12Z3`;
-		const mixed = `${path}.v3.bak.mainworthy-copy-Xy12Z3`;
-		const linked = `${path}.v4.bak.mainworthy-copy-Xy12Z3`;
-		const saved = `${path}.v1.bak.backup`;
-		const unmarked = `${path}.v1.bak.Ab12Cd`;
-		const startup = `${path}.mainworthy-start-Ab12Cd`;
-		const startupMixed = `${path}.mainworthy-start-Xy12Z3`;
-		const retained = [
-			`${path}.v0.bak.${uuid}.tmp`,
-			`${path}.v01.bak.${uuid}.tmp`,
-			`${path}.v1.bak.${uuid}.tmp-journal.extra`,
-			`${path}.v1.bak.${uuid}.tmp\n`,
-			`${path}.v1.bak.bad-uuid.tmp`,
-			`${path}.other.v1.bak.${uuid}.tmp`,
-			join(directory, `mainworthyXdb.v1.bak.${uuid}.tmp`),
-			`${path}.v1.bak.Abc123`,
-		];
-		try {
-			db.exec(MIGRATIONS[0]?.sql ?? "");
-			db.exec("INSERT INTO meta VALUES ('schema_version', '1'), ('preserved', 'kept')");
-			for (const file of [temporary, `${temporary}-journal`, journalOnly, ...retained])
-				fs.writeFileSync(file, "untouched");
-			for (const folder of [workspace, empty, mixed, saved, unmarked, startup, startupMixed]) fs.mkdirSync(folder);
-			fs.writeFileSync(join(startup, "mainworthy.db.v1.bak"), "partial startup copy");
-			fs.writeFileSync(join(startup, "mainworthy.db.v1.bak-journal"), "partial startup journal");
-			fs.writeFileSync(join(startupMixed, "unrelated"), "keep");
-			fs.symlinkSync(retained[0] ?? "", join(startupMixed, "mainworthy.db.v1.bak"));
-			fs.writeFileSync(join(saved, "mainworthy.db.v1.bak"), "operator rollback point");
-			fs.writeFileSync(join(unmarked, "mainworthy.db.v1.bak"), "unmarked copy");
-			const nested = join(workspace, "mainworthy.db.v1.bak");
-			fs.writeFileSync(nested, "partial copy");
-			fs.writeFileSync(`${nested}-journal`, "partial journal");
-			fs.writeFileSync(join(mixed, "unrelated"), "untouched");
-			fs.symlinkSync(retained[0] ?? "", join(mixed, "mainworthy.db.v3.bak"));
-			fs.mkdirSync(join(mixed, "mainworthy.db.v3.bak-journal"));
-			fs.symlinkSync(mixed, linked);
-			const linkedJournal = `${path}.v5.bak.${uuid}.tmp-journal`;
-			fs.symlinkSync(retained[0] ?? "", linkedJournal);
-			const directoryJournal = `${path}.v6.bak.${uuid}.tmp-journal`;
-			fs.mkdirSync(directoryJournal);
-			const crash = Bun.spawn(
-				[
-					process.execPath,
-					"-e",
-					`import { Database } from "bun:sqlite";
-					import { writeFileSync, writeSync } from "node:fs";
-					import { writePrivateDatabaseFile } from ${JSON.stringify(new URL("../src/server/kernel/db.ts", import.meta.url).href)};
-					const db = new Database(${JSON.stringify(path)});
-					writePrivateDatabaseFile(${JSON.stringify(`${path}.v1.bak`)}, (output) => {
-						db.query("VACUUM INTO ?").run(output);
-						writeFileSync(output + "-journal", "interrupted journal");
-						writeSync(1, JSON.stringify(output) + "\\n");
-						Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-					});`,
-				],
-				{ stdout: "pipe", stderr: "pipe" },
-			);
-			let interrupted: string;
-			try {
-				const said = await crash.stdout.getReader().read();
-				const output: unknown = JSON.parse(new TextDecoder().decode(said.value));
-				if (typeof output !== "string") throw new Error("the copy did not name its private file");
-				expect(fs.existsSync(output)).toBe(true);
-				expect(fs.existsSync(`${output}-journal`)).toBe(true);
-				interrupted = dirname(output);
-			} finally {
-				crash.kill("SIGKILL");
-				await crash.exited;
-			}
-			const opened = openDatabase(path);
-			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
-				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty, interrupted])
-					expect(fs.existsSync(removed)).toBe(false);
-				expect(fs.existsSync(startup)).toBe(false);
-				expect(readFileSync(join(startupMixed, "unrelated"), "utf8")).toBe("keep");
-				expect(fs.lstatSync(join(startupMixed, "mainworthy.db.v1.bak")).isSymbolicLink()).toBe(true);
-				expect(fs.existsSync(join(saved, "mainworthy.db.v1.bak"))).toBe(true);
-				expect(readFileSync(join(saved, "mainworthy.db.v1.bak"), "utf8")).toBe("operator rollback point");
-				expect(readFileSync(join(unmarked, "mainworthy.db.v1.bak"), "utf8")).toBe("unmarked copy");
-				for (const file of retained) expect(readFileSync(file, "utf8")).toBe("untouched");
-				expect(readFileSync(join(mixed, "unrelated"), "utf8")).toBe("untouched");
-				expect(fs.lstatSync(join(mixed, "mainworthy.db.v3.bak")).isSymbolicLink()).toBe(true);
-				expect(fs.lstatSync(join(mixed, "mainworthy.db.v3.bak-journal")).isDirectory()).toBe(true);
-				expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
-				expect(fs.lstatSync(linkedJournal).isSymbolicLink()).toBe(true);
-				expect(fs.lstatSync(directoryJournal).isDirectory()).toBe(true);
-				const backup = new Db(`${path}.v1.bak`, { reader: true });
-				try {
-					expect(schemaVersion(backup)).toBe(1);
-				} finally {
-					backup.close();
-				}
-			} finally {
-				opened.close();
-			}
-		} finally {
-			log.mockRestore();
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	for (const outcome of ["copy failure", "migration failure", "existing copy", "no migration"]) {
-		test(`interrupted copies stay when cleanup is not allowed: ${outcome}`, () => {
-			const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-kept-"));
-			const path = databasePath(directory);
-			const db = new Db(path);
-			const migration = MIGRATIONS.at(-1);
-			if (!migration) throw new Error("expected a shipped migration");
-			const original = migration.sql;
-			const temporary = `${path}.v1.bak.12345678-1234-1234-1234-123456789abc.tmp`;
-			const workspace = `${path}.v1.bak.mainworthy-copy-Ab12Cd`;
-			const log = spyOn(console, "error").mockImplementation(() => {});
-			let sync: ReturnType<typeof spyOn> | undefined;
-			try {
-				db.exec(MIGRATIONS[0]?.sql ?? "");
-				db.exec("INSERT INTO meta VALUES ('schema_version', '1')");
-				if (outcome === "no migration") migrate(db, path);
-				if (outcome === "existing copy") fs.writeFileSync(`${path}.v1.bak`, "existing copy");
-				for (const file of [temporary, `${temporary}-journal`]) fs.writeFileSync(file, "keep");
-				fs.mkdirSync(workspace);
-				const nested = join(workspace, "mainworthy.db.v1.bak");
-				fs.writeFileSync(nested, "keep");
-				fs.writeFileSync(`${nested}-journal`, "keep");
-				if (outcome === "copy failure")
-					sync = spyOn(fs, "fsyncSync").mockImplementation(() => {
-						throw new Error("copy sync failed");
-					});
-				if (outcome === "migration failure") migration.sql = "SELECT * FROM missing_table_for_regression";
-				if (outcome.endsWith("failure")) expect(() => openDatabase(path)).toThrow();
-				else openDatabase(path).close();
-				for (const file of [temporary, `${temporary}-journal`, nested, `${nested}-journal`])
-					expect(readFileSync(file, "utf8")).toBe("keep");
-			} finally {
-				sync?.mockRestore();
-				migration.sql = original;
-				log.mockRestore();
-				db.close();
-				rmSync(directory, { recursive: true, force: true });
-			}
-		});
-	}
-
-	test("a pre-existing garbage upgrade copy keeps older copies", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-garbage-copy-"));
-		const path = databasePath(directory);
-		const db = new Db(path);
-		const log = spyOn(console, "error").mockImplementation(() => {});
-		try {
-			for (const migration of MIGRATIONS.slice(0, 19)) db.exec(migration.sql);
-			db.exec("INSERT INTO meta VALUES ('schema_version', '19'), ('preserved', 'kept')");
-			db.raw.query("VACUUM INTO ?").run(`${path}.v19.bak`);
-			for (const migration of MIGRATIONS.slice(19, 20)) db.exec(migration.sql);
-			db.exec("UPDATE meta SET value = '20' WHERE key = 'schema_version'");
-			fs.writeFileSync(`${path}.v20.bak`, "partial garbage");
-			const opened = openDatabase(path);
-			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
-				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
-				expect(readFileSync(`${path}.v20.bak`, "utf8")).toBe("partial garbage");
-				expect(log.mock.calls).toEqual([]);
-				const older = new Db(`${path}.v19.bak`, { reader: true });
-				try {
-					expect(schemaVersion(older)).toBe(19);
-					expect(older.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				} finally {
-					older.close();
-				}
-			} finally {
-				opened.close();
-			}
-		} finally {
-			log.mockRestore();
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	test("a later failed migration rolls back the whole upgrade before a retry", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-batch-rollback-"));
-		const path = databasePath(directory);
-		const db = new Db(path);
-		const migration = MIGRATIONS.find((entry) => entry.version === 25);
-		if (!migration) throw new Error("expected migration 25");
-		const original = migration.sql;
-		const log = spyOn(console, "error").mockImplementation(() => {});
-		try {
-			for (const entry of MIGRATIONS.slice(0, 20)) db.exec(entry.sql);
-			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
-			db.raw.query("VACUUM INTO ?").run(`${path}.v19.bak`);
-			const before = contents(db);
-			migration.sql = "INSERT INTO meta VALUES ('preserved', 'duplicate')";
-			expect(() => openDatabase(path)).toThrow("UNIQUE");
-			expect(schemaVersion(db)).toBe(20);
-			expect(contents(db)).toEqual(before);
-			expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
-			expect(log.mock.calls).toEqual([]);
-			migration.sql = original;
-			const reopened = openDatabase(path);
-			try {
-				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
-				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
-				expect(fs.existsSync(`${path}.v24.bak`)).toBe(false);
-				expect(log.mock.calls).toEqual([]);
-				const backup = new Db(`${path}.v20.bak`, { reader: true });
-				try {
-					expect(schemaVersion(backup)).toBe(20);
-					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				} finally {
-					backup.close();
-				}
-			} finally {
-				reopened.close();
-			}
-		} finally {
-			migration.sql = original;
-			log.mockRestore();
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	test("a failed copy sync publishes no final copy and preserves the starting database", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-copy-sync-"));
-		const path = databasePath(directory);
-		const db = new Db(path);
-		const sync = spyOn(fs, "fsyncSync").mockImplementation(() => {
-			throw new Error("copy sync failed");
-		});
-		try {
-			for (const migration of MIGRATIONS.slice(0, 20)) db.exec(migration.sql);
-			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
-			fs.writeFileSync(`${path}.v19.bak`, "older copy");
-			expect(() => openDatabase(path)).toThrow("copy sync failed");
-			expect(schemaVersion(db)).toBe(20);
-			expect(fs.existsSync(`${path}.v20.bak`)).toBe(false);
-			expect(readFileSync(`${path}.v19.bak`, "utf8")).toBe("older copy");
-			expect(readdirSync(directory).filter((file) => file.startsWith("mainworthy.db.v20.bak"))).toEqual([]);
-			sync.mockRestore();
-			const reopened = openDatabase(path);
-			try {
-				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
-				expect(fs.existsSync(`${path}.v19.bak`)).toBe(false);
-				const backup = new Db(`${path}.v20.bak`, { reader: true });
-				try {
-					expect(schemaVersion(backup)).toBe(20);
-					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				} finally {
-					backup.close();
-				}
-			} finally {
-				reopened.close();
-			}
-		} finally {
-			sync.mockRestore();
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	test("a failed upgrade copy deletion logs and still opens the upgraded database", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-cleanup-failure-"));
-		const path = databasePath(directory);
-		const db = new Db(path);
-		const older = `${path}.v1.bak`;
-		const removable = `${path}.v2.bak`;
-		const remove = fs.rmSync;
-		const removal = spyOn(fs, "rmSync").mockImplementation((file, options) => {
-			if (file === older) throw new Error("permission denied for upgrade copy");
-			return remove(file, options);
-		});
-		const log = spyOn(console, "error").mockImplementation(() => {});
-		try {
-			for (const migration of MIGRATIONS.slice(0, 20)) db.exec(migration.sql);
-			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
-			fs.writeFileSync(older, "keep on removal failure");
-			fs.writeFileSync(removable, "remove successfully");
-			const opened = openDatabase(path);
-			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
-				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				expect(readFileSync(older, "utf8")).toBe("keep on removal failure");
-				expect(fs.existsSync(removable)).toBe(false);
-				expect(log.mock.calls.map((call) => call[0]).sort()).toEqual(
-					[
-						`[mainworthy] could not remove upgrade copy ${JSON.stringify(older)}: permission denied for upgrade copy`,
-						`[mainworthy] removed upgrade copy ${JSON.stringify(removable)}`,
-					].sort(),
-				);
-				const backup = new Db(`${path}.v20.bak`, { reader: true });
-				try {
-					expect(schemaVersion(backup)).toBe(20);
-				} finally {
-					backup.close();
-				}
-			} finally {
-				opened.close();
-			}
-		} finally {
-			removal.mockRestore();
-			log.mockRestore();
-			db.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-});
-
-describe("declared statements", () => {
-	const read = sql<{ key: string }, { value: string }>("SELECT value FROM meta WHERE key = $key");
-	const write = sql<{ key: string; value: string }>(
-		"INSERT INTO meta (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-	);
-	const tables = sql<readonly [], { name: string }>(
-		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
-	);
-
-	test("1000 bound reads and writes prepare once each despite dynamic SQL churn, and close finalizes them", () => {
-		const db = new Db(":memory:");
-		migrate(db, ":memory:");
-		const prepare = spyOn(db.raw, "prepare");
-		const query = spyOn(db.raw, "query");
-		try {
-			for (let i = 0; i < 1000; i++) {
-				expect(db.run(write, { key: "cache-probe", value: String(i) }).changes).toBe(1);
-				expect(db.get(read, { key: "cache-probe" })).toEqual({ value: String(i) });
-				expect(db.all(read, { key: "cache-probe" })).toEqual([{ value: String(i) }]);
-				expect(db.allDynamic(`SELECT ? AS value /* dynamic ${i} */`, [i])).toEqual([{ value: i }]);
-				if (i === 0)
-					for (let j = 0; j < 32; j++)
-						expect(db.allDynamic(`SELECT ? AS value /* evict ${j} */`, [j])).toEqual([{ value: j }]);
-			}
-			const handles = new Set(
-				[prepare, query].flatMap((call) =>
-					call.mock.calls.flatMap(([text], index) => {
-						if (text !== write.text && text !== read.text) return [];
-						const result = call.mock.results[index];
-						if (!(result?.value instanceof PreparedStatement)) throw new Error("expected a native prepared statement");
-						return [result.value];
-					}),
-				),
-			);
-			expect(handles.size).toBe(2);
-			expect(query.mock.calls.filter(([text]) => text.includes("/* dynamic") || text.includes("/* evict")).length).toBe(
-				1032,
-			);
-			const finalize = [...handles].map((statement) => spyOn(statement, "finalize"));
-			db.close();
-			expect(finalize.map((call) => call.mock.calls.length)).toEqual([1, 1]);
-			db.close();
-			expect(finalize.map((call) => call.mock.calls.length)).toEqual([1, 1]);
-			for (const call of finalize) call.mockRestore();
-			for (const statement of handles) expect(() => statement.get()).toThrow("finalized");
-			expect(() => db.get(read, { key: "cache-probe" })).toThrow("closed database");
-			expect(() => db.all(read, { key: "cache-probe" })).toThrow("closed database");
-			expect(() => db.run(write, { key: "cache-probe", value: "closed" })).toThrow("closed database");
-			expect(() => db.allDynamic("SELECT 1", [])).toThrow("closed database");
-			expect(() => db.all(tables)).toThrow("closed database");
-		} finally {
-			db.close();
-			prepare.mockRestore();
-			query.mockRestore();
-		}
-	});
-
-	test("connections keep their own bindings, data and statement lifetimes", () => {
-		const first = new Db(":memory:");
-		const second = new Db(":memory:");
-		try {
-			for (const db of [first, second]) migrate(db, ":memory:");
-			first.run(write, { key: "cache-probe", value: "first" });
-			second.run(write, { key: "cache-probe", value: "second" });
-			expect(first.get(read, { key: "cache-probe" })).toEqual({ value: "first" });
-			expect(second.get(read, { key: "cache-probe" })).toEqual({ value: "second" });
-			first.close();
-			second.run(write, { key: "cache-probe", value: "still open" });
-			expect(second.all(read, { key: "cache-probe" })).toEqual([{ value: "still open" }]);
-		} finally {
-			first.close();
-			second.close();
-		}
-	});
-
-	test("a statement prepared before migration reads the migrated schema on the same connection", () => {
-		const db = new Db(":memory:");
-		try {
-			expect(db.all(tables)).toEqual([]);
-			expect(() => db.get(read, { key: "schema_version" })).toThrow("no such table");
-			expect(migrate(db, ":memory:")).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
-			expect(db.get(read, { key: "schema_version" })).toEqual({ value: String(SCHEMA_VERSION) });
-			expect(db.all(tables)).toEqual([{ name: "meta" }]);
-			db.run(write, { key: "cache-probe", value: "after migration" });
-			expect(db.get(read, { key: "cache-probe" })).toEqual({ value: "after migration" });
-		} finally {
-			db.close();
-		}
-	});
-});
-
-describe("SQL batches", () => {
-	test("a failed statement stops the batch before later writes", () => {
-		const db = new Db(":memory:");
-		try {
-			db.exec("CREATE TABLE probe (value INTEGER CHECK (value > 0))");
-			expect(() =>
-				db.exec("INSERT INTO probe VALUES (1); INSERT INTO probe VALUES (-1); INSERT INTO probe VALUES (2)"),
-			).toThrow("CHECK");
-			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: 1 }]);
-		} finally {
-			db.close();
-		}
-	});
-
-	test("SQLite keeps quoted semicolons, comments and complete trigger bodies together", () => {
-		const db = new Db(":memory:");
-		try {
-			db.exec(`; -- leading comment with ; and '
-				/* ; */ CREATE TABLE "semi;""quoted" ([value;] TEXT, \`tick;\` TEXT);
-				CREATE TABLE audit (value TEXT);
-				CREATE TEMP TRIGGER "trigger;end" AFTER INSERT ON "semi;""quoted"
-				BEGIN
-					INSERT INTO audit VALUES (CASE WHEN NEW.[value;] = '雪;it''s' THEN 'BEGIN; END;' ELSE 'other' END);
-					-- END; ignored inside a comment
-					INSERT INTO audit VALUES (NEW.\`tick;\` || '/* ; */');
-				END;
-				/* between statements ; */ INSERT INTO "semi;""quoted" VALUES ('雪;it''s', '?;--');
-				INSERT INTO "semi;""quoted" VALUES ('other', 'second;')
-			`);
-			expect(db.raw.query("SELECT value FROM audit ORDER BY rowid").all()).toEqual([
-				{ value: "BEGIN; END;" },
-				{ value: "?;--/* ; */" },
-				{ value: "other" },
-				{ value: "second;/* ; */" },
-			]);
-		} finally {
-			db.close();
-		}
-	});
-
-	test("empty statements and trailing comments do not prevent the next batch", () => {
-		const db = new Db(":memory:");
-		try {
-			for (const text of [
-				"",
-				" ; ; \n",
-				"-- comment;",
-				"/* block; */",
-				"/* unterminated;",
-				"\uFEFF; -- comment\n /* ; */",
-			])
-				db.exec(text);
-			db.exec("CREATE TABLE probe (value TEXT); INSERT INTO probe VALUES ('kept'); -- trailing;\n /* comment; */");
-			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: "kept" }]);
-		} finally {
-			db.close();
-		}
-	});
-
-	test("unbound parameters cannot change a batch's statement boundaries", () => {
-		const db = new Db(":memory:");
-		try {
-			db.exec("CREATE TABLE probe (value TEXT); INSERT INTO probe VALUES ('kept')");
-			expect(() => db.exec("INSERT INTO probe VALUES ($value); DELETE FROM probe")).toThrow("unbound parameters");
-			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: "kept" }]);
-		} finally {
-			db.close();
-		}
-	});
-});
-
-function migrationArchiveMismatches(migrations: typeof MIGRATIONS): string[] {
-	const mismatches: string[] = [];
-	const db = new Db(":memory:");
-	const exported = () =>
-		new Map(
-			db.raw
-				.query<{ name: string }, []>(
-					"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs%' ORDER BY name",
-				)
-				.all()
-				.filter((table) => !UNEXPORTED.includes(table.name))
-				.map((table) => [
-					table.name,
-					db.raw
-						.query<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }, []>(
-							`PRAGMA table_info(${table.name})`,
-						)
-						.all(),
-				]),
-		);
-	let before = exported();
-	for (const migration of migrations) {
-		db.exec(migration.sql);
-		const after = exported();
-		const incompatible =
-			before.size !== after.size ||
-			[...before].some(([name, columns]) => {
-				const next = after.get(name);
-				if (!next) return true;
-				return (
-					columns.some(
-						(column) => JSON.stringify(next.find((item) => item.name === column.name)) !== JSON.stringify(column),
-					) ||
-					next.some(
-						(column) =>
-							!columns.some((item) => item.name === column.name) &&
-							(column.notnull !== 0 ||
-								column.pk !== 0 ||
-								(column.dflt_value !== null &&
-									db.raw.query<{ nonnull: number }, []>(`SELECT (${column.dflt_value}) IS NOT NULL AS nonnull`).get()
-										?.nonnull === 1)),
-					)
-				);
+			await migrate(database);
+			const ledger = await database.read(async (db) => {
+				expect(await schemaVersion(db)).toBe(SCHEMA_VERSION);
+				return await db.allDynamic<{ key: string; value: string }>("SELECT key, value FROM meta ORDER BY key");
 			});
-		const sql = migration.sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'/g, " ");
-		const writes = [
-			...sql.matchAll(
-				/\b(?:UPDATE(?:\s+OR\s+\w+)?|INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|DELETE\s+FROM)\s+(?:main\s*\.\s*)?(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\w+))/gi,
-			),
-		];
-		const transforms = writes.some((write) =>
-			[...before.keys(), ...after.keys()].some(
-				(name) => name.toLowerCase() === (write[1] ?? write[2] ?? write[3] ?? write[4])?.toLowerCase(),
-			),
-		);
-		const requiresArchive = incompatible || transforms;
-		const unchanged = JSON.stringify([...after]) === JSON.stringify([...before]);
-		// A nullable addition without a default can still change meaning; its behavior needs a separate test.
-		if ((requiresArchive || unchanged) && migration.archive !== requiresArchive) mismatches.push(migration.name);
-		before = after;
-	}
-	db.close();
-	return mismatches;
-}
+			expect(ledger).toEqual([
+				{ key: "archive_version", value: String(ARCHIVE_VERSION) },
+				{ key: "baseline_hash", value: baselineSchema().hash },
+				{ key: "schema_version", value: String(SCHEMA_VERSION) },
+			]);
+			expect(baselineSchema().sql).toBe(readFileSync("src/server/kernel/schema.sql", "utf8"));
+			expect(baselineSchema().hash).toMatch(/^[a-f0-9]{64}$/);
+			await database.write((db) => db.transaction(() => db.exec("INSERT INTO meta VALUES ('private', 'first clone')")));
+			expect(await peer.read((db) => db.allDynamic("SELECT value FROM meta WHERE key = 'private'"))).toEqual([]);
+		} finally {
+			await database.close();
+			await peer.close();
+			await first.close();
+			await second.close();
+		}
+	});
+});
 
 function uncheckedWitnesses(text: string): string[] {
 	return [
@@ -837,24 +117,46 @@ describe("the module map", () => {
 		}
 	});
 
-	test("the raw database handle is used only by the kernel and by the archive, which reads every table by design", () => {
-		// `db.raw` runs SQL that is neither declared nor prepared against the schema. Everything else goes through
-		// `sql()` in the module that owns the table.
-		const offenders = files.filter(
-			(file) =>
-				/\.raw\b/.test(readFileSync(file, "utf8")) &&
-				!file.startsWith("src/server/kernel/") &&
-				!file.startsWith("src/server/transfer/") &&
-				!file.startsWith("src/web/"),
-		);
+	test("only db.ts imports the PostgreSQL driver or reaches a raw driver handle", () => {
+		const offenders = files.filter((file) => {
+			if (file === "src/server/kernel/db.ts") return false;
+			const source = readFileSync(file, "utf8");
+			return (
+				imports(file).some((path) => /^(?:bun:sqlite|postgres|pg|bun:sql)$/.test(path)) ||
+				/\bBun\.(?:sql|SQL)\b|\bnew\s+SQL\b|\.unsafe\s*\(|\.reserve\s*\(|\.raw\b/.test(source) ||
+				/(?:import|export)[\s\S]*?\{[^}]*\b(?:SQL|sql|ReservedSQL)\b[^}]*\}\s*from\s*["']bun["']/.test(source)
+			);
+		});
 		expect(offenders).toEqual([]);
 	});
 
-	test("only the kernel talks to SQLite", () => {
-		const offenders = files.filter(
-			(file) => imports(file).includes("bun:sqlite") && !file.startsWith("src/server/kernel/"),
-		);
-		expect(offenders).toEqual([]);
+	test("only the registry slices WriteDb transactions; only transfer uses dynamic writes and catalogs", () => {
+		for (const [pattern, allowed] of [
+			[/\.(?:begin|commit|rollback)\s*\(/, ["src/server/kernel/db.ts", "src/server/ops/registry.ts"]],
+			[/\.(?:runDynamic|catalog)\s*\(/, ["src/server/kernel/db.ts", "src/server/transfer/"]],
+			[/\.migration\s*\(/, ["src/server/kernel/db.ts"]],
+		] as const) {
+			expect(
+				[...files, ...new Glob("scripts/**/*.ts").scanSync(".")].filter(
+					(file) =>
+						!allowed.some((path) => file === path || (path.endsWith("/") && file.startsWith(path))) &&
+						pattern.test(readFileSync(file, "utf8")),
+				),
+			).toEqual([]);
+		}
+	});
+
+	test("database administration belongs only to the fixture, tests and scripts", () => {
+		const paths = [...files, ...new Glob("{test,scripts,bench}/**/*.ts").scanSync(".")];
+		expect(
+			paths.filter(
+				(file) =>
+					file !== "src/server/kernel/db.ts" &&
+					!file.startsWith("test/") &&
+					!file.startsWith("scripts/") &&
+					/\bdatabaseAdmin\b/.test(readFileSync(file, "utf8")),
+			),
+		).toEqual([]);
 	});
 
 	test("the pure core imports nothing from the server, the surfaces or the web", () => {
@@ -918,6 +220,7 @@ describe("the module map", () => {
 				const resolved = new URL(path, `file:///${file}`).pathname.slice(1);
 				// Bundled documentation and licence text outside src are assets, not runtime layers.
 				if (!resolved.startsWith("src/") && !/\.tsx?$/.test(resolved)) continue;
+				if (file === "src/cli/test-support.ts" && resolved === "test/db.ts") continue;
 				const target = layerOf(resolved);
 				if (target === layer || target === "core" || may.includes(target) || exceptions[file]?.includes(target))
 					continue;
@@ -1003,7 +306,7 @@ describe("the module map", () => {
 		"server/handoffs": ["handoffs"],
 	};
 
-	test("a module runs SQL only on the tables it owns", () => {
+	test("a module runs SQL only on the tables it owns", async () => {
 		const ownerOf = new Map(
 			Object.entries(owners).flatMap(([layer, tables]) => tables.map((table) => [table, layer] as const)),
 		);
@@ -1023,15 +326,22 @@ describe("the module map", () => {
 		}
 		expect(offenders).toEqual([]);
 		// Every table in the schema has an owner: a new table without one fails here.
-		const db = new Db(":memory:");
-		migrate(db, ":memory:");
-		const tables = db.raw
-			.query<{ name: string }, []>(
-				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs_%'",
-			)
-			.all()
-			.map((row) => row.name);
-		db.close();
+		const fixture = await testDatabase();
+		const database = await Database.open({ url: fixture.url });
+		let tables: string[];
+		try {
+			tables = await database.read(async (db) =>
+				(
+					await db.allDynamic<{ name: string }>(
+						"SELECT c.relname AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') ORDER BY c.relname",
+					)
+				).map((row) => row.name),
+			);
+		} finally {
+			await database.close();
+			await fixture.close();
+		}
+
 		expect(tables.filter((table) => !ownerOf.has(table))).toEqual([]);
 		expect([...ownerOf.keys()].filter((table) => !tables.includes(table))).toEqual([]);
 	});
@@ -1099,162 +409,11 @@ describe("the module map", () => {
 		expect(UNEXPORTED.filter((table) => other.includes(table))).toEqual(other);
 	});
 
-	test("migration versions are contiguous and in order, with exactly one matching file per entry", () => {
-		expect(MIGRATIONS.map((migration) => migration.version)).toEqual(MIGRATIONS.map((_, index) => index + 1));
-		const directory = "src/server/kernel/migrations";
-		const filenames = MIGRATIONS.map(
-			(migration) => `${String(migration.version).padStart(4, "0")}_${migration.name}.sql`,
-		);
-		expect(readdirSync(directory).sort()).toEqual([...filenames].sort());
-		for (const [index, migration] of MIGRATIONS.entries()) {
-			expect(readFileSync(`${directory}/${filenames[index]}`, "utf8")).toBe(migration.sql);
-		}
-	});
-
-	test("migrations mark incompatible archive shapes and leave excluded changes unmarked", () => {
-		expect(migrationArchiveMismatches(MIGRATIONS)).toEqual([]);
-	});
-
-	for (const [constraint, value] of [
-		["CHECK", "''"],
-		["NOT NULL", "NULL"],
-		["UNIQUE", "'kept'"],
-		["FOREIGN KEY", "'missing'"],
-	]) {
-		test(`a migration's second-statement ${constraint} failure rolls back its rows and version`, () => {
-			const db = new Db(":memory:");
-			const migration = MIGRATIONS.at(-1);
-			if (!migration) throw new Error("expected a shipped migration");
-			const original = migration.sql;
-			try {
-				for (const earlier of MIGRATIONS.slice(0, -1)) db.exec(earlier.sql);
-				db.raw.query("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(migration.version - 1));
-				db.exec(`
-					CREATE TABLE migration_parent (value TEXT PRIMARY KEY);
-					INSERT INTO migration_parent VALUES ('kept'), ('before'), ('after'), ('');
-					CREATE TABLE migration_probe (
-						value TEXT NOT NULL UNIQUE CHECK (length(value) > 0) REFERENCES migration_parent(value)
-					);
-					INSERT INTO migration_probe VALUES ('kept');
-				`);
-				migration.sql = `INSERT INTO migration_probe VALUES ('before');
-					INSERT INTO migration_probe VALUES (${value});
-					INSERT INTO migration_probe VALUES ('after');`;
-				expect(() => migrate(db, ":memory:")).toThrow(constraint);
-				expect(db.raw.query("SELECT value FROM migration_probe").all()).toEqual([{ value: "kept" }]);
-				expect(schemaVersion(db)).toBe(migration.version - 1);
-				expect(db.raw.inTransaction).toBe(false);
-				migration.sql = original;
-				expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
-			} finally {
-				migration.sql = original;
-				db.close();
-			}
-		});
-	}
-
-	test("change landing migration never guesses old heads and indexes only received exact landings", () => {
-		const db = new Db(":memory:");
-		try {
-			const migration = MIGRATIONS.find((entry) => entry.name === "change_landings");
-			if (!migration) throw new Error("missing landing migration");
-			for (const earlier of MIGRATIONS.filter((entry) => entry.version < migration.version)) db.exec(earlier.sql);
-			db.exec(`INSERT INTO meta VALUES ('schema_version', '${migration.version - 1}');
-				INSERT INTO orgs VALUES (1, 'Example', 1);
-				INSERT INTO projects (id, org, key, name, created_at, identity) VALUES (1, 1, 'shop', 'Shop', 1, 'shop-identity');
-				INSERT INTO changes (id, project, key, repo, head_sha, title, rev) VALUES (1, 1, 'pr:8', 'acme/shop', 'landed123', 'Keep coupons', 1);
-				INSERT INTO change_ends VALUES (1, 'merged', 1);
-				INSERT INTO targets (id, project, what, repo, commit_sha, branch, line, first_seq)
-				VALUES (1, 1, 'code:acme/shop@landed123', 'acme/shop', 'landed123', 'main', 'trunk', 1);`);
-			expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
-			const location = () => resultLocation(db, mustTarget(db, 1));
-			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
-			expect(db.raw.query("SELECT landing_commit, landing_repo, landing_branch FROM change_ends").all()).toEqual([
-				{ landing_commit: null, landing_repo: null, landing_branch: null },
-			]);
-			db.exec(
-				"UPDATE change_ends SET landing_commit = 'landed123', landing_repo = 'acme/shop', landing_branch = 'master'",
-			);
-			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
-			db.exec("UPDATE change_ends SET landing_branch = 'main'");
-			expect(location()).toEqual({ label: "main · pr:8 Keep coupons", commit: "landed123", change: "pr:8" });
-			const query = declaredSql().find(
-				(text) => text.includes("json_each($targets)") && text.includes("e.landing_commit"),
-			);
-			if (!query) throw new Error("missing batched landing query");
-			const plan = db.raw
-				.query<{ detail: string }, { targets: string }>(`EXPLAIN QUERY PLAN ${query}`)
-				.all({ targets: "[1]" });
-			expect(
-				plan.some((row) =>
-					row.detail.includes("change_ends_landing (landing_commit=? AND landing_repo=? AND landing_branch=?)"),
-				),
-			).toBe(true);
-			for (const update of [
-				"landing_branch = NULL",
-				"ended = 'closed'",
-				"landing_commit = NULL",
-				"landing_branch = 'release'",
-			])
-				expect(() => db.exec(`UPDATE change_ends SET ${update}`)).toThrow("CHECK");
-		} finally {
-			db.close();
-		}
-	});
-
-	test("every older schema upgrades to the same fresh schema", () => {
-		const fresh = new Db(":memory:");
-		const schema = (db: Db) => db.raw.query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name").all();
-		try {
-			migrate(fresh, ":memory:");
-			for (let version = 0; version < SCHEMA_VERSION; version++) {
-				const db = new Db(":memory:");
-				try {
-					for (const migration of MIGRATIONS.slice(0, version)) db.exec(migration.sql);
-					if (version > 0)
-						db.raw.query("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(version));
-					expect(migrate(db, ":memory:"), `upgrade from schema ${version}`).toEqual({
-						from: version,
-						to: SCHEMA_VERSION,
-						backup: null,
-					});
-					expect(schema(db)).toEqual(schema(fresh));
-				} finally {
-					db.close();
-				}
-			}
-		} finally {
-			fresh.close();
-		}
-	});
-
-	for (const [name, sql] of [
-		["B: nullable column with a non-NULL default", "ALTER TABLE changes ADD COLUMN probe_flag INTEGER DEFAULT 1;"],
-		[
-			"C: nullable column with a backfill",
-			"ALTER TABLE changes ADD COLUMN probe_ended INTEGER; UPDATE changes SET probe_ended = 0;",
-		],
-		["A: transform existing exported data", "UPDATE changes SET head_sha = lower(head_sha);"],
-	] satisfies readonly [string, string][]) {
-		for (const archive of [false, true]) {
-			test(`archive marks require a version bump for ${name}, archive: ${archive}`, () => {
-				const probe = { version: MIGRATIONS.length + 1, name: "probe", sql, archive };
-				expect(migrationArchiveMismatches([...MIGRATIONS, probe])).toEqual(archive ? [] : ["probe"]);
-			});
-		}
-	}
-
-	test("archive marks keep NULL defaults and writes to excluded tables compatible", () => {
-		const probe = {
-			version: MIGRATIONS.length + 1,
-			name: "probe",
-			archive: false,
-			sql: `ALTER TABLE changes ADD COLUMN probe_flag INTEGER DEFAULT (NULL);
-				-- UPDATE changes SET probe_flag = 1;
-				/* UPDATE changes SET probe_flag = 2; */
-				UPDATE change_ends SET at = 3 WHERE 'UPDATE changes SET probe_flag = 3' IS NOT NULL;`,
-		};
-		expect(migrationArchiveMismatches([...MIGRATIONS, probe])).toEqual([]);
+	test("the baseline starts one PostgreSQL lineage and rejects every SQLite archive format", () => {
+		expect(SCHEMA_VERSION).toBe(1);
+		expect(ARCHIVE_VERSION).toBe(43);
+		expect([...new Glob("src/server/kernel/migrations/*.sql").scanSync(".")]).toEqual([]);
+		expect([...new Glob("src/server/kernel/*.sql").scanSync(".")]).toEqual(["src/server/kernel/schema.sql"]);
 	});
 
 	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {
@@ -1408,22 +567,35 @@ describe("the registry", () => {
 			expect(OP_LIST.find((op) => op.name === name)?.output).toBe(schema);
 	});
 
-	test("every statement the server can run prepares against the schema", () => {
-		const db = new Db(":memory:");
-		migrate(db, ":memory:");
+	test("every statement the server can run prepares against the schema", async () => {
+		// Import every runtime server owner, including modules outside the operation registry's graph.
+		for (const file of files.filter((file) => file.startsWith("src/server/"))) await import("../" + file);
+		const fixture = await testDatabase();
+		const database = await Database.open({ url: fixture.url });
 		const broken: string[] = [];
-		for (const text of declaredSql()) {
-			try {
-				db.raw.prepare(text).finalize();
-			} catch (error) {
-				broken.push(
-					`${error instanceof Error ? error.message : error}\n  in: ${text.replace(/\s+/g, " ").slice(0, 160)}`,
-				);
-			}
+		const statements = declaredSql();
+		try {
+			await database.write((db) =>
+				db.transaction(async () => {
+					for (const [index, statement] of statements.entries()) {
+						try {
+							await db.savepoint(async () => {
+								await db.exec("PREPARE architecture_" + index + " AS " + statement.text);
+								await db.exec("DEALLOCATE architecture_" + index);
+							});
+						} catch (error) {
+							broken.push(String(error) + "\\n  in: " + statement.text.replace(/\s+/g, " ").slice(0, 200));
+						}
+					}
+				}),
+			);
+		} finally {
+			await database.close();
+			await fixture.close();
 		}
-		db.close();
+		console.log("Prepared " + statements.length + " declared server statements against the PostgreSQL baseline");
 		expect(broken).toEqual([]);
-		expect(declaredSql().length).toBeGreaterThan(150);
+		expect(statements.length).toBeGreaterThan(450);
 	});
 
 	// How many MCP tools there are is a budget, reported in src/surfaces/mcp.test.ts (#906).
@@ -1582,10 +754,6 @@ describe("the project's name", () => {
 			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
 			"docs/decisions/0015-the-project-is-called-mainworthy.md": "the decision",
 			"docs/deploy.md": "the existing deployment's names, and how to move them",
-			"src/cli/startup.test.ts": "starts the server on an install under the former name",
-			"src/server/kernel/former-name.test.ts": "the carry-over of a former install",
-			"src/server/kernel/former-name.ts": "the carry-over of a former install",
-			"src/server/kernel/migrations/0001_init.sql": "a shipped migration is never edited",
 			"src/server/transfer/transfer.test.ts": "an archive exported under the former name",
 			"src/server/transfer/transfer.ts": "an archive exported under the former name",
 			"src/surfaces/formats/junit.test.ts": "a report that names its case with the former property",
@@ -1602,6 +770,15 @@ describe("the project's name", () => {
 });
 
 describe("a public repository", () => {
+	test("committed logs contain no absolute Mac volume or home paths", () => {
+		const paths = wholeTree()
+			.filter((file) => file.endsWith(".log"))
+			.flatMap((file) =>
+				[...readFileSync(file, "utf8").matchAll(/\/(?:Volumes|Users)\/[^\s]+/g)].map((match) => `${file}: ${match[0]}`),
+			);
+		expect(paths).toEqual([]);
+	});
+
 	test("no file names a private tailnet or workstation account", () => {
 		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
 		// real name, and the history was not rewritten.

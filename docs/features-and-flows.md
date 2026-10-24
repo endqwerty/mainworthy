@@ -230,7 +230,7 @@ active cases linked to automated tests. Coverage joins requirements, their cases
 
 ## Where the data lives
 
-One SQLite file holds everything except attachment bytes, which are in a `blobs` directory beside it, by hash.
+PostgreSQL 18 holds structured records. Attachment bytes live by hash in `blobs/` under the app data directory. `compose.yaml` runs the database. Running elsewhere is possible but not yet supported.
 Each table has one owning module. Other modules read the rows through the owner's functions.
 
 | Module | Tables | Written by | Read by |

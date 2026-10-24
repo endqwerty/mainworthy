@@ -82,10 +82,15 @@ test.each([
 			open: [],
 			tally: { excused: 1, unexplained: 0 },
 		});
-		const failed = h.app.db.raw.query("SELECT signature, message FROM results").get();
+		const failed =
+			(
+				await h.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT signature, message FROM results", []),
+				)
+			)[0] ?? null;
 		expect(failed).toEqual({ signature: expect.any(Number), message: null });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -699,7 +704,7 @@ test("Unicode names at the cutoff upload through the registry in every report fo
 			expect(results[0]?.test).toMatchObject({ name: "n".repeat(499) });
 		}
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 

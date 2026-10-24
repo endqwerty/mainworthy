@@ -9,6 +9,8 @@ import type { HandoffReceipt } from "../src/core/handoff.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import { deliverHandoffs, type HandoffPayload, recoverHandoffs } from "../src/server/handoffs/handoffs.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const secret = "test-handoff-signing-secret";
@@ -25,7 +27,7 @@ afterEach(async () => {
 	instance = undefined;
 	if (directory) rmSync(directory, { recursive: true, force: true });
 	directory = undefined;
-	h?.close();
+	await h?.close();
 	h = undefined;
 	await endpoint?.stop(true);
 	endpoint = undefined;
@@ -169,12 +171,15 @@ test("a hand-off the server was sending when it stopped is failed at start, not 
 	const { url, received } = agent();
 	const { h, q } = await failing(url);
 	const queued = h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
-	const interrupted = h.app.gate.run(() => {
-		h.app.db.raw.query("UPDATE handoffs SET state = 'sending'").run();
-		recoverHandoffs(h.app);
-	});
+	const interrupted = h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				await db.run(sql<readonly SqlValue[], Record<string, unknown>>("UPDATE handoffs SET state = 'sending'"), []);
+			}),
+	);
 	await queued;
 	await interrupted;
+	await recoverHandoffs(h.app);
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(0);
 	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
@@ -188,12 +193,12 @@ test("only a failure question, on a configured project, by someone who may answe
 	const { url } = agent();
 	const { h, q } = await failing(url);
 	expect(await h.call("handoff-status", { question: q })).toBeNull();
-	const reader = h.actor("pat", "human", ["read"]);
+	const reader = await h.actor("pat", "human", ["read"]);
 	expect(await h.raw("handoff", { question: q, cmd: "handoff-cmd-05" }, reader)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
-	const bot = h.actor("bot", "agent", ["read", "produce"]);
+	const bot = await h.actor("bot", "agent", ["read", "produce"]);
 	expect(await h.raw("handoff", { question: q, cmd: "handoff-cmd-06" }, bot)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
@@ -214,7 +219,12 @@ test("only a failure question, on a configured project, by someone who may answe
 		ok: false,
 		error: { code: "invalid", message: "Handing a failure to an agent is not configured for this project." },
 	});
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM handoffs").get()).toEqual({ n: 0 });
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM handoffs"), []),
+		),
+	).toEqual({ n: 0 });
 });
 
 test("the configuration takes all three settings or none, and never repeats the secret", () => {
@@ -251,12 +261,16 @@ test("the configuration takes all three settings or none, and never repeats the 
 test("the session tells a page which projects hand failures to an agent", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-handoff-"));
 	const handoff = { project: "scratch", url: "https://agent.example/hooks/abc", secret };
-	instance = start(
-		{ ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, handoff },
-		() => ({ ui: null }),
+	instance = await start(
 		{
-			readers: 0,
+			...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+			owner: "robin",
+			dataDir: directory,
+			port: 0,
+			handoff,
 		},
+		() => ({ ui: null }),
+		{},
 	);
 	// A local instance starts with the project `scratch`.
 	const response = await fetch(`${instance.url}/api/admin`, {

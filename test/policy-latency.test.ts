@@ -3,33 +3,17 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
-import { OPS } from "../src/server/ops/index.ts";
-import { invoke } from "../src/server/ops/registry.ts";
-import { ciReport } from "./helpers.ts";
+import { sql } from "../src/server/kernel/db.ts";
+import { seedPolicyChanges } from "./policy-fixture.ts";
 
 const CHANGE_RUNS = 6000;
 const LIMIT_MS = 750;
 
 async function adoptWhilePolling(): Promise<number> {
-	return withInstance(async ({ instance, client }) => {
+	return await withInstance(async ({ instance, client }) => {
 		await client.call("admin", { do: "project.create", key: "policy-latency", preset: "standard", unlinked: "ask" });
 		const project = client.with({ project: "policy-latency" });
-		for (let pr = 1; pr <= CHANGE_RUNS; pr++) {
-			const receipt = await invoke(instance.app, OPS, {
-				op: "report",
-				project: "policy-latency",
-				actor: () => instance.owner,
-				input: ciReport({
-					commit: `policy-head-${pr}`,
-					pr,
-					branch: `feature/${pr}`,
-					base: "base",
-					n: 10,
-					fail: { 0: "checkout failed" },
-				}),
-			});
-			expect(receipt).toMatchObject({ ok: true, result: { fresh: true, counts: { total: 10, fail: 1 } } });
-		}
+		await seedPolicyChanges(instance, CHANGE_RUNS);
 		const proposal = await project.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
 		expect(proposal.status).toBe("open");
 		if (!proposal.question) throw new Error("policy proposal has no question");
@@ -46,18 +30,22 @@ async function adoptWhilePolling(): Promise<number> {
 				worker.once("error", reject);
 			});
 			const states = new Set<string>();
-			const snapshot = () => {
-				const state = instance.app.reader.snapshot(() =>
-					instance.app.reader.raw
-						.query(
-							"SELECT (SELECT max(version) FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency')) version, (SELECT count(*) FROM questions WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency') AND kind = 'map' AND state = 'open') open",
-						)
-						.get(),
+			const snapshot = async () => {
+				const state = await instance.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly [], { version: number; open: number }>(
+								"SELECT (SELECT max(version) FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency')) version, (SELECT count(*) FROM questions WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency') AND kind = 'map' AND state = 'open') open",
+							),
+						),
 				);
 				states.add(JSON.stringify(state));
 			};
-			snapshot();
-			const watching = setInterval(snapshot, 5);
+			await snapshot();
+			const polling: Promise<void>[] = [];
+			const watching = setInterval(() => {
+				polling.push(snapshot());
+			}, 5);
 			try {
 				expect(
 					await project.call("decide", {
@@ -69,9 +57,10 @@ async function adoptWhilePolling(): Promise<number> {
 				).toMatchObject([{ status: "decided" }]);
 			} finally {
 				clearInterval(watching);
+				await Promise.all(polling);
 				worker.postMessage("stop");
 			}
-			snapshot();
+			await snapshot();
 			expect([...states].map((state) => JSON.parse(state))).toEqual([
 				{ version: 1, open: 1 },
 				{ version: 2, open: 0 },

@@ -3,11 +3,12 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
-import { ciReport } from "./helpers.ts";
+import { resultsOfBatch } from "../src/server/evidence/evidence.ts";
+import { ciReport, harness } from "./helpers.ts";
 
 async function reportWhilePolling(files: number): Promise<number> {
 	const cases = files === 1 ? 500 : 2000;
-	return withInstance(async ({ instance, client }) => {
+	return await withInstance(async ({ instance, client }) => {
 		await client.call("admin", { do: "project.create", key: "creating", preset: "loose", unlinked: "create" });
 		const producer = client.with({ project: "creating" });
 		const worker = new Worker(new URL("./archive-poll.ts", import.meta.url), {
@@ -57,3 +58,19 @@ for (const files of [1, 200]) {
 		);
 	}, 15_000);
 }
+
+test("a 5,000-result report uses fewer than 300 database statements", async () => {
+	const h = await harness({ preset: "standard" });
+	try {
+		const input = ciReport({ commit: "batched5000", n: 5000, fail: { 3: "boom", 77: "boom", 500: "other" } });
+		h.app.database.resetStatementCount();
+		const receipt = await h.call<{ batch: number; counts: { total: number }; results: number[] }>("report", input);
+		const statements = h.app.database.statementCount;
+		expect(receipt.counts.total).toBe(5000);
+		expect(await h.app.database.read(async (db) => await resultsOfBatch(db, receipt.batch, 5000))).toHaveLength(5000);
+		console.log(`5,000-result report: ${statements} database statements`);
+		expect(statements).toBeLessThan(300);
+	} finally {
+		await h.close();
+	}
+}, 15000);

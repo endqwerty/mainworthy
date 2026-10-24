@@ -7,6 +7,13 @@ import { Glob } from "bun";
 import type { LaunchOptions } from "playwright-core";
 import type { ResultIn } from "../src/core/ops.ts";
 
+/** Static checks shared by the local runner and the CI static job. */
+export const STATIC_CHECKS = [
+	{ name: "typecheck", args: ["run", "typecheck"] },
+	{ name: "lint", args: ["run", "lint"] },
+	{ name: "async-port", args: ["scripts/async-port.ts", "--check"] },
+] as const;
+
 /** Per-file weights in milliseconds. Shards are balanced by them; the slowest files start first. */
 export const TIMINGS = "scripts/test-timings.json";
 
@@ -43,8 +50,9 @@ export function writeTimings(path: string, durations: Readonly<Record<string, nu
 	writeFileSync(path, `${JSON.stringify({ version: TIMINGS_VERSION, files }, null, 2)}\n`);
 }
 
-/** Elapsed-time assertions run serially on a dedicated CI runner or explicitly on an idle local machine. */
+/** Elapsed-time assertions and database process cleanup checks run serially on a dedicated CI runner. */
 export const PERFORMANCE = [
+	"test/check-process.test.ts",
 	"test/demo-removal-budget.test.ts",
 	"test/archive-latency.test.ts",
 	"test/report-latency.test.ts",
@@ -68,22 +76,14 @@ export const parallelWorkers = (cores = availableParallelism(), load = loadavg()
 	return Math.min(most, Math.max(Math.min(2, most), Math.floor((cores - load) / 2)));
 };
 
-/**
- * The reader threads of a server a test starts, where MAINWORTHY_READERS does not say. A server takes the cores
- * less two, up to eight (`src/server/ops/readers.ts`), and the browser tests start several hundred servers. Each
- * thread loads the whole operation registry, which is about 110 ms of CPU, and a server that gets as far as a page
- * has used about 540 ms in all: on the 16-thread desktop the eight threads were 38% of the CPU time of the longest
- * browser file (121 CPU-seconds; 76 with two), and each thread of the two that are left is 0.11 s of a server's 0.54
- * (measured 2026-10-13, 255 servers in the parallel phase). One is still a pool, so a read still leaves the
- * server's thread. The tests about the pool itself name their own count.
- */
-export const testReaders = (): string => "1";
-
 /** Whole-suite durations only warn, by the owner's decision 0097; issue #77 tracks a future timing gate. */
 export const CHECK_WARNING_SECONDS = 130;
 
-/** The shards the workflow splits the parallel phase into; `.github/workflows/check.yml` lists as many. */
-export const CI_SHARDS = 6;
+/** The shards the scope matrix gives `.github/workflows/check.yml` for the parallel phase. */
+export const CI_SHARDS = 14;
+
+/** One test worker leaves the other CI CPU for PostgreSQL. Local worker selection stays machine-sized. */
+export const CI_TEST_WORKERS = 1;
 
 /** The existing CI warning threshold. Elapsed time does not change the gate's verdict (decision 0097). */
 export const CI_SHARD_WARNING_SECONDS = 180;
@@ -122,7 +122,7 @@ export function needsBrowserFixture(phases: readonly Phase[], shard?: string, fi
 	});
 }
 
-/** Production's compile flags, with the test fixture and the same embedded worker paths. */
+/** Production's compile flags with the test fixture. */
 export function fixtureBuildArgs(outfile: string, root = process.cwd()): string[] {
 	const output = resolve(outfile);
 	return [
@@ -133,14 +133,11 @@ export function fixtureBuildArgs(outfile: string, root = process.cwd()): string[
 		"--compile",
 		"--minify",
 		"--sourcemap",
-		// The fixture is outside src, but workers resolve server/ and cli/ from the executable's root.
+		// The fixture is outside src; keep the same source root as the production build.
 		`--root=${resolve(root, "src")}`,
 		"--banner",
 		"/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */",
 		resolve(root, "test/e2e/serve.ts"),
-		resolve(root, "src/server/ops/read-worker.ts"),
-		resolve(root, "src/server/kernel/checkpoint-worker.ts"),
-		resolve(root, "src/app/start-worker.ts"),
 		"--outfile",
 		output,
 	];

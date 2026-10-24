@@ -3,32 +3,30 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { observeDatabase } from "../bench/profile.ts";
 import { budget } from "../scripts/budget.ts";
 import { open } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { parseCase } from "../src/core/markdown.ts";
 import { applyMergeChoice, type Conflict } from "../src/core/merge3.ts";
-import { CaseBody, type ConflictAddress, emptyBody } from "../src/core/model.ts";
+import { type CaseBody, type ConflictAddress, emptyBody } from "../src/core/model.ts";
 import { type DecideReply, type Edit, ProposeReply } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { Proofs } from "../src/core/replies.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
-import { invoke, type Reply } from "../src/server/ops/registry.ts";
-import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
-import { serve } from "../src/surfaces/http.ts";
-import { dropResetIndexes } from "./demo-removal-fixture.ts";
-import legacyConflicts from "./fixtures/legacy-conflicts.json";
-import { ciReport, dropReceiptSchema, type Harness, harness } from "./helpers.ts";
+import { type AnyOp, invoke, type Reply } from "../src/server/ops/registry.ts";
+import { casesByIds, findCase, findCases, versionsOf } from "../src/server/suite/suite.ts";
+import { testDatabase } from "./db.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(() => h?.close());
 
 type Proposed = {
 	proposal: string | null;
@@ -60,24 +58,429 @@ const storedBody = async () => {
 	return parsed.doc.body;
 };
 
+test("sealing sibling edits reads their base versions together", async () => {
+	await h.call("propose", { edits: Array.from({ length: 64 }, (_, n) => ({ op: "create", outline: `Case ${n}` })) });
+	let reads = 0;
+	const restore = observeDatabase(h.app.database, (text) => {
+		if (text === "SELECT * FROM versions WHERE case_id = $1 AND no = $2") reads++;
+	});
+	try {
+		const reply = await h.call<Proposed>("propose", {
+			edits: Array.from({ length: 64 }, (_, n) => ({
+				op: "edit",
+				case: `C-${n + 1}`,
+				base: 1,
+				body: { pre: "Updated" },
+			})),
+		});
+		expect(reply.cases).toHaveLength(64);
+		expect(reads).toBeLessThanOrEqual(130);
+		const rows = await h.app.database.read((db) =>
+			db.all(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM cases WHERE head=2")),
+		);
+		expect(rows).toEqual([{ n: 64 }]);
+	} finally {
+		restore();
+	}
+});
+
+test("adopting independent edits batches versions, heads and search documents", async () => {
+	await h.call("propose", {
+		edits: Array.from({ length: 64 }, (_, n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before" },
+			tags: ["kept"],
+		})),
+	});
+	const before = h.app.database.statementCount;
+	const reply = await h.call<Proposed>("propose", {
+		edits: Array.from({ length: 64 }, (_, n) => ({
+			op: "edit",
+			case: `C-${n + 1}`,
+			base: 1,
+			body: { pre: "After bulk revision" },
+		})),
+	});
+	expect(h.app.database.statementCount - before).toBeLessThanOrEqual(100);
+	expect(reply.cases.map(({ ref, version }) => ({ ref, version }))).toEqual(
+		Array.from({ length: 64 }, (_, n) => ({ ref: `C-${n + 1}`, version: 2 })),
+	);
+	await h.app.database.read(async (db) => {
+		expect(await db.allDynamic("SELECT head,count(*) AS n FROM cases GROUP BY head")).toEqual([{ head: 2, n: 64 }]);
+		expect(
+			await db.allDynamic(
+				"SELECT v.no,count(*) AS n FROM versions v JOIN decisions d ON d.id=v.decision JOIN proposals p ON p.id=v.proposal WHERE d.kind='adopt' AND v.parent IS NOT DISTINCT FROM nullif(v.no-1,0) GROUP BY v.no ORDER BY v.no",
+			),
+		).toEqual([
+			{ no: 1, n: 64 },
+			{ no: 2, n: 64 },
+		]);
+	});
+	const page = await h.call<{ count: number; items: { tags: string[] }[] }>("find", {
+		text: "After bulk revision",
+		limit: 100,
+	});
+	expect(page.count).toBe(64);
+	expect(page.items.every((row) => row.tags.includes("kept"))).toBe(true);
+});
+
+test("a stale sibling edit falls back without repeatedly preloading the remaining batch", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	await h.call("propose", {
+		edits: Array.from({ length: 12 }, (_, n) => ({ op: "create", body: { title: `Case ${n}`, pre: "Before" } })),
+	});
+	const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const waiting = await h.call<Proposed>(
+		"propose",
+		{
+			edits: Array.from({ length: 12 }, (_, n) => ({
+				op: "edit",
+				case: `C-${n + 1}`,
+				base: 1,
+				body: { pre: "After" },
+			})),
+		},
+		agent,
+	);
+	expect(waiting.status).toBe("open");
+	await h.call("propose", { edits: [{ op: "edit", case: "C-12", base: 1, body: { title: "Changed while waiting" } }] });
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [waiting.question] });
+	let preloads = 0;
+	const restore = observeDatabase(h.app.database, (text) => {
+		if (text === "SELECT * FROM cases WHERE id = ANY($1::bigint[])") preloads++;
+	});
+	try {
+		expect(
+			await h.call("decide", { q: waiting.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+		expect(preloads).toBeLessThanOrEqual(4);
+		expect(await h.call("get", { refs: ["C-12"] })).toMatchObject([
+			{ title: "Changed while waiting", pre: "After", version: 3 },
+		]);
+	} finally {
+		restore();
+	}
+});
+
+test("batched adoption preserves proposal provenance and searchable tags", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	await h.call("propose", {
+		edits: ["firsttag", "secondtag"].map((tag, n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before" },
+			tags: [tag],
+		})),
+	});
+	const author = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const proposal = await h.call<Proposed>(
+		"propose",
+		{
+			reason: "The author's revision",
+			edits: [1, 2].map((n) => ({ op: "edit", case: `C-${n}`, base: 1, body: { pre: "After" } })),
+		},
+		author,
+	);
+	expect(proposal.status).toBe("open");
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+	expect(
+		await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject([{ status: "decided" }]);
+	await h.app.database.read(async (db) => {
+		expect(
+			await db.allDynamic(
+				"SELECT c.no,v.author,v.reason,c.updated_by FROM versions v JOIN cases c ON c.id=v.case_id WHERE v.no=2 ORDER BY c.no",
+			),
+		).toEqual([1, 2].map((no) => ({ no, author: author.id, reason: "The author's revision", updated_by: author.id })));
+		expect(await db.allDynamic("SELECT tags FROM search_docs ORDER BY id")).toEqual([
+			{ tags: "firsttag" },
+			{ tags: "secondtag" },
+		]);
+	});
+	expect(
+		(await h.call<{ items: { ref: string }[] }>("find", { text: "firsttag" })).items.map((row) => row.ref),
+	).toEqual(["C-1"]);
+});
+
+test("batched adoption refuses a newly invalid field before publishing any sibling", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	const setFields = async (choices: string[]) => {
+		const policy = await h.call<{ version: number; settings: Record<string, unknown> }>("admin", {
+			do: "policy.show",
+			project: "scratch",
+		});
+		const proposal = await h.call<Proposed>("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: policy.version,
+					settings: {
+						...policy.settings,
+						fields: { risk: { kind: "choice", label: "Risk", required: false, choices } },
+					},
+				},
+			],
+		});
+		const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+		expect(
+			await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+	};
+	await setFields(["low", "high"]);
+	await h.call("propose", {
+		edits: [1, 2, 3].map((n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before", fields: { risk: "low" } },
+		})),
+	});
+	const author = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const proposal = await h.call<Proposed>(
+		"propose",
+		{
+			edits: [1, 2, 3].map((n) => ({
+				op: "edit",
+				case: `C-${n}`,
+				base: 1,
+				body: { pre: "After", fields: { risk: n === 2 ? "high" : "low" } },
+			})),
+		},
+		author,
+	);
+	expect(proposal.status).toBe("open");
+	await setFields(["low"]);
+	const snapshot = () =>
+		h.app.database.read(async (db) => ({
+			cases: await db.allDynamic("SELECT * FROM cases ORDER BY id"),
+			versions: await db.allDynamic("SELECT * FROM versions ORDER BY case_id,no"),
+			docs: await db.allDynamic("SELECT * FROM search_docs ORDER BY id"),
+		}));
+	const before = await snapshot();
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+	expect(
+		await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject([{ status: "invalid", needs: expect.stringContaining("case custom fields are not valid") }]);
+	expect(await snapshot()).toEqual(before);
+});
+
+test("bulk suite reads preserve reference and alias resolution and pair versions exactly", async () => {
+	await h.call("propose", {
+		edits: [
+			{ op: "create", body: { title: "First" }, aliases: ["OLD1", "OLD2"] },
+			{ op: "create", body: { title: "Second" }, aliases: ["vendor:two"] },
+		],
+	});
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "First revised" } }] });
+	await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+	await h.app.database.read(async (db) => {
+		const refs = ["C-1", "1", " 1 ", "OLD1", "OLD2", " OLD1 ", "vendor:two", "C-999", "missing", "C-1", "Q-1"];
+		const before = h.app.database.statementCount;
+		const found = await findCases(db, 1, refs);
+		expect(h.app.database.statementCount - before).toBe(1);
+		for (const text of refs) expect(found.get(text)).toEqual(await findCase(db, 1, text));
+		expect(await findCases(db, 2, refs)).toEqual(new Map(refs.map((text) => [text, null])));
+		const first = found.get("C-1"),
+			second = found.get("vendor:two");
+		if (!first || !second) throw new Error("missing batch cases");
+		const byIds = await casesByIds(db, [second.id, first.id, first.id, 999999]);
+		expect(byIds.map((row) => row.id).sort((a, b) => a - b)).toEqual([first.id, second.id]);
+		const versions = await versionsOf(db, [
+			{ caseId: first.id, no: 2 },
+			{ caseId: second.id, no: 1 },
+			{ caseId: second.id, no: 99 },
+		]);
+		expect(versions.map((row) => [row.case_id, row.no]).sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0))).toEqual([
+			[first.id, 2],
+			[second.id, 1],
+		]);
+		expect(await casesByIds(db, [])).toEqual([]);
+		expect(await versionsOf(db, [])).toEqual([]);
+		expect(await findCases(db, 1, [])).toEqual(new Map());
+	});
+});
+
+test("batched coverage preserves first titles, final membership and re-added decision attribution", async () => {
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Coverage" }, covers: ["REQ-1"] }] });
+	const links = async () =>
+		await h.app.database.read(
+			async (db) =>
+				await db.all(
+					sql<readonly [], { key: string; title: string; decision: number | null }>(
+						"SELECT r.key, r.title, c.decision FROM requirements r LEFT JOIN covers c ON c.requirement = r.id ORDER BY r.key",
+					),
+				),
+		);
+	const before = await links();
+	await h.call("propose", {
+		edits: [
+			{ op: "cover", case: "C-1", requirement: "REQ-1", on: false },
+			{ op: "cover", case: "C-1", requirement: "REQ-1", title: "Keep original title", on: true },
+			{ op: "cover", case: "C-1", requirement: "REQ-2", title: "First title", on: true },
+			{ op: "cover", case: "C-1", requirement: "REQ-2", on: false },
+			{ op: "cover", case: "C-1", requirement: "REQ-2", title: "Later title", on: true },
+			{ op: "cover", case: "C-1", requirement: "REQ-3", title: "Retained requirement", on: true },
+			{ op: "cover", case: "C-1", requirement: "REQ-3", on: false },
+		],
+	});
+	const after = await links();
+	expect(after).toEqual([
+		{ key: "REQ-1", title: "", decision: expect.any(Number) },
+		{ key: "REQ-2", title: "First title", decision: expect.any(Number) },
+		{ key: "REQ-3", title: "Retained requirement", decision: null },
+	]);
+	expect(after[0]?.decision).not.toBe(before[0]?.decision);
+	expect(after[1]?.decision).toBe(after[0]?.decision);
+	expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([{ covers: ["REQ-1", "REQ-2"] }]);
+});
+
+test("a body larger than the search vector limit saves and keeps title, tags and early body searchable", async () => {
+	const pre =
+		"earlycanary café " +
+		Array.from({ length: 200_000 }, (_, i) => `word${i.toString(36).padStart(6, "0")}`).join(" ") +
+		" latecanary";
+	expect(Buffer.byteLength(pre)).toBeGreaterThan(2_000_000);
+	expect(
+		await h.call("propose", {
+			edits: [{ op: "create", body: { title: "Large vector canary", pre }, tags: ["largetag"] }],
+		}),
+	).toMatchObject({ status: "adopted" });
+	for (const text of ["large vector", "earlycanary", "cafe", "largetag"]) {
+		expect(await h.call("find", { text })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+	}
+	expect(await h.call("find", { text: "latecanary" })).toMatchObject({ count: 0, items: [] });
+	expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([{ pre }]);
+});
+
+test("search folds accents, keeps stop words and uses exact earlier words with a final prefix", async () => {
+	await h.call("propose", {
+		edits: [
+			{ op: "create", body: { title: "Café running the checkout" } },
+			{ op: "create", body: { title: "Cafe run the cart" } },
+		],
+	});
+	const refs = async (text: string) =>
+		(await h.call<{ items: { ref: string }[] }>("find", { text })).items.map((row) => row.ref).sort();
+	expect(await refs("cafe")).toEqual(["C-1", "C-2"]);
+	expect(await refs("the")).toEqual(["C-1", "C-2"]);
+	expect(await refs("run the")).toEqual(["C-2"]);
+	expect(await refs("running ch")).toEqual(["C-1"]);
+	expect(await refs("running | & ! ch")).toEqual(["C-1"]);
+	expect(await refs("***")).toEqual([]);
+});
+
 describe("atomic bulk proposals", () => {
 	const count = 450;
 	const creates = (): Edit[] =>
 		Array.from({ length: count }, (_, i) => ({ op: "create", outline: `Bulk case ${i}\n  Check > Pass` }));
-	const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-	const disk = () => {
+	const tick = async (instance: Awaited<ReturnType<typeof disk>>): Promise<void> => {
+		await instance.nextSlice();
+	};
+	const disk = async () => {
 		const dir = mkdtempSync(join(tmpdir(), "mainworthy-bulk-"));
-		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
-		const instance = open(config);
-		const call = (op: string, input: unknown = {}) => ({ op, input, project: "scratch", actor: () => instance.owner });
+		const fixture = await testDatabase();
+		const config = { ...defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" }), databaseUrl: fixture.url };
+		const instance = await open(config);
+		const call = (op: string, input: unknown = {}) => ({
+			op,
+			input,
+			project: "scratch",
+			actor: async () => instance.owner,
+		});
+		const observed: { active: boolean; monitor: boolean; finished: boolean; counts: Record<string, number> } = {
+			active: false,
+			monitor: false,
+			finished: true,
+			counts: {},
+		};
+		let releaseSlice: (() => void) | null = null;
+		const sliceWaiters: (() => void)[] = [];
+		const notifySlice = () => {
+			for (const resolve of sliceWaiters.splice(0)) resolve();
+		};
+		const resumeSlice = () => {
+			observed.active = false;
+			releaseSlice?.();
+			releaseSlice = null;
+		};
+		const observe = (operation: AnyOp): AnyOp => {
+			if (operation.scope !== "project" || operation.effect !== "write" || !("steps" in operation)) return operation;
+			return {
+				...operation,
+				async *steps(ctx, input) {
+					const steps = operation.steps(ctx, input);
+					if (!observed.monitor) return yield* steps;
+					let initialCounts: Record<string, number> | null = null;
+					const changes = new Set<string>();
+					try {
+						for (let step = await steps.next(); ; step = await steps.next()) {
+							if (step.done) return step.value;
+							const counts = await ctx.db.one(
+								sql<readonly [], Record<string, number>>(
+									`SELECT (SELECT count(*) FROM cases) AS cases, (SELECT count(*) FROM versions) AS versions,
+							 (SELECT count(*) FROM decisions) AS decisions, (SELECT count(*) FROM proposals) AS proposals,
+							 (SELECT count(*) FROM cases WHERE head = 2) AS edited,
+							 (SELECT count(*) FROM cases WHERE tags = '["changed"]') AS placed,
+							 (SELECT count(*) FROM cases WHERE state = 'archived') AS archived`,
+								),
+							);
+							let changed = initialCounts === null;
+							for (const key of Object.keys(counts)) {
+								if (initialCounts && counts[key] !== initialCounts[key] && !changes.has(key)) {
+									changed = true;
+									changes.add(key);
+								}
+							}
+							initialCounts ??= counts;
+							if (!changed) {
+								yield step.value;
+								continue;
+							}
+							observed.counts = counts;
+							observed.active = true;
+							notifySlice();
+							if (observed.monitor)
+								await new Promise<void>((resolve) => {
+									releaseSlice = resolve;
+								});
+							yield step.value;
+						}
+					} finally {
+						observed.active = false;
+						observed.monitor = false;
+						observed.finished = true;
+						notifySlice();
+						await steps.return(undefined);
+					}
+				},
+			};
+		};
+		const ops: typeof OPS = Object.fromEntries(
+			Object.entries(OPS).map(([name, operation]) => [name, observe(operation)]),
+		);
 		const raw = async (op: string, input: unknown = {}) => await invoke(instance.app, OPS, call(op, input));
 		return {
 			...instance,
 			config,
+			ops,
+			observed,
+			resumeSlice,
+			async nextSlice() {
+				resumeSlice();
+				if (!observed.finished) await new Promise<void>((resolve) => sliceWaiters.push(resolve));
+				await new Promise<void>((resolve) => setImmediate(resolve));
+			},
+			startObserving() {
+				observed.finished = false;
+				observed.monitor = true;
+			},
 			call,
 			raw,
-			close() {
-				instance.app.close();
+			async close() {
+				observed.monitor = false;
+				resumeSlice();
+				await instance.app.close();
+				await fixture.close();
 				rmSync(dir, { recursive: true, force: true });
 			},
 		};
@@ -86,9 +489,18 @@ describe("atomic bulk proposals", () => {
 		if (!reply.ok) throw new Error(JSON.stringify(reply.error));
 		return reply.result as T;
 	};
-	const storedCount = (instance: ReturnType<typeof disk>, table: "cases" | "versions" | "decisions") =>
-		instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
-	const acceptance = async (instance: ReturnType<typeof disk>, proposed: ProposeReply) => {
+	const storedCount = async (
+		instance: Awaited<ReturnType<typeof disk>>,
+		table: "cases" | "versions" | "decisions" | "proposals",
+	) =>
+		instance.observed.active
+			? (instance.observed.counts[table] ?? 0)
+			: (
+					await instance.app.database.read(
+						async (db) => await db.one(sql<readonly [], { n: number }>(`SELECT count(*) AS n FROM ${table}`)),
+					)
+				).n;
+	const acceptance = async (instance: Awaited<ReturnType<typeof disk>>, proposed: ProposeReply) => {
 		const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [proposed.question] }))[0];
 		return {
 			q: proposed.question,
@@ -97,7 +509,7 @@ describe("atomic bulk proposals", () => {
 			reason: "Reviewed all cases",
 		};
 	};
-	const strict = async (instance: ReturnType<typeof disk>) => {
+	const strict = async (instance: Awaited<ReturnType<typeof disk>>) => {
 		const policy = result<ProposeReply>(await instance.raw("propose", { edits: [{ op: "policy", preset: "strict" }] }));
 		expect(result<DecideReply[]>(await instance.raw("decide", await acceptance(instance, policy)))[0]?.status).toBe(
 			"decided",
@@ -105,7 +517,7 @@ describe("atomic bulk proposals", () => {
 	};
 
 	test("a maximum-size conflict resolution yields while sealing and keeps its replacement atomic", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			result(await instance.raw("propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
 			result(
@@ -115,10 +527,13 @@ describe("atomic bulk proposals", () => {
 				await instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }),
 			);
 			const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [conflict.question] }))[0];
-			const proposalsBefore = instance.app.db.raw
-				.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals")
-				.get()?.n;
-			const decisionsBefore = storedCount(instance, "decisions");
+			const proposalsBefore = (
+				await instance.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM proposals"), []),
+				)
+			)?.n;
+			const decisionsBefore = await storedCount(instance, "decisions");
 			const covers = Array.from({ length: 4999 }, (_, i) => `REQ-${i}`);
 			const input = {
 				q: conflict.question,
@@ -131,15 +546,18 @@ describe("atomic bulk proposals", () => {
 				cmd: "max-merge-01",
 			};
 			let done = false;
-			const saving = invoke(instance.app, OPS, instance.call("decide", input));
+			instance.startObserving();
+			const saving = invoke(instance.app, instance.ops, instance.call("decide", input));
 			void saving.then(() => {
 				done = true;
 			});
 			let duringSeal = false;
 			while (!done) {
-				await tick();
-				const proposals = instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals").get()?.n;
-				if (done || storedCount(instance, "decisions") === decisionsBefore || proposals !== proposalsBefore) continue;
+				await tick(instance);
+				if (!instance.observed.active) continue;
+				const proposals = await storedCount(instance, "proposals");
+				if (done || (await storedCount(instance, "decisions")) === decisionsBefore || proposals !== proposalsBefore)
+					continue;
 				duringSeal = true;
 				expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
 					title: "Theirs",
@@ -153,9 +571,13 @@ describe("atomic bulk proposals", () => {
 			const replies = result<DecideReply[]>(await saving);
 			expect(replies[0]).toMatchObject({ status: "decided", effects: { status: "adopted" } });
 			expect(duringSeal).toBe(true);
-			const replacement = instance.app.db.raw
-				.query<{ edits: string }, []>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")
-				.get();
+			const replacement = await instance.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], { edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1"),
+						[],
+					),
+			);
 			expect(JSON.parse(replacement?.edits ?? "[]")).toHaveLength(5000);
 			expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
 				title: "Resolved",
@@ -163,17 +585,21 @@ describe("atomic bulk proposals", () => {
 				covers: expect.arrayContaining(["REQ-0", "REQ-4998"]),
 			});
 			expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]?.covers).toHaveLength(4999);
-			expect(result<DecideReply[]>(await invoke(instance.app, OPS, instance.call("decide", input)))).toEqual(replies);
+			expect(result<DecideReply[]>(await invoke(instance.app, instance.ops, instance.call("decide", input)))).toEqual(
+				replies,
+			);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	});
 
 	test.each(["map", "finding", "policy"] as const)(
 		"case creation from %s answers yields without publishing partial effects",
 		async (kind) => {
-			const instance = disk();
+			const instance = await disk();
 			try {
 				const total = kind === "finding" ? 200 : count;
 				const questionKind = kind === "finding" ? "finding" : "map";
@@ -217,14 +643,16 @@ describe("atomic bulk proposals", () => {
 					cmd: `bulk-${kind}`,
 				};
 				let done = false;
-				const saving = invoke(instance.app, OPS, instance.call("decide", input));
+				instance.startObserving();
+				const saving = invoke(instance.app, instance.ops, instance.call("decide", input));
 				void saving.then(() => {
 					done = true;
 				});
 				let partial = false;
 				while (!done) {
-					await tick();
-					const written = storedCount(instance, "cases");
+					await tick(instance);
+					if (!instance.observed.active) continue;
+					const written = await storedCount(instance, "cases");
 					if (done || written === 0 || written === total) continue;
 					partial = true;
 					expect(result(await instance.raw("find"))).toMatchObject({ count: 0, items: [] });
@@ -236,7 +664,9 @@ describe("atomic bulk proposals", () => {
 				expect(saved.map((reply) => reply.status)).toEqual(questions.map(() => "decided"));
 				expect(result(await instance.raw("find"))).toMatchObject({ count: total });
 				expect(result(await instance.raw("inbox", { kind: questionKind }))).toMatchObject({ items: [] });
-				expect(result<DecideReply[]>(await invoke(instance.app, OPS, instance.call("decide", input)))).toEqual(saved);
+				expect(result<DecideReply[]>(await invoke(instance.app, instance.ops, instance.call("decide", input)))).toEqual(
+					saved,
+				);
 				if (kind !== "finding") {
 					const receipt = result<{ basis: { assumed: number; unresolved: number } }>(
 						await instance.raw("report", ciReport({ commit: "ba1c0002", n: total })),
@@ -245,24 +675,28 @@ describe("atomic bulk proposals", () => {
 				}
 				expect(partial).toBe(true);
 			} finally {
-				await instance.app.gate.run(() => {});
-				instance.close();
+				instance.observed.monitor = false;
+				instance.resumeSlice();
+				await instance.app.database.write(() => {});
+				await instance.close();
 			}
 		},
 	);
 
 	test("sealing a bulk proposal that needs review also answers reads before publishing it", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			let done = false;
-			const sealing = invoke(instance.app, OPS, instance.call("propose", { edits: creates() }));
+			instance.startObserving();
+			const sealing = invoke(instance.app, instance.ops, instance.call("propose", { edits: creates() }));
 			void sealing.then(() => {
 				done = true;
 			});
 			let during = false;
 			while (!done) {
-				await tick();
+				await tick(instance);
+				if (!instance.observed.active) continue;
 				if (done) break;
 				during = true;
 				expect(result(await instance.raw("find"))).toMatchObject({ count: 0 });
@@ -275,13 +709,15 @@ describe("atomic bulk proposals", () => {
 			});
 			expect(during).toBe(true);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	});
 
 	test("sealing a 5,000-case fragment move answers reads even when its last case conflicts", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			result(
 				await instance.raw("propose", {
@@ -322,8 +758,8 @@ describe("atomic bulk proposals", () => {
 				}),
 			);
 			const before = {
-				versions: storedCount(instance, "versions"),
-				decisions: storedCount(instance, "decisions"),
+				versions: await storedCount(instance, "versions"),
+				decisions: await storedCount(instance, "decisions"),
 			};
 			const edits: Edit[] = [
 				{
@@ -335,16 +771,20 @@ describe("atomic bulk proposals", () => {
 				},
 			];
 			let done = false;
-			const moving = invoke(instance.app, OPS, instance.call("propose", { edits }));
+			instance.startObserving();
+			const moving = invoke(instance.app, instance.ops, instance.call("propose", { edits }));
 			void moving.then(() => {
 				done = true;
 			});
 			let readDuringSealing = false;
 			while (!done) {
-				await tick();
+				await tick(instance);
+				if (!instance.observed.active) continue;
 				if (done) break;
 				expect(
-					result<unknown[]>(await invoke(instance.app, OPS, instance.call("get", { refs: ["C-2", "C-5001"] }))),
+					result<unknown[]>(
+						await invoke(instance.app, instance.ops, instance.call("get", { refs: ["C-2", "C-5001"] })),
+					),
 				).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
 					{ version: 2, title: "Changed consumer", steps: [{ action: "Password", source: { version: 1 } }] },
@@ -358,14 +798,16 @@ describe("atomic bulk proposals", () => {
 					message: "C-5001 changed; redo the fragment batch",
 				},
 			});
-			expect(storedCount(instance, "versions")).toBe(before.versions);
-			expect(storedCount(instance, "decisions")).toBe(before.decisions);
+			expect(await storedCount(instance, "versions")).toBe(before.versions);
+			expect(await storedCount(instance, "decisions")).toBe(before.decisions);
 			expect(await instance.raw("get", { refs: ["P-4"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
 			expect(readDuringSealing).toBe(true);
 
+			instance.startObserving();
+
 			const retry = invoke(
 				instance.app,
-				OPS,
+				instance.ops,
 				instance.call("propose", {
 					edits: [
 						{
@@ -383,7 +825,8 @@ describe("atomic bulk proposals", () => {
 				done = true;
 			});
 			while (!done) {
-				await tick();
+				await tick(instance);
+				if (!instance.observed.active) continue;
 				if (done) break;
 				expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
@@ -393,32 +836,40 @@ describe("atomic bulk proposals", () => {
 			const adopted = result<ProposeReply>(await retry);
 			expect(adopted.status).toBe("adopted");
 			expect(adopted.cases).toHaveLength(5000);
-			expect(storedCount(instance, "versions")).toBe(before.versions + 5000);
-			expect(storedCount(instance, "decisions")).toBe(before.decisions + 1);
+			expect(await storedCount(instance, "versions")).toBe(before.versions + 5000);
+			expect(await storedCount(instance, "decisions")).toBe(before.decisions + 1);
 			expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
 				{ version: 2, steps: [{ action: "Passkey", source: { version: 2 } }] },
 				{ version: 3, title: "Changed consumer", steps: [{ action: "Passkey", source: { version: 2 } }] },
 			]);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	}, 30000);
 
 	test("a bulk save answers reads between slices and publishes the complete proposal and decision once", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			const events: unknown[] = [];
 			instance.app.subscribe((event) => events.push(event));
 			let done = false;
-			const saving = invoke(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }));
+			instance.startObserving();
+			const saving = invoke(
+				instance.app,
+				instance.ops,
+				instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }),
+			);
 			void saving.then(() => {
 				done = true;
 			});
 			let partial = false;
 			while (!done) {
-				await tick();
-				const written = storedCount(instance, "cases");
+				await tick(instance);
+				if (!instance.observed.active) continue;
+				const written = await storedCount(instance, "cases");
 				if (written === 0 || written === count) continue;
 				partial = true;
 				expect(result(await instance.raw("find"))).toMatchObject({ count: 0, items: [] });
@@ -430,33 +881,36 @@ describe("atomic bulk proposals", () => {
 			expect(saved.status).toBe("adopted");
 			expect(saved.cases).toHaveLength(count);
 			expect(result(await instance.raw("find"))).toMatchObject({ count });
-			expect(storedCount(instance, "versions")).toBe(count);
-			expect(storedCount(instance, "decisions")).toBe(1);
+			expect(await storedCount(instance, "versions")).toBe(count);
+			expect(await storedCount(instance, "decisions")).toBe(1);
 			expect(events).toHaveLength(1);
 			expect(partial).toBe(true);
 			expect(
 				result<ProposeReply>(
-					await invoke(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" })),
+					await invoke(instance.app, instance.ops, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" })),
 				),
 			).toEqual(saved);
-			expect(storedCount(instance, "versions")).toBe(count);
+			expect(await storedCount(instance, "versions")).toBe(count);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	});
 
 	test("accepting a bulk proposal answers reads without exposing half its cases or a decided question", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			const proposed = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 			expect(proposed.status).toBe("open");
 			const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [proposed.question] }))[0];
 			let done = false;
+			instance.startObserving();
 			const accepting = invoke(
 				instance.app,
-				OPS,
+				instance.ops,
 				instance.call("decide", {
 					q: proposed.question,
 					onEvidence: question?.evidenceHash,
@@ -469,8 +923,9 @@ describe("atomic bulk proposals", () => {
 			});
 			let partial = false;
 			while (!done) {
-				await tick();
-				const written = storedCount(instance, "cases");
+				await tick(instance);
+				if (!instance.observed.active) continue;
+				const written = await storedCount(instance, "cases");
 				if (written === 0 || written === count) continue;
 				partial = true;
 				expect(result(await instance.raw("find"))).toMatchObject({ count: 0 });
@@ -489,15 +944,17 @@ describe("atomic bulk proposals", () => {
 			});
 			expect(partial).toBe(true);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	});
 
 	test.each(["edit", "place", "state"] as const)(
 		"a bulk %s keeps every case at its previous state between slices",
 		async (op) => {
-			const instance = disk();
+			const instance = await disk();
 			try {
 				const created = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 				const refs = created.cases.map((row) => row.ref);
@@ -509,16 +966,18 @@ describe("atomic bulk proposals", () => {
 							: [{ op, cases: refs, to: "archived" }];
 				const condition = op === "edit" ? "head = 2" : op === "place" ? "tags = '[\"changed\"]'" : "state = 'archived'";
 				let done = false;
-				const saving = invoke(instance.app, OPS, instance.call("propose", { edits }));
+				instance.startObserving();
+				const saving = invoke(instance.app, instance.ops, instance.call("propose", { edits }));
 				void saving.then(() => {
 					done = true;
 				});
 				let partial = false;
 				while (!done) {
-					await tick();
-					const changed =
-						instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM cases WHERE ${condition}`).get()
-							?.n ?? 0;
+					await tick(instance);
+					if (!instance.observed.active) continue;
+					const changed = instance.observed.active
+						? (instance.observed.counts[op === "edit" ? "edited" : op === "place" ? "placed" : "archived"] ?? 0)
+						: 0;
 					if (changed === 0 || changed === count) continue;
 					partial = true;
 					expect(result(await instance.raw("find"))).toMatchObject({ count });
@@ -529,18 +988,28 @@ describe("atomic bulk proposals", () => {
 				}
 				expect(result<ProposeReply>(await saving).status).toBe("adopted");
 				expect(
-					instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM cases WHERE ${condition}`).get()?.n,
+					(
+						await instance.app.database.read(
+							async (db) =>
+								await db.get(
+									sql<readonly SqlValue[], { n: number }>(`SELECT count(*) AS n FROM cases WHERE ${condition}`),
+									[],
+								),
+						)
+					)?.n,
 				).toBe(count);
 				expect(partial).toBe(true);
 			} finally {
-				await instance.app.gate.run(() => {});
-				instance.close();
+				instance.observed.monitor = false;
+				instance.resumeSlice();
+				await instance.app.database.write(() => {});
+				await instance.close();
 			}
 		},
 	);
 
 	test("a late adoption conflict rolls back earlier slices and leaves the next batched answer usable", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			const edits = creates();
@@ -558,7 +1027,7 @@ describe("atomic bulk proposals", () => {
 			const replies = result<DecideReply[]>(
 				await invoke(
 					instance.app,
-					OPS,
+					instance.ops,
 					instance.call("decide", {
 						all: [await acceptance(instance, pending), await acceptance(instance, next)],
 					}),
@@ -567,8 +1036,8 @@ describe("atomic bulk proposals", () => {
 			expect(replies.map((reply) => reply.status)).toEqual(["conflict", "decided"]);
 			expect(replies[0]?.needs).toBe("case alias bulk:last is already in use");
 			expect(result(await instance.raw("find"))).toMatchObject({ count: 2 });
-			expect(storedCount(instance, "versions")).toBe(2);
-			expect(storedCount(instance, "decisions")).toBe(3);
+			expect(await storedCount(instance, "versions")).toBe(2);
+			expect(await storedCount(instance, "decisions")).toBe(3);
 			expect(result<unknown[]>(await instance.raw("get", { refs: [pending.question] }))[0]).toMatchObject({
 				state: "open",
 			});
@@ -577,15 +1046,17 @@ describe("atomic bulk proposals", () => {
 				"Next answer",
 			]);
 		} finally {
-			await instance.app.gate.run(() => {});
-			instance.close();
+			instance.observed.monitor = false;
+			instance.resumeSlice();
+			await instance.app.database.write(() => {});
+			await instance.close();
 		}
 	});
 
 	test.each(["propose", "decide"])(
 		"a process killed between %s slices leaves no partial adoption after restart",
 		async (op) => {
-			const instance = disk();
+			const instance = await disk();
 			let child: ReturnType<typeof Bun.spawn> | undefined;
 			try {
 				let input: unknown = { edits: creates(), cmd: "bulk-crash-01" };
@@ -595,25 +1066,26 @@ describe("atomic bulk proposals", () => {
 					pending = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 					input = { ...(await acceptance(instance, pending)), cmd: "bulk-crash-01" };
 				}
-				const before = storedCount(instance, "decisions");
+				const before = await storedCount(instance, "decisions");
 				const module = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
 				const running = Bun.spawn(
 					[
 						process.execPath,
 						"-e",
 						`
+import { sql } from ${module("../src/server/kernel/db.ts")};
 import { OPS } from ${module("../src/server/ops/index.ts")};
 import { invoke } from ${module("../src/server/ops/registry.ts")};
 import { open } from ${module("../src/app/start.ts")};
 const { config, op, input } = JSON.parse(await Bun.stdin.text());
-const { app, owner } = open(config);
+const { app, owner } = await open(config);
 const operation = OPS[op];
 if (!("steps" in operation)) throw new Error("the bulk operation has no slices");
-const paused = { ...operation, *steps(ctx, input) {
+const paused = { ...operation, async *steps(ctx, input) {
 	const steps = operation.steps(ctx, input);
-	for (let step = steps.next(); ; step = steps.next()) {
+	for (let step = await steps.next(); ; step = await steps.next()) {
 		if (step.done) return step.value;
-		const count = app.db.raw.query("SELECT count(*) AS n FROM cases").get().n;
+		const count = (await ctx.db.one(sql("SELECT count(*) AS n FROM cases"))).n;
 		if (count > 0 && count < ${count}) {
 			process.stdout.write("PARTIAL " + count + "\\n");
 			for (;;) yield;
@@ -621,7 +1093,7 @@ const paused = { ...operation, *steps(ctx, input) {
 		yield step.value;
 	}
 } };
-await invoke(app, { ...OPS, [op]: paused }, { op, project: "scratch", input, actor: () => owner });
+await invoke(app, { ...OPS, [op]: paused }, { op, project: "scratch", input, actor: async () => owner });
 throw new Error("the operation completed without a partial adoption slice");
 `,
 					],
@@ -642,24 +1114,34 @@ throw new Error("the operation completed without a partial adoption slice");
 				}
 				child.kill("SIGKILL");
 				await child.exited;
-				const restarted = open(instance.config);
+				const restarted = await open(instance.config);
 				try {
 					const raw = async (operation: string, body: unknown = {}) =>
 						await invoke(restarted.app, OPS, {
 							op: operation,
 							project: "scratch",
 							input: body,
-							actor: () => restarted.owner,
+							actor: async () => restarted.owner,
 						});
 					expect(result(await raw("find"))).toMatchObject({ count: 0 });
 					for (const table of ["cases", "versions", "placements", "search_docs", "commands"]) {
-						expect(restarted.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(
-							0,
-						);
+						expect(
+							(
+								await restarted.app.database.read(
+									async (db) =>
+										await db.get(sql<readonly SqlValue[], { n: number }>(`SELECT count(*) AS n FROM ${table}`), []),
+								)
+							)?.n,
+						).toBe(0);
 					}
-					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(
-						before,
-					);
+					expect(
+						(
+							await restarted.app.database.read(
+								async (db) =>
+									await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM decisions"), []),
+							)
+						)?.n,
+					).toBe(before);
 					if (pending)
 						expect(result<unknown[]>(await raw("get", { refs: [pending.question] }))[0]).toMatchObject({
 							state: "open",
@@ -669,21 +1151,31 @@ throw new Error("the operation completed without a partial adoption slice");
 					expect(retried.ok).toBe(true);
 					expect(await raw(op, input)).toEqual(retried);
 					expect(result(await raw("find"))).toMatchObject({ count });
-					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM versions").get()?.n).toBe(
-						count,
-					);
-					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(
-						before + 1,
-					);
+					expect(
+						(
+							await restarted.app.database.read(
+								async (db) =>
+									await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM versions"), []),
+							)
+						)?.n,
+					).toBe(count);
+					expect(
+						(
+							await restarted.app.database.read(
+								async (db) =>
+									await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM decisions"), []),
+							)
+						)?.n,
+					).toBe(before + 1);
 				} finally {
-					restarted.app.close();
+					await restarted.app.close();
 				}
 			} finally {
 				if (child) {
 					child.kill("SIGKILL");
 					await child.exited;
 				}
-				instance.close();
+				await instance.close();
 			}
 		},
 	);
@@ -775,7 +1267,15 @@ describe("capture", () => {
 			(row) => row.path === "Refunds",
 		);
 		if (!duplicate) throw new Error("no folder to duplicate");
-		h.app.db.raw.query("UPDATE folders SET name = 'Checkout' WHERE id = ?").run(duplicate.id);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE folders SET name = 'Checkout' WHERE id = $1"), [
+							duplicate.id,
+						]),
+				),
+		);
 		expect(
 			await h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] }),
 		).toMatchObject({ ok: true, result: { status: "adopted" } });
@@ -854,7 +1354,7 @@ describe("capture", () => {
 
 	test("a pending rename rechecks collisions at adoption and leaves the proposal rejectable", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Refunds" }] });
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
 		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
 			.items[0];
@@ -1012,7 +1512,7 @@ describe("capture", () => {
 				{ op: "create", outline: "Second", folder: "Moving" },
 			],
 		});
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
 		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
 			.items[0];
@@ -1094,7 +1594,7 @@ describe("capture", () => {
 					}),
 				),
 			});
-			h.actor("approver", "human", ["read", "produce", "answer"]);
+			await h.actor("approver", "human", ["read", "produce", "answer"]);
 			await h.call("admin", {
 				do: "grant.set",
 				actor: "approver",
@@ -1102,7 +1602,7 @@ describe("capture", () => {
 				can: ["read", "produce", "answer"],
 				roles: ["approver"],
 			});
-			const approver = actorByName(h.app.db, "approver", 1);
+			const approver = await h.app.database.read(async (db) => await actorByName(db, "approver", 1));
 			if (!approver) throw new Error("no approver");
 			const clauses = [...PRESETS.standard.clauses];
 			clauses.splice(
@@ -1121,7 +1621,7 @@ describe("capture", () => {
 				.items[0];
 			if (!policy) throw new Error("no policy question");
 			await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
-			const agent = h.actor("writer", "agent", ["read", "produce"]);
+			const agent = await h.actor("writer", "agent", ["read", "produce"]);
 			const pending = await h.call<Proposed>(
 				"propose",
 				{
@@ -1178,7 +1678,7 @@ describe("capture", () => {
 			).items.find((item) => item.q === pending.question);
 			if (!question) throw new Error("no folder question");
 			expect(question.needs).toBe(needs);
-			const member = h.actor("plain", "human", ["read", "produce", "answer"]);
+			const member = await h.actor("plain", "human", ["read", "produce", "answer"]);
 			expect(
 				await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, member),
 			).toMatchObject([{ status: "forbidden", needs: ask }]);
@@ -1215,7 +1715,7 @@ describe("capture", () => {
 				folder,
 			})),
 		});
-		h.actor("approver", "human", ["read", "produce", "answer"]);
+		await h.actor("approver", "human", ["read", "produce", "answer"]);
 		await h.call("admin", {
 			do: "grant.set",
 			actor: "approver",
@@ -1223,10 +1723,10 @@ describe("capture", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["approver"],
 		});
-		const approver = actorByName(h.app.db, "approver", 1);
+		const approver = await h.app.database.read(async (db) => await actorByName(db, "approver", 1));
 		if (!approver) throw new Error("no approver");
 		if (who === "role:auditor") {
-			h.actor("auditor", "human", ["read", "produce", "answer"]);
+			await h.actor("auditor", "human", ["read", "produce", "answer"]);
 			await h.call("admin", {
 				do: "grant.set",
 				actor: "auditor",
@@ -1275,14 +1775,14 @@ describe("capture", () => {
 			{ op: "folder", folder: "A", name: "Fin" },
 			...(shape === "union" ? ([{ op: "folder", folder: "C", name: "Other" }] satisfies Edit[]) : []),
 		];
-		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce", "answer"]);
 		const pending = await h.call<Proposed>("propose", { edits }, agent);
 		expect(pending.status).toBe("open");
 		await h.call("propose", { edits: [{ op: "folder", folder: "C", name: "X" }] });
 		const question = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
 			.items[0];
 		if (!question) throw new Error("no folder question");
-		const member = h.actor("plain", "human", ["read", "produce", "answer"]);
+		const member = await h.actor("plain", "human", ["read", "produce", "answer"]);
 		const incompatible = who === "role:auditor" || who === "author";
 		const ask = incompatible
 			? "an admin who is not an agent with a reason"
@@ -1359,7 +1859,7 @@ describe("capture", () => {
 				.toLowerCase()}`;
 		}
 		const clauses = [...PRESETS.standard.clauses];
-		h.actor("approver", "human", ["read", "produce", "answer"]);
+		await h.actor("approver", "human", ["read", "produce", "answer"]);
 		await h.call("admin", {
 			do: "grant.set",
 			actor: "approver",
@@ -1383,7 +1883,7 @@ describe("capture", () => {
 			.items[0];
 		if (!policy) throw new Error("no policy question");
 		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		const pending = await h.call<Proposed>("propose", { edits }, agent);
 		expect(pending.status).toBe("open");
 		await h.call("propose", { edits: [{ op: "folder", name: "X" }] });
@@ -1427,7 +1927,13 @@ describe("capture", () => {
 
 	test("canonical lookup reuses an existing NFD folder without rewriting it", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Café" }] });
-		h.app.db.raw.query("UPDATE folders SET name = ? WHERE name = 'Café'").run("Cafe\u0301");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE folders SET name = $1 WHERE name = 'Café'"), ["Cafe\u0301"]),
+				),
+		);
 		await h.call("propose", { edits: [{ op: "create", outline: "Second", folder: "Café" }] });
 		expect((await h.call<{ items: unknown[] }>("find", { in: "folders" })).items.length).toBe(1);
 		expect((await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).map((view) => view.folder.path)).toEqual([
@@ -1456,9 +1962,15 @@ describe("capture", () => {
 		const first = await h.call<Proposed>("propose", input);
 		const second = await h.call<Proposed>("propose", input);
 		expect(second).toEqual(first);
-		const count = (table: string) =>
-			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n;
-		expect([count("cases"), count("versions"), count("proposals"), count("decisions")]).toEqual([1, 1, 1, 1]);
+		const count = async (table: string) =>
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly SqlValue[], { n: number }>(`SELECT count(*) AS n FROM ${table}`), []),
+				)
+			)?.n;
+		expect([await count("cases"), await count("versions"), await count("proposals"), await count("decisions")]).toEqual(
+			[1, 1, 1, 1],
+		);
 		expect((await h.call<{ count: number }>("find", { in: "folders" })).count).toBe(1);
 	});
 
@@ -1595,7 +2107,7 @@ describe("editing", () => {
 		const s = await harness({ preset: "standard" });
 		try {
 			await s.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const agent = await s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = await s.call<Proposed>(
 				"propose",
 				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon: percentage" } }] },
@@ -1618,7 +2130,7 @@ describe("editing", () => {
 				pre: "Signed in as robin",
 			});
 		} finally {
-			s.close();
+			await s.close();
 		}
 	});
 
@@ -1626,7 +2138,7 @@ describe("editing", () => {
 		const edits = Array.from({ length: 250 }, (_, i) => ({ op: "create", outline: `Case ${i}` }));
 		const s = await harness({ preset: "standard" });
 		try {
-			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const agent = await s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = await s.call<Proposed>("propose", { edits }, agent);
 			type Page = { count: number; cursor: string | null; edits: { body: { title: string } }[] };
 			const [read] = await s.call<Page[]>("get", { refs: [proposed.proposal] });
@@ -1652,7 +2164,7 @@ describe("editing", () => {
 				"The project changed. Read the proposal again from its first page.",
 			);
 		} finally {
-			s.close();
+			await s.close();
 		}
 	});
 
@@ -1667,7 +2179,7 @@ describe("editing", () => {
 					{ op: "create", outline: "Four", folder: "B" },
 				],
 			});
-			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const agent = await s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = await s.call<Proposed>(
 				"propose",
 				{
@@ -1692,7 +2204,7 @@ describe("editing", () => {
 				(await s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder })).items.map((item) => item.ref);
 			expect([await order("A"), await order("B")]).toEqual([["C-3", "C-4", "C-2"], ["C-1"]]);
 		} finally {
-			s.close();
+			await s.close();
 		}
 	});
 
@@ -1708,7 +2220,7 @@ describe("editing", () => {
 					{ op: "create", outline: "Five", folder: "B" },
 				],
 			});
-			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const agent = await s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = await s.call<Proposed>(
 				"propose",
 				{
@@ -1733,7 +2245,7 @@ describe("editing", () => {
 				["C-4", "C-5"],
 			]);
 		} finally {
-			s.close();
+			await s.close();
 		}
 	});
 
@@ -1758,7 +2270,7 @@ describe("editing", () => {
 				// place a case in B.
 				expect([await order("A"), await order("B")]).toEqual([["C-1"], ["C-3", "C-4", "C-5", "C-6", "C-2"]]);
 			} finally {
-				s.close();
+				await s.close();
 			}
 		}
 	});
@@ -1772,7 +2284,7 @@ describe("editing", () => {
 					{ op: "create", outline: "Two", folder: "B" },
 				],
 			});
-			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const agent = await s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = await s.call<Proposed>(
 				"propose",
 				{
@@ -1794,7 +2306,7 @@ describe("editing", () => {
 			});
 			expect(reply?.status).toBe("decided");
 		} finally {
-			s.close();
+			await s.close();
 		}
 	});
 
@@ -1813,12 +2325,12 @@ describe("a proposal that waits while its case moves on", () => {
 	type Read = {
 		edits: { body: { title: string; steps: { id: string }[] }; current: { title: string }; refused: string | null }[];
 	};
-	let agent: ReturnType<Harness["actor"]>;
+	let agent: Awaited<ReturnType<Harness["actor"]>>;
 	beforeEach(async () => {
-		h.close();
+		await h.close();
 		h = await harness({ preset: "standard" });
 		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-		agent = h.actor("helper", "agent", ["read", "produce"]);
+		agent = await h.actor("helper", "agent", ["read", "produce"]);
 	});
 	const proposeAsAgent = async (body: Record<string, unknown>) => {
 		const waiting = await h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body }] }, agent);
@@ -1929,18 +2441,32 @@ describe("organising", () => {
 		const edits = Array.from({ length: 300 }, (_, i) => ({ op: "create", outline: `Case ${i}`, folder: "inbox" }));
 		await h.call("propose", { edits });
 		const cases = Array.from({ length: 300 }, (_, i) => `C-${i + 1}`);
-		const count = (table: string) =>
-			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
-		const proposals = count("proposals");
-		const decisions = count("decisions");
-		const before = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
+		const count = async (table: string) =>
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly SqlValue[], { n: number }>(`SELECT count(*) AS n FROM ${table}`), []),
+				)
+			)?.n ?? 0;
+		const proposals = await count("proposals");
+		const decisions = await count("decisions");
+		const before =
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly SqlValue[], { seq: number }>("SELECT seq FROM projects"), []),
+				)
+			)?.seq ?? 0;
 		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "place", cases, folder: "checkout/regression", tags: { add: ["regression"] } }],
 		});
 		expect(reply.status).toBe("adopted");
-		const after = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
+		const after =
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<readonly SqlValue[], { seq: number }>("SELECT seq FROM projects"), []),
+				)
+			)?.seq ?? 0;
 		expect(after).toBe(before + 1);
-		expect([count("proposals") - proposals, count("decisions") - decisions]).toEqual([1, 1]);
+		expect([(await count("proposals")) - proposals, (await count("decisions")) - decisions]).toEqual([1, 1]);
 		const found = await h.call<{ items: { ref: string; tags: string[] }[] }>("find", {
 			folder: "checkout/regression",
 			limit: 500,
@@ -1948,7 +2474,11 @@ describe("organising", () => {
 		expect(found.items).toHaveLength(300);
 		expect(found.items.map((c) => c.ref)).toEqual(cases); // order kept
 		expect(found.items.every((c) => c.tags.includes("regression"))).toBe(true);
-		const versions = h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM versions").get()?.n;
+		const versions = (
+			await h.app.database.read(
+				async (db) => await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM versions"), []),
+			)
+		)?.n;
 		expect(versions).toBe(300); // a move is history, not a new version
 	});
 
@@ -2179,8 +2709,8 @@ describe("organising", () => {
 				edits: [{ op: "create", body: { title: "Checkout", methods: ["human", "auto", "agent"] } }],
 			});
 			const method = kind === "ci" ? "auto" : kind;
-			const author = h.actor("proof-author", kind, ["read", "record"]);
-			const other = h.actor("later-author", kind, ["read", "record"]);
+			const author = await h.actor("proof-author", kind, ["read", "record"]);
+			const other = await h.actor("later-author", kind, ["read", "record"]);
 			const report = async (run: string, as: typeof author) =>
 				await h.call(
 					"report",
@@ -2239,25 +2769,33 @@ describe("organising", () => {
 	});
 });
 
-test("a sliced savepoint closed early rolls back and drops the after-commit work it queued", () => {
-	const db = new Db(":memory:");
-	db.exec("CREATE TABLE t (x INTEGER)");
+test("a sliced savepoint closed early rolls back and drops the after-commit work it queued", async () => {
 	const ran: string[] = [];
-	db.begin();
-	db.afterCommit(() => ran.push("before"));
-	const steps = db.savepointSteps(function* () {
-		db.exec("INSERT INTO t VALUES (1)");
-		db.afterCommit(() => ran.push("inside"));
-		yield;
-		return 1;
+	await h.app.database.write(async (db) => {
+		await db.transaction(async () => {
+			await db.exec("CREATE TEMP TABLE t (x bigint) ON COMMIT DROP");
+			db.afterCommit(() => {
+				ran.push("before");
+			});
+			const steps = db.savepointSteps(async function* () {
+				await db.exec("INSERT INTO t VALUES (1)");
+				db.afterCommit(() => {
+					ran.push("inside");
+				});
+				yield;
+				return 1;
+			});
+			await steps.next();
+			await steps.return(undefined as never);
+			expect(await db.one(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM t"))).toEqual({ n: 0 });
+		});
+		expect(ran).toEqual(["before"]);
+		await db.transaction(() =>
+			db.afterCommit(() => {
+				ran.push("next");
+			}),
+		);
 	});
-	steps.next();
-	// An abandoned request closes its generator at a slice boundary, without a throw.
-	steps.return(undefined as never);
-	expect(db.raw.query("SELECT count(*) AS n FROM t").get()).toEqual({ n: 0 });
-	db.commit();
-	expect(ran).toEqual(["before"]);
-	db.transaction(() => db.afterCommit(() => ran.push("next")));
 	expect(ran).toEqual(["before", "next"]);
 });
 
@@ -2336,186 +2874,6 @@ test("choosing current keeps the current fragment pin named order through the re
 	expect(parsed.doc.body.steps).toEqual([
 		{ id: "order", use: { fragment: "C-1", version: 3 }, action: "", expected: null },
 	]);
-});
-
-describe("conflict storage upgrades", () => {
-	const addresses: ConflictAddress[] = [
-		{ kind: "field", name: "title" },
-		{ kind: "field", name: "pre" },
-		{ kind: "field", name: "methods" },
-		{ kind: "field", name: "automate" },
-		{ kind: "custom-field", key: 'risk.dot"x' },
-		{ kind: "custom-field", key: "gone" },
-		{ kind: "step", id: "order" },
-		{ kind: "step", id: "ds" },
-		{ kind: "step-field", id: "sf", name: "action" },
-		{ kind: "step-field", id: "sf", name: "expected" },
-		{ kind: "step", id: "pf" },
-		{ kind: "step-order" },
-	];
-
-	// Conflicts were generated by mergeBodies at b59be234, including both meanings of steps.order in one proposal.
-	const oldInstance = async (sample: (typeof legacyConflicts)[number]) => {
-		const dir = mkdtempSync(join(tmpdir(), "mainworthy-conflict-upgrade-"));
-		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
-		const instance = open({ ...config, port: 0 });
-		const call = async (op: string, input: unknown) => {
-			const reply = await invoke(instance.app, OPS, { op, input, project: "scratch", actor: () => instance.owner });
-			if (!reply.ok) throw new Error(JSON.stringify(reply.error));
-			return reply.result;
-		};
-		try {
-			await call("propose", { edits: [{ op: "create", kind: "fragment", outline: "Shared\n  Check" }] });
-			for (const version of [1, 2]) {
-				await call("propose", {
-					edits: [{ op: "edit", case: "C-1", base: version, body: { title: `Shared ${version}` } }],
-				});
-			}
-			await call("propose", { edits: [{ op: "create", body: CaseBody.parse(sample.base) }] });
-			await call("propose", {
-				edits: [
-					{ op: "create", outline: "Base" },
-					{ op: "create", outline: "Uncontested" },
-				],
-			});
-			await call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Theirs" } }] });
-			await call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.theirs) }] });
-			const input = {
-				cmd: "legacy-conflict-command",
-				edits: [
-					{ op: "edit", case: "C-4", base: 1, body: { title: "No conflict" } },
-					{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.mine) },
-					{ op: "edit", case: "C-3", base: 1, body: { title: "Mine" } },
-				],
-			};
-			const proposed = ProposeReply.parse(await call("propose", input));
-			expect(proposed.status).toBe("conflict");
-			const db = instance.app.db;
-			db.raw
-				.query(
-					`UPDATE proposals SET resolved = json_set(resolved, '$[1].conflicts', json(?), '$[2].conflicts', json(?)) WHERE no = ?`,
-				)
-				.run(
-					JSON.stringify(sample.conflicts),
-					JSON.stringify([sample.conflicts[0]]),
-					Number(proposed.proposal?.slice(2)),
-				);
-			db.raw.query("UPDATE commands SET outcome = ? WHERE id = ?").run(
-				JSON.stringify({
-					...proposed,
-					conflicts: [
-						{ case: "C-2", paths: sample.conflicts.map((c) => c.path) },
-						{ case: "C-3", paths: ["title"] },
-					],
-				}),
-				input.cmd,
-			);
-			dropResetIndexes(db);
-			dropReceiptSchema(db);
-			db.exec(
-				"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE slot_leases; DROP TABLE handoffs",
-			);
-			db.exec(
-				"DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
-			);
-			db.raw.query("UPDATE meta SET value = '30' WHERE key = 'schema_version'").run();
-			const evidence = db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all();
-			const command = db.raw
-				.query("SELECT id, project, op, actor, at, seq, touched, request FROM commands ORDER BY id")
-				.all();
-			return { dir, config: { ...config, port: 0 }, input, proposed, evidence, command };
-		} catch (error) {
-			rmSync(dir, { recursive: true, force: true });
-			throw error;
-		} finally {
-			instance.app.close();
-		}
-	};
-
-	for (const sample of legacyConflicts) {
-		for (const operation of ["get", "replay"] as const) {
-			test(`old ${sample.kind} conflicts survive upgrade and archive: ${operation}`, async () => {
-				const old = await oldInstance(sample);
-				const upgraded = open(old.config);
-				const server = serve(upgraded.app, upgraded.owner);
-				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
-				const check = async (reader: Client) => {
-					if (operation === "get") {
-						const result = await reader.operation("get", { refs: [old.proposed.proposal] });
-						expect(result).toMatchObject([
-							{
-								ref: old.proposed.proposal,
-								edits: [
-									{ conflicts: [] },
-									{
-										conflicts: sample.conflicts.map(({ path: _path, ...values }, index) => ({
-											...values,
-											address: addresses[index],
-										})),
-									},
-									{
-										conflicts: [
-											{ address: { kind: "field", name: "title" }, base: "Base", mine: "Mine", theirs: "Theirs" },
-										],
-									},
-								],
-							},
-						]);
-					} else {
-						expect(await reader.operation("propose", old.input)).toEqual({
-							...old.proposed,
-							conflicts: [
-								{ case: "C-2", addresses },
-								{ case: "C-3", addresses: [{ kind: "field", name: "title" }] },
-							],
-						});
-					}
-				};
-				try {
-					await check(client);
-					expect(upgraded.app.db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all()).toEqual(
-						old.evidence,
-					);
-					expect(
-						upgraded.app.db.raw
-							.query("SELECT id, project, op, actor, at, seq, touched, request FROM commands ORDER BY id")
-							.all(),
-					).toEqual(old.command);
-					const chunks: string[] = [];
-					exportArchive(upgraded.app.db, (chunk) => chunks.push(chunk), { blobs: upgraded.app.blobs });
-					const restored = await harness();
-					try {
-						removeBootstrap(restored.app.db);
-						importArchive(restored.app.db, linesOf(chunks.join("")), { blobs: restored.app.blobs });
-						const restoredServer = serve(restored.app, restored.owner);
-						try {
-							await check(
-								new Client({ url: `http://127.0.0.1:${restoredServer.port}`, project: "scratch", token: undefined }),
-							);
-						} finally {
-							await restoredServer.stop(true);
-						}
-					} finally {
-						restored.close();
-					}
-					const empty = await harness();
-					try {
-						removeBootstrap(empty.app.db);
-						const legacyArchive = chunks.join("").replace(`"schema":${ARCHIVE_VERSION}`, '"schema":23');
-						expect(() => importArchive(empty.app.db, linesOf(legacyArchive), { blobs: empty.app.blobs })).toThrow(
-							`archive schema 23 is older than this build's archive schema ${ARCHIVE_VERSION}`,
-						);
-					} finally {
-						empty.close();
-					}
-				} finally {
-					await server.stop(true);
-					upgraded.app.close();
-					rmSync(old.dir, { recursive: true, force: true });
-				}
-			});
-		}
-	}
 });
 
 describe("authoritative placement effects", () => {
@@ -2602,11 +2960,15 @@ describe("placement reply boundaries and order", () => {
 
 	for (const operation of ["propose", "decide"] as const) {
 		test(`${operation} hides prior placement metadata without read, including command replay`, async () => {
-			h.close();
+			await h.close();
 			h = await harness({ preset: "standard" });
 			await propose([{ op: "create", folder: "Private", tags: ["private-tag"], body: { title: "Protected case" } }]);
-			const reader = h.actor("writer", operation === "propose" ? "human" : "agent", ["read", "produce"]);
-			const blind = h.actor("blind-writer", "human", operation === "decide" ? ["produce", "answer"] : ["produce"]);
+			const reader = await h.actor("writer", operation === "propose" ? "human" : "agent", ["read", "produce"]);
+			const blind = await h.actor(
+				"blind-writer",
+				"human",
+				operation === "decide" ? ["produce", "answer"] : ["produce"],
+			);
 			expect((await h.raw("get", { refs: ["C-1"] }, blind)).ok).toBe(false);
 			const input = {
 				edits: [
@@ -2648,7 +3010,7 @@ describe("placement reply boundaries and order", () => {
 
 	test("replay filters effects after the caller loses read access", async () => {
 		await propose([{ op: "create", tags: ["private-tag"], body: { title: "Revoked read" } }]);
-		const actor = h.actor("reader-writer", "human", ["read", "produce"]);
+		const actor = await h.actor("reader-writer", "human", ["read", "produce"]);
 		const input = { cmd: "read-before-revoke", edits: [{ op: "place", cases: ["C-1"], tags: { set: [] } }] };
 		expect(ProposeReply.parse(await h.call("propose", input, actor)).placements).toHaveLength(1);
 		expect(ProposeReply.parse(await h.call("propose", input, { ...actor, can: ["produce"] })).placements).toEqual([]);
@@ -2657,7 +3019,16 @@ describe("placement reply boundaries and order", () => {
 	test("legacy recorded create outcomes recover without duplicating the case", async () => {
 		const input = { cmd: "pre-placements-create", edits: [{ op: "create", body: { title: "Old create reply" } }] };
 		const { placements: _placements, ...old } = ProposeReply.parse(await h.call("propose", input));
-		h.app.db.raw.query("UPDATE commands SET outcome = ? WHERE id = ?").run(JSON.stringify(old), input.cmd);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[]>("UPDATE commands SET outcome = $1 WHERE id = $2"), [
+							JSON.stringify(old),
+							input.cmd,
+						]),
+				),
+		);
 		const fate = await h.call<{ reply: unknown }>("command", { cmd: input.cmd });
 		expect(ProposeReply.parse(fate.reply).placements).toEqual([]);
 		expect(ProposeReply.parse(await h.call("propose", input)).placements).toEqual([]);
@@ -2786,7 +3157,7 @@ describe("conflict-merge placement effects", () => {
 
 	for (const read of [true, false]) {
 		test(`a tag-delta merge returns placement effects ${read ? "to a reader" : "without disclosing them to its produce-only author"}`, async () => {
-			const author = h.actor("merge-author", "human", read ? ["read", "produce"] : ["produce"]);
+			const author = await h.actor("merge-author", "human", read ? ["read", "produce"] : ["produce"]);
 			const q = await conflictFor(author);
 			const input = { ...(await resolution(q)), cmd: read ? "reader-merge" : "blind-merge" };
 			const first = await h.call<DecideReply[]>("decide", input, author);

@@ -22,7 +22,7 @@ import {
 import {
 	type Actor,
 	allProjects,
-	demoSince,
+	demoProjects,
 	findProject,
 	insertProject,
 	makeCtx,
@@ -30,71 +30,83 @@ import {
 	rewriteCommandReplies,
 	stampSeq,
 } from "../kernel/ctx.ts";
-import type { Db } from "../kernel/db.ts";
+import type { ReadDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
-import { currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
+import { currentPolicies, currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
-export function listProjects(db: Db): {
-	key: string;
-	identity: string;
-	name: string;
-	seq: number;
-	createdAt: number;
-	policy: string;
-	unlinked: Unlinked;
-	fieldDefinitions: FieldDefinitions;
-	demo: boolean;
-}[] {
-	return allProjects(db).map((row) => ({
-		key: row.key,
-		identity: row.identity,
-		name: row.name,
-		seq: row.seq,
-		createdAt: row.created_at,
-		...policySummary(currentPolicy(db, row.id)),
-		demo: demoSince(db, row.id) !== null,
-	}));
+export async function listProjects(db: ReadDb): Promise<
+	{
+		key: string;
+		identity: string;
+		name: string;
+		seq: number;
+		createdAt: number;
+		policy: string;
+		unlinked: Unlinked;
+		fieldDefinitions: FieldDefinitions;
+		demo: boolean;
+	}[]
+> {
+	const projects = await allProjects(db);
+	const policies = await currentPolicies(
+		db,
+		projects.map((row) => row.id),
+	);
+	const demos = await demoProjects(db);
+	return projects.map((row) => {
+		const policy = policies.get(row.id);
+		if (!policy) throw new Error(`project ${row.id} has no policy`);
+		return {
+			key: row.key,
+			identity: row.identity,
+			name: row.name,
+			seq: row.seq,
+			createdAt: row.created_at,
+			...policySummary(policy),
+			demo: demos.has(row.id),
+		};
+	});
 }
 
 /** Creates a project with its first policy. Used by the admin operation and by first start. */
-export function createProject(
+export async function createProject(
 	env: InstanceCtx,
 	input: { key: string; name?: string | undefined; preset?: string | undefined; unlinked?: Unlinked | undefined },
 ) {
 	const preset = input.preset ?? "loose";
 	if (!isPreset(preset)) throw invalid(`unknown preset ${preset}`);
-	if (findProject(env.app.db, input.key)) throw conflict(`a project named ${input.key} exists`);
-	const project = insertProject(env.app.db, {
-		org: orgId(env.app.db),
+	if (await findProject(env.db, input.key)) throw conflict(`a project named ${input.key} exists`);
+	const project = await insertProject(env.db, {
+		org: await orgId(env.db),
 		key: input.key,
 		name: input.name ?? input.key,
 		at: env.now,
 	});
-	const ctx = makeCtx(env.app, project, env.actor, true);
-	seedPolicy(ctx, preset, input.unlinked);
-	stampSeq(ctx);
+	const ctx = makeCtx(env.app, env.db, project, env.actor, true);
+	await seedPolicy(ctx, preset, input.unlinked);
+	await stampSeq(ctx);
 	return { key: project.key, identity: project.identity, name: project.name, policy: preset };
 }
 
 /** The id of the project a grant names, or 0 when it names none: every project. */
-export function projectOf(db: Db, key: string | undefined): number {
+export async function projectOf(db: ReadDb, key: string | undefined): Promise<number> {
 	if (key === undefined) return 0;
-	const project = findProject(db, key);
+	const project = await findProject(db, key);
 	if (!project) throw notFound(`project ${key}`);
 	return project.id;
 }
 
 /** Every actor with its grants as a person reads them: each names its project by key, and every project as `*`. */
-export function actorsWithGrants(db: Db) {
-	const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
+export async function actorsWithGrants(db: ReadDb) {
+	const keys = new Map((await allProjects(db)).map((project) => [project.id, project.key]));
 	const display = (grants: { project: number; can: readonly string[] }[]) =>
 		grants.flatMap((grant) => {
 			const project = grant.project === 0 ? "*" : keys.get(grant.project);
 			return project === undefined ? [] : [{ project, can: [...grant.can] }];
 		});
-	return listActors(db).map((actor) => ({
+	return (await listActors(db)).map((actor) => ({
 		...actor,
 		grants: actor.grants.flatMap((grant) => display([grant]).map((shown) => ({ ...shown, roles: grant.roles }))),
 		teams: actor.teams.map((team) => ({ ...team, grants: display(team.grants) })),
@@ -143,8 +155,8 @@ export function refuseToken(
 	);
 }
 
-export function admin(env: InstanceCtx, input: AdminInput): unknown {
-	const db = env.app.db;
+export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknown> {
+	const db = env.db;
 	const owner = env.app.config.owner;
 	switch (input.do) {
 		case "team.create":
@@ -155,15 +167,15 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		case "team.grant.remove":
 		case "team.history":
 			personOnly(env, "a team is administered");
-			return manageTeams(env.app, env.actor, orgId(db), input, env.context);
+			return await manageTeams(env.app, db, env.actor, await orgId(db), input, env.context);
 		case "project.create":
-			return createProject(env, input);
+			return await createProject(env, input);
 		case "project.list":
-			return listProjects(db);
+			return await listProjects(db);
 		case "project.demo": {
-			const project = findProject(db, input.key);
+			const project = await findProject(db, input.key);
 			if (!project) throw notFound(`project ${input.key}`);
-			const since = markDemo(db, project, env.now);
+			const since = await markDemo(db, project, env.now);
 			if (since === null)
 				throw conflict(
 					`project ${input.key} holds work, and what it records keeps the server's clock; a demo is a project nothing was written to`,
@@ -171,15 +183,15 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			return { key: project.key, since };
 		}
 		case "token.create": {
-			const project = projectOf(db, input.project);
-			const existing = actorByName(db, input.actor, project);
+			const project = await projectOf(db, input.project);
+			const existing = await actorByName(db, input.actor, project);
 			refuseToken(env, input, existing);
 			// A new actor is given what was asked, or its kind's default. One that exists keeps its grants, and
 			// `createToken` refuses a list for it.
 			const isNew = existing === null;
 			// The schema lets through only what `durationMs` reads, so a null here is an `expires` that was absent.
 			const lastsMs = input.expires === undefined ? null : durationMs(input.expires);
-			const created = createToken(
+			const created = await createToken(
 				env.app,
 				{
 					actor: input.actor,
@@ -191,6 +203,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 					madeBy: env.actor.id,
 				},
 				{ actor: env.actor.id, context: env.context },
+				db,
 			);
 			return {
 				// The token's id, which `token.revoke` takes: whoever made it can revoke exactly this one.
@@ -198,13 +211,13 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				actor: created.actor,
 				token: created.secret,
 				// What the token's holder may do on the project asked about, as the registry will see it.
-				can: actorByName(db, created.actor, project)?.can ?? [],
+				can: (await actorByName(db, created.actor, project))?.can ?? [],
 				expiresAt: created.expiresAt,
 				note: "This token is shown once. Store it now.",
 			};
 		}
 		case "token.list":
-			return listTokens(env.app).map((row) => ({
+			return (await listTokens(env.app, db)).map((row) => ({
 				id: row.id,
 				actor: row.actor,
 				kind: row.kind,
@@ -218,9 +231,9 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				revoked: row.revoked_at !== null,
 			}));
 		case "token.revoke":
-			return { revoked: revokeToken(env.app, input.id) };
+			return { revoked: await revokeToken(env.app, db, input.id) };
 		case "actor.list":
-			return actorsWithGrants(db).map((actor) => ({ ...actor, owner: actor.name === owner }));
+			return (await actorsWithGrants(db)).map((actor) => ({ ...actor, owner: actor.name === owner }));
 		case "grant.set":
 		case "grant.remove": {
 			personOnly(env, "a grant is changed");
@@ -230,10 +243,12 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				throw invalid("you cannot change what you yourself may do; another admin must do it");
 			if (input.actor === owner)
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
-			const project = projectOf(db, input.project);
-			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
-			const roles = setGrant(
+			const project = await projectOf(db, input.project);
+			if (input.do === "grant.remove")
+				return { removed: await removeGrant(env.app, db, { actor: input.actor, project }) };
+			const roles = await setGrant(
 				env.app,
+				db,
 				{
 					actor: input.actor,
 					project,
@@ -254,8 +269,8 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 					`${owner} owns this instance and is not forgotten: nobody would be left who can always repair it. To hand the instance to somebody else, start it with MAINWORTHY_OWNER set to their name; ${owner} can be forgotten after that`,
 				);
 			}
-			const forgotten = forgetActor(env.app, input.name);
-			forgetQuestionNames(db, input.name, forgotten.forgotten);
+			const forgotten = await forgetActor(env.app, db, input.name);
+			await forgetQuestionNames(db, input.name, forgotten.forgotten);
 			// These write replies name people in grant.actor, report.questions[].by, claim.known[].by and announce.by.
 			// Requests are digests; their binding to a command id must survive forgetting, as must free text.
 			const rewrite = (op: string, reply: string): string => {
@@ -267,14 +282,14 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 					),
 				);
 			};
-			rewriteCommandReplies(db, rewrite);
-			rewriteReportReceipts(db, (receipt) => rewrite("report", receipt));
+			await rewriteCommandReplies(db, rewrite);
+			await rewriteReportReceipts(db, (receipt) => rewrite("report", receipt));
 			return forgotten;
 		}
 		case "policy.show": {
-			const project = findProject(db, input.project);
+			const project = await findProject(db, input.project);
 			if (!project) throw notFound(`project ${input.project}`);
-			return currentPolicy(db, project.id);
+			return await currentPolicy(db, project.id);
 		}
 		default: {
 			const _exhaustive: never = input;

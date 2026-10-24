@@ -1,3 +1,6 @@
+import { expect, spyOn, test } from "bun:test";
+import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 // Extended random sequences for the Mainworthy engine, written by an independent defect hunt (Claude Fable 5.1) and
 // kept as a test. Everything `test/sequences.ts` does, plus:
 // several tests per case and several causes; planned runs with `jobs` obligations and `minActors: 2`; runs closed by
@@ -29,29 +32,24 @@
 // The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
-import type { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
-import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
-import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
-import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
-import { auditExcuses } from "./sequences.ts";
+import { auditRelations } from "./sequence-audit.ts";
+import { type AuditMeasurement, auditExcuses, seedPlan } from "./sequences.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
 const FIRST = Number(process.env.MAINWORTHY_SEQUENCE_FIRST ?? 1);
 
-function auditJobs(db: Database): { job: string; target: number }[] {
-	return db
-		.query<{ job: string; target: number }, []>(
-			`SELECT job, target FROM batches b WHERE state = 'processed'
+async function auditJobs(db: ReadDb): Promise<{ job: string; target: number }[]> {
+	return await db.all(
+		sql<readonly [], { job: string; target: number }>(`SELECT job, target FROM batches b WHERE state = 'processed'
 			 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'auto'
 			             AND r.outcome IN ('pass', 'fail', 'error')
-			             AND r.id NOT IN (SELECT corrects FROM results WHERE corrects IS NOT NULL))`,
-		)
-		.all();
+			             AND r.id NOT IN (SELECT corrects FROM results WHERE corrects IS NOT NULL))`),
+	);
 }
 
 type Row = Record<string, string | number | null>;
@@ -68,7 +66,12 @@ const replaces = (held: { attempt: number; outcome: string }, next: { attempt: n
 /** How the commands of every sequence ended, per operation: a check that the random actions are effective. */
 export const stats = new Map<string, number>();
 
-export async function sequence(seed: number, preset: string): Promise<Problem | null> {
+export async function sequence(
+	seed: number,
+	preset: string,
+	steps = STEPS,
+	onAudit?: (measurement: AuditMeasurement) => void,
+): Promise<Problem | null> {
 	let state = seed * 2654435761 + 1;
 	const rand = (n: number): number => {
 		state ^= state << 13;
@@ -78,15 +81,19 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 	};
 	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
 	const h = await harness({ preset });
-	const rows = <T = Row>(sql: string, ...args: (string | number | null)[]): T[] =>
-		h.app.db.raw.query(sql).all(...args) as T[];
+	const rows = async <T = Row>(query: string, ...args: (string | number | null)[]): Promise<T[]> => {
+		let index = 0;
+		return await h.app.database.read(
+			async (db) => await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args),
+		);
+	};
 	const trace: unknown[] = [];
 	const successful = new Map<string, number>();
-	let people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
-	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-	let agents: Actor[] = [h.actor("explorer", "agent", ["read", "produce"])];
-	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
-	const project = Number(rows<{ id: number }>("SELECT id FROM projects WHERE key = 'scratch'")[0]?.id ?? 0);
+	let people: Actor[] = [h.owner, await h.actor("second", "human", ["read", "produce", "answer", "plan"])];
+	const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+	let agents: Actor[] = [await h.actor("explorer", "agent", ["read", "produce"])];
+	const rule = Number((await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'"))[0]?.id ?? 0);
+	const project = Number((await rows<{ id: number }>("SELECT id FROM projects WHERE key = 'scratch'"))[0]?.id ?? 0);
 	let lastReport: { input: unknown; as: Actor } | null = null;
 	const sentLast = (): { input: unknown; as: Actor } | null => lastReport;
 	let forgotten = false;
@@ -94,7 +101,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 	// into a run, which says nothing about where the commit is). Keyed by repository and commit.
 	type Placement = { kind: "trunk" | "pr" | "typed"; pr?: number | undefined; branch?: string | undefined };
 	const placed = new Map<string, Placement>();
-	const placeOf = (as: Actor, input: unknown): void => {
+	const placeOf = async (as: Actor, input: unknown): Promise<void> => {
 		const sent = input as { target?: { commit?: string; repo?: string; branch?: string; pr?: number }; run?: string };
 		// What an agent says about where a commit is holds only until a pipeline or a person reports it.
 		if (as.kind === "agent") return;
@@ -111,9 +118,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 						: { kind: "typed" },
 			);
 		} else if (sent.run) {
-			const run = rows<{ accepts: string }>(
-				"SELECT accepts FROM runs WHERE no = ?",
-				Number(sent.run.replace(/^R-/, "")),
+			const run = (
+				await rows<{ accepts: string }>("SELECT accepts FROM runs WHERE no = ?", Number(sent.run.replace(/^R-/, "")))
 			)[0];
 			const accepts = run ? (JSON.parse(run.accepts) as { commit?: string; repo?: string }) : {};
 			if (accepts.commit) {
@@ -129,11 +135,11 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		const key = `${op}: ${reply.ok ? "ok" : `${reply.error.code} ${reply.error.message.slice(0, 70)}`}`;
 		stats.set(key, (stats.get(key) ?? 0) + 1);
 		if (op === "report" && reply.ok) lastReport = { input, as };
-		if (op === "report" && reply.ok) placeOf(as, input);
+		if (op === "report" && reply.ok) await placeOf(as, input);
 		return reply.ok ? reply.result : null;
 	};
 	const answerOpen = async (kind: string, as: Actor = h.owner, answer: Record<string, unknown> = { is: "accept" }) => {
-		for (const waiting of rows<{ no: number; evidence_hash: string }>(
+		for (const waiting of await rows<{ no: number; evidence_hash: string }>(
 			"SELECT no, evidence_hash FROM questions WHERE kind = ? AND state = 'open'",
 			kind,
 		))
@@ -149,9 +155,13 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					? `line:${target.line}@${target.repo}`
 					: `line:${target.line}`;
 
-	const audit = (): { what: string; detail: unknown } | null => {
-		let jobRows: ReturnType<typeof auditJobs> | undefined;
-		const runs = rows("SELECT * FROM runs");
+	const audit = async (db: ReadDb): Promise<{ what: string; detail: unknown } | null> => {
+		const rows = async <T = Row>(query: string, ...args: (string | number | null)[]): Promise<T[]> => {
+			let index = 0;
+			return await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args);
+		};
+		const relations = await auditRelations(db, h.app.now());
+		const runs = relations.runs;
 		const newestInScope = new Map<string, number>();
 		for (const run of runs) {
 			if (run.scope !== null) {
@@ -160,7 +170,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			}
 		}
 		// A change speaks through its observed head only while that run belongs to this scope.
-		for (const change of rows("SELECT id, project, repo, head_sha FROM changes")) {
+		for (const change of relations.changes) {
 			const scope = `change:${change.id}`;
 			const head =
 				change.head_sha === null
@@ -175,20 +185,18 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			if (head) newestInScope.set(scope, Number(head.id));
 			else newestInScope.delete(scope);
 		}
-		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
-			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
-			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
-		).map((question) => ({
+		const agentResults = new Set(relations.results.filter((row) => row.method === "agent").map((row) => row.id));
+		const targets = new Map(relations.targets.map((target) => [Number(target.id), target]));
+		const open = relations.open.map((question) => ({
 			...question,
 			subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
 			evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
 			refs: String(question.refs ?? "").split(","),
 		}));
-		const excuseSnapshot = auditExcuses(h.app.db.raw);
-		const excuseOf = (signature: number, scope: string, target: number, result = 0, slot?: number) =>
+		const excuseSnapshot = await auditExcuses(db, relations.excuses);
+		const excuseOf = async (signature: number, scope: string, target: number, result = 0, slot?: number) =>
 			slot !== undefined
-				? slotSettlement(h.app.db, slot, result)
+				? relations.settlement(slot, result)
 				: excuseSnapshot(project, signature, scope, target, result);
 		const verdictOf = (tally: Record<string, number>, blocking: number, outstanding: number): string => {
 			if (outstanding > 0) return "pending";
@@ -205,24 +213,20 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			if (live) {
 				const causes: { signature: number; target: number; result: number; slot?: number }[] =
 					run.origin === "change"
-						? rows<{ signature: number; target: number; result: number }>(
-								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
-								id,
-							)
-						: rows<{ id: number; state: string }>(
-								"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
-								id,
-							).flatMap((slot) =>
-								failingSlotResults(h.app.db, slot.id).map((cause) => ({
-									...cause,
-									...(slot.state === "disputed" ? { slot: slot.id } : {}),
-								})),
+						? relations.lanes(id).filter((row) => row.outcome === "fail" || row.outcome === "error")
+						: await flatMapAsync(
+								relations.slots(id).filter((slot) => slot.state === "failing" || slot.state === "disputed"),
+								async (slot) =>
+									relations.failing(slot.id).map((cause) => ({
+										...cause,
+										...(slot.state === "disputed" ? { slot: slot.id } : {}),
+									})),
 							);
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
 					const scope = scopeOf(target, id);
-					if (excuseOf(cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
+					if (await excuseOf(cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
 					const asked = open.filter((question) => {
 						const subject = question.subject;
 						const evidence = question.evidence;
@@ -235,7 +239,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 						);
 					});
 					if (asked.length === 0)
-						return { what: "1: a live run shows an unexplained failure nobody is asked about", detail: { run, cause } };
+						return {
+							what: "1: a live run shows an unexplained failure nobody is asked about",
+							detail: { run, cause },
+						};
 					const blocking = JSON.parse(String(run.blocking)) as string[];
 					if (!asked.some((question) => blocking.includes(`Q-${question.no}`)))
 						return { what: "1: a run's gate does not name the question about its failure", detail: { run, cause } };
@@ -243,16 +250,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			}
 
 			if (run.origin === "change") {
-				const current = rows("SELECT * FROM run_tests WHERE run = ?", id);
-				const history = rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
-					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
-					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
-					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
-					   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
-					 ORDER BY r.seq, r.ord`,
-					String(run.accepts_what),
-					project,
-				);
+				const current = relations.lanes(id);
+				const history = relations.history(project, String(run.accepts_what));
 				const held = new Map<string, (typeof history)[number]>();
 				for (const next of history) {
 					const key = `${next.test}|${next.target}:${next.job}:${next.actor}`;
@@ -274,10 +273,9 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 						detail: { run, actual, expected },
 					};
 				// 15. No agent result in a commit's gate.
-				const agentCounted = rows(
-					"SELECT rt.result FROM run_tests rt JOIN results r ON r.id = rt.result WHERE rt.run = ? AND r.method = 'agent'",
-					id,
-				);
+				const agentCounted = current
+					.filter((row) => agentResults.has(Number(row.result)))
+					.map((row) => ({ result: row.result }));
 				if (agentCounted.length > 0)
 					return { what: "15: an agent's result is counted in a commit's gate", detail: agentCounted };
 
@@ -289,7 +287,12 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					else {
 						const seenOn = targets.get(Number(row.target));
 						if (!seenOn) return { what: "a result on an unknown target", detail: row };
-						const excuse = excuseOf(Number(row.signature), scopeOf(seenOn, id), Number(row.target), Number(row.result));
+						const excuse = await excuseOf(
+							Number(row.signature),
+							scopeOf(seenOn, id),
+							Number(row.target),
+							Number(row.result),
+						);
 						tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
 					}
 				}
@@ -307,14 +310,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 
 			// 9. Closed runs and their sign-off.
 			if (run.state === "closed") {
-				const signoff = rows(
-					`SELECT d.id FROM decisions d JOIN questions q ON q.id = d.question
-					 WHERE d.id = ? AND q.kind = 'signoff' AND q.state = 'decided' AND q.decision = d.id
-					   AND json_extract(d.answer, '$.is') = 'approve' AND json_extract(q.subject, '$.run') = ?`,
-					Number(run.signoff ?? -1),
-					id,
-				);
-				if (signoff.length === 0) return { what: "9: a closed run has no sign-off decision in force", detail: run };
+				if (!relations.approves(id, Number(run.signoff ?? -1)))
+					return { what: "9: a closed run has no sign-off decision in force", detail: run };
 			} else if (run.signoff !== null) return { what: "9: an open run still cites a sign-off", detail: run };
 			// 10. Nothing outstanding once everything accepted is applied.
 			if (Number(run.outstanding) !== 0)
@@ -322,28 +319,30 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		}
 
 		// 6, 11, 12, 13. Slots of open planned runs.
-		const results = rows<{ id: number } & Row>(`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch`);
-		const corrected = new Set(
-			rows<{ c: number }>("SELECT corrects AS c FROM results WHERE corrects IS NOT NULL").map((r) => r.c),
-		);
+		const results = relations.results;
+		const resultsById = new Map(results.map((row) => [row.id, row]));
+		const byCase = new Map<number, typeof results>();
+		for (const row of results) {
+			const key = Number(row.basis_case);
+			const held = byCase.get(key) ?? [];
+			held.push(row);
+			byCase.set(key, held);
+		}
+		const corrected = relations.corrected;
 		const versions = new Map<string, string[]>();
-		const methodsAt = (caseId: number, version: number): string[] => {
-			const key = `${caseId}@${version}`;
-			let found = versions.get(key);
-			if (!found) {
-				const body = rows<{ body: string }>(
-					"SELECT body FROM versions WHERE case_id = ? AND no = ?",
-					caseId,
-					version,
-				)[0];
-				found = body ? ((JSON.parse(body.body) as { methods: string[] }).methods ?? []) : [];
-				versions.set(key, found);
-			}
-			return found;
-		};
+		for (const row of relations.versions) {
+			versions.set(`${row.case_id}@${row.no}`, (JSON.parse(row.body) as { methods: string[] }).methods ?? []);
+		}
+		const methodsAt = (caseId: number, version: number): string[] => versions.get(`${caseId}@${version}`) ?? [];
+
 		for (const run of runs.filter((r) => r.origin === "planned" && r.state === "open")) {
 			const id = Number(run.id);
-			const accepts = JSON.parse(String(run.accepts)) as { commit?: string; repo?: string; env?: string; self?: true };
+			const accepts = JSON.parse(String(run.accepts)) as {
+				commit?: string;
+				repo?: string;
+				env?: string;
+				self?: true;
+			};
 			const obligations = JSON.parse(String(run.require)) as {
 				id: string;
 				kind: string;
@@ -377,14 +376,11 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				return null;
 			};
 			const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
-			for (const slot of rows("SELECT * FROM slots WHERE run = ?", id)) {
-				const rowsIn = rows<{ result: number; corrected: number; discounted_by: number | null; admitted: string }>(
-					"SELECT result, corrected, discounted_by, admitted FROM slot_results WHERE slot = ?",
-					Number(slot.id),
-				);
+			for (const slot of relations.slots(id)) {
+				const rowsIn = relations.admitted(Number(slot.id));
 				// 11. Soundness of every admission.
 				for (const held of rowsIn) {
-					const result = results.find((r) => r.id === held.result);
+					const result = resultsById.get(held.result);
 					if (!result) return { what: "11: a slot holds a result that does not exist", detail: { slot, held } };
 					const target = targets.get(Number(result.target));
 					if (!target || !accepted(target, result.run === null ? null : Number(result.run)))
@@ -403,15 +399,15 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				}
 				// 12. Completeness: what should be in the slot is.
 				const admittedIds = new Set(rowsIn.map((r) => r.result));
-				for (const result of results) {
+				for (const result of byCase.get(Number(slot.case_id)) ?? []) {
 					if (Number(result.basis_case) !== Number(slot.case_id) || corrected.has(result.id)) continue;
 					const target = targets.get(Number(result.target));
 					if (!target || !accepted(target, result.run === null ? null : Number(result.run))) continue;
 					if (admits(slot, result) === null) continue;
 					if (!admittedIds.has(result.id)) {
-						const signoffs = rows(
+						const signoffs = await rows(
 							`SELECT q.no, d.id, d.answer, d.seq FROM questions q JOIN decisions d ON d.question = q.id
-							 WHERE q.kind = 'signoff' AND json_extract(q.subject, '$.run') = ? ORDER BY d.id`,
+						 WHERE q.kind = 'signoff' AND ((q.subject::jsonb)->>'run')::bigint = ? ORDER BY d.id`,
 							id,
 						);
 						return {
@@ -423,7 +419,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				// 6. The slot's state from the admitted, uncorrected, undiscounted fills.
 				const fills = rowsIn
 					.filter((r) => r.corrected === 0 && r.discounted_by === null)
-					.map((r) => results.find((x) => x.id === r.result))
+					.map((r) => resultsById.get(r.result))
 					.filter((r): r is NonNullable<typeof r> => r !== undefined)
 					.sort((a, b) => Number(a.seq) - Number(b.seq) || Number(a.ord) - Number(b.ord));
 				const latest = new Map<string, (typeof fills)[number]>();
@@ -482,10 +478,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					tally.missing++;
 				} else {
 					const causes = [...latest.values()].filter((fill) => fill.outcome === "fail" || fill.outcome === "error");
-					const excuses = causes.map((fill) => {
+					const excuses = await mapAsync(causes, async (fill) => {
 						const seenOn = targets.get(Number(fill.target));
 						return seenOn
-							? excuseOf(
+							? await excuseOf(
 									Number(fill.signature),
 									scopeOf(seenOn, id),
 									Number(fill.target),
@@ -505,9 +501,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			// 13'. Jobs: a batch meets a job only by a decisive result that is itself automated.
 			const jobs = obligations.flatMap((o) => (o.kind === "jobs" ? (o.jobs ?? []) : []));
 			if (jobs.length > 0) {
-				jobRows ??= auditJobs(h.app.db.raw);
 				const reported = new Set<string>();
-				for (const batch of jobRows) {
+				for (const batch of relations.jobs) {
 					const target = targets.get(batch.target);
 					if (target && accepted(target, null)) reported.add(batch.job);
 				}
@@ -529,17 +524,16 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			if (subject.slot !== undefined) {
 				if (
 					(evidence.results ?? []).length > 0 &&
-					evidence.results?.every(
-						(result) =>
-							rows("SELECT decision FROM result_excuses WHERE slot = ? AND result = ?", subject.slot ?? 0, result)
-								.length > 0,
-					)
+					(await everyAsync(evidence.results ?? [], async (result) => relations.exact(subject.slot ?? 0, result)))
 				)
 					return { what: "a settled slot still has an open dispute question", detail: question };
 				continue;
 			}
 			const listed = evidence.targets ?? [];
-			if (listed.length > 0 && listed.every((target) => excuseOf(subject.signature, subject.scope, target)))
+			if (
+				listed.length > 0 &&
+				(await everyAsync(listed, async (target) => await excuseOf(subject.signature, subject.scope, target)))
+			)
 				return {
 					what: "7: a question is open about a failure that has an answer everywhere it was seen",
 					detail: question,
@@ -547,43 +541,24 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		}
 
 		// 8. A superseded decision is not in force.
-		const standing = rows(
-			`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
-			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
-			   AND json_extract(old.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')`,
-		);
+		const standing = relations.standing;
 		if (standing.length > 0)
 			return { what: "8: a superseded decision is still its question's answer", detail: standing };
 
 		// 4. Excuses and the decisions they belong to.
-		const orphans = rows(
-			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
-			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
-		);
+		const orphans = relations.orphans;
 		if (orphans.length > 0) return { what: "4: an excuse outlived its decision", detail: orphans };
-		const bare = rows(
-			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
-			 WHERE q.kind = 'failure' AND q.state = 'decided' AND json_extract(d.effects, '$.class') IS NOT NULL
-			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
-     AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
-		);
+		const bare = relations.bare;
 		if (bare.length > 0) return { what: "4: an answer is in force with nothing to show for it", detail: bare };
 
 		// 14. Dependencies name decisions in force; none expired after a sweep.
-		const stale = rows(
-			`SELECT dep.run, dep.decision FROM depends_on dep JOIN decisions d ON d.id = dep.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
-		);
+		const stale = relations.stale;
 		if (stale.length > 0) return { what: "14: a run depends on a decision that is not in force", detail: stale };
-		const expired = rows(
-			"SELECT run, decision, expires_at FROM depends_on WHERE expires_at IS NOT NULL AND expires_at <= ?",
-			Number(h.app.now()),
-		);
+		const expired = relations.expired;
 		if (expired.length > 0) return { what: "14: a run rests on an expired decision after the sweep", detail: expired };
 
 		// 16. A commit's place is the first counted report's.
-		const changes = new Map(rows("SELECT * FROM changes").map((change) => [Number(change.id), change]));
+		const changes = new Map(relations.changes.map((change) => [Number(change.id), change]));
 		for (const target of targets.values()) {
 			if (target.commit_sha === null) continue;
 			const expected = placed.get(`${target.repo ?? ""}@${target.commit_sha}`);
@@ -599,7 +574,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					detail: { target, expected, change },
 				};
 		}
-		const unsupported = invalidInherited(h.app.db);
+		const unsupported = relations.unsupported;
 		if (unsupported.length > 0)
 			return { what: "an inherited failure does not fail on its base now", detail: unsupported };
 
@@ -615,7 +590,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			],
 		});
 		await answerOpen("adopt");
-		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		expect(await rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		expect(await command("plan", seedPlan)).not.toBeNull();
 		const commits = ["random01", "random02", "random03"];
 		const changeCommits = ["change01", "change02"];
 		const causes = ["cause a", "cause b", "cause c"];
@@ -629,10 +605,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				...(outcome === "fail" ? cause() : {}),
 			};
 		};
-		const correctionFor = (as: Actor, key: string, commit: string, env: string, run: number | null) => {
-			const earlier = rows<{ id: number }>(
+		const correctionFor = async (as: Actor, key: string, commit: string, env: string, run: number | null) => {
+			const earlier = await rows<{ id: number }>(
 				`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
-				 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS ?`,
+				 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NOT DISTINCT FROM ? ORDER BY r.id`,
 				as.id,
 				key,
 				commit,
@@ -641,7 +617,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			);
 			return earlier.length > 0 ? pick(earlier).id : null;
 		};
-		for (let step = 0; step < STEPS; step++) {
+		for (let step = 0; step < steps; step++) {
 			const action = rand(100);
 			if (action < 30) {
 				// A pipeline or a person reports one to three automated tests on trunk, sometimes correcting, sometimes a fork.
@@ -657,7 +633,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				const results = Array.from({ length: n }, () => autoResult(rand(4)));
 				if (rand(5) === 0) {
 					const first = results[0] as { test: { key: string }; corrects?: number };
-					const id = correctionFor(as, first.test.key, target.commit, target.env, null);
+					const id = await correctionFor(as, first.test.key, target.commit, target.env, null);
 					if (id !== null) first.corrects = id;
 				}
 				await command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results }, as);
@@ -728,8 +704,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				await command("plan", { name: `Plan ${step}`, select, accepts, require }, pick(people));
 			} else if (action < 60) {
 				// A person records a result by hand in an open run, sometimes correcting an earlier one of theirs.
-				const planned = rows<{ id: number; no: number }>(
-					"SELECT id, no FROM runs WHERE origin = 'planned' AND state = 'open'",
+				const planned = await rows<{ id: number; no: number }>(
+					"SELECT id, no FROM runs WHERE origin = 'planned' AND state = 'open' ORDER BY id",
 				);
 				if (planned.length > 0) {
 					const run = pick(planned);
@@ -742,8 +718,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 						...(outcome === "fail" ? { note: pick(["cause a", "cause c"]) } : {}),
 					};
 					if (rand(4) === 0) {
-						const earlier = rows<{ id: number }>(
-							"SELECT r.id FROM results r JOIN tests t ON t.id = r.test WHERE r.actor = ? AND t.key = ? AND r.run = ?",
+						const earlier = await rows<{ id: number }>(
+							"SELECT r.id FROM results r JOIN tests t ON t.id = r.test WHERE r.actor = ? AND t.key = ? AND r.run = ? ORDER BY r.id",
 							as.id,
 							`case:${caseNo}`,
 							run.id,
@@ -761,8 +737,14 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				}
 			} else if (action < 80) {
 				// Answer or withdraw: failures, sign-offs, findings, adopts, maps.
-				const questions = rows<{ no: number; kind: string; state: string; evidence_hash: string; evidence: string }>(
-					"SELECT no, kind, state, evidence_hash, evidence FROM questions WHERE state IN ('open', 'decided')",
+				const questions = await rows<{
+					no: number;
+					kind: string;
+					state: string;
+					evidence_hash: string;
+					evidence: string;
+				}>(
+					"SELECT no, kind, state, evidence_hash, evidence FROM questions WHERE state IN ('open', 'decided') ORDER BY id",
 				);
 				if (questions.length > 0) {
 					const question = pick(questions);
@@ -791,8 +773,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				}
 			} else if (action < 82) {
 				// A closed run is reopened by withdrawing its sign-off.
-				const closed = rows<{ no: number }>(
-					`SELECT q.no FROM questions q JOIN runs r ON r.signoff = q.decision WHERE r.state = 'closed' AND q.kind = 'signoff'`,
+				const closed = await rows<{ no: number }>(
+					`SELECT q.no FROM questions q JOIN runs r ON r.signoff = q.decision WHERE r.state = 'closed' AND q.kind = 'signoff' ORDER BY q.id`,
 				);
 				if (closed.length > 0)
 					await command("decide", { undo: `Q-${pick(closed).no}`, reason: "reopen" }, pick(people));
@@ -806,7 +788,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else if (action < 87) {
 				// A case is edited, so runs planned before pin the older version.
 				const caseNo = 1 + rand(2);
-				const head = rows<{ head: number }>("SELECT head FROM cases WHERE no = ?", caseNo)[0]?.head ?? 1;
+				const head = (await rows<{ head: number }>("SELECT head FROM cases WHERE no = ?", caseNo))[0]?.head ?? 1;
 				await command("propose", {
 					edits: [
 						{
@@ -835,7 +817,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else if (action < 93) {
 				// A report accepted and applied later, as a restart does.
 				const app = h.app;
-				const projectRow = findProject(app.db, "scratch");
+				const projectRow = await app.database.read(async (db) => await findProject(db, "scratch"));
 				if (projectRow) {
 					const as = pick([pipeline, ...people]);
 					const input = {
@@ -846,17 +828,20 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					};
 					let error: string | null = null;
 					try {
-						app.db.transaction(() => {
-							const ctx = makeCtx(app, projectRow, as, true);
-							acceptReport(ctx, input);
-							stampSeq(ctx);
-						});
+						await app.database.write(
+							async (db) =>
+								await db.transaction(async () => {
+									const ctx = makeCtx(app, db, projectRow, as, true);
+									await acceptReport(ctx, input);
+									await stampSeq(ctx);
+								}),
+						);
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
 					trace.push({ op: "acceptReport", input, as: as.name, error });
-					if (error === null) placeOf(as, input);
-					const applied = recoverAccepted(app);
+					if (error === null) await placeOf(as, input);
+					const applied = await recoverAccepted(app);
 					trace.push({ op: "recoverAccepted", applied });
 				}
 			} else if (action < 95 && !forgotten) {
@@ -881,28 +866,30 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else {
 				h.advance(15 * 86_400_000);
 				trace.push({ advance: "15 days" });
-				sweep(h.app, rule);
+				await sweep(h.app, rule);
 			}
-			const problem = audit();
+			const beforeAudit = h.app.database.statementCount;
+			const problem = await h.app.database.read(audit);
+			onAudit?.({ step, statements: h.app.database.statementCount - beforeAudit });
 			if (problem) return { seed, step, ...problem, last: trace.slice(-15) };
 		}
 		if (
 			(successful.get("report") ?? 0) === 0 ||
 			(successful.get("plan") ?? 0) === 0 ||
-			rows("SELECT id FROM slots").length === 0 ||
-			rows("SELECT id FROM results").length === 0 ||
-			rows("SELECT id FROM runs").length === 0
+			(await rows("SELECT id FROM slots")).length === 0 ||
+			(await rows("SELECT id FROM results")).length === 0 ||
+			(await rows("SELECT id FROM runs")).length === 0
 		)
 			return {
 				seed,
-				step: STEPS,
+				step: steps,
 				what: "sequence made no reporting progress",
 				detail: [...successful],
 				last: trace.slice(-15),
 			};
 		return null;
 	} finally {
-		h.close();
+		await h.close();
 	}
 }
 
@@ -926,7 +913,7 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 					],
 				});
 				await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-				const ci = h.actor("pipeline", "ci", ["read", "record"]);
+				const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 				const send = async (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
 					const receipt = await h.call<ReportReceipt>(
 						"report",
@@ -947,7 +934,7 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 					return {
 						verdict: gate.verdict,
 						missing: gate.tally.missing,
-						jobs: [...new Set(auditJobs(h.app.db.raw).map((b) => b.job))],
+						jobs: [...new Set(await (await h.app.database.read(async (db) => await auditJobs(db))).map((b) => b.job))],
 					};
 				};
 				expect(await snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
@@ -960,16 +947,50 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 				await send("pass", "e2e", blocked);
 				expect(await snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
 			} finally {
-				h.close();
+				await h.close();
 			}
 		});
 
+	test("extended sequence audits keep database snapshots bounded", async () => {
+		const reads = spyOn(Database.prototype, "read");
+		try {
+			expect(await sequence(1, preset, 10)).toBeNull();
+			expect(reads.mock.calls.length).toBeLessThan(200);
+		} finally {
+			reads.mockRestore();
+		}
+	});
+
 	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, async () => {
 		const problems: Problem[] = [];
+		let auditStatements = 0;
 		for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
-			const problem = await sequence(seed, preset);
+			const problem = await sequence(seed, preset, STEPS, ({ statements }) => {
+				auditStatements = Math.max(auditStatements, statements);
+			});
 			if (problem) problems.push(problem);
 		}
 		expect(problems).toEqual([]);
+		expect(auditStatements).toBeLessThanOrEqual(4);
 	}, 600_000);
+}
+
+async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {
+	const out: R[] = [];
+	for (const row of rows) {
+		const found = await callback(row);
+		out.push(...(Array.isArray(found) ? found : [found]));
+	}
+	return out;
+}
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
+}
+
+async function everyAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (!(await callback(row))) return false;
+	return true;
 }

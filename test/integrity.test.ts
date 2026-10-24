@@ -19,7 +19,8 @@ import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import type { HoldTerm } from "../src/server/decisions/questions.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
+import { type SqlValue, sql, type WriteDb } from "../src/server/kernel/db.ts";
+
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "../src/server/ops/jobs.ts";
@@ -32,7 +33,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 type Item = InboxReply["items"][number];
 type CaseView = { ref: string; version: number; title: string; pre: string; tags: string[]; state: string };
@@ -61,11 +62,15 @@ const plan = async (input: Record<string, unknown>) => await h.call<PlanReply>("
 const exercise = (methods: string[] = ["human", "auto"]) => [
 	{ id: "exercise", kind: "exercise", methods, basis: "exact-or-assumed", minActors: 1 },
 ];
-const rows = <T = Record<string, unknown>>(sql: string, ...args: (string | number)[]): T[] =>
-	h.app.db.raw.query(sql).all(...args) as T[];
+const rows = async <T = Record<string, unknown>>(query: string, ...args: (string | number)[]): Promise<T[]> => {
+	let index = 0;
+	return await h.app.database.read(
+		async (db) => await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args),
+	);
+};
 const usePolicy = async (preset: string, unlinked?: "ask" | "track" | "create") => {
 	await h.call("propose", { edits: [{ op: "policy", preset, ...(unlinked ? { unlinked } : {}) }] });
-	return decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "switch for the test" });
+	return await decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "switch for the test" });
 };
 
 describe("who may change the suite and the policy", () => {
@@ -150,16 +155,16 @@ describe("who may change the suite and the policy", () => {
 			await seed();
 			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
 			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
-			const before = rows("SELECT count(*) AS n FROM proposals");
-			const decisions = rows("SELECT count(*) AS n FROM decisions");
+			const before = await rows("SELECT count(*) AS n FROM proposals");
+			const decisions = await rows("SELECT count(*) AS n FROM decisions");
 			const question = await open("adopt");
 			const values = Array.from({ length: 5001 }, (_, i) => (metadata === "tags" ? `tag-${i}` : `REQ-${i}`));
 			expect(await decide(question, { is: "merge", body: emptyBody("Resolved"), [metadata]: values })).toMatchObject({
 				status: "invalid",
 				effects: null,
 			});
-			expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
-			expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+			expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+			expect(await rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
 			expect((await open("adopt")).q).toBe(question.q);
 			expect(await getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
 		});
@@ -169,8 +174,8 @@ describe("who may change the suite and the policy", () => {
 		await seed();
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
-		const before = rows("SELECT count(*) AS n FROM proposals");
-		const decisions = rows("SELECT count(*) AS n FROM decisions");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
+		const decisions = await rows("SELECT count(*) AS n FROM decisions");
 		const question = await open("adopt");
 		const reply = await decide(question, {
 			is: "merge",
@@ -180,8 +185,8 @@ describe("who may change the suite and the policy", () => {
 		});
 		expect(reply).toMatchObject({ status: "invalid", effects: null });
 		expect(reply.needs).toContain("5000");
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
-		expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(await rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
 		expect((await open("adopt")).q).toBe(question.q);
 		expect(await getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
 	});
@@ -195,15 +200,15 @@ describe("who may change the suite and the policy", () => {
 				...Array.from({ length: 4999 }, (_, i) => ({ op: "cover", case: "C-1", requirement: `REQ-${i}`, on: true })),
 			],
 		});
-		const before = rows("SELECT count(*) AS n FROM proposals");
-		const decisions = rows("SELECT count(*) AS n FROM decisions");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
+		const decisions = await rows("SELECT count(*) AS n FROM decisions");
 		const question = await open("adopt");
 		expect(await decide(question, { is: "merge", body: emptyBody("Resolved"), covers: ["REQ-99999"] })).toMatchObject({
 			status: "invalid",
 			effects: null,
 		});
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
-		expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(await rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
 		expect((await open("adopt")).q).toBe(question.q);
 		expect(await getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
 	});
@@ -223,7 +228,7 @@ describe("who may change the suite and the policy", () => {
 			effects: { status: "adopted" },
 		});
 		expect((await getCase()).tags).toEqual([...tags].sort());
-		const proposal = rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")[0];
+		const proposal = (await rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1"))[0];
 		expect(JSON.parse(proposal?.edits ?? "[]")).toHaveLength(3);
 	});
 
@@ -243,7 +248,7 @@ describe("who may change the suite and the policy", () => {
 		});
 		expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted" } });
 		expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual(["REQ-1"]);
-		const proposal = rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")[0];
+		const proposal = (await rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1"))[0];
 		expect(JSON.parse(proposal?.edits ?? "[]")).toHaveLength(2);
 	});
 
@@ -294,13 +299,13 @@ describe("who may change the suite and the policy", () => {
 		});
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
 		const question = await open("adopt");
-		const before = rows("SELECT count(*) AS n FROM proposals");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
 		const reply = await decide(question, {
 			is: "merge",
 			body: { ...emptyBody(literal), steps: [{ id: "s2", action: literal, expected: null }] },
 		});
 		expect(reply).toMatchObject({ status: "invalid", effects: null });
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 		expect(await getCase()).toMatchObject({ title: literal, version: 2, tags: [] });
 	});
 
@@ -332,14 +337,14 @@ describe("who may change the suite and the policy", () => {
 		).toMatchObject({ steps: [{ action: "Enter #critical @REQ-100" }], tags: [], covers: [] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
-		const before = rows("SELECT count(*) AS n FROM proposals");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
 		const reply = await decide(await open("adopt"), {
 			is: "merge",
 			body: { ...emptyBody("Merged"), steps: [{ id: "s1", action: "New #critical @REQ-100", expected: null }] },
 		});
 		expect(reply).toMatchObject({ status: "invalid", effects: null });
 		expect(reply.needs).toContain("use the web app");
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 		expect(await getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
 	});
 
@@ -388,7 +393,7 @@ describe("who may change the suite and the policy", () => {
 				],
 			});
 			await decide(await open("adopt"), { is: "accept" });
-			const writer = h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
+			const writer = await h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
 			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }, writer);
 			const merged = await decide(
 				await open("adopt"),
@@ -451,7 +456,7 @@ describe("who may change the suite and the policy", () => {
 					],
 				});
 				await decide(await open("adopt"), { is: "accept" });
-				const writer = h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
+				const writer = await h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
 				await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }, writer);
 				const question = await open("adopt");
 				const content = (text: string) => ({
@@ -460,7 +465,7 @@ describe("who may change the suite and the policy", () => {
 						{ id: "s1", action: field === "action" ? text : "Act", expected: field === "expected" ? text : null },
 					],
 				});
-				const before = rows("SELECT count(*) AS n FROM proposals");
+				const before = await rows("SELECT count(*) AS n FROM proposals");
 				for (const token of ["#critical", "@REQ-101"]) {
 					for (const space of ["", "\t", "\u00a0", "\u2007", "\u3000"]) {
 						const raw = await decide(
@@ -469,7 +474,7 @@ describe("who may change the suite and the policy", () => {
 							writer,
 						);
 						expect(raw).toMatchObject({ status: "invalid", effects: null });
-						expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+						expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 					}
 				}
 				const parsed = parseBodyInline(
@@ -518,14 +523,14 @@ describe("who may change the suite and the policy", () => {
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
 		const question = await open("adopt");
-		const before = rows("SELECT count(*) AS n FROM proposals");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
 		for (const separator of ["\u2028", "\u2029", "\v", "\f"]) {
 			for (const token of ["#critical", "@REQ-101"]) {
 				expect(await decide(question, { is: "merge", body: emptyBody(`Resolved${separator}${token}`) })).toMatchObject({
 					status: "invalid",
 					effects: null,
 				});
-				expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+				expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 			}
 		}
 	});
@@ -559,7 +564,7 @@ describe("who may change the suite and the policy", () => {
 				],
 			});
 			await decide(await open("adopt"), { is: "accept" });
-			const writer = h.actor("case-writer", "human", ["read", "produce", "answer"]);
+			const writer = await h.actor("case-writer", "human", ["read", "produce", "answer"]);
 			await h.call(
 				"propose",
 				{
@@ -592,15 +597,15 @@ describe("who may change the suite and the policy", () => {
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }, extra] });
 		const before = await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] });
-		const proposals = rows("SELECT count(*) AS n FROM proposals");
+		const proposals = await rows("SELECT count(*) AS n FROM proposals");
 		expect((await decide(await open("adopt"), { is: "merge", body: emptyBody("Merged") })).status).toBe("invalid");
 		expect(await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).toEqual(before);
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(proposals);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(proposals);
 	});
 
 	test("resolving a conflict does not carry other edits or a policy change through", async () => {
 		await seed(2);
-		const member = h.actor("member", "human", ["read", "produce"]);
+		const member = await h.actor("member", "human", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "New head" } }] });
 		const proposed = await h.call<ProposeReply>(
 			"propose",
@@ -621,7 +626,7 @@ describe("who may change the suite and the policy", () => {
 			member,
 		);
 		expect(merged.status).not.toBe("decided");
-		expect(rows("SELECT count(*) AS n FROM cases")).toEqual([{ n: 2 }]);
+		expect(await rows("SELECT count(*) AS n FROM cases")).toEqual([{ n: 2 }]);
 		expect((await getCase("C-2")).state).toBe("active");
 		expect((await h.call<{ preset: string }>("admin", { do: "policy.show", project: "scratch" })).preset).toBe("loose");
 	});
@@ -645,7 +650,7 @@ describe("who may change the suite and the policy", () => {
 
 	test("a strict project still reviews what a conflict's author resolved", async () => {
 		await usePolicy("strict");
-		const member = h.actor("member", "human", ["read", "produce", "answer"]);
+		const member = await h.actor("member", "human", ["read", "produce", "answer"]);
 		await h.call("propose", { edits: [{ op: "create", body: { title: "Case 1" } }] });
 		await decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "first version" });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Head" } }] });
@@ -665,7 +670,7 @@ describe("who may change the suite and the policy", () => {
 	test("a queued tag change is applied to the tags as they are when it is accepted", async () => {
 		await usePolicy("standard");
 		await seed();
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { add: ["agent"] } }] }, agent);
 		const pending = await open("adopt");
 		await h.call("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { add: ["human"] } }] });
@@ -683,14 +688,16 @@ describe("who may change the suite and the policy", () => {
 		const moved = await h.raw("propose", { edits: [{ op: "folder", folder: parent.id, parent: "Parent/NewChild" }] });
 		expect(moved.ok).toBe(false);
 		expect((await folders()).items.map((folder) => folder.path)).toContain("Parent");
-		expect(rows("SELECT count(*) AS n FROM folders WHERE name = 'NewChild'")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM folders WHERE name = 'NewChild'")).toEqual([{ n: 0 }]);
 	});
 });
 
 describe("what a result may prove", () => {
 	const emptyPolicy = async (emptyReports: "pending" | "nothing-required") => {
 		await h.call("propose", { edits: [{ op: "policy", emptyReports }] });
-		return decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "Path filters can require no tests" });
+		return await decide(await open("adopt"), { is: "accept" }, h.owner, {
+			reason: "Path filters can require no tests",
+		});
 	};
 	const nothingRequired = (commit: string, extra: Record<string, unknown> = {}) => ({
 		target: { commit, branch: "main" },
@@ -700,7 +707,7 @@ describe("what a result may prove", () => {
 	});
 
 	test("a CI declaration of nothing required passes only under a recorded policy choice", async () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
 		const input = nothingRequired("empty0001");
 		expect((await report(input, pipeline)).gate?.verdict).toBe("pending");
 		expect((await gate({ commit: "empty0001" })).verdict).toBe("pending");
@@ -721,15 +728,15 @@ describe("what a result may prove", () => {
 		});
 		expect((await gate({ commit: "unknown01" })).verdict).toBe("pending");
 		expect((await report(input, pipeline)).fresh).toBe(false);
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
 		await emptyPolicy("pending");
 		expect(await gate({ commit: "empty0001" })).toMatchObject({ verdict: "pending", stale: false });
 	});
 
 	test("nothing required is explicit, only from CI, and only about a commit", async () => {
 		await emptyPolicy("nothing-required");
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
-		const agent = h.actor("explorer", "agent", ["produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
+		const agent = await h.actor("explorer", "agent", ["produce"]);
 		for (const actor of [h.owner, agent])
 			expect((await h.raw("report", nothingRequired("empty0002"), actor)).ok).toBe(false);
 		for (const input of [
@@ -738,42 +745,47 @@ describe("what a result may prove", () => {
 			nothingRequired("empty0002", { results: [{ test: { key: "a::t" }, outcome: "skip" }] }),
 		])
 			expect((await h.raw("report", input, pipeline)).ok).toBe(false);
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
 	});
 
 	test("nothing required refuses a planned run even with an explicit commit", async () => {
 		await emptyPolicy("nothing-required");
 		await seed();
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
 		const planned = await plan({ name: "tests required", select: {}, accepts: { commit: "empty0009" } });
 		expect(await h.raw("report", nothingRequired("empty0009", { run: planned.run }), pipeline)).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: "nothing required is a declaration about a commit, not a planned run" },
 		});
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { missing: 1 } });
 	});
 
 	test("a nothing-required declaration waits for application and survives accepted-batch recovery", async () => {
 		await emptyPolicy("nothing-required");
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-		const project = findProject(h.app.db, "scratch");
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, pipeline, true);
-			acceptReport(ctx, { target: { commit: "empty0008" }, results: [], nothingRequired: true });
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, pipeline, true);
+					await acceptReport(ctx, { target: { commit: "empty0008" }, results: [], nothingRequired: true });
+					await stampSeq(ctx);
+				}),
+		);
 		expect((await gate({ commit: "empty0008" })).verdict).toBe("pending");
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		expect((await gate({ commit: "empty0008" })).verdict).toBe("passed");
-		expect(rows("SELECT nothing_required, state FROM batches")).toEqual([{ nothing_required: 1, state: "processed" }]);
+		expect(await rows("SELECT nothing_required, state FROM batches")).toEqual([
+			{ nothing_required: 1, state: "processed" },
+		]);
 	});
 
 	test("nothing required cannot hide skips, refused results, agent results or a skipped failure", async () => {
 		await emptyPolicy("nothing-required");
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
-		const agent = h.actor("explorer", "agent", ["produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
+		const agent = await h.actor("explorer", "agent", ["produce"]);
 		await report(nothingRequired("empty0003"), pipeline);
 		await report(
 			{
@@ -808,7 +820,7 @@ describe("what a result may prove", () => {
 	test("nothing required is scoped to its repository and never fills a planned run or a job", async () => {
 		await emptyPolicy("nothing-required");
 		await seed();
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
 		const planned = await plan({
 			name: "the build must run tests",
 			select: {},
@@ -826,7 +838,7 @@ describe("what a result may prove", () => {
 
 	test("an agent's result stays an agent's result when it travels with an automated one", async () => {
 		await seed(2);
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		const planned = await plan({ name: "default excludes agents", select: { cases: ["C-1"] } });
 		await report(
 			{
@@ -838,14 +850,14 @@ describe("what a result may prove", () => {
 			},
 			agent,
 		);
-		expect(rows("SELECT DISTINCT method FROM results")).toEqual([{ method: "agent" }]);
+		expect(await rows("SELECT DISTINCT method FROM results")).toEqual([{ method: "agent" }]);
 		expect(first(await slots(planned.run)).state).toBe("missing");
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
 	});
 
 	test("an agent cannot label its evidence as a pipeline's by naming a test key", async () => {
 		await seed();
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		const planned = await plan({ name: "people and pipelines", select: {}, accepts: { commit: "agentkey1" } });
 		await report(
 			{
@@ -871,7 +883,7 @@ describe("what a result may prove", () => {
 		});
 		expect(refused.ok).toBe(false);
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
-		expect(rows("SELECT count(*) AS n FROM results")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM results")).toEqual([{ n: 0 }]);
 	});
 
 	test("a skip does not turn a failed gate green, and nothing proven is never green", async () => {
@@ -916,7 +928,7 @@ describe("what a result may prove", () => {
 		expect(receipt.declined).toHaveLength(1);
 		expect(receipt.counts).toMatchObject({ total: 2, fail: 1, pass: 1 });
 		expect(receipt.gate?.verdict).toBe("blocked");
-		expect(rows("SELECT basis, basis_case FROM results WHERE outcome = 'fail'")).toEqual([
+		expect(await rows("SELECT basis, basis_case FROM results WHERE outcome = 'fail'")).toEqual([
 			{ basis: "unresolved", basis_case: null },
 		]);
 	});
@@ -981,7 +993,7 @@ describe("what a result may prove", () => {
 		expect((await report(reset)).fresh).toBe(false);
 		expect((await report(second)).fresh).toBe(false);
 		expect((await gate({ change: "pr:12" })).verdict).toBe("passed");
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 3 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 3 }]);
 	});
 
 	test("without a head, changing the build URL still deduplicates identical reports", async () => {
@@ -989,7 +1001,7 @@ describe("what a result may prove", () => {
 		await report({ ...old, buildUrl: "https://ci.example/runs/1" });
 		expect((await report({ ...old, buildUrl: "https://ci.example/runs/2" })).fresh).toBe(false);
 		expect((await gate({ change: "branch:feature" })).verdict).toBe("passed");
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
 	});
 
 	test("ordinary metadata updates preserve first-reported commit ordering", async () => {
@@ -1040,10 +1052,10 @@ describe("what a result may prove", () => {
 		);
 		await report(
 			{ ...old, target: { ...old.target, head: "head0002" } },
-			h.actor("reviewer", "agent", ["read", "produce"]),
+			await h.actor("reviewer", "agent", ["read", "produce"]),
 		);
 		expect((await gate({ change: "pr:12" })).run).toBe((await gate({ commit: "head0001", repo: "acme/web" })).run);
-		await report({ ...old, target: { ...old.target, head: "head0002" } }, h.actor("pipeline", "ci", ["record"]));
+		await report({ ...old, target: { ...old.target, head: "head0002" } }, await h.actor("pipeline", "ci", ["record"]));
 		expect((await gate({ change: "pr:12" })).run).toBe((await gate({ commit: "head0002", repo: "acme/web" })).run);
 	});
 
@@ -1077,7 +1089,7 @@ describe("what a result may prove", () => {
 		]) {
 			expect(await h.raw("report", { ...old, target })).toMatchObject({ ok: false, error: { code: "invalid" } });
 		}
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
 	});
 
 	test("in a slot, another test's pass or an older attempt does not hide a failure", async () => {
@@ -1136,12 +1148,12 @@ describe("what a result may prove", () => {
 		expect(elsewhere.rejected).toHaveLength(1);
 		expect(first(await slots(planned.run)).state).toBe("satisfied");
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
-		expect(rows("SELECT corrected FROM slot_results")).toEqual([{ corrected: 0 }]);
+		expect(await rows("SELECT corrected FROM slot_results")).toEqual([{ corrected: 0 }]);
 	});
 
 	test.each(["human", "ci"] as const)("a %s report refuses a second correction of the same result", async (kind) => {
 		await seed(1, ["human", "auto"]);
-		const actor = kind === "ci" ? h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
+		const actor = kind === "ci" ? await h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
 		const planned = await plan({ name: "One correction", select: {}, accepts: { commit: "correct611" } });
 		const input = { target: { commit: "correct611" } };
 		const test = kind === "ci" ? { key: "correction-test" } : { case: "C-1" };
@@ -1153,7 +1165,7 @@ describe("what a result may prove", () => {
 			results: [{ ...observed, outcome: "fail", note: "Still broken", corrects: original }],
 		};
 		const corrected = await report(correction, actor);
-		const before = rows("SELECT count(*) AS n FROM batches");
+		const before = await rows("SELECT count(*) AS n FROM batches");
 		expect(
 			await h.raw("report", { ...input, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
 		).toEqual({
@@ -1163,8 +1175,8 @@ describe("what a result may prove", () => {
 				message: `result ${original} was already corrected; read the latest results and correct the current result instead`,
 			},
 		});
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual(before);
-		expect(rows("SELECT outcome FROM results ORDER BY id")).toEqual([{ outcome: "pass" }, { outcome: "fail" }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual(before);
+		expect(await rows("SELECT outcome FROM results ORDER BY id")).toEqual([{ outcome: "pass" }, { outcome: "fail" }]);
 		expect((await gate({ run: planned.run })).verdict).toBe("blocked");
 		if (kind === "ci")
 			expect(await report(correction, actor)).toMatchObject({ fresh: false, results: corrected.results });
@@ -1179,7 +1191,7 @@ describe("what a result may prove", () => {
 
 	test.each(["human", "ci"] as const)("a pending %s correction excludes another before recovery", async (kind) => {
 		await seed(1, ["human", "auto"]);
-		const actor = kind === "ci" ? h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
+		const actor = kind === "ci" ? await h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
 		const target = { commit: "pending631" };
 		const planned = await plan({ name: "Pending correction", select: {}, accepts: target });
 		const test = kind === "ci" ? { key: "pending-correction" } : { case: "C-1" };
@@ -1190,17 +1202,20 @@ describe("what a result may prove", () => {
 			cmd: crypto.randomUUID(),
 			results: [{ ...observed, outcome: "fail", note: "Still broken", corrects: original }],
 		});
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		const acceptPending = () =>
-			h.app.db.transaction(() => {
-				const ctx = makeCtx(h.app, project, actor, true);
-				const accepted = acceptReport(ctx, correction);
-				stampSeq(ctx);
-				return accepted;
-			});
-		expect(acceptPending().fresh).toBe(true);
-		expect(acceptPending().fresh).toBe(false);
+		const acceptPending = async () =>
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						const ctx = makeCtx(h.app, db, project, actor, true);
+						const accepted = await acceptReport(ctx, correction);
+						await stampSeq(ctx);
+						return accepted;
+					}),
+			);
+		expect((await acceptPending()).fresh).toBe(true);
+		expect((await acceptPending()).fresh).toBe(false);
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
 		expect(
 			await h.raw("report", { target, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
@@ -1211,10 +1226,13 @@ describe("what a result may prove", () => {
 				message: `result ${original} has an accepted correction waiting to be applied; retry that report or wait for server recovery before correcting again`,
 			},
 		});
-		expect(rows("SELECT state FROM batches ORDER BY id")).toEqual([{ state: "processed" }, { state: "accepted" }]);
-		expect(recoverAccepted(h.app)).toBe(1);
-		expect(recoverAccepted(h.app)).toBe(0);
-		expect(rows("SELECT outcome, corrects FROM results ORDER BY id")).toEqual([
+		expect(await rows("SELECT state FROM batches ORDER BY id")).toEqual([
+			{ state: "processed" },
+			{ state: "accepted" },
+		]);
+		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(0);
+		expect(await rows("SELECT outcome, corrects FROM results ORDER BY id")).toEqual([
 			{ outcome: "pass", corrects: null },
 			{ outcome: "fail", corrects: original },
 		]);
@@ -1229,28 +1247,30 @@ describe("what a result may prove", () => {
 	});
 
 	test("accepting many corrections reads waiting batches once", async () => {
-		const actor = h.actor("pipeline", "ci", ["read", "record"]);
+		const actor = await h.actor("pipeline", "ci", ["read", "record"]);
 		const input = ciReport({ commit: "scans631", n: 33 });
 		const original = (await report(input, actor)).results;
 		expect(original).toHaveLength(33);
 		const reserved = original[32];
 		const observed = input.results[32];
 		if (reserved === undefined || observed === undefined) throw new Error("missing original result");
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, actor, true);
-			acceptReport(ctx, {
-				...input,
-				results: [
-					...Array.from({ length: 2_000 }, () => ({ test: { key: "waiting" }, outcome: "pass" as const })),
-					{ ...observed, corrects: reserved },
-				],
-			});
-			stampSeq(ctx);
-		});
-		const get = spyOn(h.app.db, "get");
-		const all = spyOn(h.app.db, "all");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, actor, true);
+					await acceptReport(ctx, {
+						...input,
+						results: [
+							...Array.from({ length: 2_000 }, () => ({ test: { key: "waiting" }, outcome: "pass" as const })),
+							{ ...observed, corrects: reserved },
+						],
+					});
+					await stampSeq(ctx);
+				}),
+		);
+		const all = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "all");
 		try {
 			const corrected = await report(
 				{
@@ -1260,25 +1280,29 @@ describe("what a result may prove", () => {
 				actor,
 			);
 			expect(corrected).toMatchObject({ counts: { total: 32, pass: 32 }, rejected: [], declined: [] });
-			const scans = [...get.mock.calls, ...all.mock.calls].filter(
-				([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
+			const scans = all.mock.calls.filter(
+				([statement]) =>
+					statement.text.startsWith("SELECT") &&
+					/\bbatches\b/.test(statement.text) &&
+					/\bstaged\b/.test(statement.text),
 			);
 			budget("staged batch scans of a corrected report", scans.length, 1, "scans");
-			get.mockClear();
 			all.mockClear();
 			expect(await report({ ...input, results: [{ ...observed, note: "ordinary report" }] }, actor)).toMatchObject({
 				counts: { total: 1, pass: 1 },
 			});
 			budget(
 				"staged batch scans of an ordinary report",
-				[...get.mock.calls, ...all.mock.calls].filter(
-					([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
+				all.mock.calls.filter(
+					([statement]) =>
+						statement.text.startsWith("SELECT") &&
+						/\bbatches\b/.test(statement.text) &&
+						/\bstaged\b/.test(statement.text),
 				).length,
 				0,
 				"scans",
 			);
 		} finally {
-			get.mockRestore();
 			all.mockRestore();
 		}
 		expect(
@@ -1291,19 +1315,22 @@ describe("what a result may prove", () => {
 		const target = { commit: "producer631" };
 		const observed = { test: { key: "producer-correction" }, annotation: { case: "C-1", version: 1 } };
 		const original = first((await report({ target, results: [{ ...observed, outcome: "pass" }] })).results);
-		const other = h.actor("another-producer", "ci", ["read", "record"]);
-		const project = findProject(h.app.db, "scratch");
+		const other = await h.actor("another-producer", "ci", ["read", "record"]);
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, other, true);
-			acceptReport(ctx, { target, results: [{ ...observed, outcome: "pass", corrects: original }] });
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, other, true);
+					await acceptReport(ctx, { target, results: [{ ...observed, outcome: "pass", corrects: original }] });
+					await stampSeq(ctx);
+				}),
+		);
 		const corrected = await report({ target, results: [{ ...observed, outcome: "fail", corrects: original }] });
 		expect(corrected).toMatchObject({ counts: { total: 1, fail: 1 }, declined: [], rejected: [] });
-		expect(recoverAccepted(h.app)).toBe(1);
-		expect(recoverAccepted(h.app)).toBe(0);
-		expect(rows("SELECT id FROM results WHERE corrects IS NOT NULL")).toEqual([{ id: first(corrected.results) }]);
+		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(0);
+		expect(await rows("SELECT id FROM results WHERE corrects IS NOT NULL")).toEqual([{ id: first(corrected.results) }]);
 		expect((await gate({ commit: target.commit })).verdict).toBe("blocked");
 	});
 
@@ -1318,8 +1345,8 @@ describe("what a result may prove", () => {
 				results: ["fail", "skip"].map((outcome) => ({ test: { case: "C-1" }, outcome, corrects: original })),
 			}),
 		).toMatchObject({ ok: false, error: { code: "conflict" } });
-		expect(rows("SELECT outcome FROM results")).toEqual([{ outcome: "pass" }]);
-		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT outcome FROM results")).toEqual([{ outcome: "pass" }]);
+		expect(await rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
 	});
 
@@ -1403,7 +1430,7 @@ describe("what a result may prove", () => {
 
 	test("the same attempt reported twice keeps the failure; a newer attempt or a correction replaces it", async () => {
 		await seed();
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const planned = await plan({ name: "Same attempt", select: {}, accepts: { commit: "sameatt01" } });
 		const one = (outcome: string, extra: Record<string, unknown> = {}) => ({
 			target: { commit: "sameatt01", branch: "main" },
@@ -1429,7 +1456,7 @@ describe("what a result may prove", () => {
 	});
 
 	test("the 'already failing on the base' hint reads what the base's gate counts, after corrections and attempts", async () => {
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const one = (target: Record<string, unknown>, outcome: string, extra: Record<string, unknown> = {}) => ({
 			target,
 			job: "e2e",
@@ -1591,7 +1618,7 @@ describe("what a result may prove", () => {
 		await report(fail("staletarget2"));
 		const stale = await decide(seen, { is: "infra" });
 		expect(stale.status).toBe("conflict");
-		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
 		// Read again, the answer is for the build now shown; and an answer that carries (flaky) still carries.
 		expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		expect((await gate({ commit: "staletarget2" })).verdict).toBe("passed");
@@ -1611,7 +1638,7 @@ describe("what a result may prove", () => {
 		await decide(await open("failure"), { is: "flaky" });
 		const second = await report(push("repo-b", "repob001"));
 		expect(second.gate?.verdict).toBe("blocked");
-		expect(rows("SELECT repo, head_sha FROM changes ORDER BY id")).toEqual([
+		expect(await rows("SELECT repo, head_sha FROM changes ORDER BY id")).toEqual([
 			{ repo: "repo-a", head_sha: "repoa001" },
 			{ repo: "repo-b", head_sha: "repob001" },
 		]);
@@ -1620,7 +1647,7 @@ describe("what a result may prove", () => {
 
 	test("who may fill a pinned slot is read from the pinned version, not the newest", async () => {
 		await seed();
-		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const agent = await h.actor("writer", "agent", ["read", "produce"]);
 		const planned = await plan({ name: "pinned human only", select: {}, require: exercise(["agent"]) });
 		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { methods: ["human", "agent"] } }] });
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, agent);
@@ -1640,8 +1667,8 @@ describe("what a result may prove", () => {
 	});
 
 	test("an agent's results never count in a commit's gate, and cannot clear a pipeline's failure", async () => {
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const keyed = (key: string, outcome: string) => ({
 			test: { key },
 			outcome,
@@ -1666,11 +1693,11 @@ describe("what a result may prove", () => {
 		const asked = (await h.call<InboxReply>("inbox", { kind: "failure" })).items;
 		expect(asked).toHaveLength(2);
 		expect((await gate({ commit: "agent002" })).verdict).toBe("blocked");
-		expect(rows("SELECT count(*) AS n FROM results WHERE method = 'agent'")).toEqual([{ n: 3 }]);
+		expect(await rows("SELECT count(*) AS n FROM results WHERE method = 'agent'")).toEqual([{ n: 3 }]);
 	});
 
 	test("one producer's pass does not replace another job's or another producer's failure of the same test", async () => {
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const one = (outcome: string, job: string) => ({
 			target: { commit: "lanes0001", branch: "main" },
 			job,
@@ -1707,7 +1734,7 @@ describe("what a result may prove", () => {
 	test("in a planned run, a skip recorded later does not hide that producer's failure", async () => {
 		await seed(2);
 		const planned = await plan({ name: "Skip is no proof", select: {} });
-		const other = h.actor("second-person", "human", ["read", "produce"]);
+		const other = await h.actor("second-person", "human", ["read", "produce"]);
 		await report({
 			run: planned.run,
 			results: [
@@ -1815,7 +1842,7 @@ describe("what a result may prove", () => {
 
 	test("a result judged a mistake counts in no run planned afterwards, and comes back everywhere when the judgement is withdrawn", async () => {
 		await seed();
-		const other = h.actor("other", "human", ["read", "produce"]);
+		const other = await h.actor("other", "human", ["read", "produce"]);
 		const target = { commit: "judged01", branch: "main" };
 		const one = { test: { key: "one" }, annotation: { case: "C-1", version: 1 } };
 		await report({ target, results: [{ ...one, outcome: "fail", failure: { message: "same cause" } }] });
@@ -1852,10 +1879,10 @@ describe("what a result may prove", () => {
 			results: [fail("two")],
 		});
 		expect(later.questions.map((q) => q.how)).toEqual(["already decided"]);
-		expect(rows("SELECT DISTINCT line, change FROM targets")).toHaveLength(1);
+		expect(await rows("SELECT DISTINCT line, change FROM targets")).toHaveLength(1);
 		expect(
 			new Set(
-				rows<{ subject: string }>("SELECT subject FROM questions WHERE kind = 'failure'").map(
+				(await rows<{ subject: string }>("SELECT subject FROM questions WHERE kind = 'failure'")).map(
 					(q) => JSON.parse(q.subject).scope,
 				),
 			).size,
@@ -1886,9 +1913,9 @@ describe("what a result may prove", () => {
 		expect((await gate({ commit: "matrix001" })).verdict).toBe("blocked");
 		// A run over the commit, every environment: it sees the failure too, and is not signed off.
 		const planned = await plan({ name: "Whole matrix", select: {}, accepts: { commit: "matrix001" } });
-		expect(rows<{ n: number }>("SELECT count(*) AS n FROM slot_results")).toEqual([{ n: environments }]);
+		expect(await rows<{ n: number }>("SELECT count(*) AS n FROM slot_results")).toEqual([{ n: environments }]);
 		expect((await gate({ run: planned.run })).verdict).toBe("blocked");
-		expect(rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
+		expect(await rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
 		// A run over the last environment alone finds its result.
 		const last = await plan({
 			name: "Last environment",
@@ -1908,7 +1935,7 @@ describe("what a result may prove", () => {
 		const planned = await plan({ name: "manual case", select: {} });
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 		expect(first(await slots(planned.run)).state).toBe("satisfied");
-		expect(rows("SELECT key, kind, case_id FROM tests")).toEqual([{ key: "case:1", kind: "manual", case_id: 1 }]);
+		expect(await rows("SELECT key, kind, case_id FROM tests")).toEqual([{ key: "case:1", kind: "manual", case_id: 1 }]);
 	});
 
 	test("a required job counts as soon as its own report is applied", async () => {
@@ -1933,13 +1960,13 @@ describe("what a result may prove", () => {
 			results: [{ test: { key: "   " }, outcome: "pass" }],
 		});
 		expect(reply.ok).toBe(false);
-		expect(rows("SELECT count(*) AS n FROM tests")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM tests")).toEqual([{ n: 0 }]);
 	});
 });
 
 describe("what a run and a change may count", () => {
-	const pipeline = () => h.actor("pipeline", "ci", ["read", "record"]);
-	const explorer = () => h.actor("explorer", "agent", ["read", "produce"]);
+	const pipeline = async () => await h.actor("pipeline", "ci", ["read", "record"]);
+	const explorer = async () => await h.actor("explorer", "agent", ["read", "produce"]);
 	const linked = (outcome: string, message = "boom") => ({
 		test: { key: "t1" },
 		annotation: { case: "C-1", version: 1 },
@@ -1951,17 +1978,17 @@ describe("what a run and a change may count", () => {
 		await seed(2, ["human", "auto"]);
 		const a = "abcdef1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 		const b = "abcdef1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-		const ci = pipeline();
+		const ci = await pipeline();
 		await report({ target: { commit: a, branch: "main" }, results: [linked("fail")] }, ci);
 		// One commit starts with these seven characters: the run is planned for that commit, by its whole hash.
 		const one = await plan({ name: "By prefix", select: {}, accepts: { commit: "abcdef1" } });
-		expect(rows<{ accepts: string }>("SELECT accepts FROM runs WHERE no = ?", Number(one.run.slice(2)))).toEqual([
+		expect(await rows<{ accepts: string }>("SELECT accepts FROM runs WHERE no = ?", Number(one.run.slice(2)))).toEqual([
 			{ accepts: JSON.stringify({ commit: a }) },
 		]);
 		await report({ target: { commit: b, branch: "main" }, results: [linked("pass")] }, ci);
 		// The other commit's pass is not this run's: its slot still shows the failure of the commit it counts.
 		expect(
-			rows<{ commit_sha: string }>(
+			await rows<{ commit_sha: string }>(
 				`SELECT DISTINCT t.commit_sha FROM slot_results s JOIN results r ON r.id = s.result
 				 JOIN targets t ON t.id = r.target WHERE s.run = ?`,
 				Number(one.run.slice(2)),
@@ -1970,7 +1997,7 @@ describe("what a run and a change may count", () => {
 		expect((await gate({ run: one.run })).verdict).toBe("blocked");
 		// A result typed into the run is recorded on that commit, not on a commit named by the abbreviation.
 		await report({ run: one.run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
-		expect(rows("SELECT 1 AS n FROM targets WHERE commit_sha = 'abcdef1'")).toEqual([]);
+		expect(await rows("SELECT 1 AS n FROM targets WHERE commit_sha = 'abcdef1'")).toEqual([]);
 		// Two commits start with it now: a run cannot be planned for both.
 		await expect(plan({ name: "Which", select: {}, accepts: { commit: "abcdef1" } })).rejects.toThrow("abcdef1");
 		expect((await plan({ name: "Exact", select: {}, accepts: { commit: b } })).run).toBeDefined();
@@ -1997,10 +2024,10 @@ describe("what a run and a change may count", () => {
 		expect(await waiting()).toEqual({ verdict: "pending", missing: 1 });
 		const target = { commit, branch: "main" };
 		// An agent, which the run never asked for, reports under the job's name.
-		await report({ target, job: "e2e", results: [{ test: { key: "probe" }, outcome: "pass" }] }, explorer());
+		await report({ target, job: "e2e", results: [{ test: { key: "probe" }, outcome: "pass" }] }, await explorer());
 		expect(await waiting()).toEqual({ verdict: "pending", missing: 1 });
 		// The pipeline's job reports that it ran nothing.
-		const ci = pipeline();
+		const ci = await pipeline();
 		await report({ target, job: "e2e", results: [{ test: { key: "spec::a" }, outcome: "skip" }] }, ci);
 		expect(await waiting()).toEqual({ verdict: "pending", missing: 1 });
 		// A person sends their own pass of the case together with one skipped key, under the job's name. The
@@ -2023,7 +2050,7 @@ describe("what a run and a change may count", () => {
 	for (const outcome of ["skip", "blocked"] as const) {
 		test(`correcting a required job's only pass to ${outcome} removes its evidence from existing and new runs`, async () => {
 			await seed();
-			const ci = pipeline();
+			const ci = await pipeline();
 			const target = { commit: "jobsfix1", branch: "main" };
 			const input = {
 				name: "Release",
@@ -2065,7 +2092,7 @@ describe("what a run and a change may count", () => {
 	for (const outcome of ["fail", "error"] as const) {
 		test(`a correction to ${outcome} still meets the required job and counts its failure`, async () => {
 			await seed(1, ["human", "auto"]);
-			const ci = pipeline();
+			const ci = await pipeline();
 			const target = { commit: "jobsfail1", branch: "main" };
 			const input = {
 				name: "Release",
@@ -2098,7 +2125,7 @@ describe("what a run and a change may count", () => {
 
 	test("a required job keeps its other decisive results but never revives corrected ancestors", async () => {
 		await seed();
-		const ci = pipeline();
+		const ci = await pipeline();
 		const target = { commit: "jobschain1", branch: "main" };
 		const planned = await plan({
 			name: "Release",
@@ -2147,16 +2174,16 @@ describe("what a run and a change may count", () => {
 		await seed(1, ["human", "auto"]);
 		const commit = "feedface00000000000000000000000000000001";
 		const target = { commit, branch: "main" };
-		const ci = pipeline();
+		const ci = await pipeline();
 		const planned = await plan({ name: "Release", select: {}, accepts: { commit } });
 		const pass = await report({ target, job: "e2e", results: [linked("pass")] }, ci);
-		const stored = () =>
-			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
-		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		const stored = async () =>
+			first(await rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		expect(await stored()).toEqual({ state: "closed", verdict: "passed" });
 		// The pipeline withdraws its pass: the test failed, and the sign-off no longer holds.
 		await report({ target, job: "e2e", results: [{ ...linked("fail"), corrects: first(pass.results) }] }, ci);
 		expect((await gate({ commit })).verdict).toBe("blocked");
-		expect(stored()).toEqual({ state: "open", verdict: "blocked" });
+		expect(await stored()).toEqual({ state: "open", verdict: "blocked" });
 		expect((await slots(planned.run)).map((slot) => slot.state)).toEqual(["failing"]);
 		expect((await open("signoff")).evidence).toMatchObject({ verdict: "blocked" });
 		expect((await open("failure")).about).toContain(planned.run);
@@ -2165,19 +2192,21 @@ describe("what a run and a change may count", () => {
 	test("a late result in another environment reopens a closed commit run", async () => {
 		await seed(1, ["human", "auto"]);
 		const commit = "feedface00000000000000000000000000000002";
-		const ci = pipeline();
+		const ci = await pipeline();
 		const planned = await plan({ name: "Release", select: {}, accepts: { commit } });
 		await report({ target: { commit, branch: "main", env: "prod" }, results: [linked("pass")] }, ci);
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe(
+			"closed",
+		);
 		// Another environment of the same commit fails after the run was closed.
 		await report({ target: { commit, branch: "main", env: "staging" }, results: [linked("fail")] }, ci);
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
 		expect((await gate({ run: planned.run })).verdict).toBe("blocked");
 	});
 
 	test("a reopened run knows a result was corrected even where a decision had already set it aside", async () => {
 		await seed(1, ["human", "auto"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const target = { repo: "app", commit: "corrected001", branch: "main" };
 		const planned = await plan({ name: "Release", select: {}, accepts: { repo: "app", commit: target.commit } });
 		const failed = await report({ target, results: [linked("fail", "old cause")] }, ci);
@@ -2191,15 +2220,15 @@ describe("what a run and a change may count", () => {
 		// The `mistaken` answer is withdrawn too. The failure it had set aside was withdrawn by its producer
 		// meanwhile, so it does not come back: the run and the commit read the same.
 		await h.call("decide", { undo: asked.q, reason: "not needed" });
-		expect(rows("SELECT corrected, discounted_by FROM slot_results WHERE result = ?", first(failed.results))).toEqual([
-			{ corrected: 1, discounted_by: null },
-		]);
+		expect(
+			await rows("SELECT corrected, discounted_by FROM slot_results WHERE result = ?", first(failed.results)),
+		).toEqual([{ corrected: 1, discounted_by: null }]);
 		expect((await gate({ commit: target.commit, repo: "app" })).verdict).toBe("passed");
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
 	});
 
 	test("the first pipeline to report a change says where its head is, whatever an agent said before", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
 		const older = { repo: "app", commit: "older001", branch: "main" };
 		await report({ target: older, results: [{ test: { key: "one" }, outcome: "pass" }] }, ci);
 		// An agent names a pull request nobody has reported, on a commit of its own, with a base, a title and files.
@@ -2216,7 +2245,7 @@ describe("what a run and a change may count", () => {
 				},
 				results: [{ test: { key: "agent" }, outcome: "skip" }],
 			},
-			explorer(),
+			await explorer(),
 		);
 		expect(await gate({ change: "pr:7" })).toMatchObject({ run: null, verdict: "pending" });
 		// The pipeline's first report of the pull request is for a commit Mainworthy saw before the agent's.
@@ -2228,7 +2257,7 @@ describe("what a run and a change may count", () => {
 			},
 			ci,
 		);
-		expect(rows("SELECT head_sha, base_sha, title, files FROM changes WHERE key = 'pr:7'")).toEqual([
+		expect(await rows("SELECT head_sha, base_sha, title, files FROM changes WHERE key = 'pr:7'")).toEqual([
 			{ head_sha: "older001", base_sha: "realbase", title: "Pipeline", files: '["real.ts"]' },
 		]);
 		expect((await gate({ change: "pr:7" })).verdict).toBe("blocked");
@@ -2238,7 +2267,7 @@ describe("what a run and a change may count", () => {
 				target: { repo: "app", commit: "early001", pr: 8, branch: "other" },
 				results: [{ test: { key: "agent" }, outcome: "skip" }],
 			},
-			explorer(),
+			await explorer(),
 		);
 		await report(
 			{
@@ -2254,20 +2283,23 @@ describe("what a run and a change may count", () => {
 			},
 			ci,
 		);
-		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:8'")).head_sha).toBe(
+		expect(first(await rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:8'")).head_sha).toBe(
 			"early001",
 		);
 	});
 
 	test("an agent's report does not choose where a commit's failures are answered", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
 		const fail = { test: { key: "t0" }, outcome: "fail", failure: { message: "X boom" } };
 		// Trunk fails with cause X and a person calls it flaky: that answer stands on the trunk line.
 		await report({ target: { repo: "acme/web", commit: "trunk0001", branch: "main" }, results: [fail] }, ci);
 		expect((await decide(await open("failure"), { is: "flaky" })).status).toBe("decided");
 		// An agent mentions a pull request's head as a commit of main. Nothing counts that.
 		const probe = { test: { key: "agent::probe" }, outcome: "skip" };
-		await report({ target: { repo: "acme/web", commit: "head00001", branch: "main" }, results: [probe] }, explorer());
+		await report(
+			{ target: { repo: "acme/web", commit: "head00001", branch: "main" }, results: [probe] },
+			await explorer(),
+		);
 		// The pipeline reports that commit as the head of pr:7, failing with the same cause. It is the pull
 		// request's failure: it gets its own inherited decision, independent of trunk's flaky answer.
 		const reported = await report(
@@ -2280,39 +2312,39 @@ describe("what a run and a change may count", () => {
 		expect(reported.questions.map((q) => q.how)).toEqual(["decided by rule"]);
 		expect(reported.questions[0]?.answer).toBe("inherited");
 		expect((await gate({ change: "pr:7" })).verdict).toBe("passed");
-		expect(rows("SELECT DISTINCT line, branch FROM targets WHERE commit_sha = 'head00001'")).toEqual([
+		expect(await rows("SELECT DISTINCT line, branch FROM targets WHERE commit_sha = 'head00001'")).toEqual([
 			{ line: "change", branch: "feature" },
 		]);
 		// The other way round: an agent calls a trunk commit a pull request's; the pipeline's report says trunk.
 		await report(
 			{ target: { repo: "acme/web", commit: "trunk0002", pr: 9, branch: "other" }, results: [probe] },
-			explorer(),
+			await explorer(),
 		);
 		const onTrunk = await report(
 			{ target: { repo: "acme/web", commit: "trunk0002", branch: "main" }, results: [fail] },
 			ci,
 		);
 		expect(onTrunk.questions.map((q) => q.how)).toEqual(["already decided"]);
-		expect(rows("SELECT DISTINCT line, change FROM targets WHERE commit_sha = 'trunk0002'")).toEqual([
+		expect(await rows("SELECT DISTINCT line, change FROM targets WHERE commit_sha = 'trunk0002'")).toEqual([
 			{ line: "trunk", change: null },
 		]);
 		// And a pipeline that sends only the hash of a commit an agent placed gives it a place of its own.
 		await report(
 			{ target: { repo: "acme/web", commit: "bare00001", pr: 9, branch: "other" }, results: [probe] },
-			explorer(),
+			await explorer(),
 		);
 		await report(
 			{ target: { repo: "acme/web", commit: "bare00001" }, results: [{ test: { key: "t1" }, outcome: "pass" }] },
 			ci,
 		);
 		expect(
-			rows("SELECT c.key FROM targets t JOIN changes c ON c.id = t.change WHERE t.commit_sha = 'bare00001'"),
+			await rows("SELECT c.key FROM targets t JOIN changes c ON c.id = t.change WHERE t.commit_sha = 'bare00001'"),
 		).toEqual([{ key: "commit:bare00001" }]);
 	});
 
 	test("a run that counted an agent's result is recomputed when the commit is put in its real place", async () => {
 		await seed(2, ["human", "agent"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "moved0001";
 		const planned = await plan({
 			name: "Exploration",
@@ -2326,7 +2358,7 @@ describe("what a run and a change may count", () => {
 				target: { commit, branch: "main", env: "staging" },
 				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } }],
 			},
-			explorer(),
+			await explorer(),
 		);
 		const first = await open("failure");
 		expect((await decide(first, { is: "flaky" })).status).toBe("decided");
@@ -2338,7 +2370,7 @@ describe("what a run and a change may count", () => {
 			{ target: { commit, pr: 7, branch: "feature", env: "prod" }, results: [{ test: { key: "t" }, outcome: "pass" }] },
 			ci,
 		);
-		expect(rows("SELECT DISTINCT line FROM targets WHERE commit_sha = ?", commit)).toEqual([{ line: "change" }]);
+		expect(await rows("SELECT DISTINCT line FROM targets WHERE commit_sha = ?", commit)).toEqual([{ line: "change" }]);
 		const now = await gate({ run: planned.run });
 		expect(now.tally).toMatchObject({ excused: 0, unexplained: 1 });
 		const asked = await open("failure");
@@ -2347,25 +2379,25 @@ describe("what a run and a change may count", () => {
 	});
 
 	test("until a pipeline or a person reports a commit, what an agent says about where it is counts for nothing", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
 		const fail = { test: { key: "t0" }, outcome: "fail", failure: { message: "agent found it" } };
 		// An agent reports two commits nobody has: one as a commit of main, one as the head of pr:9 in a repository.
-		await report({ target: { repo: "app", commit: "lone00001", branch: "main" }, results: [fail] }, explorer());
+		await report({ target: { repo: "app", commit: "lone00001", branch: "main" }, results: [fail] }, await explorer());
 		await report(
 			{ target: { repo: "app", commit: "lone00002", pr: 9, branch: "feature" }, results: [fail] },
-			explorer(),
+			await explorer(),
 		);
 		// Neither is on trunk or in a pull request: each is on its own, as a commit reported by its hash alone is.
 		// No pull request exists because an agent named one, so the name stays free for whoever really reports it.
 		expect(
-			rows(
+			await rows(
 				"SELECT t.commit_sha, t.line, t.branch, c.key FROM targets t JOIN changes c ON c.id = t.change ORDER BY t.id",
 			),
 		).toEqual([
 			{ commit_sha: "lone00001", line: "change", branch: null, key: "commit:lone00001" },
 			{ commit_sha: "lone00002", line: "change", branch: null, key: "commit:lone00002" },
 		]);
-		expect(rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
+		expect(await rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
 		// Its failures are asked about there, so an answer to one is an answer about that commit and no line.
 		const asked = (await h.call<InboxReply>("inbox", { kind: "failure", limit: 50 })).items;
 		expect(asked).toHaveLength(2);
@@ -2373,13 +2405,16 @@ describe("what a run and a change may count", () => {
 		await report({ target: { repo: "app", commit: "trunk0009", branch: "main" }, results: [fail] }, ci);
 		expect((await gate({ commit: "trunk0009", repo: "app" })).verdict).toBe("blocked");
 		// On a commit a pipeline has placed, an agent's naming of a pull request makes none either.
-		await report({ target: { repo: "app", commit: "trunk0009", pr: 12, branch: "x" }, results: [fail] }, explorer());
-		expect(rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
+		await report(
+			{ target: { repo: "app", commit: "trunk0009", pr: 12, branch: "x" }, results: [fail] },
+			await explorer(),
+		);
+		expect(await rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
 	});
 
 	test("what an agent found on a commit is asked about where the commit is, once a pipeline says where that is", async () => {
 		await seed(1, ["human", "agent"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "found0002";
 		// An agent reviews a pull request before its pipeline has reported: a case fails.
 		await report(
@@ -2387,7 +2422,7 @@ describe("what a run and a change may count", () => {
 				target: { repo: "app", commit, pr: 482, branch: "feature" },
 				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "total is wrong" } }],
 			},
-			explorer(),
+			await explorer(),
 		);
 		const early = await open("failure");
 		expect(early.about).not.toContain("pr:482");
@@ -2415,7 +2450,7 @@ describe("what a run and a change may count", () => {
 
 	test("a run whose commit a report is about to put elsewhere reads pending while that report is being applied", async () => {
 		await seed(2, ["human", "agent"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "moving001";
 		const planned = await plan({
 			name: "Exploration",
@@ -2428,7 +2463,7 @@ describe("what a run and a change may count", () => {
 				target: { commit, branch: "main", env: "agent-env" },
 				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } }],
 			},
-			explorer(),
+			await explorer(),
 		);
 		expect((await decide(await open("failure"), { is: "flaky" })).status).toBe("decided");
 		// The run passes on that answer (under `loose` the rule signs it off; either way it reads passed).
@@ -2436,29 +2471,32 @@ describe("what a run and a change may count", () => {
 		// The pipeline's first report of the commit, for another environment, is accepted and not yet applied:
 		// the commit is already where the pipeline says, so the run's failure is no longer covered. Until the
 		// report is applied and the run recomputed, the run must not go on saying passed.
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
-				target: { commit, pr: 7, branch: "feature", env: "pipeline-env" },
-				results: [{ test: { key: "t" }, outcome: "pass" }],
-			});
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, ci, true);
+					await acceptReport(ctx, {
+						target: { commit, pr: 7, branch: "feature", env: "pipeline-env" },
+						results: [{ test: { key: "t" }, outcome: "pass" }],
+					});
+					await stampSeq(ctx);
+				}),
+		);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "pending", stale: true });
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		const after = await gate({ run: planned.run });
 		expect(after).toMatchObject({ verdict: "blocked", stale: false });
 		expect(after.tally).toMatchObject({ unexplained: 1, excused: 0 });
 		expect(
-			first(rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
+			first(await rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
 		).toBe(0);
 	});
 
 	test("an answer given before a commit had its place ends when the commit is placed, and the runs that rested on it are asked about again", async () => {
 		await seed(1, ["human", "agent"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "closed0001";
 		const planned = await plan({
 			name: "Exploration",
@@ -2480,14 +2518,14 @@ describe("what a run and a change may count", () => {
 					})),
 				],
 			},
-			explorer(),
+			await explorer(),
 		);
 		const early = await open("failure");
 		expect(early.evidence).toMatchObject({ count: 61 });
 		expect((await decide(early, { is: "flaky" })).status).toBe("decided");
-		const stored = () =>
-			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
-		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		const stored = async () =>
+			first(await rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		expect(await stored()).toEqual({ state: "closed", verdict: "passed" });
 		// The pipeline reports the commit as the head of a pull request. The answer was given about the commit on
 		// its own; the failure is the pull request's now. The answer ends, in the ledger, and the failure is asked
 		// about where the commit is, naming the run that rested on the answer although it has closed.
@@ -2496,7 +2534,7 @@ describe("what a run and a change may count", () => {
 			ci,
 		);
 		expect(
-			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+			(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")).map(
 				(row) => JSON.parse(row.answer).is,
 			),
 		).toEqual(["flaky", "outdated"]);
@@ -2512,7 +2550,7 @@ describe("what a run and a change may count", () => {
 
 	test("two commits that begin alike are each on their own, and placing one leaves the other's question alone", async () => {
 		await seed(1, ["human", "agent"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const one = "abcdef123456aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 		const two = "abcdef123456bbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 		const fail = { test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } };
@@ -2527,10 +2565,10 @@ describe("what a run and a change may count", () => {
 				}),
 			);
 		}
-		await report({ target: { repo: "app", commit: one }, results: [fail] }, explorer());
-		await report({ target: { repo: "app", commit: two }, results: [fail] }, explorer());
+		await report({ target: { repo: "app", commit: one }, results: [fail] }, await explorer());
+		await report({ target: { repo: "app", commit: two }, results: [fail] }, await explorer());
 		// Two commits, two places, two questions.
-		expect(rows("SELECT count(DISTINCT change) AS n FROM targets")).toEqual([{ n: 2 }]);
+		expect(await rows("SELECT count(DISTINCT change) AS n FROM targets")).toEqual([{ n: 2 }]);
 		expect((await h.call<InboxReply>("inbox", { kind: "failure", limit: 50 })).items).toHaveLength(2);
 		// The pipeline places the first. The second is where it was, asked about as before, by a question that
 		// is still there to answer.
@@ -2552,47 +2590,50 @@ describe("what a run and a change may count", () => {
 
 	test("a run planned while a report for its commit waits to be applied waits for it too", async () => {
 		await seed(1, ["human", "auto"]);
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "waiting001";
 		const target = { commit, branch: "main" };
 		await report({ target, results: [linked("pass")] }, ci);
 		// The pipeline's next attempt fails. It is accepted and, for whatever reason, not applied yet.
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
-			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
-				target,
-				attempt: 2,
-				results: [
-					{
-						test: { key: "t1" },
-						annotation: { case: "C-1", version: 1 },
-						outcome: "fail",
-						failure: { message: "boom" },
-					},
-				],
-			});
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, ci, true);
+					await acceptReport(ctx, {
+						target,
+						attempt: 2,
+						results: [
+							{
+								test: { key: "t1" },
+								annotation: { case: "C-1", version: 1 },
+								outcome: "fail",
+								failure: { message: "boom" },
+							},
+						],
+					});
+					await stampSeq(ctx);
+				}),
+		);
 		expect((await gate({ commit })).verdict).toBe("pending");
 		// A run planned over that commit now sees the older pass. It must not pass on it, let alone be closed.
 		const planned = await plan({ name: "Release", select: {}, accepts: { commit } });
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
-		recoverAccepted(h.app);
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
+		await recoverAccepted(h.app);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
 		expect(
-			first(rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
+			first(await rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
 		).toBe(0);
 	});
 
 	test("a dispute that is asked about again where its commit now is, is still a dispute there", async () => {
 		await usePolicy("standard");
 		await h.call("propose", { edits: [{ op: "create", body: { title: "Agent exercise", methods: ["agent"] } }] });
-		const agentA = h.actor("agent-a", "agent", ["read", "produce"]);
-		const agentB = h.actor("agent-b", "agent", ["read", "produce"]);
-		const ci = pipeline();
+		const agentA = await h.actor("agent-a", "agent", ["read", "produce"]);
+		const agentB = await h.actor("agent-b", "agent", ["read", "produce"]);
+		const ci = await pipeline();
 		const target = { repo: "app", commit: "movingdispute", env: "agents" };
 		const planned = await plan({
 			name: "Disputed exploration",
@@ -2610,7 +2651,9 @@ describe("what a run and a change may count", () => {
 		await report({ target, results: [result("fail")] }, agentA);
 		await report({ target, results: [result("pass")] }, agentB);
 		expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe(
+			"closed",
+		);
 		// The project then lets a rule answer plain failures; disputes stay a person's who reported neither result.
 		const clauses = structuredClone(PRESETS.standard.clauses).map((clause) =>
 			clause.kind === "failure" && clause.id !== "failure-disputed"
@@ -2649,20 +2692,22 @@ describe("what a run and a change may count", () => {
 		expect(first(await slots(planned.run)).state).toBe("disputed");
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
 		expect(
-			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+			(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")).map(
 				(row) => JSON.parse(row.answer).is,
 			),
 		).toEqual(["infra", "outdated", "flaky"]);
 	});
 
 	test("placing a commit whose failure was answered in sixty environments asks about each of them once", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
+		const agent = await explorer();
+		const setupStatements = h.app.database.statementCount;
 		const commit = "manyenvs01";
 		const fail = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
 		const envs = Array.from({ length: 60 }, (_, i) => `env-${i}`);
 		// The agent reports all of them, and then a person answers each in turn: an answer for one environment
 		// leaves the others asked about, in a question that still lists what it had seen.
-		for (const env of envs) await report({ target: { repo: "app", commit, env }, results: [fail] }, explorer());
+		for (const env of envs) await report({ target: { repo: "app", commit, env }, results: [fail] }, agent);
 		for (const _ of envs) expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		expect((await h.call<InboxReply>("inbox", { kind: "failure", limit: 500 })).items).toEqual([]);
 		// The pipeline's first report of the commit is applied: every answer given about the commit on its own
@@ -2672,6 +2717,7 @@ describe("what a run and a change may count", () => {
 			ci,
 		);
 		expect(placed.counts.total).toBe(1);
+		expect(h.app.database.statementCount - setupStatements).toBeLessThanOrEqual(11_000);
 		expect((await gate({ commit, repo: "app" })).verdict).toBe("passed");
 		const asked = (await h.call<InboxReply>("inbox", { kind: "failure", limit: 500 })).items;
 		expect(asked).toHaveLength(1);
@@ -2680,8 +2726,8 @@ describe("what a run and a change may count", () => {
 		// The two tests name no file, so the pipeline's test joins the agent's in one question about tests with no
 		// case, and the rule's answer to that question ends too. It is not one of the sixty.
 		expect(
-			rows(
-				"SELECT kind, count(*) AS n FROM decisions WHERE json_extract(answer, '$.is') = 'outdated' GROUP BY kind ORDER BY kind",
+			await rows(
+				"SELECT kind, count(*) AS n FROM decisions WHERE (answer::jsonb)->>'is' = 'outdated' GROUP BY kind ORDER BY kind",
 			),
 		).toEqual([
 			{ kind: "failure", n: 60 },
@@ -2699,31 +2745,34 @@ describe("what a run and a change may count", () => {
 		const fork = { commit: "waitstale1", repo: "fork" };
 		await report(
 			{ target: fork, results: [{ test: { key: "agent" }, outcome: "fail", failure: { message: "fork failure" } }] },
-			explorer(),
+			await explorer(),
 		);
 		await report({
 			target: { ...fork, branch: "main" },
 			results: [{ test: { key: "pipeline" }, outcome: "fail", failure: { message: "fork failure" } }],
 		});
-		expect(rows("SELECT verdict, outstanding FROM runs WHERE no = ?", Number(planned.run.slice(2)))).toEqual([
+		expect(await rows("SELECT verdict, outstanding FROM runs WHERE no = ?", Number(planned.run.slice(2)))).toEqual([
 			{ verdict: "blocked", outstanding: 0 },
 		]);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
 	});
 
 	test("placing a commit reaches every question about it, however many there are, and keeps every test they named", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
 		const commit = "manyq00001";
 		const fail = (key: string, message: string) => ({ test: { key }, outcome: "fail", failure: { message } });
 		// One cause in one environment, asked about first. Then a second cause in 205 environments, each answered
 		// on its own: far more than two hundred questions about this commit, the first one the oldest.
-		await report({ target: { repo: "app", commit, env: "first" }, results: [fail("a", "first cause")] }, explorer());
+		await report(
+			{ target: { repo: "app", commit, env: "first" }, results: [fail("a", "first cause")] },
+			await explorer(),
+		);
 		expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		const envs = Array.from({ length: 205 }, (_, i) => `env-${i}`);
 		for (const [i, env] of envs.entries())
 			await report(
 				{ target: { repo: "app", commit, env }, results: [fail(i % 2 === 0 ? "b" : "c", "second cause")] },
-				explorer(),
+				await explorer(),
 			);
 		for (const _ of envs) expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		await report(
@@ -2733,8 +2782,8 @@ describe("what a run and a change may count", () => {
 		// Every answer about the commit on its own has ended, the oldest included, and both causes are asked
 		// about where the commit is, the second with both of the tests it was seen on.
 		expect(
-			rows(
-				"SELECT count(*) AS n FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.kind = 'failure' AND json_extract(d.answer, '$.is') = 'infra'",
+			await rows(
+				"SELECT count(*) AS n FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.kind = 'failure' AND (d.answer::jsonb)->>'is' = 'infra'",
 			),
 		).toEqual([{ n: 0 }]);
 		const asked = (await h.call<InboxReply>("inbox", { kind: "failure", limit: 500 })).items;
@@ -2762,13 +2811,13 @@ describe("what a run and a change may count", () => {
 					target: { repo: "app", commit, env },
 					results: [{ test: { key }, outcome: "fail", failure: { message: "same cause" } }],
 				},
-				explorer(),
+				await explorer(),
 			);
 			expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		}
 		await report(
 			{ target: { repo: "app", commit, env: "ci", pr: 7 }, results: [{ test: { key: "t" }, outcome: "pass" }] },
-			pipeline(),
+			await pipeline(),
 		);
 		const asked = (await open("failure")).evidence as { count: number; tests: { name: string }[]; targets: number[] };
 		expect(asked.targets).toHaveLength(2);
@@ -2777,7 +2826,7 @@ describe("what a run and a change may count", () => {
 	});
 
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", async () => {
-		const ci = pipeline();
+		const ci = await pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
 		const trunk = "t3t3t3t300000000000000000000000000000003";
 		const fail = { test: { key: "t1" }, outcome: "fail", failure: { message: "boom" } };
@@ -2798,17 +2847,19 @@ describe("what a run and a change may count", () => {
 		const probe = { test: { key: "other" }, outcome: "skip" };
 		await report(
 			{ target: { commit: trunk, repo: "acme/web", pr: 7, branch: "feature" }, results: [probe] },
-			explorer(),
+			await explorer(),
 		);
 		expect(await gate({ change: "pr:7" })).toEqual(before);
 		// And a commit nobody else has reported.
 		const unseen = "dddddddd00000000000000000000000000000004";
 		await report(
 			{ target: { commit: unseen, repo: "acme/web", pr: 7, branch: "feature" }, results: [probe] },
-			explorer(),
+			await explorer(),
 		);
 		expect(await gate({ change: "pr:7" })).toEqual(before);
-		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(head);
+		expect(first(await rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(
+			head,
+		);
 		// The pull request's own failure is still the one people are asked about.
 		expect((await open("failure")).blocks).toEqual([before.run as string]);
 		// When the pipeline reports that commit, it is the head.
@@ -2819,20 +2870,34 @@ describe("what a run and a change may count", () => {
 			},
 			ci,
 		);
-		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(unseen);
+		expect(first(await rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(
+			unseen,
+		);
 	});
 });
 
 describe("what a decision may change", () => {
 	test("standing cannot cite a decision that is not in the ledger", async () => {
 		await report(ciReport({ commit: "witness1", n: 1, fail: { 0: "bug" } }));
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		const ctx = makeCtx(h.app, project, h.owner, true);
-		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
-		const plain = { decision: 999_999, kind: "failure", signers: [h.owner.id], expiresAt: null } as unknown as Witness;
-		expect(() => setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow();
-		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, h.owner, true);
+					const signature = first(await rows<{ id: number }>("SELECT id FROM signatures")).id;
+					const plain = {
+						decision: 999_999,
+						kind: "failure",
+						signers: [h.owner.id],
+						expiresAt: null,
+					} as unknown as Witness;
+					await expect(
+						setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", targets: null }),
+					).rejects.toThrow();
+				}),
+		);
+		expect(await rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
 	});
 
 	test("withdrawing an older link decision leaves a newer decision's link alone", async () => {
@@ -2853,13 +2918,14 @@ describe("what a decision may change", () => {
 		};
 		await decide(about("a"), { is: "link", pairs: [["T-1", "C-1"]] });
 		await decide(about("b"), { is: "link", pairs: [["T-1", "C-2"]] });
-		const linked = () => first(rows<{ case_id: number | null }>("SELECT case_id FROM tests WHERE no = 1")).case_id;
-		const second = linked();
+		const linked = async () =>
+			first(await rows<{ case_id: number | null }>("SELECT case_id FROM tests WHERE no = 1")).case_id;
+		const second = await linked();
 		await h.call("decide", { undo: about("a").q });
-		expect(linked()).toBe(second);
+		expect(await linked()).toBe(second);
 		// Withdrawing the newer one does not put back a link whose own decision was withdrawn.
 		await h.call("decide", { undo: about("b").q });
-		expect(linked()).toBeNull();
+		expect(await linked()).toBeNull();
 	});
 
 	test("a question asked again is answered and undone there, and the old one cannot touch the new decision", async () => {
@@ -2875,7 +2941,7 @@ describe("what a decision may change", () => {
 		const undone = first(await h.call<DecideReply[]>("decide", { undo: old.q }));
 		expect(undone.status).toBe("conflict");
 		expect((await gate({ commit: "again002" })).verdict).toBe("failed");
-		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
 	});
 
 	test("a witness of one kind cannot change what another kind of decision owns", async () => {
@@ -2902,22 +2968,29 @@ describe("what a decision may change", () => {
 		const genuine: Witness = adoptWitness;
 		expect(decisionOf(genuine, "adopt")).toBeGreaterThan(0);
 		expect(() => decisionOf(genuine, "merge-receipt")).toThrow("only a merge-receipt decision");
-		const project = findProject(h.app.db, "scratch");
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 		if (!project) throw new Error("no project");
-		const ctx = makeCtx(h.app, project, h.owner, true);
-		const test = testById(h.app.db, 1);
-		const run = runById(h.app.db, 1);
-		if (!test || !run) throw new Error("fixture missing");
-		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
-		// The same witness is refused by every writer that another kind of decision owns, and nothing is written.
-		expect(() => linkTest(ctx, genuine, test, 1)).toThrow("only a map decision");
-		expect(() => setExcuse(ctx, genuine, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow(
-			"only a failure decision",
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const ctx = makeCtx(h.app, db, project, h.owner, true);
+					const test = await h.app.database.read(async (db) => await testById(db, 1));
+					const run = await h.app.database.read(async (db) => await runById(db, 1));
+					if (!test || !run) throw new Error("fixture missing");
+					const signature = first(await rows<{ id: number }>("SELECT id FROM signatures")).id;
+					// The same witness is refused by every writer that another kind of decision owns, and nothing is written.
+					await expect(linkTest(ctx, genuine, test, 1)).rejects.toThrow("only a map decision");
+					await expect(
+						setExcuse(ctx, genuine, { signature, scope: "line:trunk", class: "excused", targets: null }),
+					).rejects.toThrow("only a failure decision");
+					await expect(closeRun(ctx, genuine, run)).rejects.toThrow("only a signoff decision");
+				}),
 		);
-		expect(() => closeRun(ctx, genuine, run)).toThrow("only a signoff decision");
-		expect(rows("SELECT case_id, linked_by FROM tests WHERE id = 1")).toEqual([{ case_id: null, linked_by: null }]);
-		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
-		expect(rows("SELECT state FROM runs WHERE id = 1")).toEqual([{ state: "open" }]);
+		expect(await rows("SELECT case_id, linked_by FROM tests WHERE id = 1")).toEqual([
+			{ case_id: null, linked_by: null },
+		]);
+		expect(await rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT state FROM runs WHERE id = 1")).toEqual([{ state: "open" }]);
 	});
 
 	test("only the decision machinery can make a witness", () => {
@@ -2942,18 +3015,20 @@ describe("what a decision may change", () => {
 		await report(fail("expiry02"));
 		const again = await open("failure");
 		expect(again.q).not.toBe(old.q);
-		const ledger = () =>
-			rows<{ answer: string; supersedes: number | null }>(
-				"SELECT answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
+		const ledger = async () =>
+			(
+				await rows<{ answer: string; supersedes: number | null }>(
+					"SELECT answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
+				)
 			).map((row) => JSON.parse(row.answer).is);
-		expect(ledger()).toEqual(["flaky", "expired"]);
+		expect(await ledger()).toEqual(["flaky", "expired"]);
 		// The timer finds nothing left to do: the question was already asked again.
-		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(0);
+		const rule = first(await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
+		expect(await sweep(h.app, rule)).toBe(0);
 		expect((await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((item) => item.q)).toEqual([again.q]);
 		await decide(again, { is: "defect" });
-		expect(ledger()).toEqual(["flaky", "expired", "defect"]);
-		expect(rows("SELECT supersedes FROM decisions WHERE kind = 'failure' ORDER BY id")).toEqual([
+		expect(await ledger()).toEqual(["flaky", "expired", "defect"]);
+		expect(await rows("SELECT supersedes FROM decisions WHERE kind = 'failure' ORDER BY id")).toEqual([
 			{ supersedes: null },
 			{ supersedes: 2 },
 			{ supersedes: 3 },
@@ -2963,7 +3038,7 @@ describe("what a decision may change", () => {
 	test("withdrawing a 'mistaken' answer does not undo a correction the producer made since", async () => {
 		await seed(2);
 		const planned = await plan({ name: "Open until the second case", select: {} });
-		const other = h.actor("other", "human", ["read", "produce"]);
+		const other = await h.actor("other", "human", ["read", "produce"]);
 		const failed = await report({
 			run: planned.run,
 			attempt: 2,
@@ -2985,26 +3060,26 @@ describe("what a decision may change", () => {
 	test("under a policy where a person adopts new cases, 'create cases' says so and leaves nothing behind", async () => {
 		await usePolicy("strict");
 		await report(ciReport({ commit: "mapstrict", n: 1, file: "tests/new.spec.ts" }));
-		const before = rows("SELECT count(*) AS n FROM proposals");
+		const before = await rows("SELECT count(*) AS n FROM proposals");
 		const reply = await decide(await open("map"), { is: "create" }, h.owner, { reason: "make cases for them" });
 		expect(reply.status).toBe("invalid");
 		expect(reply.needs).toContain("propose the cases");
-		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(await rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 		expect((await h.call<InboxReply>("inbox", { kind: "map" })).items).toHaveLength(1);
 		// Where the policy adopts them at once, the same answer creates and links.
 		await usePolicy("standard", "ask");
 		expect((await decide(await open("map"), { is: "create" })).status).toBe("decided");
-		expect(rows("SELECT count(*) AS n FROM tests WHERE case_id IS NOT NULL")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM tests WHERE case_id IS NOT NULL")).toEqual([{ n: 1 }]);
 	});
 
 	test("an expired decision stays in the chain of the one that replaces it", async () => {
 		await report(ciReport({ commit: "sweep001", n: 1, fail: { 0: "stable failure" } }));
 		await decide(await open("failure"), { is: "flaky" });
 		h.advance(15 * 86_400_000);
-		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(1);
+		const rule = first(await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
+		expect(await sweep(h.app, rule)).toBe(1);
 		await decide(await open("failure"), { is: "defect" });
-		const ledger = rows<{ id: number; answer: string; supersedes: number | null }>(
+		const ledger = await rows<{ id: number; answer: string; supersedes: number | null }>(
 			"SELECT id, answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
 		);
 		expect(ledger.map((row) => JSON.parse(row.answer).is)).toEqual(["flaky", "expired", "defect"]);
@@ -3027,7 +3102,7 @@ describe("what a decision may change", () => {
 			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
 		});
 		// A pipeline fails the case and a person passes it: the slot is disputed, and a person calls it flaky.
-		await report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "record"]));
+		await report({ target, results: [result("fail")] }, await h.actor("pipeline", "ci", ["read", "record"]));
 		await report({ target, results: [result("pass")] });
 		const dispute = await open("failure");
 		expect((dispute.evidence as { hints: string[] }).hints).toContain("disputed");
@@ -3037,20 +3112,20 @@ describe("what a decision may change", () => {
 		// An agent reports the same failure. No run asked for agents and the case does not admit them.
 		const later = await report(
 			{ target, results: [result("fail")] },
-			h.actor("explorer", "agent", ["read", "produce"]),
+			await h.actor("explorer", "agent", ["read", "produce"]),
 		);
 		expect(later.questions.map((q) => q.how)).toEqual(["already decided"]);
 		expect((await gate({ commit: "head0012", repo: "app" })).verdict).toBe("passed");
 		expect(
-			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'").map(
+			(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).map(
 				(d) => JSON.parse(d.answer).is,
 			),
 		).toEqual(["flaky", "flaky"]);
 	});
 
 	test("an agent's failure is asked about even where a pipeline passes the same test", async () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+		const explorer = await h.actor("explorer", "agent", ["read", "produce"]);
 		const target = { commit: "found001", branch: "main" };
 		await report({ target, results: [{ test: { key: "checkout" }, outcome: "pass" }] }, pipeline);
 		// The agent found a way to make it fail. The pipeline's pass, which came before, is no proof that it is gone.
@@ -3066,8 +3141,8 @@ describe("what a decision may change", () => {
 	});
 
 	test("an agent's report does not close a person's question about an older commit", async () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+		const explorer = await h.actor("explorer", "agent", ["read", "produce"]);
 		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "shared cause" } });
 		await report(
 			{
@@ -3092,7 +3167,7 @@ describe("what a decision may change", () => {
 	});
 
 	test("an answer whose failure went away ends, and nobody is asked", async () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
 		await report(
 			{
 				target: { commit: "gone0001", branch: "main" },
@@ -3120,7 +3195,7 @@ describe("what a decision may change", () => {
 		// And a report that touches the older commit afterwards changes nothing about it.
 		await report(
 			{ target: { commit: "gone0001", branch: "main" }, results: [{ test: { key: "other" }, outcome: "pass" }] },
-			h.actor("explorer", "agent", ["read", "produce"]),
+			await h.actor("explorer", "agent", ["read", "produce"]),
 		);
 		expect(await gate({ commit: "gone0001" })).toEqual(older);
 	});
@@ -3132,27 +3207,27 @@ describe("what a decision may change", () => {
 			await report({ run: planned.run, attempt, results: [{ test: { case: ref }, outcome: "pass" }] });
 		await pass("C-1");
 		await pass("C-2");
-		const stored = () =>
-			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		const stored = async () =>
+			first(await rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
 		// Under `loose` a passing run is signed off by rule. A person takes that back and refuses it.
-		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		expect(await stored()).toEqual({ state: "closed", verdict: "passed" });
 		await h.call("decide", { undo: (await open("signoff", "decided")).q, reason: "not yet" });
 		expect(
 			(await decide(await open("signoff"), { is: "reject" }, h.owner, { reason: "coverage is thin" })).status,
 		).toBe("decided");
-		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		expect(await stored()).toEqual({ state: "open", verdict: "passed" });
 		// One more result arrives. The run shows something new, so it is asked about again: of a person. The rule
 		// does not answer over the head of whoever refused it.
 		await pass("C-1", 2);
-		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		expect(await stored()).toEqual({ state: "open", verdict: "passed" });
 		const asked = await open("signoff");
 		expect(asked.needs).toContain("member");
 		// And again when the next one arrives, while the question is still open.
 		await pass("C-2", 2);
-		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		expect(await stored()).toEqual({ state: "open", verdict: "passed" });
 		// A person approving closes it.
 		expect((await decide(await open("signoff"), { is: "approve" })).status).toBe("decided");
-		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		expect(await stored()).toEqual({ state: "closed", verdict: "passed" });
 	});
 
 	test("a question about a disputed result stays a dispute, whoever reports the cause next", async () => {
@@ -3171,12 +3246,12 @@ describe("what a decision may change", () => {
 			outcome,
 			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
 		});
-		await report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "record"]));
+		await report({ target, results: [result("fail")] }, await h.actor("pipeline", "ci", ["read", "record"]));
 		await report({ target, results: [result("pass")] });
 		expect((await open("failure")).answers).toContain("mistaken");
 		// The same cause from an agent, in a report that touches no slot. The slot is still disputed, so the
 		// question is still about a dispute: with the answers a dispute has, and its rule about who may give them.
-		await report({ target, results: [result("fail")] }, h.actor("explorer", "agent", ["read", "produce"]));
+		await report({ target, results: [result("fail")] }, await h.actor("explorer", "agent", ["read", "produce"]));
 		const still = await open("failure");
 		expect((still.evidence as { hints: string[] }).hints).toContain("disputed");
 		expect(still.answers).toContain("mistaken");
@@ -3186,8 +3261,8 @@ describe("what a decision may change", () => {
 
 	test("a pipeline's pass does not close the question about a failure a planned run still shows", async () => {
 		await seed(1, ["human", "agent"]);
-		const agent = h.actor("agent", "agent", ["read", "produce"]);
-		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = await h.actor("agent", "agent", ["read", "produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
 		const planned = await plan({
 			name: "Agent run",
 			select: {},
@@ -3214,7 +3289,7 @@ describe("what a decision may change", () => {
 
 	test("the question about an agent's failure closes when the agent's next attempt passes", async () => {
 		await seed(1, ["human", "agent"]);
-		const agent = h.actor("agent", "agent", ["read", "produce"]);
+		const agent = await h.actor("agent", "agent", ["read", "produce"]);
 		const planned = await plan({
 			name: "Agent run",
 			select: {},
@@ -3227,7 +3302,7 @@ describe("what a decision may change", () => {
 		expect((await gate({ run: planned.run })).verdict).toBe("blocked");
 		await report({ target, attempt: 2, results: [{ ...one, outcome: "pass" }] }, agent);
 		expect((await h.call<InboxReply>("inbox", { kind: "failure", limit: 50 })).items).toEqual([]);
-		expect(rows("SELECT state FROM questions WHERE kind = 'failure'")).toEqual([{ state: "dissolved" }]);
+		expect(await rows("SELECT state FROM questions WHERE kind = 'failure'")).toEqual([{ state: "dissolved" }]);
 		expect((await gate({ run: planned.run })).open).toEqual([]);
 	});
 
@@ -3252,12 +3327,12 @@ describe("what a decision may change", () => {
 		const undone = first(await h.call<DecideReply[]>("decide", { undo: production.q }));
 		expect(undone.status).toBe("reopened");
 		expect(await gate({ commit: "twoenv01" })).toMatchObject({ verdict: "blocked", open: [production.q] });
-		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
 		// Answered again, it does not ask about staging a second time: staging's answer stands.
 		expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		expect((await h.call<InboxReply>("inbox", { kind: "failure", limit: 50 })).items).toEqual([]);
 		expect((await gate({ commit: "twoenv01" })).verdict).toBe("passed");
-		expect(rows("SELECT count(*) AS n FROM questions WHERE kind = 'failure'")).toEqual([{ n: 2 }]);
+		expect(await rows("SELECT count(*) AS n FROM questions WHERE kind = 'failure'")).toEqual([{ n: 2 }]);
 	});
 
 	test("whoever reported the failure cannot settle the dispute about it, whoever raised the dispute", async () => {
@@ -3269,8 +3344,8 @@ describe("what a decision may change", () => {
 			],
 		});
 		const planned = await plan({ name: "Keep open", select: {} });
-		const other = h.actor("other", "human", ["read", "produce", "answer"]);
-		const third = h.actor("third", "human", ["read", "produce", "answer"]);
+		const other = await h.actor("other", "human", ["read", "produce", "answer"]);
+		const third = await h.actor("third", "human", ["read", "produce", "answer"]);
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same failure" }] });
 		// The question exists before there is a dispute; the other member's pass, a later report, makes it one.
 		const before = await open("failure");
@@ -3282,7 +3357,7 @@ describe("what a decision may change", () => {
 		// The owner reported the failure, the other member the pass: neither may say which of them was wrong.
 		expect((await decide(dispute, { is: "mistaken" })).status).toBe("forbidden");
 		expect((await decide(dispute, { is: "mistaken" }, other)).status).toBe("forbidden");
-		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 0 }]);
 		expect((await decide(dispute, { is: "mistaken" }, third)).status).toBe("decided");
 	});
 
@@ -3295,14 +3370,14 @@ describe("what a decision may change", () => {
 			],
 		});
 		const planned = await plan({ name: "Keep open", select: {} });
-		const other = h.actor("other", "human", ["read", "produce", "answer"]);
-		const third = h.actor("third", "human", ["read", "produce", "answer"]);
+		const other = await h.actor("other", "human", ["read", "produce", "answer"]);
+		const third = await h.actor("third", "human", ["read", "produce", "answer"]);
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same failure" }] });
 		const cause = await open("failure");
 		if (order === "answer-then-pass") expect((await decide(cause, { is: "flaky" })).status).toBe("decided");
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
 		if (order === "pass-then-answer") expect((await decide(cause, { is: "flaky" })).status).toBe("decided");
-		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
+		expect(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
 		expect(first(await slots(planned.run)).state).toBe("disputed");
 		expect(await gate({ run: planned.run })).toMatchObject({
 			verdict: "blocked",
@@ -3319,8 +3394,8 @@ describe("what a decision may change", () => {
 	test("an agent dispute leaves cause answers standing on the commit, other runs and other scopes", async () => {
 		await usePolicy("standard");
 		await seed(2, ["auto", "agent", "human"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		const target = { commit: "slotcause01", branch: "main" };
 		const plain = await plan({
 			name: "Pipeline only",
@@ -3367,8 +3442,8 @@ describe("what a decision may change", () => {
 	test.each(["pass", "fail"])("agent %s reports never end a person's slot settlement", async (agentOutcome) => {
 		await usePolicy("standard");
 		await seed(1, ["auto", "agent", "human"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		const target = { commit: "agentslot2", branch: "main" };
 		const planned = await plan({
 			name: "Exploration",
@@ -3389,12 +3464,12 @@ describe("what a decision may change", () => {
 		expect(dispute.title).toStartWith("Disputed C-1");
 		const settled = await decide(dispute, { is: "flaky" });
 		expect(settled.status).toBe("decided");
-		const ledger = rows("SELECT * FROM decisions WHERE kind = 'failure'");
-		const standing = rows("SELECT * FROM result_excuses");
+		const ledger = await rows("SELECT * FROM decisions WHERE kind = 'failure'");
+		const standing = await rows("SELECT * FROM result_excuses");
 		for (const [index, outcome] of [agentOutcome, "pass", "fail"].entries()) {
 			await report({ target, attempt: index + 2, results: [result(outcome)] }, agent);
-			expect(rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
-			expect(rows("SELECT * FROM result_excuses")).toEqual(standing);
+			expect(await rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
+			expect(await rows("SELECT * FROM result_excuses")).toEqual(standing);
 			expect(await h.call<{ state: string; decision: { id: number } }[]>("get", { refs: [dispute.q] })).toMatchObject([
 				{ state: "decided", decision: { id: settled.decision } },
 			]);
@@ -3409,8 +3484,8 @@ describe("what a decision may change", () => {
 	test("an agent's new failure after a mistaken settlement needs its own answer", async () => {
 		await usePolicy("standard");
 		await seed(1, ["auto", "agent"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		const target = { commit: "agentwrong2", branch: "main" };
 		const planned = await plan({
 			name: "Exploration",
@@ -3428,13 +3503,13 @@ describe("what a decision may change", () => {
 		await report({ target, results: [result("fail")] }, agent);
 		const prior = await open("failure");
 		expect((await decide(prior, { is: "mistaken" })).status).toBe("decided");
-		const ledger = rows("SELECT * FROM decisions WHERE kind = 'failure'");
+		const ledger = await rows("SELECT * FROM decisions WHERE kind = 'failure'");
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
 		await report({ target, attempt: 2, results: [result("fail")] }, agent);
 		const asked = await open("failure");
 		expect(asked.title).toStartWith("Disputed C-1");
 		expect(asked.q).not.toBe(prior.q);
-		expect(rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
+		expect(await rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		expect((await decide(asked, { is: "flaky" })).status).toBe("decided");
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
@@ -3443,8 +3518,8 @@ describe("what a decision may change", () => {
 	test("two slots sharing results require independent settlements and expiry leaves the cause answer intact", async () => {
 		await usePolicy("standard");
 		await seed(2, ["human", "auto"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
-		const passer = h.actor("passer", "human", ["read", "produce"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+		const passer = await h.actor("passer", "human", ["read", "produce"]);
 		const target = { commit: "sharedslot1", branch: "main" };
 		const runs = [];
 		for (const name of ["One", "Two"]) runs.push(await plan({ name, select: {}, accepts: { commit: target.commit } }));
@@ -3466,61 +3541,65 @@ describe("what a decision may change", () => {
 		expect((await gate({ run: settledRun })).tally).toMatchObject({ pass: 1, disputed: 0 });
 		expect(await gate({ run: unsettledRun })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		h.advance(15 * 86_400_000);
-		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(1);
+		const rule = first(await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
+		expect(await sweep(h.app, rule)).toBe(1);
 		expect(await gate({ run: settledRun })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		expect(await gate({ commit: target.commit })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
-	});
-
-	test("the slot migration preserves an existing inherited result excuse as global standing", async () => {
-		await report(ciReport({ commit: "basefor70", n: 1, fail: { 0: "same cause" } }));
-		await report(ciReport({ commit: "headfor70", pr: 70, base: "basefor70", n: 1, fail: { 0: "same cause" } }));
-		const before = rows<{ result: number; decision: number; class: string; expires_at: number | null }>(
-			"SELECT result, decision, class, expires_at FROM result_excuses",
-		);
-		expect(before).toHaveLength(1);
-		const earlier = MIGRATIONS.find((migration) => migration.name === "result_excuses");
-		const slots = MIGRATIONS.find((migration) => migration.name === "slot_excuses");
-		if (!earlier || !slots) throw new Error("missing the result or slot excuse migration");
-		h.app.db.exec("DROP TABLE result_excuses; DROP INDEX changes_base;");
-		h.app.db.exec(earlier.sql);
-		for (const row of before)
-			h.app.db.raw
-				.query("INSERT INTO result_excuses (result, decision, class, expires_at) VALUES (?, ?, ?, ?)")
-				.run(row.result, row.decision, row.class, row.expires_at);
-		// Only the slot migration runs, in one transaction as migrate applies it: the tables of every other migration
-		// are already here, so rewinding the version would run later migrations a second time.
-		h.app.db.transaction(() => h.app.db.exec(slots.sql));
-		expect(rows("SELECT result, decision, class, expires_at, slot FROM result_excuses")).toEqual(
-			before.map((row) => ({ ...row, slot: null })),
-		);
-		expect(await gate({ commit: "headfor70" })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
 	});
 
 	test("startup gives an earlier cause-settled dispute its own question without ending its cause answer", async () => {
 		await usePolicy("standard");
 		await seed(2);
-		const passer = h.actor("passer", "human", ["read", "produce", "answer"]);
+		const passer = await h.actor("passer", "human", ["read", "produce", "answer"]);
 		const planned = await plan({ name: "Earlier dispute", select: {} });
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same cause" }] });
 		expect((await decide(await open("failure"), { is: "flaky" })).status).toBe("decided");
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, passer);
 		const dispute = await open("failure");
-		const id = first(rows<{ id: number }>("SELECT id FROM questions WHERE no = ?", Number(dispute.q.slice(2)))).id;
-		h.app.db.raw.query("DELETE FROM question_refs WHERE question = ?").run(id);
-		h.app.db.raw.query("DELETE FROM questions WHERE id = ?").run(id);
-		h.app.db.raw
-			.query("UPDATE runs SET verdict = 'pending', tally = ? WHERE origin = 'planned'")
-			.run(JSON.stringify({ pass: 1, excused: 0, attributed: 0, unexplained: 0, disputed: 0, missing: 1, skipped: 0 }));
-		expect(recoverDisputes(h.app)).toBe(1);
+		const id = first(
+			await rows<{ id: number }>("SELECT id FROM questions WHERE no = ?", Number(dispute.q.slice(2))),
+		).id;
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () => await db.run(sql<readonly SqlValue[]>("DELETE FROM question_refs WHERE question = $1"), [id]),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () => await db.run(sql<readonly SqlValue[]>("DELETE FROM questions WHERE id = $1"), [id]),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<readonly SqlValue[]>("UPDATE runs SET verdict = 'pending', tally = $1 WHERE origin = 'planned'"),
+							[
+								JSON.stringify({
+									pass: 1,
+									excused: 0,
+									attributed: 0,
+									unexplained: 0,
+									disputed: 0,
+									missing: 1,
+									skipped: 0,
+								}),
+							],
+						),
+				),
+		);
+		expect(await recoverDisputes(h.app)).toBe(1);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1, pass: 0 } });
 		expect((await open("failure")).title).toStartWith("Disputed C-1");
 		expect(
-			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'").map(
+			(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).map(
 				(row) => JSON.parse(row.answer).is,
 			),
 		).toEqual(["flaky"]);
-		expect(recoverDisputes(h.app)).toBe(0);
+		expect(await recoverDisputes(h.app)).toBe(0);
 	});
 
 	test.each(["ci", "human"] as const)(
@@ -3528,8 +3607,8 @@ describe("what a decision may change", () => {
 		async (kind) => {
 			await usePolicy("standard");
 			await seed(2, ["human", "auto"]);
-			const ci = h.actor("producer", kind, kind === "ci" ? ["read", "record"] : ["read", "produce"]);
-			const passer = h.actor("passer", "human", ["read", "produce"]);
+			const ci = await h.actor("producer", kind, kind === "ci" ? ["read", "record"] : ["read", "produce"]);
+			const passer = await h.actor("passer", "human", ["read", "produce"]);
 			const target = { commit: "lateslot01", branch: "main" };
 			const planned = await plan({ name: "Late results", select: {}, accepts: { commit: target.commit } });
 			const result = (outcome: string) => ({
@@ -3559,7 +3638,7 @@ describe("what a decision may change", () => {
 	test("an attributed cause cannot conceal another unsettled cause in the same disputed slot", async () => {
 		await usePolicy("standard");
 		await seed(2, ["human", "auto"]);
-		const producer = h.actor("producer", "human", ["read", "produce"]);
+		const producer = await h.actor("producer", "human", ["read", "produce"]);
 		const planned = await plan({ name: "Several causes", select: {} });
 		await report(
 			{
@@ -3593,8 +3672,8 @@ describe("what a decision may change", () => {
 	test("changing or withdrawing a slot settlement is kept from its producers while its cause answer stays separate", async () => {
 		await usePolicy("standard");
 		await seed(2);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer"]);
-		const carol = h.actor("carol", "human", ["read", "produce", "answer"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer"]);
+		const carol = await h.actor("carol", "human", ["read", "produce", "answer"]);
 		const planned = await plan({ name: "Keep open", select: {} });
 		const typed = (outcome: string) => ({
 			run: planned.run,
@@ -3626,9 +3705,9 @@ describe("what a decision may change", () => {
 
 	test("an answer given to a dispute is not undone by the people it was kept from, once the dispute no longer shows", async () => {
 		await usePolicy("standard");
-		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		const alice = await h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = await h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
 		await seed(2);
 		// Two shapes of "no longer shows": the run stays open and the judged result is set aside (`mistaken`), or
 		// the run passes on the answer and is closed.
@@ -3654,7 +3733,9 @@ describe("what a decision may change", () => {
 			const dispute = await open("failure");
 			expect((await decide(dispute, { is: "flaky" }, alice)).status).toBe("forbidden");
 			expect((await decide(dispute, { is: shape.first }, carol)).status).toBe("decided");
-			const state = first(rows<{ state: string }>("SELECT state FROM runs WHERE no = ?", Number(planned.run.slice(2))));
+			const state = first(
+				await rows<{ state: string }>("SELECT state FROM runs WHERE no = ?", Number(planned.run.slice(2))),
+			);
 			expect(state.state).toBe(shape.name);
 			// Alice reported the failure. She may neither take Carol's judgement back nor put her own in its place.
 			const judged = first(
@@ -3677,9 +3758,9 @@ describe("what a decision may change", () => {
 	test("everybody a dispute was kept from stays kept from its answer: whoever passed as well as whoever failed", async () => {
 		await usePolicy("standard");
 		await seed(2, ["human", "auto"]);
-		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		const alice = await h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = await h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
 		let n = 0;
 		for (const shape of ["plan after the reports", "an answer before the dispute"])
 			for (const select of [{}, { cases: ["C-1"] }])
@@ -3726,9 +3807,9 @@ describe("what a decision may change", () => {
 	test("a run closing does not hand a dispute back to the people it is kept from", async () => {
 		await usePolicy("standard");
 		await seed(2);
-		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		const alice = await h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = await h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
 		const planned = await h.call<PlanReply>("plan", { name: "Review", select: {} }, alice);
 		const typed = (ref: string, outcome: string) => ({
 			run: planned.run,
@@ -3745,7 +3826,9 @@ describe("what a decision may change", () => {
 		expect((await decide(await standing(), { is: "infra" }, alice)).status).toBe("forbidden");
 		// Bob passes the other case: the run passes on Carol's slot settlement and the rule closes it.
 		await report(typed("C-2", "pass"), bob);
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe(
+			"closed",
+		);
 		expect(first(await slots(planned.run)).state).toBe("disputed");
 		// The slot still disputes the failure, so it is still a dispute: for Alice, for Bob, for the question shown.
 		expect(((await standing()).evidence as { hints: string[] }).hints).toContain("disputed");
@@ -3764,10 +3847,10 @@ describe("what a decision may change", () => {
 	test("a dispute settled for one build does not make a later failure with the same cause a dispute", async () => {
 		await usePolicy("standard");
 		await seed(1, ["human", "auto"]);
-		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const alice = await h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = await h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const result = (outcome: string) => ({
 			test: { key: "one" },
 			annotation: { case: "C-1", version: 1 },
@@ -3785,7 +3868,9 @@ describe("what a decision may change", () => {
 		await report({ target: old, results: [result("fail")] }, alice);
 		await report({ target: old, results: [result("pass")] }, bob);
 		expect((await decide(await open("failure"), { is: "infra" }, carol)).status).toBe("decided");
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe(
+			"closed",
+		);
 		// The pipeline fails the next build with the same cause. Nothing disputes that failure: it is a plain
 		// failure, with a plain failure's answers, and anybody who may answer one may answer it, Bob included.
 		await report({ target: { repo: "app", commit: "shadow002", branch: "main" }, results: [result("fail")] }, ci);
@@ -3796,9 +3881,11 @@ describe("what a decision may change", () => {
 		// Bob's answer is about the cause from here on. It does not take the place of Carol's judgement of the
 		// dispute he was a party to: hers is still the answer for the first build, and the run still rests on it.
 		expect(
-			rows<{ answer: string }>(
-				`SELECT d.answer FROM depends_on dep JOIN decisions d ON d.id = dep.decision
+			(
+				await rows<{ answer: string }>(
+					`SELECT d.answer FROM depends_on dep JOIN decisions d ON d.id = dep.decision
 				 JOIN runs r ON r.id = dep.run WHERE r.origin = 'planned'`,
+				)
 			).map((row) => JSON.parse(row.answer).is),
 		).toEqual(["infra"]);
 		// And Alice cannot take it back.
@@ -3831,9 +3918,9 @@ describe("what a decision may change", () => {
 			"decided",
 		);
 		await seed(1, ["human", "auto"]);
-		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
-		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const alice = await h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = await h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const result = (outcome: string) => ({
 			test: { key: "one" },
 			annotation: { case: "C-1", version: 1 },
@@ -3854,7 +3941,7 @@ describe("what a decision may change", () => {
 		expect((await decide(await open("failure"), { is: "expected" }, bob)).status).toBe("decided");
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
 		expect(
-			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+			(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")).map(
 				(row) => JSON.parse(row.answer).is,
 			),
 		).toEqual(["infra", "expected"]);
@@ -3862,8 +3949,8 @@ describe("what a decision may change", () => {
 
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", async () => {
 		await usePolicy("strict");
-		const producer = h.actor("producer", "human", ["read", "produce", "answer"]);
-		const other = h.actor("other", "human", ["read", "produce", "answer"]);
+		const producer = await h.actor("producer", "human", ["read", "produce", "answer"]);
+		const other = await h.actor("other", "human", ["read", "produce", "answer"]);
 		const results = [{ test: { key: "one" }, outcome: "fail", failure: { message: "same failure" } }];
 		await report({ target: { commit: "undo0001", branch: "main" }, results }, producer);
 		const question = await open("failure");
@@ -3883,8 +3970,8 @@ describe("what a decision may change", () => {
 
 	test("a producer whose failure took on an existing answer cannot replace that answer", async () => {
 		await usePolicy("strict");
-		const one = h.actor("one", "human", ["read", "produce", "answer"]);
-		const two = h.actor("two", "human", ["read", "produce", "answer"]);
+		const one = await h.actor("one", "human", ["read", "produce", "answer"]);
+		const two = await h.actor("two", "human", ["read", "produce", "answer"]);
 		const results = [{ test: { key: "one" }, outcome: "fail", failure: { message: "same failure" } }];
 		await report({ target: { commit: "carry001", branch: "main" }, results }, one);
 		expect((await decide(await open("failure"), { is: "flaky" }, h.owner, { reason: "seen before" })).status).toBe(
@@ -3894,7 +3981,7 @@ describe("what a decision may change", () => {
 		const decided = await open("failure", "decided");
 		expect((await decide(decided, { is: "infra" }, two, { reason: "it is mine" })).status).toBe("forbidden");
 		expect((await decide(decided, { is: "infra" }, one, { reason: "it is mine" })).status).toBe("forbidden");
-		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
+		expect(await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
 	});
 
 	test("when a carried answer stops holding, every run that rested on it is recomputed", async () => {
@@ -4020,7 +4107,9 @@ describe("what a decision may change", () => {
 		const planned = await plan({ name: "Reopen later", select: {}, accepts: { commit: "reopen01" } });
 		const question = await open("failure");
 		await decide(question, { is: "flaky" });
-		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		expect(first(await rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe(
+			"closed",
+		);
 		await h.call("decide", { undo: question.q });
 		// The case is edited and the commit passes on a newer attempt, proving the new version. The run is pinned
 		// to the version it was planned on, so that pass is not its evidence: it still shows the failure.
@@ -4060,9 +4149,9 @@ describe("what a decision may change", () => {
 		expect((await gate({ commit: "first001" })).verdict).toBe("failed");
 		expect((await gate({ commit: "second01" })).verdict).toBe("failed");
 		// One answer in force for the cause, and the ledger says what became of the others.
-		const ledger = rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
-			(row) => JSON.parse(row.answer).is,
-		);
+		const ledger = (
+			await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")
+		).map((row) => JSON.parse(row.answer).is);
 		expect(ledger).toEqual(["infra", "outdated", "flaky", "defect"]);
 		const retried = await on("second01", "staging", 2);
 		expect(retried.questions.map((q) => q.answer)).toEqual(["defect"]);
@@ -4082,7 +4171,7 @@ describe("what a decision may change", () => {
 		await h.call("decide", { undo: (await open("signoff", "decided")).q });
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "Total is wrong" }] });
 		expect((await gate({ commit: "rc300005" })).verdict).toBe("blocked");
-		const lead = h.actor("mira", "human", ["read", "produce", "answer"]);
+		const lead = await h.actor("mira", "human", ["read", "produce", "answer"]);
 		const dispute = await open("failure");
 		expect((await decide(dispute, { is: "mistaken" }, lead)).status).toBe("decided");
 		expect(first(await slots(planned.run)).state).toBe("satisfied");
@@ -4107,7 +4196,7 @@ describe("what a decision may change", () => {
 			],
 		});
 		const planned = await plan({ name: "Mistaken, then again", select: {} });
-		const other = h.actor("other", "human", ["read", "produce"]);
+		const other = await h.actor("other", "human", ["read", "produce"]);
 		const record = async (outcome: string, attempt: number, as = h.owner) =>
 			await report(
 				{
@@ -4131,7 +4220,7 @@ describe("what a decision may change", () => {
 		expect((await gate({ run: planned.run })).open).toContain(asked.q);
 		expect((await gate({ run: planned.run })).open).toHaveLength(2);
 		// The first result stays discounted by the first decision.
-		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 1 }]);
 	});
 
 	test("an answer for the whole cause takes the place of every narrower answer, and their runs follow", async () => {
@@ -4148,9 +4237,9 @@ describe("what a decision may change", () => {
 		expect((await decide(earlier, { is: "defect" })).status).toBe("decided");
 		expect((await gate({ commit: "first001" })).verdict).toBe("failed");
 		expect((await gate({ commit: "second01" })).verdict).toBe("failed");
-		const ledger = rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
-			(row) => JSON.parse(row.answer).is,
-		);
+		const ledger = (
+			await rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")
+		).map((row) => JSON.parse(row.answer).is);
 		expect(ledger).toEqual(["infra", "infra", "outdated", "defect"]);
 		const retried = await on("second01", 2);
 		expect(retried.questions.map((q) => q.answer)).toEqual(["defect"]);
@@ -4193,7 +4282,7 @@ describe("what a decision may change", () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Case" }] });
 		await decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "first version" });
 		const planned = await plan({ name: "Sign-off", select: {} });
-		const other = h.actor("other", "human", ["read", "produce"]);
+		const other = await h.actor("other", "human", ["read", "produce"]);
 		await report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 		const signoff = await open("signoff");
 		expect((signoff.evidence as { verdict: string }).verdict).toBe("passed");
@@ -4202,7 +4291,7 @@ describe("what a decision may change", () => {
 		expect((await gate({ run: planned.run })).verdict).toBe("blocked");
 		const late = await decide(signoff, { is: "approve" }, h.owner, { reason: "looked fine" });
 		expect(late.status).toBe("conflict");
-		expect(rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
+		expect(await rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
 		expect((await h.call<InboxReply>("inbox", { kind: "signoff", limit: 50 })).items).toEqual([]);
 	});
 
@@ -4213,7 +4302,7 @@ describe("what a decision may change", () => {
 				{ op: "create", outline: "Spare" },
 			],
 		});
-		const other = h.actor("second", "human", ["read", "produce"]);
+		const other = await h.actor("second", "human", ["read", "produce"]);
 		const result = (outcome: string, key = "one", ref = "C-1") => ({
 			test: { key },
 			annotation: { case: ref, version: 1 },
@@ -4248,7 +4337,7 @@ describe("what a decision may change", () => {
 		expect(await gate({ run: staging.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		// Production's answer is changed to `mistaken`. That is about production's failing result, not staging's.
 		expect((await decide(production, { is: "mistaken" })).status).toBe("decided");
-		const discounted = rows<{ env: string }>(
+		const discounted = await rows<{ env: string }>(
 			`SELECT DISTINCT t.env FROM slot_results s JOIN results r ON r.id = s.result JOIN targets t ON t.id = r.target
 			 WHERE s.discounted_by IS NOT NULL`,
 		);
@@ -4277,7 +4366,7 @@ describe("what a decision may change", () => {
 		// Planned over the failure that was called flaky: it passes on that answer, and the rule closes it.
 		const planned = await plan({ name: "Prior plan", select: {}, accepts: { commit: "headfail1", repo: "app" } });
 		expect((await gate({ run: planned.run })).verdict).toBe("passed");
-		expect(rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "closed" }]);
+		expect(await rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "closed" }]);
 		// The answer runs out and the same failure is reported again: the answer is ended by that report.
 		h.advance(15 * 86_400_000);
 		await report({ target: head, attempt: 2, results: [failing] });
@@ -4339,7 +4428,7 @@ describe("what a caller is told", () => {
 			const reply = await invoke(h.app, OPS, {
 				op: "report",
 				project: "scratch",
-				actor: () => h.owner,
+				actor: async () => h.owner,
 				input,
 			});
 			expect(reply).toMatchObject({ ok: true, seq: 3, result: { fresh: true, counts: { total: 1, pass: 1 } } });
@@ -4367,7 +4456,7 @@ describe("what a caller is told", () => {
 			op: "propose",
 			project: "other",
 			input: { cmd, edits: [{ op: "create", outline: "Other project" }] },
-			actor: () => h.owner,
+			actor: async () => h.owner,
 		});
 		expect(cross).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
@@ -4381,7 +4470,7 @@ describe("what a caller is told", () => {
 		const more = await h.raw("propose", { cmd, edits: [{ op: "create", outline: "Typed so far, and then some" }] });
 		expect(more).toMatchObject({ ok: false, error: { code: "conflict" } });
 		expect(more.ok ? "" : more.error.message).toContain("another request");
-		expect(rows("SELECT count(*) AS n FROM cases")).toEqual([{ n: 1 }]);
+		expect(await rows("SELECT count(*) AS n FROM cases")).toEqual([{ n: 1 }]);
 		// The unchanged request is still a retry.
 		expect(await h.raw("propose", { cmd, edits: [{ op: "create", outline: "Typed so far" }] })).toEqual(made);
 		// The same for a command on the instance.
@@ -4395,7 +4484,7 @@ describe("what a caller is told", () => {
 
 	test("the caller of a command can ask what became of it, and nobody else is told", async () => {
 		const fate = async (cmd: string, as = h.owner, project = "scratch") =>
-			await invoke(h.app, OPS, { op: "command", project, input: { cmd }, actor: () => as });
+			await invoke(h.app, OPS, { op: "command", project, input: { cmd }, actor: async () => as });
 		expect(await fate("never-sent-01")).toMatchObject({ ok: true, result: { state: "none" } });
 		const made = await h.raw("propose", { cmd: "asked-about-01", edits: [{ op: "create", outline: "Once" }] });
 		if (!made.ok) throw new Error(made.error.message);
@@ -4433,17 +4522,17 @@ describe("what a caller is told", () => {
 		});
 		expect(await fate("merge-made-01")).toMatchObject({ result: { reply: merged.ok && merged.result } });
 		// Another caller is told nothing, in this project or another.
-		const member = h.actor("member", "human", ["read", "produce"]);
+		const member = await h.actor("member", "human", ["read", "produce"]);
 		expect(await fate("asked-about-01", member)).toMatchObject({ ok: true, result: { state: "none" } });
 		await h.call("admin", { do: "project.create", key: "other" });
 		expect(await fate("asked-about-01", h.owner, "other")).toMatchObject({ ok: true, result: { state: "none" } });
 		// A command on the instance is in no project. Its stored reply can stand for a secret and is never read here.
 		await h.call("admin", { do: "token.create", actor: "ci-bot", kind: "ci", can: ["read"], cmd: "admin-command-09" });
-		expect(rows("SELECT project FROM commands WHERE id = 'admin-command-09'")).toEqual([{ project: 0 }]);
+		expect(await rows("SELECT project FROM commands WHERE id = 'admin-command-09'")).toEqual([{ project: 0 }]);
 		expect(await fate("admin-command-09")).toMatchObject({ ok: true, result: { state: "none" } });
 		expect(await fate("short")).toMatchObject({ ok: false, error: { code: "invalid" } });
 		// A caller who may not read is refused.
-		const writer = h.actor("writer", "ci", ["record"]);
+		const writer = await h.actor("writer", "ci", ["record"]);
 		expect(await fate("asked-about-01", writer)).toMatchObject({ ok: false, error: { code: "forbidden" } });
 	});
 
@@ -4460,12 +4549,12 @@ describe("what a caller is told", () => {
 				op: "command",
 				project: "scratch",
 				input: { cmd: "report-cmd-01" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			});
 		const pending = invoke(h.app, OPS, {
 			op: "report",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee01", n: 3 }), cmd: "report-cmd-01" },
 		});
 		try {
@@ -4483,29 +4572,37 @@ describe("what a caller is told", () => {
 	// Issue #377. The process stops after the first transaction of a report committed, with a command id bound to it.
 	test("a report that recovery applies finishes its command with the receipt, as the request would have", async () => {
 		const fate = async (cmd: string) =>
-			await invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: () => h.owner });
-		const begin = h.app.db.begin.bind(h.app.db);
+			await invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: async () => h.owner });
+		const begin = (await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb)).begin;
 		let transactions = 0;
-		const interrupted = spyOn(h.app.db, "begin").mockImplementation(() => {
+		const interrupted = spyOn(
+			await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb),
+			"begin",
+		).mockImplementation(async function (this: WriteDb) {
 			if (++transactions === 2) throw new Error("the process stopped before applying the report");
-			begin();
+			await begin.call(this);
 		});
 		const logged = spyOn(console, "error").mockImplementation(() => {});
-		const stopped = await invoke(h.app, OPS, {
-			op: "report",
-			project: "scratch",
-			actor: () => h.owner,
-			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
-		});
-		interrupted.mockRestore();
-		logged.mockRestore();
+		const stopped = await (async () => {
+			try {
+				return await invoke(h.app, OPS, {
+					op: "report",
+					project: "scratch",
+					actor: async () => h.owner,
+					input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
+				});
+			} finally {
+				interrupted.mockRestore();
+				logged.mockRestore();
+			}
+		})();
 		expect(stopped.ok).toBe(false);
 		expect(await fate("report-cmd-02")).toMatchObject({ ok: true, result: { state: "begun", op: "report" } });
-		const seqBefore = rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")[0]?.seq ?? 0;
+		const seqBefore = (await rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'"))[0]?.seq ?? 0;
 
-		expect(recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(1);
 
-		const receipt = rows<{ receipt: string }>("SELECT receipt FROM batches")[0]?.receipt;
+		const receipt = (await rows<{ receipt: string }>("SELECT receipt FROM batches"))[0]?.receipt;
 		expect(receipt).toBeDefined();
 		expect(await fate("report-cmd-02")).toMatchObject({
 			ok: true,
@@ -4515,11 +4612,11 @@ describe("what a caller is told", () => {
 		const again = await invoke(h.app, OPS, {
 			op: "report",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
 		});
 		expect(again).toMatchObject({ ok: true, result: JSON.parse(receipt ?? "null"), seq: seqBefore + 1 });
-		expect(rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")[0]?.seq).toBe(seqBefore + 1);
+		expect((await rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'"))[0]?.seq).toBe(seqBefore + 1);
 	});
 
 	test("a retry is the same request however a client orders the keys of its objects", async () => {
@@ -4543,7 +4640,7 @@ describe("what a caller is told", () => {
 		await seed(1);
 		const cases = Array.from({ length: 20_001 }, () => "C-1");
 		await expect(plan({ name: "Too many", select: { cases } })).rejects.toThrow("20,000");
-		expect(rows("SELECT count(*) AS n FROM runs")).toEqual([{ n: 0 }]);
+		expect(await rows("SELECT count(*) AS n FROM runs")).toEqual([{ n: 0 }]);
 	});
 
 	test("a pass that disputes a failure leaves the failure's message and sample on its question", async () => {
@@ -4562,7 +4659,7 @@ describe("what a caller is told", () => {
 				target: { commit: "message01", branch: "main" },
 				results: [{ test: { key: "one" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
 			},
-			h.actor("pipeline", "ci", ["read", "record"]),
+			await h.actor("pipeline", "ci", ["read", "record"]),
 		);
 		const now = await open("failure");
 		expect((now.evidence as { hints: string[] }).hints).toContain("disputed");
@@ -4571,7 +4668,7 @@ describe("what a caller is told", () => {
 	});
 
 	test("the number of tests a question has seen does not fall when a later report adds one", async () => {
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const failing = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "one cause" } });
 		const target = { commit: "many0001", branch: "main" };
 		await report({ target, results: Array.from({ length: 60 }, (_, i) => failing(`t${i}`)) }, ci);
@@ -4585,7 +4682,7 @@ describe("what a caller is told", () => {
 	test("a question says who is asked under the policy in force, not the one it was asked under", async () => {
 		await report(
 			ciReport({ commit: "policy001", n: 1, fail: { 0: "bug" } }),
-			h.actor("pipeline", "ci", ["read", "record"]),
+			await h.actor("pipeline", "ci", ["read", "record"]),
 		);
 		const before = (await open("failure")).needs;
 		await usePolicy("strict");
@@ -4609,10 +4706,10 @@ describe("what a caller is told", () => {
 		};
 		expect((await h.raw("admin", token)).ok).toBe(true);
 		expect(await h.raw("admin", token)).toMatchObject({ ok: false, error: { code: "conflict" } });
-		expect(rows("SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = 'ci-bot'")).toEqual([
-			{ n: 1 },
-		]);
-		expect(JSON.stringify(rows("SELECT outcome FROM commands"))).not.toContain("cb_");
+		expect(
+			await rows("SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = 'ci-bot'"),
+		).toEqual([{ n: 1 }]);
+		expect(JSON.stringify(await rows("SELECT outcome FROM commands"))).not.toContain("cb_");
 	});
 
 	test("text is never stored with half a character in it", async () => {
@@ -4627,9 +4724,9 @@ describe("what a caller is told", () => {
 			findings: [{ on: "C-1", category: "ambiguous", note: `${"c".repeat(119)}😀 tail` }],
 		});
 		const stored = [
-			...rows<{ t: string }>("SELECT title AS t FROM cases"),
-			...rows<{ t: string }>("SELECT title AS t FROM questions"),
-			...rows<{ t: string }>("SELECT text AS t FROM signatures"),
+			...(await rows<{ t: string }>("SELECT title AS t FROM cases")),
+			...(await rows<{ t: string }>("SELECT title AS t FROM questions")),
+			...(await rows<{ t: string }>("SELECT text AS t FROM signatures")),
 		];
 		expect(stored.length).toBeGreaterThanOrEqual(4);
 		for (const row of stored) expect(row.t.isWellFormed()).toBe(true);

@@ -1,3 +1,8 @@
+import { expect, test } from "bun:test";
+import type { Api } from "../src/core/api.ts";
+import type { SlotFill, Tally } from "../src/core/runs.ts";
+import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
+import type { Actor } from "../src/server/kernel/ctx.ts";
 // Random sequences of the things people, pipelines and agents do, with the engine's invariants checked after
 // every step. The examples in `integrity.test.ts` each pin one path; this looks for the paths nobody thought of.
 // The idea and the first version are the independent reviewer's (round 6 of the engine review); this one adds
@@ -34,38 +39,52 @@
 //
 // The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
-import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
-import type { SlotFill, Tally } from "../src/core/runs.ts";
-import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
-import type { Actor } from "../src/server/kernel/ctx.ts";
+import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
+import { testDatabase } from "./db.ts";
 import { harness } from "./helpers.ts";
-import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
+import { auditRelations } from "./sequence-audit.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = 80;
 
+export const seedPlan = {
+	name: "Seed run",
+	select: { cases: ["C-1"] },
+	accepts: { self: true },
+	require: [{ id: "exercise", kind: "exercise", methods: ["human"], basis: "exact-or-assumed", minActors: 1 }],
+} satisfies Api["plan"]["input"];
+
 type AuditExcuse = { class: string; decision: number };
 
-export function auditExcuses(db: Database) {
+export async function auditExcuses(
+	db: ReadDb,
+	stored?: {
+		broad: (AuditExcuse & { project: number; signature: number; scope: string; target: number })[];
+		exact: (AuditExcuse & { result: number })[];
+	},
+) {
 	const key = (project: number, signature: number, scope: string, target: number) =>
 		JSON.stringify([project, signature, scope, target]);
 	const broad = new Map(
-		db
-			.query<AuditExcuse & { project: number; signature: number; scope: string; target: number }, []>(
-				"SELECT project, signature, scope, target, class, decision FROM excuses",
-			)
-			.all()
-			.map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
+		(
+			stored?.broad ??
+			(await db.all(
+				sql<readonly [], AuditExcuse & { project: number; signature: number; scope: string; target: number }>(
+					"SELECT project, signature, scope, target, class, decision FROM excuses",
+				),
+			))
+		).map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
 	);
 	const exact = new Map(
-		db
-			.query<AuditExcuse & { result: number }, []>(
-				"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
-			)
-			.all()
-			.map((row) => [row.result, row]),
+		(
+			stored?.exact ??
+			(await db.all(
+				sql<readonly [], AuditExcuse & { result: number }>(
+					"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
+				),
+			))
+		).map((row) => [row.result, row]),
 	);
 	return (project: number, signature: number, scope: string, target: number, result = 0): AuditExcuse | undefined => {
 		// Target specificity wins within broad standing, even against a newer global decision.
@@ -79,8 +98,15 @@ export function auditExcuses(db: Database) {
 
 type Row = Record<string, string | number | null>;
 type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };
+export type AuditMeasurement = { step: number; statements: number };
 
-async function sequence(seed: number, preset: string): Promise<Problem | null> {
+export async function sequence(
+	seed: number,
+	preset: string,
+	onFirstPlan?: (step: number) => void,
+	onAudit?: (measurement: AuditMeasurement) => void,
+): Promise<Problem | null> {
+	let currentStep = -1;
 	let state = seed * 2654435761 + 1;
 	const rand = (n: number): number => {
 		state ^= state << 13;
@@ -90,16 +116,24 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	};
 	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
 	const h = await harness({ preset });
-	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
+	const rows = async <T = Row>(query: string, ...args: (string | number)[]): Promise<T[]> => {
+		let index = 0;
+		return await h.app.database.read(
+			async (db) => await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args),
+		);
+	};
 	const trace: unknown[] = [];
 	const successful = new Map<string, number>();
-	const people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
-	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-	const agent = h.actor("explorer", "agent", ["read", "produce"]);
-	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
+	const people: Actor[] = [h.owner, await h.actor("second", "human", ["read", "produce", "answer", "plan"])];
+	const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+	const agent = await h.actor("explorer", "agent", ["read", "produce"]);
+	const rule = Number((await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'"))[0]?.id ?? 0);
 	const command = async (op: string, input: unknown, as: Actor = h.owner): Promise<unknown> => {
 		const reply = await h.raw(op, input, as);
-		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
+		if (reply.ok) {
+			if (op === "plan" && !successful.has("plan")) onFirstPlan?.(currentStep);
+			successful.set(op, (successful.get(op) ?? 0) + 1);
+		}
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		return reply.ok ? reply.result : null;
 	};
@@ -113,285 +147,257 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					? `line:${target.line}@${target.repo}`
 					: `line:${target.line}`;
 
-	const audit = (): { what: string; detail: unknown } | null => {
-		const runs = rows("SELECT * FROM runs");
-		const newestInScope = new Map<string, number>();
-		for (const run of runs) {
-			if (run.scope !== null) {
-				const scope = String(run.scope);
-				newestInScope.set(scope, Math.max(newestInScope.get(scope) ?? 0, Number(run.id)));
+	const audit = async (): Promise<{ what: string; detail: unknown } | null> =>
+		h.app.database.read(async (db) => {
+			const relations = await auditRelations(db, h.app.now());
+			const runs = relations.runs;
+			const newestInScope = new Map<string, number>();
+			for (const run of runs) {
+				if (run.scope !== null) {
+					const scope = String(run.scope);
+					newestInScope.set(scope, Math.max(newestInScope.get(scope) ?? 0, Number(run.id)));
+				}
 			}
-		}
-		// A change speaks through its observed head only while that run belongs to this scope.
-		for (const change of rows("SELECT id, project, repo, head_sha FROM changes")) {
-			const scope = `change:${change.id}`;
-			const head =
-				change.head_sha === null
-					? undefined
-					: runs.find(
-							(run) =>
-								run.origin === "change" &&
-								run.project === change.project &&
-								run.scope === scope &&
-								run.accepts_what === `code:${change.repo ?? ""}@${change.head_sha}`,
-						);
-			if (head) newestInScope.set(scope, Number(head.id));
-			else newestInScope.delete(scope);
-		}
-		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
-			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
-			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
-		).map((question) => ({
-			...question,
-			subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
-			evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
-			refs: String(question.refs ?? "").split(","),
-		}));
-		const excuseSnapshot = auditExcuses(h.app.db.raw);
-		const excuseOf = (project: number, signature: number, scope: string, target: number, result = 0, slot?: number) =>
-			slot !== undefined
-				? slotSettlement(h.app.db, slot, result)
-				: excuseSnapshot(project, signature, scope, target, result);
-
-		for (const run of runs) {
-			const id = Number(run.id);
-			// 1. Live runs and their unexplained failures.
-			const newest = run.scope === null ? null : newestInScope.get(String(run.scope));
-			const live = run.origin === "planned" ? run.state === "open" : id === newest;
-			if (live) {
-				const causes: { signature: number; target: number; result: number; slot?: number }[] =
-					run.origin === "change"
-						? rows<{ signature: number; target: number; result: number }>(
-								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
-								id,
-							)
-						: rows<{ id: number; state: string }>(
-								"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
-								id,
-							).flatMap((slot) =>
-								failingSlotResults(h.app.db, slot.id).map((cause) => ({
-									...cause,
-									...(slot.state === "disputed" ? { slot: slot.id } : {}),
-								})),
+			// A change speaks through its observed head only while that run belongs to this scope.
+			for (const change of relations.changes) {
+				const scope = `change:${change.id}`;
+				const head =
+					change.head_sha === null
+						? undefined
+						: runs.find(
+								(run) =>
+									run.origin === "change" &&
+									run.project === change.project &&
+									run.scope === scope &&
+									run.accepts_what === `code:${change.repo ?? ""}@${change.head_sha}`,
 							);
-				for (const cause of causes) {
-					const target = targets.get(cause.target);
-					if (!target) return { what: "a cause on an unknown target", detail: cause };
-					const scope = scopeOf(target, id);
-					if (excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
-					const asked = open.filter((question) => {
-						const subject = question.subject;
-						const evidence = question.evidence;
-						return (
-							subject.signature === cause.signature &&
-							subject.scope === scope &&
-							subject.slot === cause.slot &&
-							(evidence.targets ?? []).includes(cause.target) &&
-							question.refs.includes(`R-${run.no}`)
-						);
-					});
-					if (asked.length === 0)
-						return { what: "a live run shows an unexplained failure nobody is asked about", detail: { run, cause } };
-					const blocking = JSON.parse(String(run.blocking)) as string[];
-					if (!asked.some((question) => blocking.includes(`Q-${question.no}`)))
-						return { what: "a run's gate does not name the question about its failure", detail: { run, cause } };
+				if (head) newestInScope.set(scope, Number(head.id));
+				else newestInScope.delete(scope);
+			}
+			const targets = new Map(relations.targets.map((target) => [Number(target.id), target]));
+			const open = relations.open.map((question) => ({
+				...question,
+				subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
+				evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
+				refs: String(question.refs ?? "").split(","),
+			}));
+			const excuseSnapshot = await auditExcuses(db, relations.excuses);
+			const excuseOf = async (
+				project: number,
+				signature: number,
+				scope: string,
+				target: number,
+				result = 0,
+				slot?: number,
+			) =>
+				slot !== undefined
+					? relations.settlement(slot, result)
+					: excuseSnapshot(project, signature, scope, target, result);
+
+			for (const run of runs) {
+				const id = Number(run.id);
+				// 1. Live runs and their unexplained failures.
+				const newest = run.scope === null ? null : newestInScope.get(String(run.scope));
+				const live = run.origin === "planned" ? run.state === "open" : id === newest;
+				if (live) {
+					const causes: { signature: number; target: number; result: number; slot?: number }[] =
+						run.origin === "change"
+							? relations.lanes(id).filter((row) => row.outcome === "fail" || row.outcome === "error")
+							: await flatMapAsync(
+									relations.slots(id).filter((slot) => slot.state === "failing" || slot.state === "disputed"),
+									async (slot) =>
+										relations.failing(slot.id).map((cause) => ({
+											...cause,
+											...(slot.state === "disputed" ? { slot: slot.id } : {}),
+										})),
+								);
+					for (const cause of causes) {
+						const target = targets.get(cause.target);
+						if (!target) return { what: "a cause on an unknown target", detail: cause };
+						const scope = scopeOf(target, id);
+						if (await excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot))
+							continue;
+						const asked = open.filter((question) => {
+							const subject = question.subject;
+							const evidence = question.evidence;
+							return (
+								subject.signature === cause.signature &&
+								subject.scope === scope &&
+								subject.slot === cause.slot &&
+								(evidence.targets ?? []).includes(cause.target) &&
+								question.refs.includes(`R-${run.no}`)
+							);
+						});
+						if (asked.length === 0)
+							return { what: "a live run shows an unexplained failure nobody is asked about", detail: { run, cause } };
+						const blocking = JSON.parse(String(run.blocking)) as string[];
+						if (!asked.some((question) => blocking.includes(`Q-${question.no}`)))
+							return { what: "a run's gate does not name the question about its failure", detail: { run, cause } };
+					}
+				}
+
+				if (run.origin === "change") {
+					// 2. The commit's lanes point back to their source history.
+					const current = relations.lanes(id);
+					const history = relations.history(Number(run.project), String(run.accepts_what));
+					for (const counted of current) {
+						const source = history.find((row) => row.id === counted.result);
+						if (
+							!source ||
+							`${source.test}|${source.target}:${source.job}:${source.actor}` !== `${counted.test}|${counted.lane}`
+						)
+							return { what: "a counted lane has no matching source result", detail: { run, counted, source } };
+					}
+
+					// 3. The stored tally against the results and the excuses in force.
+					const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
+					for (const row of current) {
+						if (row.outcome === "pass") tally.pass++;
+						else if (row.outcome === "skip") tally.skipped++;
+						else if (row.outcome === "blocked") tally.missing++;
+						else {
+							const seenOn = targets.get(Number(row.target));
+							if (!seenOn) return { what: "a result on an unknown target", detail: row };
+							const excuse = await excuseOf(
+								Number(run.project),
+								Number(row.signature),
+								scopeOf(seenOn, id),
+								Number(row.target),
+								Number(row.result),
+							);
+							tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
+						}
+					}
+					const stored = JSON.parse(String(run.tally)) as Tally;
+					for (const key of Object.keys(tally) as (keyof typeof tally)[])
+						if (tally[key] !== stored[key])
+							return { what: "a run's stored tally is not what its results give", detail: { run, tally, stored } };
+				}
+
+				// 11. The questions the gate names are open ones.
+				for (const named of JSON.parse(String(run.blocking)) as string[]) {
+					const state = relations.question(Number(run.project), Number(named.slice(2)));
+					if (state !== "open")
+						return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
 				}
 			}
 
-			if (run.origin === "change") {
-				// 2. The commit's lanes point back to their source history.
-				const current = rows("SELECT * FROM run_tests WHERE run = ?", id);
-				const history = rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
-					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
-					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
-					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
-					   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
-					 ORDER BY r.seq, r.ord`,
-					String(run.accepts_what),
-					Number(run.project),
-				);
-				for (const counted of current) {
-					const source = history.find((row) => row.id === counted.result);
-					if (
-						!source ||
-						`${source.test}|${source.target}:${source.job}:${source.actor}` !== `${counted.test}|${counted.lane}`
-					)
-						return { what: "a counted lane has no matching source result", detail: { run, counted, source } };
-				}
+			// Every slot fill belongs to an existing slot and result of the same case.
+			const orphaned = relations.orphaned;
+			if (orphaned.length > 0) return { what: "slot fills have no matching case result", detail: orphaned };
 
-				// 3. The stored tally against the results and the excuses in force.
+			// 6b. A planned run's stored tally against its slots and the excuses in force.
+			for (const run of runs) {
+				if (run.origin !== "planned" || run.state !== "open") continue;
 				const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
-				for (const row of current) {
-					if (row.outcome === "pass") tally.pass++;
-					else if (row.outcome === "skip") tally.skipped++;
-					else if (row.outcome === "blocked") tally.missing++;
-					else {
-						const seenOn = targets.get(Number(row.target));
-						if (!seenOn) return { what: "a result on an unknown target", detail: row };
-						const excuse = excuseOf(
-							Number(run.project),
-							Number(row.signature),
-							scopeOf(seenOn, id),
-							Number(row.target),
-							Number(row.result),
-						);
-						tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
+				for (const slot of relations.slots(Number(run.id))) {
+					if (slot.state === "satisfied" || slot.state === "waived") tally.pass++;
+					else if (slot.state === "missing") tally.missing++;
+					else if (slot.state === "skipped") {
+						tally.skipped++;
+						tally.missing++;
+					} else {
+						const causes = relations.failing(Number(slot.id));
+						const excuses = await mapAsync(causes, async ({ signature, target, result }) => {
+							const seenOn = targets.get(target);
+							return seenOn
+								? await excuseOf(
+										Number(run.project),
+										signature,
+										scopeOf(seenOn, Number(run.id)),
+										target,
+										result,
+										slot.state === "disputed" ? Number(slot.id) : undefined,
+									)
+								: undefined;
+						});
+						const unanswered = excuses.filter((excuse) => !excuse).length;
+						if (slot.state === "disputed" && (unanswered > 0 || causes.length === 0)) tally.disputed++;
+						else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
+						else if (unanswered > 0 || causes.length === 0)
+							tally[slot.state === "disputed" ? "disputed" : "unexplained"]++;
+						else if (slot.state === "disputed") tally.pass++;
+						else tally.excused++;
 					}
 				}
 				const stored = JSON.parse(String(run.tally)) as Tally;
 				for (const key of Object.keys(tally) as (keyof typeof tally)[])
 					if (tally[key] !== stored[key])
-						return { what: "a run's stored tally is not what its results give", detail: { run, tally, stored } };
+						return { what: "a planned run's stored tally is not what its slots give", detail: { run, tally, stored } };
 			}
 
-			// 11. The questions the gate names are open ones.
-			for (const named of JSON.parse(String(run.blocking)) as string[]) {
-				const state = rows<{ state: string }>(
-					"SELECT state FROM questions WHERE project = ? AND no = ?",
-					Number(run.project),
-					Number(named.slice(2)),
-				)[0]?.state;
-				if (state !== "open")
-					return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
-			}
-		}
-
-		// Every slot fill belongs to an existing slot and result of the same case.
-		const orphaned = rows(`SELECT s.* FROM slot_results s
-			LEFT JOIN slots slot ON slot.id = s.slot LEFT JOIN results r ON r.id = s.result
-			WHERE slot.id IS NULL OR r.id IS NULL OR r.basis_case != slot.case_id`);
-		if (orphaned.length > 0) return { what: "slot fills have no matching case result", detail: orphaned };
-
-		// 6b. A planned run's stored tally against its slots and the excuses in force.
-		for (const run of runs) {
-			if (run.origin !== "planned" || run.state !== "open") continue;
-			const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
-			for (const slot of rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
-				if (slot.state === "satisfied" || slot.state === "waived") tally.pass++;
-				else if (slot.state === "missing") tally.missing++;
-				else if (slot.state === "skipped") {
-					tally.skipped++;
-					tally.missing++;
-				} else {
-					const causes = failingSlotResults(h.app.db, Number(slot.id));
-					const excuses = causes.map(({ signature, target, result }) => {
-						const seenOn = targets.get(target);
-						return seenOn
-							? excuseOf(
-									Number(run.project),
-									signature,
-									scopeOf(seenOn, Number(run.id)),
-									target,
-									result,
-									slot.state === "disputed" ? Number(slot.id) : undefined,
-								)
-							: undefined;
-					});
-					const unanswered = excuses.filter((excuse) => !excuse).length;
-					if (slot.state === "disputed" && (unanswered > 0 || causes.length === 0)) tally.disputed++;
-					else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
-					else if (unanswered > 0 || causes.length === 0)
-						tally[slot.state === "disputed" ? "disputed" : "unexplained"]++;
-					else if (slot.state === "disputed") tally.pass++;
-					else tally.excused++;
-				}
-			}
-			const stored = JSON.parse(String(run.tally)) as Tally;
-			for (const key of Object.keys(tally) as (keyof typeof tally)[])
-				if (tally[key] !== stored[key])
-					return { what: "a planned run's stored tally is not what its slots give", detail: { run, tally, stored } };
-		}
-
-		// Accepted fills point to the pinned case and a target accepted by their run.
-		for (const fill of rows(`SELECT sr.*, s.case_id, r.basis_case, t.commit_sha, t.repo, t.env, t.project AS target_project, run.project AS run_project, run.accepts, run.id AS run_id,
-			b.run AS typed FROM slot_results sr JOIN slots s ON s.id = sr.slot
-			JOIN runs run ON run.id = s.run JOIN results r ON r.id = sr.result
-			JOIN targets t ON t.id = r.target JOIN batches b ON b.id = r.batch WHERE run.state = 'open'`)) {
-			const accepts = JSON.parse(String(fill.accepts)) as { commit?: string; repo?: string; env?: string };
-			if (
-				fill.case_id !== fill.basis_case ||
-				fill.target_project !== fill.run_project ||
-				(accepts.repo !== undefined && accepts.repo !== fill.repo) ||
-				(accepts.env !== undefined && accepts.env !== fill.env) ||
-				(accepts.commit ? !String(fill.commit_sha).startsWith(accepts.commit) : fill.typed !== fill.run_id)
-			)
-				return { what: "an admitted fill has an unrelated case or target", detail: fill };
-		}
-
-		// 7. Nobody is asked about what already has an answer.
-		for (const question of open) {
-			const subject = question.subject;
-			const evidence = question.evidence;
-			if (subject.slot !== undefined) {
+			// Accepted fills point to the pinned case and a target accepted by their run.
+			for (const fill of relations.acceptedFills) {
+				const accepts = JSON.parse(String(fill.accepts)) as { commit?: string; repo?: string; env?: string };
 				if (
-					(evidence.results ?? []).length > 0 &&
-					evidence.results?.every(
-						(result) =>
-							rows("SELECT decision FROM result_excuses WHERE slot = ? AND result = ?", subject.slot ?? 0, result)
-								.length > 0,
-					)
+					fill.case_id !== fill.basis_case ||
+					fill.target_project !== fill.run_project ||
+					(accepts.repo !== undefined && accepts.repo !== fill.repo) ||
+					(accepts.env !== undefined && accepts.env !== fill.env) ||
+					(accepts.commit ? !String(fill.commit_sha).startsWith(accepts.commit) : fill.typed !== fill.run_id)
 				)
-					return { what: "a settled slot still has an open dispute question", detail: question };
-				continue;
+					return { what: "an admitted fill has an unrelated case or target", detail: fill };
 			}
-			const listed = evidence.targets ?? [];
-			const project = Number(runs[0]?.project ?? 0);
-			if (listed.length > 0 && listed.every((target) => excuseOf(project, subject.signature, subject.scope, target)))
-				return {
-					what: "a question is open about a failure that has an answer everywhere it was seen",
-					detail: question,
-				};
-		}
 
-		// 12. Heads and runs come from reports a gate counts.
-		const counted = new Set(
-			rows<{ what: string }>(
-				"SELECT DISTINCT t.what FROM batches b JOIN targets t ON t.id = b.target WHERE b.method != 'agent'",
-			).map((row) => row.what),
-		);
-		for (const change of rows("SELECT key, repo, head_sha FROM changes WHERE head_sha IS NOT NULL")) {
-			const what = `code:${change.repo ?? ""}@${change.head_sha}`;
-			if (!counted.has(what))
-				return { what: "a change's head is a commit no pipeline or person reported", detail: change };
-		}
-		for (const run of runs) {
-			if (run.origin === "change" && !counted.has(String(run.accepts_what)))
-				return { what: "a commit only an agent reported has a run", detail: run };
-		}
+			// 7. Nobody is asked about what already has an answer.
+			for (const question of open) {
+				const subject = question.subject;
+				const evidence = question.evidence;
+				if (subject.slot !== undefined) {
+					if (
+						(evidence.results ?? []).length > 0 &&
+						(await everyAsync(evidence.results ?? [], async (result) => relations.exact(subject.slot ?? 0, result)))
+					)
+						return { what: "a settled slot still has an open dispute question", detail: question };
+					continue;
+				}
+				const listed = evidence.targets ?? [];
+				const project = Number(runs[0]?.project ?? 0);
+				if (
+					listed.length > 0 &&
+					(await everyAsync(
+						listed,
+						async (target) => await excuseOf(project, subject.signature, subject.scope, target),
+					))
+				)
+					return {
+						what: "a question is open about a failure that has an answer everywhere it was seen",
+						detail: question,
+					};
+			}
 
-		// 8. A superseded decision is not in force.
-		const standing = rows(
-			`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
-			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
-			   AND json_extract(old.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')`,
-		);
-		if (standing.length > 0) return { what: "a superseded decision is still its question's answer", detail: standing };
+			// 12. Heads and runs come from reports a gate counts.
+			const counted = new Set(relations.counted.map((row) => row.what));
+			for (const change of relations.changes.filter((change) => change.head_sha !== null)) {
+				const what = `code:${change.repo ?? ""}@${change.head_sha}`;
+				if (!counted.has(what))
+					return { what: "a change's head is a commit no pipeline or person reported", detail: change };
+			}
+			for (const run of runs) {
+				if (run.origin === "change" && !counted.has(String(run.accepts_what)))
+					return { what: "a commit only an agent reported has a run", detail: run };
+			}
 
-		// 4. Excuses and the decisions they belong to.
-		const orphans = rows(
-			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
-			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
-		);
-		if (orphans.length > 0) return { what: "an excuse outlived its decision", detail: orphans };
-		const bare = rows(
-			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
-			 WHERE q.kind = 'failure' AND q.state = 'decided' AND json_extract(d.effects, '$.class') IS NOT NULL
-			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
-     AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
-		);
-		if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
-		const unsupported = invalidInherited(h.app.db);
-		if (unsupported.length > 0)
-			return { what: "an inherited failure does not fail on its base now", detail: unsupported };
+			// 8. A superseded decision is not in force.
+			const standing = relations.standing;
+			if (standing.length > 0)
+				return { what: "a superseded decision is still its question's answer", detail: standing };
 
-		return null;
-	};
+			// 4. Excuses and the decisions they belong to.
+			const orphans = relations.orphans;
+			if (orphans.length > 0) return { what: "an excuse outlived its decision", detail: orphans };
+			const bare = relations.bare;
+			if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
+			const unsupported = relations.unsupported;
+			if (unsupported.length > 0)
+				return { what: "an inherited failure does not fail on its base now", detail: unsupported };
 
-	const commitGates = (): Map<number, string> =>
+			return null;
+		});
+
+	const commitGates = async (): Promise<Map<number, string>> =>
 		new Map(
-			rows("SELECT id, tally, verdict, blocking, state FROM runs WHERE origin = 'change'").map((run) => [
+			(await rows("SELECT id, tally, verdict, blocking, state FROM runs WHERE origin = 'change'")).map((run) => [
 				Number(run.id),
 				`${run.verdict} ${run.state} ${run.tally} ${run.blocking}`,
 			]),
@@ -406,30 +412,33 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	const seen: { now: { no: number; parties: Set<number> | null } | null } = { now: null };
 	// Whether this policy keeps this failure question from this person, read from the rows as they are before the
 	// command: who reported a failure with its cause in its scope, and who has a result in a slot that disputes it.
-	const keptFromAnswering = (no: number, as: Actor): boolean => {
+	const keptFromAnswering = async (no: number, as: Actor): Promise<boolean> => {
 		if (preset === "loose") return false;
-		const question = rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no)[0];
+		const question = (await rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no))[0];
 		if (!question) return false;
 		const subject = JSON.parse(question.subject) as { signature: number; scope: string; slot?: number };
-		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const reported = rows<{ target: number; run: number | null }>(
-			`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
+		const targets = new Map((await rows("SELECT * FROM targets")).map((target) => [Number(target.id), target]));
+		const reported = (
+			await rows<{ target: number; run: number | null }>(
+				`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
 			 WHERE r.signature = ? AND r.actor = ? AND r.outcome IN ('fail', 'error')`,
-			subject.signature,
-			as.id,
+				subject.signature,
+				as.id,
+			)
 		).some((row) => {
 			const target = targets.get(Number(row.target));
 			return target !== undefined && scopeOf(target, Number(row.run ?? 0)) === subject.scope;
 		});
 		const parties = new Set<number>();
 		if (subject.slot !== undefined)
-			for (const row of rows<{ actor: number }>(
+			for (const row of await rows<{ actor: number }>(
 				"SELECT DISTINCT r.actor FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL",
 				subject.slot,
 			))
 				parties.add(Number(row.actor));
 		seen.now = { no, parties: subject.slot !== undefined ? parties : null };
-		const decided = rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no)[0]?.state === "decided";
+		const decided =
+			(await rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no))[0]?.state === "decided";
 		const before = decided ? answeredAsDispute.get(no) : undefined;
 		return subject.slot === undefined
 			? preset === "strict" && reported
@@ -445,8 +454,8 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			],
 		});
 		// Under a policy where a person adopts new cases, the owner does, with the reason it asks for.
-		for (const waiting of rows<{ no: number; evidence_hash: string }>(
-			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open'",
+		for (const waiting of await rows<{ no: number; evidence_hash: string }>(
+			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open' ORDER BY id",
 		))
 			await command("decide", {
 				q: `Q-${waiting.no}`,
@@ -454,9 +463,13 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				answer: { is: "accept" },
 				reason: "seed",
 			});
-		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		expect(await rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		// Keep pre-plan evidence in the exploration, while guaranteeing slots early enough to exercise.
+		const planByStep = 1 + (((seed * 2654435761) >>> 0) % (STEPS / 4));
 		const commits = ["random01", "random02", "random03"];
 		for (let step = 0; step < STEPS; step++) {
+			currentStep = step;
+			if (step === planByStep && !successful.has("plan")) expect(await command("plan", seedPlan)).not.toBeNull();
 			const action = rand(100);
 			const cause = () => ({ failure: { message: pick(["cause a", "cause b"]) } });
 			if (action < 38) {
@@ -480,9 +493,9 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					...(outcome === "fail" ? cause() : {}),
 				};
 				if (rand(5) === 0) {
-					const earlier = rows<{ id: number }>(
+					const earlier = await rows<{ id: number }>(
 						`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
-						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL`,
+						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL ORDER BY r.id`,
 						as.id,
 						`test-${index}`,
 						target.commit,
@@ -526,7 +539,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					{ commit: pick(commits), branch: "main", env: "prod" },
 					{ commit: pick(["change01", "change02"]), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
 				]);
-				gatesBefore = commitGates();
+				gatesBefore = await commitGates();
 				await command(
 					"report",
 					{
@@ -561,7 +574,9 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				});
 			} else if (action < 72) {
 				// A person records a result by hand in an open run: two people on one case can dispute.
-				const planned = rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
+				const planned = await rows<{ no: number }>(
+					"SELECT no FROM runs WHERE origin = 'planned' AND state = 'open' ORDER BY id",
+				);
 				if (planned.length > 0) {
 					const outcome = pick(["fail", "pass", "pass", "skip"]);
 					await command(
@@ -581,13 +596,14 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					);
 				}
 			} else if (action < 94) {
-				const questions = rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
-					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided')",
+				const questions = await rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
+					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided') ORDER BY id",
 				);
 				if (questions.length > 0) {
 					const question = pick(questions);
 					const as = pick(people);
-					keptFrom = question.kind === "failure" && keptFromAnswering(question.no, as) ? `Q-${question.no}` : null;
+					keptFrom =
+						question.kind === "failure" && (await keptFromAnswering(question.no, as)) ? `Q-${question.no}` : null;
 					if (question.state === "decided" && rand(3) === 0)
 						settled = await command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
 					else
@@ -610,7 +626,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			} else {
 				h.advance(15 * 86_400_000);
 				trace.push({ advance: "15 days" });
-				sweep(h.app, rule);
+				await sweep(h.app, rule);
 			}
 			// 13. An answer or a withdrawal by somebody the policy keeps it from did not go through.
 			if (keptFrom !== null) {
@@ -637,11 +653,13 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			seen.now = null;
 			keptFrom = null;
 			settled = null;
-			const problem = audit();
+			const beforeAudit = h.app.database.statementCount;
+			const problem = await audit();
+			onAudit?.({ step, statements: h.app.database.statementCount - beforeAudit });
 			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
 			// 10. The commits that had a gate before an agent's report read the same after it.
 			if (gatesBefore) {
-				const after = commitGates();
+				const after = await commitGates();
 				for (const [run, gate] of gatesBefore)
 					if (after.get(run) !== gate)
 						return {
@@ -657,9 +675,9 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		if (
 			(successful.get("report") ?? 0) === 0 ||
 			(successful.get("plan") ?? 0) === 0 ||
-			rows("SELECT id FROM slots").length === 0 ||
-			rows("SELECT id FROM results").length === 0 ||
-			rows("SELECT id FROM runs").length === 0
+			(await rows("SELECT id FROM slots")).length === 0 ||
+			(await rows("SELECT id FROM results")).length === 0 ||
+			(await rows("SELECT id FROM runs")).length === 0
 		)
 			return {
 				seed,
@@ -670,7 +688,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			};
 		return null;
 	} finally {
-		h.close();
+		await h.close();
 	}
 }
 
@@ -689,7 +707,7 @@ function literalTransitions(): void {
 				accepts: { commit: target.commit },
 				require: [{ id: "exercise", kind: "exercise", methods: ["auto", "human"], basis: "exact", minActors: 2 }],
 			});
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			const report = async (outcome: string, attempt = 1, job = "unit") =>
 				await h.call(
 					"report",
@@ -734,7 +752,7 @@ function literalTransitions(): void {
 			});
 			expect(await snapshot()).toEqual({ slot: "disputed", gate: "blocked" });
 		} finally {
-			h.close();
+			await h.close();
 		}
 	});
 
@@ -762,7 +780,7 @@ function literalTransitions(): void {
 				accepts: { commit: "admission01" },
 				require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
 			});
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			await h.call(
 				"report",
 				{
@@ -785,7 +803,7 @@ function literalTransitions(): void {
 				slots.items.map((slot) => ({ state: slot.state, fills: slot.fills.map((fill) => fill.admitted) })),
 			).toEqual([{ state, fills: admitted === null ? [] : [admitted] }]);
 		} finally {
-			h.close();
+			await h.close();
 		}
 	});
 
@@ -924,31 +942,73 @@ function literalTransitions(): void {
 export function sequences(preset: "loose" | "standard" | "strict"): void {
 	if (preset === "loose") literalTransitions();
 	if (preset === "loose")
-		test("the audit resolves broad and exact-result standing independently", () => {
-			using db = new Database(":memory:");
-			db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
+		test("the audit resolves broad and exact-result standing independently", async () => {
+			const fixture = await testDatabase({ schema: "empty" });
+			const database = await Database.open({ url: fixture.url });
+			try {
+				await database.write(
+					async (db) =>
+						await db.transaction(async () => {
+							await db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
 			CREATE TABLE result_excuses (result INTEGER, slot INTEGER, class TEXT, decision INTEGER);
 			INSERT INTO excuses VALUES (1, 2, 'line:main', 0, 'excused', 30), (1, 2, 'line:main', 4, 'attributed', 10);
 			INSERT INTO result_excuses VALUES (5, NULL, 'excused', 20), (6, NULL, 'excused', 9),
 				(7, NULL, 'excused', 10), (8, 99, 'excused', 40);`);
-			const excuseOf = auditExcuses(db);
-			expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-			expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
-			expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
-			expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-			expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
-			expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+							const excuseOf = await auditExcuses(db);
+							expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+							expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
+							expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
+							expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+							expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
+							expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+						}),
+				);
+			} finally {
+				await database.close();
+				await fixture.close();
+			}
 		});
 
-	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, async () => {
-		const problems: Problem[] = [];
-		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {
-			const problem = await sequence(seed, preset);
-			if (problem) problems.push(problem);
-		}
-		expect(problems).toEqual([]);
-	}, 120_000);
+	for (let seed = 1; seed <= SEEDS; seed++) {
+		test(`random sequence ${seed}/${SEEDS} under the ${preset} policy keeps every invariant`, async () => {
+			let firstPlan = -1;
+			let auditStatements = 0;
+			const problem = await sequence(
+				seed,
+				preset,
+				(step) => {
+					firstPlan = step;
+				},
+				({ statements }) => {
+					auditStatements = Math.max(auditStatements, statements);
+				},
+			);
+			expect(problem).toBeNull();
+			expect(firstPlan).toBeGreaterThanOrEqual(0);
+			expect(auditStatements).toBeLessThanOrEqual(4);
+		}, 120_000);
+	}
+}
+
+async function everyAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (!(await callback(row))) return false;
+	return true;
+}
+
+async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {
+	const out: R[] = [];
+	for (const row of rows) {
+		const found = await callback(row);
+		out.push(...(Array.isArray(found) ? found : [found]));
+	}
+	return out;
+}
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
 }

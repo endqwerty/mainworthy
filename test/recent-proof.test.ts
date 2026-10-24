@@ -5,6 +5,7 @@ import { totpCode } from "../src/server/identity/totp.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
+import { pgRun } from "./identity-db.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import {
 	authenticator,
@@ -35,7 +36,7 @@ const refused = (reply: { status: number; body: unknown }) => {
 for (const email of ["recovery@example.org", null]) {
 	test(`a credentialless token-opened owner must add and prove a credential before ${email === null ? "removing" : "setting"} a recovery address`, async () => {
 		const smtp = await fakeSmtp();
-		const w = world();
+		const w = await world();
 		w.instance.app.config.mail = defaultConfig({
 			MAINWORTHY_SMTP_HOST: "127.0.0.1",
 			MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -46,25 +47,25 @@ for (const email of ["recovery@example.org", null]) {
 		try {
 			const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
 			if (email === null) {
-				w.instance.app.db.raw
-					.query(
-						"INSERT INTO mail_contacts (actor, email, verified_at, revision) SELECT id, ?, ?, ? FROM actors WHERE name = ?",
-					)
-					.run("existing@example.org", w.clock.now(), "existing-contact", OWNER);
+				await pgRun(
+					w.instance.app,
+					"INSERT INTO mail_contacts (actor, email, verified_at, revision) SELECT id, ?, ?, ? FROM actors WHERE name = ?",
+					["existing@example.org", w.clock.now(), "existing-contact", OWNER],
+				);
 			}
-			const before = w.rows("SELECT * FROM mail_contacts");
+			const before = await w.rows("SELECT * FROM mail_contacts");
 			stale(w);
 			const change = () => w.op("credential", { do: "email.set", email }, { cookie });
 			refused(await change());
-			expect(w.rows("SELECT * FROM mail_contacts")).toEqual(before);
+			expect(await w.rows("SELECT * FROM mail_contacts")).toEqual(before);
 			await waitMail(w.instance.app);
 			expect(smtp.messages).toHaveLength(0);
 			expect((await w.post("/api/account/password", { next: PASSWORD }, { cookie })).status).toBe(200);
 			refused(await change());
-			expect(w.rows("SELECT * FROM mail_contacts")).toEqual(before);
+			expect(await w.rows("SELECT * FROM mail_contacts")).toEqual(before);
 			expect((await proof(w, cookie)).status).toBe(200);
 			expect(must(await change())).toEqual({ email, verified: false });
-			expect(w.rows("SELECT email FROM mail_contacts")).toEqual(email === null ? [] : [{ email }]);
+			expect(await w.rows("SELECT email FROM mail_contacts")).toEqual(email === null ? [] : [{ email }]);
 		} finally {
 			await waitMail(w.instance.app);
 			await smtp.close();
@@ -74,7 +75,7 @@ for (const email of ["recovery@example.org", null]) {
 
 for (const input of [{ do: "totp.begin" }, { do: "totp.confirm", challenge: "unproved-enrollment", code: "123456" }]) {
 	test(`a credentialless token-opened owner has no first-credential exemption for ${input.do}`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
 		stale(w);
 		refused(await w.op("credential", input, { cookie }));
@@ -82,17 +83,28 @@ for (const input of [{ do: "totp.begin" }, { do: "totp.confirm", challenge: "unp
 	});
 }
 
-function verifiedAdminArchive(): string {
-	const source = world();
-	const owner = source
-		.rows<{ id: number; name: string }>("SELECT id, name FROM actors")
-		.find((row) => row.name === OWNER);
+async function verifiedAdminArchive(): Promise<string> {
+	const source = await world();
+	const owner = (await source.rows<{ id: number; name: string }>("SELECT id, name FROM actors")).find(
+		(row) => row.name === OWNER,
+	);
 	if (!owner) throw new Error("no owner");
-	source.instance.app.db.raw
-		.query("INSERT INTO mail_contacts (actor, email, verified_at, revision) VALUES (?, ?, ?, ?)")
-		.run(owner.id, "restored@example.org", source.clock.now(), "restored-contact");
+	await pgRun(
+		source.instance.app,
+		"INSERT INTO mail_contacts (actor, email, verified_at, revision) VALUES (?, ?, ?, ?)",
+		[owner.id, "restored@example.org", source.clock.now(), "restored-contact"],
+	);
 	const chunks: string[] = [];
-	exportArchive(source.instance.app.db, (chunk) => chunks.push(chunk), { blobs: source.instance.app.blobs });
+	await source.instance.app.database.read(
+		async (db) =>
+			await exportArchive(
+				db,
+				(chunk) => {
+					chunks.push(chunk);
+				},
+				{ blobs: source.instance.app.blobs },
+			),
+	);
 	return chunks.join("");
 }
 
@@ -106,9 +118,9 @@ async function preparedImport(w: World): Promise<string> {
 }
 
 test("stale browser import cannot install a verified address and gain an administrator through mail reset", async () => {
-	const body = verifiedAdminArchive();
+	const body = await verifiedAdminArchive();
 	const smtp = await fakeSmtp();
-	const w = world();
+	const w = await world();
 	w.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -121,7 +133,7 @@ test("stale browser import cannot install a verified address and gain an adminis
 		stale(w);
 		const response = await importBody(w, body, { cookie });
 		refused({ status: response.status, body: await response.json() });
-		expect(w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
+		expect(await w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
 		expect(await w.status({ cookie })).toBe(200);
 		await w.post("/api/login", { resetRequest: "restored@example.org" });
 		await waitMail(w.instance.app);
@@ -132,7 +144,7 @@ test("stale browser import cannot install a verified address and gain an adminis
 		expect((await proof(w, cookie)).status).toBe(200);
 		expect((await importBody(w, body, { cookie })).status).toBe(200);
 		expect(await w.status({ cookie })).toBe(401);
-		expect(w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
+		expect(await w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
 			{ email: "restored@example.org" },
 		]);
 		await w.post("/api/login", { resetRequest: "restored@example.org" });
@@ -152,8 +164,8 @@ test("stale browser import cannot install a verified address and gain an adminis
 });
 
 test("browser import rechecks proof after waiting at the write gate", async () => {
-	const body = verifiedAdminArchive();
-	const w = world();
+	const body = await verifiedAdminArchive();
+	const w = await world();
 	const cookie = await preparedImport(w);
 	expect((await proof(w, cookie)).status).toBe(200);
 	w.clock.advance(9 * 60_000 + 59_000);
@@ -166,7 +178,7 @@ test("browser import rechecks proof after waiting at the write gate", async () =
 		await gate.release();
 		const response = await pending;
 		refused({ status: response.status, body: await response.json() });
-		expect(w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
+		expect(await w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
 	} finally {
 		await gate.release();
 	}
@@ -174,10 +186,10 @@ test("browser import rechecks proof after waiting at the write gate", async () =
 
 for (const mode of ["server", "local"] as const) {
 	test(`${mode} operator import retains verified recovery addresses without browser proof`, async () => {
-		const body = verifiedAdminArchive();
-		const w = world({ mode });
+		const body = await verifiedAdminArchive();
+		const w = await world({ mode });
 		expect((await importBody(w, body, mode === "server" ? bearer(TOKEN) : {})).status).toBe(200);
-		expect(w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
+		expect(await w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
 			{ email: "restored@example.org" },
 		]);
 	});
@@ -185,26 +197,26 @@ for (const mode of ["server", "local"] as const) {
 
 for (const can of [undefined, ["read"]]) {
 	test(`browser join invitations require own recent proof (${can ? "read-only" : "default admin"})`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 		stale(w);
 		const input = { do: "create", name: "new-person", ...(can ? { can } : {}), cmd: "join-proof" };
 		refused(await w.op("invitation", input, { cookie }));
-		expect(w.rows("SELECT id FROM actors WHERE name = 'new-person'")).toEqual([]);
-		expect(w.rows("SELECT id FROM commands WHERE id = 'join-proof'")).toEqual([]);
+		expect(await w.rows("SELECT id FROM actors WHERE name = 'new-person'")).toEqual([]);
+		expect(await w.rows("SELECT id FROM commands WHERE id = 'join-proof'")).toEqual([]);
 		await signIn(w, "ada", PASSWORD);
 		refused(await w.op("invitation", input, { cookie }));
 		expect((await proof(w, cookie)).status).toBe(200);
 		expect((await w.op("invitation", input, { cookie })).status).toBe(200);
 		expect((await w.op("invitation", { do: "create", name: "token-person" }, bearer(TOKEN))).status).toBe(200);
-		const local = world({ mode: "local" });
+		const local = await world({ mode: "local" });
 		expect((await local.op("invitation", { do: "create", name: "local-person" }, {})).status).toBe(200);
 	});
 }
 
 for (const via of ["direct", "team-grant", "team-member"] as const) {
 	test(`browser admin authority through ${via} requires own recent proof`, async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "controlled", "a controlled person's password", { can: ["read"] });
 		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 		await w.ok("admin", { do: "team.create", name: "Quality" });
@@ -221,7 +233,7 @@ for (const via of ["direct", "team-grant", "team-member"] as const) {
 		const before = must(await w.op<unknown[]>("admin", { do: "actor.list" }));
 		refused(await w.op("admin", input, { cookie }));
 		expect(must(await w.op<unknown[]>("admin", { do: "actor.list" }))).toEqual(before);
-		expect(w.rows("SELECT id FROM commands WHERE id = 'elevate-proof'")).toEqual([]);
+		expect(await w.rows("SELECT id FROM commands WHERE id = 'elevate-proof'")).toEqual([]);
 		await signIn(w, "ada", PASSWORD);
 		refused(await w.op("admin", input, { cookie }));
 		expect((await proof(w, cookie)).status).toBe(200);
@@ -233,7 +245,7 @@ for (const via of ["direct", "team-grant", "team-member"] as const) {
 }
 
 test("queued team membership checks the current admin grant inside the writer", async () => {
-	const w = world();
+	const w = await world();
 	await joined(w, "controlled", "a controlled person's password");
 	const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 	await w.ok("admin", { do: "team.create", name: "Quality" });
@@ -258,7 +270,7 @@ test("queued team membership checks the current admin grant inside the writer", 
 for (const owner of [false, true]) {
 	for (const operation of ["credential", "admin"] as const) {
 		test(`a stale ${owner ? "owner" : "non-owner admin"} browser cannot mint a ${operation} token to reach recovery authority`, async () => {
-			const w = world();
+			const w = await world();
 			const sam = await joined(w, "sam", "sam's own long password");
 			const name = owner ? OWNER : "ada";
 			const cookie = await joined(w, name, PASSWORD, owner ? {} : { can: ["read", "admin"] });
@@ -268,10 +280,10 @@ for (const owner of [false, true]) {
 				operation === "credential"
 					? { do: "token.create", label: "Recovery CLI", expires: "1d", cmd: "mint-proof" }
 					: { do: "token.create", actor: name, kind: "human", cmd: "mint-proof" };
-			const before = w.rows("SELECT id FROM tokens");
+			const before = await w.rows("SELECT id FROM tokens");
 			refused(await w.op(operation, input, { cookie }));
-			expect(w.rows("SELECT id FROM tokens")).toEqual(before);
-			expect(w.rows("SELECT id FROM commands WHERE id = 'mint-proof'")).toEqual([]);
+			expect(await w.rows("SELECT id FROM tokens")).toEqual(before);
+			expect(await w.rows("SELECT id FROM commands WHERE id = 'mint-proof'")).toEqual([]);
 			const otherSession = (await signIn(w, name, PASSWORD)).cookie;
 			refused(await w.op(operation, input, { cookie }));
 			expect((await proof(w, cookie)).status).toBe(200);
@@ -296,7 +308,7 @@ async function passkey(w: World, cookie: string) {
 }
 
 test("a session older than ten minutes cannot begin changing its sign-in", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	w.clock.advance(10 * 60_000 + 1);
 	const reply = await w.op("credential", { do: "passkey.begin" }, { cookie });
@@ -305,7 +317,7 @@ test("a session older than ten minutes cannot begin changing its sign-in", async
 });
 
 test("fresh password sign-in and proof authorize only their own session for ten minutes", async () => {
-	const w = world();
+	const w = await world();
 	const first = await joined(w, "robin", PASSWORD);
 	const second = (await signIn(w, "robin", PASSWORD)).cookie;
 	w.clock.advance(10 * 60_000);
@@ -325,7 +337,7 @@ test("fresh password sign-in and proof authorize only their own session for ten 
 });
 
 test("passkey finalization, password addition, removal and recovery address writes all require proof", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const { device, id } = await passkey(w, cookie);
 	w.clock.advance(9 * 60_000 + 59_000);
@@ -364,8 +376,8 @@ test("passkey finalization, password addition, removal and recovery address writ
 	expect(login.status).toBe(200);
 	stale(w);
 	expect((await proof(w, login.cookie)).status).toBe(200);
-	const password = w.rows<{ id: number }>(
-		"SELECT id FROM credentials WHERE kind = 'password' AND revoked_at IS NULL",
+	const password = (
+		await w.rows<{ id: number }>("SELECT id FROM credentials WHERE kind = 'password' AND revoked_at IS NULL")
 	)[0];
 	await w.ok("credential", { do: "remove", id: password?.id }, { cookie: login.cookie });
 	expect((await w.op("credential", { do: "email.set", email: null }, { cookie: login.cookie })).status).toBe(200);
@@ -381,7 +393,7 @@ test("passkey finalization, password addition, removal and recovery address writ
 });
 
 test("TOTP confirmation rechecks freshness, TOTP proof consumes the code, and recovery codes are not standalone proof", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const setup = await w.ok<{ challenge: string; secret: string }>("credential", { do: "totp.begin" }, { cookie });
 	stale(w);
@@ -423,7 +435,7 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 	const step = 60_779_457;
 	const code = "566269";
 	expect([totpCode(secret, step), totpCode(secret, step + 1)]).toEqual([code, code]);
-	const w = world({ clock: clockAt(step * 30_000 + 29_000) });
+	const w = await world({ clock: clockAt(step * 30_000 + 29_000) });
 	const cookie = await joined(w, "robin", PASSWORD);
 	const setup = await w.ok<{ challenge: string; secret: string }>("credential", { do: "totp.begin" }, { cookie });
 	await w.ok(
@@ -431,9 +443,11 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 		{ do: "totp.confirm", challenge: setup.challenge, code: totpCode(setup.secret, step) },
 		{ cookie },
 	);
-	w.instance.app.db.raw
-		.query("UPDATE credentials SET data = json_set(data, '$.secret', ?, '$.lastStep', -1) WHERE kind = 'totp'")
-		.run(secret);
+	await pgRun(
+		w.instance.app,
+		"UPDATE credentials SET data = jsonb_set(jsonb_set(data::jsonb, '{secret}', to_jsonb(?::text)), '{lastStep}', '-1'::jsonb)::text WHERE kind = 'totp'",
+		[secret],
+	);
 	const gate = holdGate(w.instance);
 	try {
 		const waiting = waitingAtGate(w.instance, 1);
@@ -449,7 +463,7 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 });
 
 test("an admin needs their own session proof when changing another person's credentials or address", async () => {
-	const w = world();
+	const w = await world();
 	const person = await joined(w, "sam", "a different quite long password");
 	const key = await passkey(w, person);
 	refused(await w.op("credential", { do: "email.set", actor: "sam", email: null }, bearer(TOKEN)));
@@ -468,7 +482,7 @@ test("an admin needs their own session proof when changing another person's cred
 });
 
 test("a passkey proof cannot be moved to another session or person", async () => {
-	const w = world();
+	const w = await world();
 	const first = await joined(w, "robin", PASSWORD);
 	const second = (await signIn(w, "robin", PASSWORD)).cookie;
 	const other = await joined(w, "sam", PASSWORD);
@@ -488,21 +502,23 @@ test("a passkey proof cannot be moved to another session or person", async () =>
 });
 
 test("proof rereads credential and session state after waiting for the writer", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	const gate = holdGate(w.instance);
 	const waiting = waitingAtGate(w.instance, 1);
 	const pending = proof(w, cookie);
 	await waiting;
-	w.instance.app.db.raw.query("UPDATE sessions SET ended_at = ?").run(w.clock.now());
+	await gate.run(async (db) => await pgRun(w.instance.app, "UPDATE sessions SET ended_at = ?", [w.clock.now()], db));
 	await gate.release();
 	expect((await pending).status).toBe(403);
-	expect(w.rows<{ at: number | null }>("SELECT reauthenticated_at AS at FROM sessions")[0]?.at).not.toBe(w.clock.now());
+	expect((await w.rows<{ at: number | null }>("SELECT reauthenticated_at AS at FROM sessions"))[0]?.at).not.toBe(
+		w.clock.now(),
+	);
 });
 
 test("a password replaced ahead of a queued proof cannot authenticate the still-live passkey session", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const key = await passkey(w, cookie);
 	const begun = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {});
@@ -531,7 +547,7 @@ test("a password replaced ahead of a queued proof cannot authenticate the still-
 });
 
 test("a future proof fails closed and failed password proofs share sign-in throttling", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	w.clock.advance(-1);
 	refused(await w.op("credential", { do: "totp.begin" }, { cookie }));
@@ -542,7 +558,7 @@ test("a future proof fails closed and failed password proofs share sign-in throt
 });
 
 test("the proof exchange enforces origin and accepts exactly one proof without recording secrets", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	expect(
@@ -552,19 +568,19 @@ test("the proof exchange enforces origin and accepts exactly one proof without r
 	expect((await w.post("/api/account/proof", { password: PASSWORD, code: "123456" }, { cookie })).status).toBe(400);
 	refused(await w.op("credential", { do: "totp.begin" }, { cookie }));
 	expect((await proof(w, cookie)).status).toBe(200);
-	expect(w.rows("SELECT id FROM commands")).toEqual([]);
-	expect(w.written().includes(Buffer.from(PASSWORD))).toBe(false);
+	expect(await w.rows("SELECT id FROM commands")).toEqual([]);
+	expect((await w.written()).includes(Buffer.from(PASSWORD))).toBe(false);
 });
 
 test("invitation and recovery acceptance need no prior proof, and the last usable credential stays", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	const recovered = await invite(w, { name: "robin" });
 	const accepted = await w.post("/api/login", { invitation: recovered.code, password: "a new recovery password" });
 	expect(accepted.status).toBe(200);
 	expect(await w.status({ cookie })).toBe(401);
-	const credential = w.rows<{ id: number }>("SELECT id FROM credentials WHERE revoked_at IS NULL")[0];
+	const credential = (await w.rows<{ id: number }>("SELECT id FROM credentials WHERE revoked_at IS NULL"))[0];
 	expect((await w.op("credential", { do: "remove", id: credential?.id }, { cookie: accepted.cookie })).status).toBe(
 		400,
 	);
@@ -573,15 +589,15 @@ test("invitation and recovery acceptance need no prior proof, and the last usabl
 });
 
 test("a stale browser cannot issue a recovery link; token, CLI and local recovery authority still works", async () => {
-	const w = world();
+	const w = await world();
 	await joined(w, "sam", PASSWORD);
 	const admin = (await w.post("/api/login", { token: TOKEN })).cookie;
 	expect((await w.post("/api/account/password", { next: PASSWORD }, { cookie: admin })).status).toBe(200);
 	stale(w);
-	const before = w.rows("SELECT id FROM invitations");
+	const before = await w.rows("SELECT id FROM invitations");
 	refused(await w.op("invitation", { do: "create", name: "sam", cmd: "stale-recovery" }, { cookie: admin }));
-	expect(w.rows("SELECT id FROM invitations")).toEqual(before);
-	expect(w.rows("SELECT id FROM commands WHERE id = 'stale-recovery'")).toEqual([]);
+	expect(await w.rows("SELECT id FROM invitations")).toEqual(before);
+	expect(await w.rows("SELECT id FROM commands WHERE id = 'stale-recovery'")).toEqual([]);
 	const tokenLink = await invite(w, { name: "sam" });
 	expect(tokenLink.purpose).toBe("recover");
 	const cli = Bun.spawn([process.execPath, CLI_ENTRY, "invite", "new", "sam"], {
@@ -598,7 +614,7 @@ test("a stale browser cannot issue a recovery link; token, CLI and local recover
 	expect(stdout).toContain("/invite#");
 	expect((await proof(w, admin)).status).toBe(200);
 	expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: admin })).status).toBe(200);
-	const local = world({ mode: "local" });
+	const local = await world({ mode: "local" });
 	await invite(local, { name: "local-person", can: ["read"], project: "scratch" }, {});
 	expect((await invite(local, { name: "local-person" }, {})).purpose).toBe("recover");
 });

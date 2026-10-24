@@ -4,36 +4,31 @@ Find your data, export it to a text file, back it up and move it to another mach
 
 ## Where the data lives
 
-Mainworthy keeps structured records in one SQLite file, `mainworthy.db`, and attachment bytes in `blobs/` in the data directory. The directory defaults to `~/.mainworthy`, or `/data` in the container. Set `MAINWORTHY_DATA` to use another directory. See [configuration](./configuration.md#variables-the-server-reads).
+Mainworthy keeps structured records in PostgreSQL 18, selected by `MAINWORTHY_DATABASE_URL`.
+`compose.yaml` starts that database with its own named volume. Running elsewhere is possible but not yet supported.
+Attachment bytes live in `blobs/` and archive transfers use `spool/` in the app data directory.
+That directory defaults to `~/.mainworthy`, or `/data` in the container. Set `MAINWORTHY_DATA` to change it.
 
-```
-$ ls -F ~/.mainworthy  # after an archive transfer
-mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  blobs/  server.lock  spool/
-```
+PostgreSQL controls database storage, access and write-ahead logging. Mainworthy no longer opens a SQLite file,
+creates upgrade copies, runs reader or checkpoint threads, or locks a local database directory.
+A copied app volume alone is not a database backup. Secure and back up both PostgreSQL and local attachments.
 
-While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
+Startup installs the PostgreSQL baseline under a migration advisory lock, then recovers pending work.
+During startup, `/healthz` answers HTTP 200 with `ok: false` and `state: "upgrading"`.
+Other requests receive HTTP 503 with `Retry-After: 5` until ready. Readiness requires `ok: true`.
 
-On a POSIX filesystem, Mainworthy makes the database, its live sidecars and upgrade copies readable and writable only by the operating-system user that runs the server. It repairs broader permissions before opening an existing file and refuses a database file owned by another user. The data directory can also contain files managed by the operator, so Mainworthy does not change the directory or those unrelated files.
+The PostgreSQL conversion starts with an empty database. Existing SQLite records do not move automatically into PostgreSQL.
+The old SQLite file remains untouched on its volume. Its identities, tokens and sessions do not sign in to
+the new database. There is no automatic data conversion or upgrade-copy rollback.
 
-This file boundary assumes an untrusted operating-system user cannot add, remove or replace entries in the data directory. The directory may permit traversal, as `0755` does, because the sensitive files are private. Secure a Windows deployment and any shared writable directory at the operating-system or volume boundary. [Issue #659](https://github.com/endqwerty/mainworthy/issues/659) tracks a supported Windows ACL and writable-directory design.
+On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes change streams. Requests in flight
+have five seconds to send their replies before remaining connections close. The server then closes its database
+pools. If a write loses its reply, retry with the same command id, `cmd`, so it is not applied twice.
 
-An upgrade runs all pending database migrations in one transaction. If any statement fails, startup stops and rolls back the entire upgrade, including its schema version. Before upgrading existing data, Mainworthy writes a consistent copy in a new private directory beside the database, syncs and closes it, then renames it to `mainworthy.db.v<N>.bak`. `<N>` is the version before the upgrade. It syncs the directory before starting the migrations.
-
-During the copy, migration and startup recovery, `/healthz` answers HTTP 200 with `ok: false` and `state: "upgrading"`, plus the build's version, API version and commit. `mainworthy health` prints `upgrading` and exits 0 because the process is alive; `--json` includes `state: "upgrading"`. Every other request receives HTTP 503 with an `upgrading` error and `Retry-After: 5`. Retry after startup finishes. Readiness requires `/healthz` to say `ok: true`; a commit named by an upgrading process is not proof of a completed deployment. A failed startup closes the listener. The worker stops after 30 minutes without observable copy/database writes or recovery progress; a progressing copy can take longer. Startup failure removes only that attempt's private copy workspace after the worker ends, and a published backup remains for the next start to reuse.
-
-After every pending migration commits, Mainworthy keeps the copy it completed on that start and removes older copies for the same database, logging each removed filename. At the same point it removes abandoned copies and journals with the exact legacy `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal` names. It also removes the exact copy and journal files inside `<database>.v<N>.bak.mainworthy-copy-<six-character suffix>` workspaces, then removes those directories only if empty. The same exact regular-file rule cleans marked `<database>.mainworthy-start-<six-character suffix>` workspaces after a whole-process crash. Only regular files are removed. Unmarked directories, including workspaces from earlier builds, remain because their names cannot distinguish them from an operator's saved copies. Symlinks, non-regular entries, and unrelated contents remain. If the final copy already existed, Mainworthy leaves it unchecked and performs no cleanup. A failed migration also removes none. A cleanup failure is logged and startup continues, so extra copies can remain until a later successful upgrade writes a new copy.
-
-After upgrading an older database, the first start also rebuilds the private assertion-presence index before applying pending reports. It reads stored evidence in bounded pages and keeps historical causes unchanged. This one-time work takes longer with more evidence.
-
-Normally one upgrade copy remains. Only copies still present can restore an earlier database state. Save a separate backup before upgrading if you need an older rollback point.
-
-On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. Requests already in flight have five seconds to send their replies before the server closes the remaining connections. The server then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so the write is not applied twice. The CLI and web UI send command ids.
-
-With reader threads enabled, a background thread checkpoints every half second. If the thread fails to open the database or exits unexpectedly, the server restarts it with increasing delays capped at 30 seconds. Shutdown cancels these retries. The writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.
-
-Before this limit, Bun's own SQLite on Linux, including the container, defaulted to no retention limit, `-1`. On a Mac, Bun uses Apple's libsqlite3, whose default was `32768`, or 32 KiB. The 4 MiB limit is a new bound in the container and a looser one on a Mac.
-
-The server also keeps `server.lock` inside the data directory. While the server holds the lock, it keeps `server.lock-journal` too. A clean stop removes the journal. Archive transfers use `spool/` inside the data directory. Exports stage the whole archive before sending it. Imports stage the whole upload before reading it. Leave enough free space on that filesystem for every concurrent transfer. Each temporary directory is private, and each archive file is readable and writable only by its owner. Completed, cancelled and rejected transfers remove their temporary files. A killed process can leave files in `spool/`. After stopping the server, you can remove that directory.
+Exports stage the whole archive before sending it. Imports stage the upload before reading it.
+Leave space for concurrent transfers. Temporary directories and archive files are private to the server user.
+Completed, cancelled and rejected transfers remove their files. A killed process can leave files in `spool/`;
+after stopping the server, you can remove that directory.
 
 The database holds every project, case and version, every result, decision and policy, and the actors, grants and a hash of each token. Treat it like the data of any private system. What it keeps about people, and for how long, is on the [privacy](./privacy.md) page.
 
@@ -58,16 +53,10 @@ assertion cause's hash matches neither its normalized text nor a verified file-s
 The server stops before serving requests because it cannot rebuild the assertion index
 from that evidence. Import refuses an archive with the same inconsistency and rolls back.
 
-1. Stop the instance and preserve a copy of its whole data directory, including database
-   sidecars and attachments. Follow the [directory backup steps](#back-up).
-2. Keep the exact error, the signature id it names, and the version or image commit that
-   refused to start.
-3. Restore a tested backup to a separate data directory, or import an archive written by
-   Mainworthy into a fresh instance. Verify that the restored instance starts and its
-   evidence is intact before directing traffic to it. The copy taken immediately before
-   this upgrade (`mainworthy.db.v<N>.bak`) may contain the same inconsistency, so test that
-   copy too, and start it with the version that ran before the upgrade: this version refuses it
-   for the same reason.
+1. Stop the app and preserve PostgreSQL plus the attachment directory. Follow [Back up](#back-up).
+2. Keep the exact error, signature id and image commit that refused to start.
+3. Restore a tested database backup and its attachments to an isolated instance, or import a matching archive
+   into a fresh PostgreSQL database. Check its evidence before directing traffic to it.
 
 Without a tested backup, keep the preserved data and request a repair of the named
 signature. There is no automatic repair command for this error. Changing hashes or
@@ -89,7 +78,7 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":23,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":43,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
@@ -124,11 +113,9 @@ An unknown key is an error. Without `--project`, the command exports the whole i
 `MAINWORTHY_PROJECT` is set. Import either archive into a fresh instance with the command below.
 Import refuses an instance that already has data.
 
-Migration 31 converts stored proposal conflicts and saved propose replies to structured addresses.
-Commands recorded before the upgrade can still be retried with their original command id.
-Archives from before this conversion are refused as an older archive schema.
-Upgrade the original database and export a new archive before importing it into this build.
-Historical question evidence stays unchanged.
+Archives preserve structured proposal-conflict addresses and recorded project command replies.
+A matching imported command can still be retried with its original command id.
+The archive must match this build's archive schema; older archive schemas are refused.
 
 ## Export and verify an audit
 
@@ -385,8 +372,7 @@ original values.
 
 Build bindings, artifact provenance and deployment history travel in archives.
 Archives exported before those tables were added cannot import into this build.
-Restore such an archive with the build that exported it. Existing databases
-upgrade in place when the current server starts.
+Restore such an archive with the build that exported it. An archive must use format 1 and schema 43 and pass the current table, column and evidence checks.
 
 An import loads an archive into a new instance. A full archive restores every project, and a project archive restores only its selected project. Import does not merge data. The server keeps answering reads during the import. Writes wait until the import finishes.
 
@@ -414,16 +400,16 @@ Import also refuses a failure question whose stored subject cannot be read by th
 
 **A successful export can produce a backup that this build refuses to import.** Before the report limit added on 2026-10-22, reports could store durations above 30 days. Export preserves those values. When exported duration columns contain invalid values, the CLI warns on stderr after saving the file. HTTP export returns the warning in `X-Mainworthy-Archive-Warning`. Neither changes the archive's evidence.
 
-Keep the original archive. To retain every timing measurement, restore a stopped copy of the data directory as described under [Back up](#back-up). To make an importable archive by discarding invalid timings, first stop the server and copy the data directory. Work on that copy, keeping the original unchanged. Open the copy's `mainworthy.db` with SQLite and inspect the affected rows:
+Keep the original archive. To retain every timing measurement, restore an isolated PostgreSQL backup as described under [Back up](#back-up). To make an importable archive by discarding invalid timings, first stop the app and back up PostgreSQL and its attachments. Restore into an isolated database, keeping the original unchanged. Open the restored database with `psql` and inspect the affected rows:
 
 ```sql
 SELECT 'results' AS table_name, id, duration_ms FROM results
 WHERE duration_ms IS NOT NULL AND
-  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000)
+  duration_ms NOT BETWEEN 0 AND 2592000000
 UNION ALL
 SELECT 'result_tries', id, duration_ms FROM result_tries
 WHERE duration_ms IS NOT NULL AND
-  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+  duration_ms NOT BETWEEN 0 AND 2592000000;
 ```
 
 If you accept losing these timing measurements, set only those values to NULL on the copy. Their durations become unknown; the results and tries remain:
@@ -432,14 +418,14 @@ If you accept losing these timing measurements, set only those values to NULL on
 BEGIN;
 UPDATE results SET duration_ms = NULL
 WHERE duration_ms IS NOT NULL AND
-  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+  duration_ms NOT BETWEEN 0 AND 2592000000;
 UPDATE result_tries SET duration_ms = NULL
 WHERE duration_ms IS NOT NULL AND
-  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+  duration_ms NOT BETWEEN 0 AND 2592000000;
 COMMIT;
 ```
 
-Start the copy with `MAINWORTHY_DATA` pointing at its directory, export again and test import into a throwaway instance. These queries change only the two stored duration columns. A pending report can still fail its per-result checks; its error names the offending field.
+Start the isolated app with `MAINWORTHY_DATABASE_URL` pointing at the restored database and its own attachment directory, export again and test import into a throwaway instance. These queries change only the two stored duration columns. A pending report can still fail its per-result checks; its error names the offending field.
 
 An instance that already has data refuses an import and keeps what it has:
 
@@ -456,15 +442,9 @@ A migration changes the archive version if it adds or removes exported tables, r
 
 An archive with a newer version is refused with a message to upgrade. An archive with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
 
-Attachments change the archive version to 11. Teams, memberships, team grants and their history change it to 12. Result-specific inherited excuses change it to 13. Build bindings and deployments change it to 15. Slot-specific dispute settlements change it to 17. Personal grant roles change it to 19. Migration 20 adds recovery contacts and changes the archive version to 20. Import preserves their addresses and verification status and clears pending mail links. Per-test quarantines change it to 21. Case fragments change it to 22. Quarantine coverage recorded on each result changes it to 23.
-
-To move older data forward, upgrade the original database and take a fresh export. If only an older archive remains, follow these steps:
-
-1. Restore the archive with a matching older build.
-2. Upgrade that database.
-3. Export again.
-
-Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the new tables and columns.
+This build uses archive format 1 and schema 43. Import validates the table and column shapes and the evidence
+before committing. It does not open or convert a SQLite database file. Preserve the original database and a
+matching executable for archives whose older schema this build refuses.
 
 After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey, authenticator or invitation either. The people, agents and pipelines are still there with their grants. Verified recovery addresses stay verified; with configured mail, they can authorize a password reset.
 
@@ -488,11 +468,16 @@ exported to backup-2026-10-13.ndjson.gz
 
 Test a backup by importing it into a throwaway instance before you rely on it.
 
-A second way is to copy the data directory. A copy keeps the tokens as well as the cases and decisions. To back up and restore the directory, follow these steps:
+To preserve tokens, sessions and credentials too, back up PostgreSQL and attachment bytes together.
 
-1. Stop the server. For a container, stop the container.
-2. Copy the whole data directory, including the `-wal` and `-shm` files. For a container, copy the volume.
-3. To restore the backup, start a server with `MAINWORTHY_DATA` pointing at the copy. The server opens with the same cases, tokens and decisions.
+1. Stop the app while leaving PostgreSQL running, so attachment files match the database snapshot.
+2. Dump PostgreSQL with `pg_dump` and copy the app's `blobs/` directory. In Compose, use
+   `docker compose exec -T postgres pg_dump -U mainworthy -d mainworthy -Fc > mainworthy.dump`.
+3. Restore the dump into an isolated PostgreSQL 18 database with `pg_restore`, restore its matching `blobs/`,
+   and start the same app version with that database URL and attachment directory.
+4. Check the restored cases, tokens and attachments before using the backup for recovery.
+
+Do not copy a running PostgreSQL data directory as if it were an ordinary file. Use PostgreSQL backup tools.
 
 ## Move to another machine
 
@@ -502,7 +487,7 @@ To move your data, export on the old machine and import on the new one:
 2. Copy the file to the new machine.
 3. On the new machine, install the same version of Mainworthy.
 4. In server mode, set `MAINWORTHY_OWNER_TOKEN`.
-5. Start a server with an empty data directory.
+5. Start a server with an empty PostgreSQL database and a separate attachment directory.
 6. Run `mainworthy import mainworthy.ndjson.gz`.
 7. Restart the server, so the owner token you set becomes a token.
 8. Make new tokens for agents and pipelines.
@@ -510,7 +495,7 @@ To move your data, export on the old machine and import on the new one:
 10. Point `MAINWORTHY_URL` at the new address.
 11. When everything reports to the new server, stop the old server.
 
-If you want to keep the tokens, stop the server and copy the data directory instead, as described under backups.
+To keep tokens, restore a PostgreSQL backup and its matching attachment directory, as described under backups.
 
 ## See also
 

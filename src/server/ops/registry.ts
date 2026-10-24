@@ -22,7 +22,7 @@ import {
 	stampSeq,
 	UNFINISHED,
 } from "../kernel/ctx.ts";
-import { json } from "../kernel/db.ts";
+import { json, type ReadDb, type WriteDb } from "../kernel/db.ts";
 import { type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
 
 type Base<I, O> = {
@@ -50,27 +50,27 @@ export const COMMIT: unique symbol = Symbol("commit");
 /** What `steps` may yield: `COMMIT`, or nothing, which marks a point where other requests may be served. */
 export type Pause = typeof COMMIT | undefined;
 
-type ProjectBase<I, O> = Base<I, O> & { scope: "project"; effect: "read" | "write" };
-/**
- * An operation on one project. A write runs in a transaction stamped with the project's next sequence number.
- * Most operations are one function, `run`. One that can take long gives `steps` instead: a generator that yields
- * between slices of work, so the server can answer reads while it runs. The registry awaits each step.
- */
+type ProjectBase<I, O> = Base<I, O> & { scope: "project" };
+/** Project reads receive only a snapshot; writes receive the exclusive lease. */
 export type ProjectOp<I, O> = ProjectBase<I, O> &
 	(
-		| { run: (ctx: Ctx, input: I) => O | Promise<O> }
-		| { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> | AsyncGenerator<Pause, O, void> }
+		| { effect: "read"; run: (ctx: Ctx<ReadDb>, input: I) => O | Promise<O> }
+		| ({ effect: "write" } & (
+				| { run: (ctx: Ctx, input: I) => O | Promise<O> }
+				| { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> | AsyncGenerator<Pause, O, void> }
+		  ))
 	);
 /** An operation on the instance: projects, actors, tokens. */
 export type InstanceOp<I, O> = Base<I, O> & {
 	scope: "instance";
-	effect: "read" | "write";
-	run: (env: InstanceCtx, input: I) => O | Promise<O>;
-	/** True when the reply to this input holds a secret. It is then never stored, so the command cannot be replayed. */
 	secret?: (input: I) => boolean;
-};
-export type InstanceCtx = {
+} & (
+		| { effect: "read"; run: (env: InstanceCtx<ReadDb>, input: I) => O | Promise<O> }
+		| { effect: "write"; run: (env: InstanceCtx, input: I) => O | Promise<O> }
+	);
+export type InstanceCtx<D extends ReadDb = WriteDb> = {
 	app: App;
+	db: D;
 	actor: Actor;
 	now: number;
 	/**
@@ -133,16 +133,16 @@ export type Call = {
 	project: string | null;
 	input: unknown;
 	/** Resolves the caller for a project (0 for the instance). Null when the caller is not signed in. */
-	actor: (project: number) => Actor | null;
-	/** Admitted requests carry this instead of sending resolved authority to a reader. */
+	actor: (project: number) => Promise<Actor | null>;
+	/** Admitted requests carry a credential reference resolved within each database scope. */
 	reference?: CallerReference;
 	/**
 	 * The caller's browser session as it stands when it is asked, or null (see `InstanceCtx`). Asked where the
-	 * operation runs, after its wait at the gate, as `actor` is: an id is given to another row after an import.
+	 * operation runs, after its wait for the write lock, as `actor` is: an id is given to another row after an import.
 	 */
-	session?: () => number | null;
+	session?: () => number | null | Promise<number | null>;
 	/** Where the caller is signed in, as it stands when it is asked, or null (see `InstanceCtx`). */
-	context?: () => string | null;
+	context?: () => string | null | Promise<string | null>;
 	/**
 	 * When the caller says this happened, in milliseconds. Only a write to a demo project takes it (decision
 	 * 0100); anywhere else it is refused, not ignored, so nobody believes a real project recorded the time it
@@ -152,8 +152,7 @@ export type Call = {
 };
 
 /**
- * Why a call that says when it happened is refused before it runs, or null. Asked wherever a call enters, a read
- * that goes to a reader thread included. Whether the project is a demo is asked inside the write (`execute`).
+ * Why a call that says when it happened is refused before it runs, or null. Asked wherever a call enters. Whether the project is a demo is asked inside the write (`execute`).
  */
 function misplacedTime(op: AnyOp | undefined, call: Call): Reply | null {
 	if (call.at === undefined || !op) return null;
@@ -194,24 +193,26 @@ function admitCaller(
  * twice and takes a number for each transaction). After each commit it publishes what changed. It pauses where
  * the operation says other requests may be served.
  */
-async function execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
-	if (ops[call.op]?.effect !== "write") return await executeInSnapshot(app, ops, call);
-	if (app.db.inTransaction)
-		return fail("internal", "a write is in progress; writes go through invoke, which queues them");
-	app.db.begin();
+async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	await db.begin();
 	try {
-		const reply = await executeInSnapshot(app, ops, call);
-		if (app.db.inTransaction) {
-			if (reply.ok) app.db.commit();
-			else app.db.rollback();
+		const reply = await executeInSnapshot(app, db, ops, call);
+		if (db.inTransaction) {
+			if (reply.ok) await db.commit();
+			else await db.rollback();
 		}
 		return reply;
 	} finally {
-		app.db.rollback();
+		await db.rollback();
 	}
 }
 
-async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+async function executeInSnapshot(
+	app: App,
+	db: ReadDb | WriteDb,
+	ops: Readonly<Record<string, AnyOp>>,
+	call: Call,
+): Promise<Reply> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
 	// An operation of the instance has one address. Named under a project it is refused, whichever project and
@@ -223,8 +224,8 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 	if (misplaced) return misplaced;
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
-	const db = op.effect === "write" ? app.db : app.reader;
-	const found = op.scope === "project" && call.project ? findProject(db, call.project) : null;
+
+	const found = op.scope === "project" && call.project ? await findProject(db, call.project) : null;
 	const noSuchProject = (): Reply => {
 		const { code, message } = noProject(call.project);
 		return fail(code, message);
@@ -233,11 +234,11 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 		if (!call.project) return fail("invalid", `${op.name} needs a project`);
 		if (!found) return noSuchProject();
 	}
-	const caller = call.reference ? resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
+	const caller = call.reference ? await resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
 	const admitted = admitCaller(
 		call,
 		op,
-		call.reference ? (caller?.actor ?? null) : call.actor(found?.id ?? 0),
+		call.reference ? (caller?.actor ?? null) : await call.actor(found?.id ?? 0),
 		found?.key ?? null,
 	);
 	// A caller that holds no grant on a project is told what it would be told of a project that does not exist,
@@ -267,15 +268,17 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 
 	try {
 		if (op.scope === "instance") {
-			const env: InstanceCtx = {
+			const env = {
 				app,
+				db,
 				actor,
 				now: app.now(),
-				session: call.reference ? (caller?.session ?? null) : (call.session?.() ?? null),
-				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
+				session: call.reference ? (caller?.session ?? null) : ((await call.session?.()) ?? null),
+				context: call.reference ? (caller?.context ?? null) : ((await call.context?.()) ?? null),
 			};
-			if (!writing) return { ok: true, result: present(await op.run(env, input)), seq: null };
-			const prior = cmd ? findCommand(app.db, cmd) : null;
+			if (op.effect === "read") return { ok: true, result: present(await op.run(env, input)), seq: null };
+			if (!("begin" in db)) throw new Error("a write needs an exclusive lease");
+			const prior = cmd ? await findCommand(db, cmd) : null;
 			if (prior) {
 				if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
 				if (prior.request !== request) throw changed();
@@ -288,10 +291,10 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 				}
 				return { ok: true, result: present(kept), seq: null };
 			}
-			const result = await op.run(env, input);
+			const result = await op.run({ ...env, db }, input);
 			if (cmd) {
 				const outcome = op.secret?.(input) ? WITHHELD : result;
-				recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
+				await recordInstanceCommand(db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
 			}
 			return { ok: true, result: present(result), seq: null };
 		}
@@ -311,24 +314,24 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 				{ projectIdentity: "obsolete" },
 			);
 
-		if (!writing) {
-			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
-			return { ok: true, result: present(await op.run(makeCtx(app, found, actor, false), input)), seq: found.seq };
+		if (op.effect === "read") {
+			return { ok: true, result: present(await op.run(makeCtx(app, db, found, actor, false), input)), seq: found.seq };
 		}
 
+		if (!("begin" in db)) throw new Error("a write needs an exclusive lease");
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
 			// transaction and never finished (the server stopped), or by this one when it commits its own.
 			let bound = false;
 			if (cmd) {
-				const prior = findCommand(app.db, cmd);
+				const prior = await findCommand(db, cmd);
 				if (prior) {
 					// The same id from the same actor for the same operation in the same project, or it is a conflict:
 					// a reply recorded for one project is never returned for another.
 					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== found.id) throw reused();
 					if (prior.request !== request) throw changed();
 					if (prior.outcome !== UNFINISHED) {
-						app.db.commit();
+						await db.commit();
 						return { ok: true, result: present(json<unknown>(prior.outcome)), seq: prior.seq };
 					}
 					// Begun and never answered: the operation runs again, finds what it already stored (a report finds
@@ -337,16 +340,16 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 				}
 			}
 			// Read the project inside the transaction: its sequence number is what this command builds on.
-			const project = findProject(app.db, found.key) ?? found;
+			const project = (await findProject(db, found.key)) ?? found;
 			if (call.at !== undefined) {
-				if (demoSince(app.db, project.id) === null)
+				if ((await demoSince(db, project.id)) === null)
 					throw new OpError(
 						"invalid",
 						`${project.key} is not a demo project: what it records takes the server's clock, and no time from a caller`,
 					);
 				if (call.at > app.now()) throw new OpError("invalid", "the time is in the future");
 			}
-			const ctx = makeCtx(app, project, actor, true, call.at);
+			const ctx = makeCtx(app, db, project, actor, true, call.at);
 			const publish = () => {
 				app.publish({ project: found.key, seq: ctx.seq, op: op.name, actor: actor.name, touched: [...ctx.touched] });
 				ctx.touched.clear();
@@ -361,95 +364,89 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 					}
 					if (step.value === COMMIT) {
 						if (cmd && !bound) {
-							beginCommand(ctx, { id: cmd, op: op.name, request });
+							await beginCommand(ctx, { id: cmd, op: op.name, request });
 							bound = true;
 						}
-						stampSeq(ctx);
-						app.db.commit();
+						await stampSeq(ctx);
+						await db.commit();
 						publish();
-						app.db.begin();
+						await db.begin();
 						ctx.seq += 1;
 					}
 					await nextTick();
 				}
 			} else result = await op.run(ctx, input);
-			if (cmd && bound) finishCommand(ctx, { id: cmd, outcome: result });
-			else if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
-			stampSeq(ctx);
-			app.db.commit();
+			if (cmd && bound) await finishCommand(ctx, { id: cmd, outcome: result });
+			else if (cmd) await recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
+			await stampSeq(ctx);
+			await db.commit();
 			publish();
 			return { ok: true, result: present(result), seq: ctx.seq };
 		} catch (error) {
-			app.db.rollback();
+			await db.rollback();
 			throw error;
 		}
 	} catch (error) {
-		if (error instanceof OpError) return fail(error.code, error.message, error.details);
-		// Anything else is a failure nobody wrote a sentence for: a constraint of the database, a missing file.
-		// Its text can name a table, a path or a statement, so it goes to the log and the caller gets one fixed
-		// sentence, the same one the HTTP surface gives for a failure of its own.
-		console.error(`[mainworthy] ${op.name} failed:`, error);
-		return fail("internal", INTERNAL_ERROR);
+		// A failed read statement aborts its snapshot; let the scope roll back before making the reply.
+		if (op.effect === "read") throw error;
+		return failure(op.name, error);
 	}
 }
 
-/** Runs an inline read in one snapshot, including an awaited handler. */
-const read = (app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> => {
-	const run = () => app.reader.snapshotAsync(() => execute(app, ops, call));
-	// In-memory instances share the writer connection. An idle read owns the gate until its snapshot ends;
-	// a read during a sliced write joins that transaction, as synchronous reads did.
-	return app.reader === app.db && !app.db.inTransaction ? app.gate.run(run) : run();
-};
+function failure(op: string, error: unknown): Reply {
+	if (error instanceof OpError) return fail(error.code, error.message, error.details);
+	console.error(`[mainworthy] ${op} failed:`, error);
+	return fail("internal", INTERNAL_ERROR);
+}
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-/**
- * Runs one operation as a server does. A read goes to a reader thread, which has its own read-only connection
- * (with no reader threads it runs at once on the one reader connection). A write waits its turn at
- * the gate (one writer at a time, and nobody blocks the thread to wait), then runs; where the operation pauses,
- * the event loop serves whatever else has arrived. Every surface calls this and nothing else.
- */
-export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+export const READ_ATTEMPTS = 3;
+
+/** Every read closes its snapshot before checking current authority in a fresh scope. */
+async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, attempt = 0): Promise<Reply> {
 	const op = ops[call.op];
-	const misplaced = misplacedTime(op, call);
-	if (misplaced) return misplaced;
-	if (op?.effect === "read" && app.readers && call.reference) {
-		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
-		if (op.scope === "project" && !project) return read(app, ops, call);
-		const actor = call.actor(project?.id ?? 0);
-		// Who may read is decided here, in the thread that knows the caller, and asked again when the reader has
-		// answered. A reader thread is only ever handed a call its caller is allowed to make; a refusal is answered
-		// inline and never reaches one.
-		if (!actor || !mayRun(actor, op.needs)) return read(app, ops, call);
-		return app.readers
-			.run(
-				{
-					op: call.op,
-					project: call.project,
-					input: call.input,
-					caller: call.reference,
-					clockOffset: app.now() - Date.now(),
-				},
-				() => read(app, ops, call),
-			)
-			.then((reply) => {
-				// Also refuse a project, credential or capability that ended while the reader was answering. The read
-				// itself resolved these in its snapshot; an inline replay does the same.
-				const current = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
-				if (op.scope === "project" && !current) {
-					const { code, message } = noProject(call.project);
-					return fail(code, message);
-				}
-				if (current?.identity !== project?.identity) return read(app, ops, call);
-				const admitted = admitCaller(call, op, call.actor(current?.id ?? 0), current?.key ?? null);
-				if ("reply" in admitted) return admitted.reply;
-				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
-			});
+	let identity: string | undefined;
+	let reply: Reply;
+	try {
+		reply = await app.database.read(async (db) => {
+			identity = op?.scope === "project" && call.project ? (await findProject(db, call.project))?.identity : undefined;
+			return await executeInSnapshot(app, db, ops, call);
+		});
+	} catch (error) {
+		reply = failure(call.op, error);
 	}
-	if (ops[call.op]?.effect !== "write") return read(app, ops, call);
-	return app.gate.run(async () => {
-		const reply = await execute(app, ops, call);
-		if (op?.scope === "instance" && reply.ok) app.readers?.refresh();
+	if (!op) return reply;
+	const rechecked = await app.database.read(async (db) => {
+		const project = op.scope === "project" && call.project ? await findProject(db, call.project) : null;
+		if (op.scope === "project" && !call.project) return fail("invalid", `${op.name} needs a project`);
+		if (op.scope === "project" && !project) {
+			const { code, message } = noProject(call.project);
+			return fail(code, message);
+		}
+		const caller = call.reference ? await resolveCaller(app, db, call.reference, project?.id ?? 0) : null;
+		const admitted = admitCaller(
+			call,
+			op,
+			call.reference ? (caller?.actor ?? null) : await call.actor(project?.id ?? 0),
+			project?.key ?? null,
+		);
+		if ("reply" in admitted) return admitted.reply;
+		if (project?.identity !== identity) return null;
 		return reply;
 	});
+	return (
+		rechecked ??
+		(attempt + 1 < READ_ATTEMPTS
+			? await read(app, ops, call, attempt + 1)
+			: fail("conflict", "project changed during all read attempts"))
+	);
+}
+
+/** Runs writes exclusively on one lease, and reads in repeatable snapshots. */
+export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	const misplaced = misplacedTime(ops[call.op], call);
+	if (misplaced) return misplaced;
+	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
+	return await app.database.write(async (db) => await execute(app, db, ops, call));
 }

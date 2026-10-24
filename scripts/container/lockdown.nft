@@ -3,6 +3,7 @@ table inet mainworthy_lockdown {
 		type filter hook output priority filter; policy drop;
 		ip daddr 127.0.0.11 counter drop
 		oifname "lo" accept
+		# database endpoint
 		ct state established,related ct direction reply accept
 		counter drop
 	}

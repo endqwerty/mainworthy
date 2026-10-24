@@ -6,7 +6,7 @@ import { type TrackerInput, TrackerItem, type TrackerReceipt } from "../../core/
 import { batchById, mustTarget, resultById, testById, testRef } from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
 import { type Ctx, projectById } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
@@ -55,29 +55,29 @@ function receipt(row: RequestRow): TrackerReceipt {
 	};
 }
 
-export function trackerStatus(db: Db, project: number, id: string): TrackerReceipt {
-	const row = db.get(Q.one, { project, id });
+export async function trackerStatus(db: ReadDb, project: number, id: string): Promise<TrackerReceipt> {
+	const row = await db.get(Q.one, { project, id });
 	if (!row) throw notFound("tracker request");
 	return receipt(row);
 }
 
-export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
+export async function queueDefect(ctx: Ctx, input: TrackerInput): Promise<TrackerReceipt> {
 	const config = configuredTrackers(ctx.app.config, ctx.project.key)[0];
 	if (!config) throw invalid("A tracker is not configured for this project.");
 	if (input.do === "link" && !config.validKey(input.key))
 		throw invalid("The issue key must name an issue in the configured tracker project.");
-	const result = resultById(ctx.db, input.result);
+	const result = await resultById(ctx.db, input.result);
 	if (!mayRun(ctx.actor, "read") && result?.actor !== ctx.actor.id)
 		throw forbidden("tracker needs the read capability to queue a result this actor did not record");
 	if (!result || result.project !== ctx.project.id) throw notFound("result");
 	if (result.outcome !== "fail" && result.outcome !== "error")
 		throw invalid("A defect needs a failed or errored result.");
-	const test = testById(ctx.db, result.test);
-	const target = mustTarget(ctx.db, result.target);
-	const batch = batchById(ctx.db, result.batch);
+	const test = await testById(ctx.db, result.test);
+	const target = await mustTarget(ctx.db, result.target);
+	const batch = await batchById(ctx.db, result.batch);
 	if (!test || !batch) throw notFound("result evidence");
-	const row = result.basis_case === null ? null : caseById(ctx.db, result.basis_case);
-	const version = row && result.basis_version !== null ? versionOf(ctx.db, row.id, result.basis_version) : null;
+	const row = result.basis_case === null ? null : await caseById(ctx.db, result.basis_case);
+	const version = row && result.basis_version !== null ? await versionOf(ctx.db, row.id, result.basis_version) : null;
 	const body = version ? json<CaseBody>(version.body) : null;
 	const basis = row && version ? `${caseRef(row)}@v${version.no} (${result.basis})` : "unresolved";
 	const draft = [
@@ -111,7 +111,7 @@ export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
 		error: null,
 		at: ctx.now,
 	};
-	ctx.db.run(Q.insert, request);
+	await ctx.db.run(Q.insert, request);
 	return receipt(request);
 }
 
@@ -120,7 +120,7 @@ const stopping = new WeakSet<App>();
 
 export function deliverTrackerRequests(app: App, port?: TrackerPort): Promise<number> {
 	const running = active.get(app);
-	if (running) return running;
+	if (running !== undefined) return running;
 	if (stopping.has(app)) return Promise.resolve(0);
 	const work = deliver(app, port).finally(() => active.delete(app));
 	active.set(app, work);
@@ -138,12 +138,14 @@ export async function waitTrackerRequests(app: App): Promise<void> {
 async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
-		const claimed = await app.gate.run(() => {
-			if (stopping.has(app)) return null;
-			const next = app.db.get(Q.next);
-			if (next) app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
-			return next ? { row: next, project: projectById(app.db, next.project)?.key } : null;
-		});
+		const claimed = await app.database.write(async (db) =>
+			db.transaction(async () => {
+				if (stopping.has(app)) return null;
+				const next = await db.get(Q.next);
+				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
+				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
+			}),
+		);
 		if (!claimed) break;
 		const { row, project } = claimed;
 		let issue: TrackerItem | null = null;
@@ -165,14 +167,17 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 					? caught.message
 					: "The tracker request failed; check the tracker before creating another issue.";
 		}
-		await app.gate.run(() =>
-			app.db.run(Q.finish, {
-				id: row.id,
-				nonce: row.nonce,
-				issue: issue ? JSON.stringify(issue) : null,
-				error,
-				state: issue ? "complete" : "failed",
-			}),
+		await app.database.write(async (db) =>
+			db.transaction(
+				async () =>
+					await db.run(Q.finish, {
+						id: row.id,
+						nonce: row.nonce,
+						issue: issue ? JSON.stringify(issue) : null,
+						error,
+						state: issue ? "complete" : "failed",
+					}),
+			),
 		);
 		delivered++;
 	}

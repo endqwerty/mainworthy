@@ -5,15 +5,16 @@ import { join } from "node:path";
 import { z } from "zod";
 import { type Instance, start } from "../src/app/start.ts";
 import { InboxReply } from "../src/core/ops.ts";
-import { ruleActor } from "../src/server/identity/identity.ts";
 import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { githubStatusesPort } from "../src/server/statuses/github.ts";
 import type { StatusDraft } from "../src/server/statuses/port.ts";
 import { deliverCommitStatuses } from "../src/server/statuses/statuses.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 const commit = "a".repeat(40);
@@ -27,7 +28,7 @@ afterEach(async () => {
 	instance = undefined;
 	if (directory) rmSync(directory, { recursive: true, force: true });
 	directory = undefined;
-	h?.close();
+	await h?.close();
 	h = undefined;
 });
 
@@ -86,7 +87,7 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-"));
 	let now = 1_800_000_000_000;
 	const config = {
-		...defaultConfig({}),
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 		owner: "robin",
 		dataDir: directory,
 		port: 0,
@@ -108,7 +109,7 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 		),
 	);
 	try {
-		instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now });
+		instance = await start(config, () => ({ ui: null }), { now: () => now });
 		const post = async (op: string, input: unknown = {}) => {
 			const response = await original(`${instance?.url}/api/p/scratch/${op}`, {
 				method: "POST",
@@ -177,14 +178,18 @@ test("all four verdicts map to commit status states", async () => {
 		state: "failure",
 		description: expect.stringContaining("failed:"),
 	});
-	const project = findProject(fixture.app.db, "scratch");
+	const project = await fixture.app.database.read(async (db) => await findProject(db, "scratch"));
 	if (!project) throw new Error("expected scratch");
-	fixture.app.db.transaction(() =>
-		acceptReport(makeCtx(fixture.app, project, fixture.owner, true), {
-			target: { commit, repo: github.repository, pr: 55 },
-			attempt: 2,
-			results: [{ test: { key: "checkout" }, outcome: "pass" }],
-		}),
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await acceptReport(makeCtx(fixture.app, db, project, fixture.owner, true), {
+						target: { commit, repo: github.repository, pr: 55 },
+						attempt: 2,
+						results: [{ test: { key: "checkout" }, outcome: "pass" }],
+					}),
+			),
 	);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
@@ -251,7 +256,15 @@ test("failed status posts stay due and an accepted post clears the last error", 
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		await deliverCommitStatuses(fixture.app, fake.port);
-		expect(fixture.app.db.raw.query("SELECT state, sent FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, sent FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "queued",
 			sent: null,
 		});
@@ -259,12 +272,27 @@ test("failed status posts stay due and an accepted post clears the last error", 
 		fixture.advance(60_000);
 		await deliverCommitStatuses(fixture.app, fake.port);
 		expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "error"]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
 		expect(JSON.stringify(log.mock.calls)).not.toContain(credential);
-		expect(JSON.stringify(fixture.app.db.raw.query("SELECT * FROM commit_statuses").all())).not.toContain(credential);
+		expect(
+			JSON.stringify(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.all(sql<readonly SqlValue[], Record<string, unknown>>("SELECT * FROM commit_statuses"), []),
+				),
+			),
+		).not.toContain(credential);
 	} finally {
 		log.mockRestore();
 	}
@@ -291,7 +319,15 @@ test("a lost first reply retries the latest gate without reading remote state", 
 			["POST", "error"],
 			["POST", "success"],
 		]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
@@ -310,7 +346,7 @@ test("only opted-in counted reports for the configured project and repository en
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests).toEqual([]);
 	await report(fixture, "pass", { commit: "b".repeat(40), repo: "other/repository", pr: 55 });
-	const agent = fixture.actor("agent", "agent", ["read", "produce"]);
+	const agent = await fixture.actor("agent", "agent", ["read", "produce"]);
 	await fixture.call(
 		"report",
 		{
@@ -338,18 +374,28 @@ test("archives omit commit status state and restoring one does not enroll histor
 	const fixture = await setup();
 	await report(fixture, "pass");
 	const chunks: string[] = [];
-	exportArchive(fixture.app.db, (chunk) => chunks.push(chunk));
+	await fixture.app.database.read(async (db) => await exportArchive(db, (chunk) => chunks.push(chunk)));
 	expect(chunks.join("")).not.toContain('"t":"commit_statuses"');
 	expect(chunks.join("")).not.toContain(credential);
-	const restored = openApp(fixture.app.config, { memory: true });
+	const restored = await openApp({ ...fixture.app.config, databaseUrl: (await testDatabase()).url }, { memory: true });
 	try {
-		importArchive(restored.db, chunks.join("").trimEnd().split("\n"));
+		await restored.database.write(
+			async (db) => await db.transaction(async () => await importArchive(db, chunks.join("").trimEnd().split("\n"))),
+		);
 		const fake = remote();
 		await deliverCommitStatuses(restored, fake.port);
 		expect(fake.requests).toEqual([]);
-		expect(restored.db.raw.query("SELECT count(*) AS n FROM commit_statuses").get()).toEqual({ n: 0 });
+		expect(
+			await restored.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({ n: 0 });
 	} finally {
-		restored.close();
+		await restored.close();
 	}
 });
 
@@ -401,15 +447,29 @@ test("the adapter bounds descriptions and ignores reply bodies", async () => {
 test("a row interrupted during delivery retries after its existing minute delay", async () => {
 	const fixture = await setup();
 	await report(fixture);
-	fixture.app.db.raw
-		.query("UPDATE commit_statuses SET state = 'sending', sent = NULL, next_at = ?")
-		.run(fixture.app.now() + 60_000);
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"UPDATE commit_statuses SET state = 'sending', sent = NULL, next_at = $1",
+						),
+						[fixture.app.now() + 60_000],
+					),
+			),
+	);
 	const fake = remote();
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((request) => [request.init?.method, request.body.state])).toEqual([["POST", "error"]]);
-	expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+	expect(
+		await fixture.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"), []),
+		),
+	).toEqual({
 		state: "complete",
 		error: null,
 	});
@@ -424,7 +484,7 @@ test("expired holds post the current status after the same sweep the minute job 
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "success" });
 	fixture.advance(15 * 86_400_000);
-	await fixture.app.gate.run(() => sweep(fixture.app, ruleActor(fixture.app.db).id));
+	await sweep(fixture.app);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)).toMatchObject({
 		url: `https://api.github.com/repos/example/shop/statuses/${commit}`,
@@ -436,7 +496,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-stop-"));
 	let now = 1_800_000_000_000;
 	const config = {
-		...defaultConfig({}),
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 		owner: "robin",
 		dataDir: directory,
 		port: 0,
@@ -453,7 +513,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		entered.resolve();
 		return finish.promise;
 	});
-	instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: slow.port });
+	instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: slow.port });
 	const post = async (op: string, input: unknown) => {
 		const reply = await fetch(`${instance?.url}/api/p/scratch/${op}`, {
 			method: "POST",
@@ -488,8 +548,18 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		instance = undefined;
 	}
 	const resumed = remote();
-	instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: resumed.port });
-	expect(instance.app.db.raw.query("SELECT commit_sha, state FROM commit_statuses ORDER BY commit_sha").all()).toEqual([
+	instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: resumed.port });
+	expect(
+		await instance.app.database.read(
+			async (db) =>
+				await db.all(
+					sql<readonly SqlValue[], Record<string, unknown>>(
+						"SELECT commit_sha, state FROM commit_statuses ORDER BY commit_sha",
+					),
+					[],
+				),
+		),
+	).toEqual([
 		{ commit_sha: commit, state: "complete" },
 		{ commit_sha: "b".repeat(40), state: "queued" },
 	]);
@@ -506,7 +576,9 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 test("an older reply cannot complete a replacement row or bypass its minute limit", async () => {
 	const fixture = await setup();
 	await report(fixture);
-	const old = fixture.app.db.raw.query<{ nonce: string }, []>("SELECT nonce FROM commit_statuses").get();
+	const old = await fixture.app.database.read(
+		async (db) => await db.get(sql<readonly SqlValue[], { nonce: string }>("SELECT nonce FROM commit_statuses"), []),
+	);
 	const entered = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<Response>();
 	const fake = remote(() => {
@@ -516,7 +588,13 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 	const delivery = deliverCommitStatuses(fixture.app, fake.port);
 	await entered.promise;
 	try {
-		await fixture.app.gate.run(() => fixture.app.db.raw.query("DELETE FROM commit_statuses").run());
+		await fixture.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[], Record<string, unknown>>("DELETE FROM commit_statuses"), []),
+				),
+		);
 		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
@@ -526,16 +604,25 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 		finish.resolve(response());
 		await delivery;
 	}
-	const replacement = fixture.app.db.raw
-		.query<{ nonce: string; state: string }, []>("SELECT nonce, state FROM commit_statuses")
-		.get();
+	const replacement = await fixture.app.database.read(
+		async (db) =>
+			await db.get(
+				sql<readonly SqlValue[], { nonce: string; state: string }>("SELECT nonce, state FROM commit_statuses"),
+				[],
+			),
+	);
 	expect(replacement?.nonce).not.toBe(old?.nonce);
 	expect(replacement?.state).toBe("queued");
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["error"]);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "success"]);
-	expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+	expect(
+		await fixture.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"), []),
+		),
+	).toEqual({
 		state: "complete",
 		error: null,
 	});
@@ -676,7 +763,15 @@ test("a failed post remains due even after thirty days", async () => {
 		fail = false;
 		await deliverCommitStatuses(fixture.app, fake.port);
 		expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "error"]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
@@ -697,16 +792,35 @@ test("P6 a refused 422 commit backs off and stops during one simulated day until
 	});
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
-		for (let minute = 0; minute <= 1440; minute++) {
-			await deliverCommitStatuses(fixture.app, fake.port);
-			fixture.advance(60_000);
+		for (let attempt = 0; attempt < 16; attempt++) {
+			if (attempt > 0) {
+				const { next_at } = await fixture.app.database.read((db) =>
+					db.one(sql<readonly [], { next_at: number }>("SELECT next_at FROM commit_statuses")),
+				);
+				expect(next_at).toBeGreaterThan(fixture.app.now());
+				fixture.advance(next_at - fixture.app.now() - 1);
+				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+				fixture.advance(1);
+			}
+			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(1);
 		}
+		expect(fixture.app.now() - start).toBeLessThan(86_400_000);
+		fixture.advance(start + 1441 * 60_000 - fixture.app.now());
+		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		console.info(`P6 posts for a 422 commit over one day: ${fake.requests.length}`);
 		expect(times.map((time) => time / 60_000)).toEqual([
 			0, 1, 3, 7, 15, 31, 63, 123, 183, 243, 303, 363, 423, 483, 543, 603,
 		]);
 		expect(fake.requests.at(-1)?.body.state).toBe("error");
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "stopped",
 			error:
 				"GitHub commit status delivery stopped after 16 unsuccessful attempts; check repository access and Commit statuses write permission, then send a new counted report.",
@@ -793,8 +907,83 @@ for (const status of [403, 429]) {
 
 test("the rolling hour permits 240 status posts across jobs and resumes when the oldest posts expire", async () => {
 	const fixture = await setup();
-	for (let n = 1; n <= 241; n++)
-		await report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
+	await report(fixture, "pass", { commit: (1).toString(16).padStart(40, "0"), repo: github.repository, pr: 1 });
+	// Clone report history, including the gate projection refresh reads. Every post below is delivered normally.
+	await fixture.app.database.write(async (db) =>
+		db.transaction(async () => {
+			await db.exec(`
+ WITH seed AS (SELECT n,lpad(to_hex(n),40,'0') AS sha FROM generate_series(2,241) AS u(n)),
+ source AS (
+  SELECT t.id AS target,r.id AS run,b.id AS batch,z.id AS result,t.change
+  FROM targets t JOIN runs r ON r.accepts_what=t.what
+  JOIN batches b ON b.target=t.id JOIN results z ON z.batch=b.id
+  WHERE t.commit_sha=lpad('1',40,'0')
+ ), changes_made AS (
+  INSERT INTO changes(project,key,repo,base_sha,head_sha,branch,title,url,files,rev,head_observed_seq)
+  SELECT c.project,'pr:'||s.n,c.repo,c.base_sha,s.sha,c.branch,c.title,c.url,c.files,c.rev,c.head_observed_seq
+  FROM source x JOIN changes c ON c.id=x.change CROSS JOIN seed s RETURNING *
+ ), targets_made AS (
+  INSERT INTO targets(project,what,env,repo,commit_sha,branch,line,change,first_seq)
+  SELECT t.project,'code:'||t.repo||'@'||c.head_sha,t.env,t.repo,c.head_sha,t.branch,t.line,c.id,t.first_seq
+  FROM source x JOIN targets t ON t.id=x.target CROSS JOIN changes_made c RETURNING *
+ ), runs_made AS (
+  INSERT INTO runs(project,no,name,origin,accepts,accepts_what,scope,require,change,state,signoff,
+   accepted_seq,applied_seq,outstanding,next_expiry,tally,blocking,verdict,created_by,created_at,rev,quarantined)
+  SELECT r.project,r.no+s.n-1,left(s.sha,7)||' on '||c.key,r.origin,
+   (r.accepts::jsonb || jsonb_build_object('commit',s.sha))::text,t.what,'change:'||c.id,r.require,c.id,r.state,r.signoff,
+   r.accepted_seq,r.applied_seq,r.outstanding,r.next_expiry,r.tally,r.blocking,r.verdict,r.created_by,r.created_at,r.rev,r.quarantined
+  FROM source x JOIN runs r ON r.id=x.run CROSS JOIN seed s JOIN targets_made t ON t.commit_sha=s.sha
+  JOIN changes_made c ON c.id=t.change RETURNING *
+ ), batches_made AS (
+  INSERT INTO batches(project,key,target,job,attempt,method,actor,run,build_url,state,counts,staged,receipt,at,seq,
+   nothing_required,shard,shards,model)
+  SELECT b.project,b.key||':'||t.commit_sha,t.id,b.job,b.attempt,b.method,b.actor,b.run,b.build_url,b.state,b.counts,
+   b.staged,NULL,b.at,b.seq,b.nothing_required,b.shard,b.shards,b.model
+  FROM source x JOIN batches b ON b.id=x.batch CROSS JOIN targets_made t RETURNING *
+ ), results_made AS (
+  INSERT INTO results(project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,
+   outcome,attempt,duration_ms,signature,message,detail,at_step,trail,note,run,corrects,at,quarantine_decision,quarantine_exit,model)
+  SELECT z.project,z.test,z.seq,z.ord,b.id,b.target,z.method,z.actor,z.basis,z.basis_case,z.basis_version,z.basis_claim,
+   z.outcome,z.attempt,z.duration_ms,z.signature,z.message,z.detail,z.at_step,z.trail,z.note,z.run,z.corrects,z.at,
+   z.quarantine_decision,z.quarantine_exit,z.model
+  FROM source x JOIN results z ON z.id=x.result CROSS JOIN batches_made b RETURNING *
+ ), memberships AS (
+  INSERT INTO run_tests(run,test,result,outcome,signature,attempt,flipped,lane,target)
+  SELECT r.id,z.test,z.id,z.outcome,z.signature,z.attempt,rt.flipped,z.target||':'||b.job||':'||z.actor,z.target
+  FROM source x JOIN run_tests rt ON rt.run=x.run AND rt.result=x.result CROSS JOIN results_made z
+  JOIN batches_made b ON b.id=z.batch JOIN targets_made t ON t.id=z.target JOIN runs_made r ON r.accepts_what=t.what
+ )
+ INSERT INTO commit_statuses(project,repository,commit_sha,nonce,desired,sent,state,attempts,next_at,watch_until,error)
+ SELECT s.project,s.repository,t.commit_sha,gen_random_uuid()::text,
+  jsonb_set(s.desired::jsonb,'{url}',to_jsonb(regexp_replace(s.desired::jsonb->>'url','[^/]+$',replace(c.key,':','%3A'))))::text,
+  s.sent,s.state,s.attempts,s.next_at,s.watch_until,s.error
+ FROM source x JOIN targets original ON original.id=x.target JOIN commit_statuses s ON s.commit_sha=original.commit_sha
+  AND s.project=original.project AND s.repository=original.repo
+ CROSS JOIN targets_made t JOIN changes_made c ON c.id=t.change;
+ UPDATE batches b SET receipt=(original.receipt::jsonb || jsonb_build_object(
+  'batch',b.id,'results',jsonb_build_array(z.id),'gate',
+  original.receipt::jsonb->'gate' || jsonb_build_object('run','R-'||r.no)))::text
+ FROM batches original,targets t,results z,runs r
+ WHERE original.target=(SELECT id FROM targets WHERE commit_sha=lpad('1',40,'0'))
+  AND b.target=t.id AND z.batch=b.id AND r.accepts_what=t.what AND b.id<>original.id;
+ UPDATE counters SET value=(SELECT max(no) FROM runs WHERE project=counters.project) WHERE name='run';
+`);
+		}),
+	);
+	expect(
+		await fixture.app.database.read((db) =>
+			db.all(
+				sql<readonly [], { commits: number; results: number; runs: number; statuses: number }>(`
+ SELECT count(DISTINCT t.commit_sha) AS commits,count(DISTINCT z.id) AS results,count(DISTINCT r.id) AS runs,
+ count(DISTINCT s.commit_sha) AS statuses FROM targets t JOIN batches b ON b.target=t.id
+ JOIN results z ON z.batch=b.id AND z.target=t.id JOIN run_tests m ON m.result=z.id AND m.target=t.id
+ JOIN runs r ON r.id=m.run AND r.accepts_what=t.what AND r.verdict='passed'
+ JOIN commit_statuses s ON s.commit_sha=t.commit_sha AND s.project=t.project AND s.repository=t.repo
+`),
+			),
+		),
+	).toEqual([{ commits: 241, results: 241, runs: 241, statuses: 241 }]);
+
 	const fake = remote();
 	for (let minute = 0; minute < 12; minute++) {
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(20);
@@ -802,6 +991,7 @@ test("the rolling hour permits 240 status posts across jobs and resumes when the
 		fixture.advance(60_000);
 	}
 	expect(fake.requests).toHaveLength(240);
+	expect(fake.requests.every((request) => request.body.state === "success")).toBe(true);
 	fixture.advance(47 * 60_000);
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	fixture.advance(60_000);
@@ -816,6 +1006,7 @@ for (const failure of ["permission", "lost reply"]) {
 	test(`a lasting ${failure} stops after sixteen attempts and accepted delivery resets the back-off`, async () => {
 		const fixture = await setup();
 		await report(fixture);
+		const start = fixture.app.now();
 		let reject = true;
 		const fake = remote(() => {
 			if (!reject) return response();
@@ -824,12 +1015,28 @@ for (const failure of ["permission", "lost reply"]) {
 		});
 		const log = spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			for (let minute = 0; minute <= 1440; minute++) {
-				await deliverCommitStatuses(fixture.app, fake.port);
-				fixture.advance(60_000);
+			for (let attempt = 0; attempt < 16; attempt++) {
+				if (attempt > 0) {
+					const { next_at } = await fixture.app.database.read((db) =>
+						db.one(sql<readonly [], { next_at: number }>("SELECT next_at FROM commit_statuses")),
+					);
+					expect(next_at).toBeGreaterThan(fixture.app.now());
+					fixture.advance(next_at - fixture.app.now() - 1);
+					expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+					fixture.advance(1);
+				}
+				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(1);
 			}
+			expect(fixture.app.now() - start).toBeLessThan(86_400_000);
+			fixture.advance(start + 1441 * 60_000 - fixture.app.now());
+			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 			expect(fake.requests).toHaveLength(16);
-			expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
+			expect(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state FROM commit_statuses"), []),
+				),
+			).toEqual({ state: "stopped" });
 			reject = false;
 			await fixture.call("report", {
 				target: { commit, repo: github.repository, pr: 55 },
@@ -847,7 +1054,15 @@ for (const failure of ["permission", "lost reply"]) {
 			await deliverCommitStatuses(fixture.app, fake.port);
 			expect(fake.requests).toHaveLength(18);
 			expect(fake.requests.at(-1)?.body.state).toBe("error");
-			expect(fixture.app.db.raw.query("SELECT state, attempts FROM commit_statuses").get()).toEqual({
+			expect(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, attempts FROM commit_statuses"),
+							[],
+						),
+				),
+			).toEqual({
 				state: "complete",
 				attempts: 0,
 			});
@@ -863,7 +1078,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 		directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-rate-"));
 		let now = 1_800_000_000_000;
 		const config = {
-			...defaultConfig({}),
+			...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 			owner: "robin",
 			dataDir: directory,
 			port: 0,
@@ -888,7 +1103,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 		const limited = remote(() => new Response(credential, { status: 403, headers }));
 		const log = spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: limited.port });
+			instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: limited.port });
 			for (const sha of [commit, "b".repeat(40)]) {
 				const reply = await fetch(`${instance.url}/api/p/scratch/report`, {
 					method: "POST",
@@ -905,14 +1120,22 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 			await instance.stop();
 			instance = undefined;
 			const accepted = remote();
-			instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: accepted.port });
+			instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: accepted.port });
 			now += pause - 1000;
 			await instance.minute();
 			expect(accepted.requests).toHaveLength(0);
 			now += 1000;
 			await instance.minute();
 			expect(accepted.requests.map((request) => request.body.state)).toEqual(["success", "success"]);
-			expect(instance.app.db.raw.query("SELECT posts FROM commit_status_delivery").get()).toEqual({
+			expect(
+				await instance.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly SqlValue[], Record<string, unknown>>("SELECT posts FROM commit_status_delivery"),
+							[],
+						),
+				),
+			).toEqual({
 				posts: JSON.stringify(pause < 3_600_000 ? [now - pause, now, now] : [now, now]),
 			});
 		} finally {
@@ -948,14 +1171,30 @@ test("repeated rate limits increase the shared delay even when each post is for 
 test("an interrupted sixteenth attempt stops once and a counted report with unchanged content resumes it", async () => {
 	const fixture = await setup();
 	await report(fixture, "pass");
-	fixture.app.db.raw.query("UPDATE commit_statuses SET state = 'sending', attempts = 16").run();
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"UPDATE commit_statuses SET state = 'sending', attempts = 16",
+						),
+						[],
+					),
+			),
+	);
 	const fake = remote();
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(log.mock.calls).toHaveLength(1);
-		expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state FROM commit_statuses"), []),
+			),
+		).toEqual({ state: "stopped" });
 		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
@@ -965,5 +1204,25 @@ test("an interrupted sixteenth attempt stops once and a counted report with unch
 		expect(fake.requests[0]?.body).toMatchObject({ state: "success", description: "passed: 1 result proven" });
 	} finally {
 		log.mockRestore();
+	}
+});
+
+test("a failed completion write stops status delivery without continuing on another lease", async () => {
+	const fixture = await setup();
+	await report(fixture, "pass");
+	const fake = remote();
+	const write = fixture.app.database.write.bind(fixture.app.database);
+	let scopes = 0;
+	const probe = spyOn(fixture.app.database, "write").mockImplementation(async (fn, options) => {
+		scopes++;
+		if (scopes === 3) throw new Error("completion connection lost");
+		return await write(fn, options);
+	});
+	try {
+		await expect(deliverCommitStatuses(fixture.app, fake.port)).rejects.toThrow("completion connection lost");
+		expect(fake.requests).toHaveLength(1);
+		expect(scopes).toBe(3);
+	} finally {
+		probe.mockRestore();
 	}
 });

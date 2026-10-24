@@ -240,7 +240,7 @@ $ mainworthy token revoke 2
 token 2 revoked
 ```
 
-The server reads your token or session, your actor and your grants in the same snapshot that runs an operation. A read waiting for a reader sees a grant removed before it starts. Before sending a reader-thread reply, the server checks the project, caller's grant and required capability again; if the project was replaced, it reads the replacement instead of returning the old project's data. A report already accepted keeps its actor and finishes even if that actor's token is then revoked.
+The server reads your token or session, your actor and your grants in the same snapshot that runs an operation. A read waiting for a pooled connection sees a grant removed before it starts. Before sending a read reply, the server checks the project, caller's grant and required capability again; if the project was replaced, it reads the replacement instead of returning the old project's data. A report already accepted keeps its actor and finishes even if that actor's token is then revoked.
 
 A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym made from `forgotten-` and the actor's number. If an archive imported from an older build already holds that name, Mainworthy adds `-2`, `-3` or a later suffix. The tokens stop working. Mainworthy revokes the person's passwords, passkeys and open invitations. The history keeps what the actor did.
 
@@ -564,6 +564,8 @@ The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</k
 A page's operation requests and signed-in account changes carry the actor id the page loaded, so a shared cookie cannot record your text as somebody else. If another tab signs in as a different person, the server refuses the stale page's request and asks you to sign in again. This also applies when the new person has the same name as a forgotten person.
 
 For HTTP clients that send `X-Mainworthy-As`, its value is the exact decimal `actorId` from `/api/session`, such as `3`. Names, percent-encoded values and other number formats such as `03` are refused. Clients that omit the header continue to act as their credentials identify them.
+
+An expired session returns HTTP `401 unauthenticated`, including when it expires while an account read or live-update connection request is being authorized. Sign in again to continue.
 
 To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. Ending this browser's session in Settings, **Your sessions**, opens the same dialog. It offers three choices:
 

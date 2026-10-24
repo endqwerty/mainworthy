@@ -1,7 +1,7 @@
 // The headers every reply carries: the policy by itself, then on a real listener for each kind of route, for the
 // web UI as the executable holds it (a list of built files) and as a start from source serves it (Bun's bundle).
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { Client } from "../src/cli/client.ts";
 import { refreshDemo } from "../src/cli/demo.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
-import { Db } from "../src/server/kernel/db.ts";
+import { Database } from "../src/server/kernel/db.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
 import {
@@ -25,6 +25,7 @@ import {
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { withHeadersOnEvery } from "../src/surfaces/with-headers.ts";
 import sourceUi from "../src/web/index.html";
+import { closeIdentityDatabases, identityDatabaseUrl } from "./identity-db.ts";
 
 const PAGE =
 	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -149,6 +150,7 @@ const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const scratch = (): string => {
@@ -158,9 +160,10 @@ const scratch = (): string => {
 };
 
 /** A server-mode instance with every surface `mainworthy serve` has, and one route that fails. */
-function boot(ui: unknown = null): Instance {
-	const instance = start(
+async function boot(ui: unknown = null): Promise<Instance> {
+	const instance = await start(
 		{
+			databaseUrl: await identityDatabaseUrl(scratch()),
 			dataDir: scratch(),
 			host: "127.0.0.1",
 			port: 0,
@@ -311,7 +314,7 @@ describe("on a real listener, without the web UI", () => {
 		test(`every route's reply carries the headers when the request came over ${scheme}`, async () => {
 			const failures = spyOn(console, "error").mockImplementation(() => {});
 			try {
-				const instance = boot();
+				const instance = await boot();
 				for (const request of REQUESTS) {
 					const headers = {
 						...Object.fromEntries(new Headers(request.init?.headers)),
@@ -334,7 +337,7 @@ describe("on a real listener, without the web UI", () => {
 	}
 
 	test("a route's own headers stay: the cookie of a sign-in, the methods a 405 allows, no-store on the API", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const signedIn = await fetch(`${instance.url}/api/login`, {
 			method: "POST",
 			headers: json,
@@ -348,7 +351,7 @@ describe("on a real listener, without the web UI", () => {
 	});
 
 	test("a proxy's list of schemes counts by its first element, whatever its case", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const sent = async (forwarded: string) =>
 			(await fetch(`${instance.url}/healthz`, { headers: { "x-forwarded-proto": forwarded } })).headers.get(
 				"strict-transport-security",
@@ -369,9 +372,10 @@ describe("on a real listener, without the web UI", () => {
 describe("a route that answers without a session and writes the policy of its own pages", () => {
 	const OWN = "default-src 'none'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors 'self'";
 	const SANDBOXED = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'";
-	const open = (): Instance => {
-		const instance = start(
+	const open = async (): Promise<Instance> => {
+		const instance = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(scratch()),
 				dataDir: scratch(),
 				host: "127.0.0.1",
 				port: 0,
@@ -411,7 +415,7 @@ describe("a route that answers without a session and writes the policy of its ow
 	};
 
 	test("keeps that policy and its referrer rule, gets the framing header that policy means, and every other header", async () => {
-		const instance = open();
+		const instance = await open();
 		const page = await fetch(`${instance.url}/open/page`);
 		expect(carried(page)).toEqual({
 			...FIXED,
@@ -434,15 +438,16 @@ describe("a route that answers without a session and writes the policy of its ow
 	});
 
 	test("a reply of such a route that carries no policy gets the one for everything else", async () => {
-		const instance = open();
+		const instance = await open();
 		const moved = await fetch(`${instance.url}/open/moved`, { redirect: "manual" });
 		expect(moved.status).toBe(308);
 		expect(carried(moved)).toEqual(expected(OTHER, false));
 	});
 
 	test("the documentation's pages keep their policy: a page may frame a diagram, and a diagram stays sandboxed", async () => {
-		const instance = start(
+		const instance = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(scratch()),
 				dataDir: scratch(),
 				host: "127.0.0.1",
 				port: 0,
@@ -496,7 +501,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	}
 
 	test("the page carries the strict policy at every address the app routes, and is checked again on each visit", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		for (const path of ["/", "/p/scratch/suite/c/1", "/index-h7qagb7x.html", "/chunk-unknown.js", "/api/nothing"]) {
 			const reply = await fetch(`${instance.url}${path}`, { headers: { "x-forwarded-proto": "https" } });
 			expect(reply.status, path).toBe(200);
@@ -509,7 +514,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("a script, a style sheet and the icon carry the headers, their own type, and may be kept for good", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		for (const [path, type, body] of [
 			["/chunk-ehzzqme2.js", "text/javascript;charset=utf-8", SCRIPT],
 			["/chunk-dsth2dfw.css", "text/css;charset=utf-8", "body{margin:0}"],
@@ -530,7 +535,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("a browser that holds a file is told so, with the headers; HEAD has no body; nothing but GET and HEAD is taken", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		// `*` is "whatever you have of it": the browser holds some version, and a name with its hash has only one.
 		for (const held of ['"rrFff1eUjuI"', 'W/"rrFff1eUjuI"', '"other", "rrFff1eUjuI"', "*", " * "]) {
 			const reply = await fetch(`${instance.url}/chunk-ehzzqme2.js`, { headers: { "if-none-match": held } });
@@ -557,7 +562,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("only the listed files are served: an address cannot reach a file beside them", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		const beside = join(scratch(), "secret.txt");
 		writeFileSync(beside, "not part of the bundle");
 		for (const path of ["/../secret.txt", "/%2e%2e/secret.txt", `/${encodeURIComponent(beside)}`, "//etc/passwd"]) {
@@ -567,7 +572,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("an API route is still the API's when the UI takes every other path", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		const reply = await fetch(`${instance.url}/api/session`, { headers: bearer });
 		expect(reply.headers.get("content-type")).toBe("application/json; charset=utf-8");
 		expect(carried(reply)).toEqual(expected(OTHER, false));
@@ -580,7 +585,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	const sha256 = (text: string): string => new Bun.CryptoHasher("sha256").update(text).digest("base64");
 
 	test("the page allows the inline scripts that are in it, by hash, and its files carry the headers", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const reply = await fetch(`${instance.url}/p/scratch/suite`, { headers: { "x-forwarded-proto": "https" } });
 		const html = await reply.text();
 		expect(reply.status).toBe(200);
@@ -653,7 +658,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	}
 
 	test("the page's own reload socket opens: this server's Origin, on the path the development page asks for", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const html = await (await fetch(`${instance.url}/`)).text();
 		const client = [...html.matchAll(/src="(\/_bun\/client\/[^"]+)"/g)].map((match) => match[1] ?? "")[0];
 		// The path is Bun's, in the script it serves with the development page. If Bun moves it, this says so.
@@ -666,7 +671,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("a page on another site cannot open the reload socket: its Origin is refused, with the headers, and nothing is opened", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		const { host } = new URL(instance.url);
 		for (const sent of [
@@ -687,7 +692,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("the reload socket does not open under a name the bundler does not serve, whatever Origin comes with it", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		// A page reached through a name that resolves here (DNS rebinding) is same-origin with that name. Bun's
 		// development server refuses the name, and it is shown the name the visitor sent, not the relay's own.
@@ -704,7 +709,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("only the reload socket's path is made a socket: an upgrade asked of any other path is answered as that path", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const page = await (await fetch(`${instance.url}/`)).text();
 		for (const path of ["/not-a-websocket", "/p/scratch/suite", "/_bun/hmr/", "/_bun/hmrx", "/x/_bun/hmr"]) {
 			const reply = await handshake(instance, path, { Origin: instance.url });
@@ -717,7 +722,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("the reload socket is relayed to the bundler, and what the page posts to it arrives", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		const socket = new WebSocket(`${instance.url.replace("http", "ws")}/_bun/hmr`);
 		socket.binaryType = "arraybuffer";
@@ -816,6 +821,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				USER: "robin",
 				TMPDIR: data,
 				MAINWORTHY_DATA: data,
+				MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(data),
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
 				MAINWORTHY_OWNER_TOKEN: TOKEN,
@@ -881,33 +887,6 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(carried(api)).toEqual(expected(OTHER, false));
 			// The executable serves its files itself: it has no bundler behind it and so no socket of one.
 			expect(readdirSync(data).filter((name) => name.startsWith("mainworthy-ui-"))).toEqual([]);
-			// A commit below the server writer's 20,000-page fallback must reach the database file while
-			// both connections stay open. The probe writer cannot checkpoint its own commit.
-			const path = join(data, "mainworthy.db");
-			const probe = new Db(path);
-			try {
-				probe.exec("PRAGMA wal_autocheckpoint = 0");
-				probe.exec(
-					"CREATE TABLE checkpoint_probe (value TEXT); INSERT INTO checkpoint_probe VALUES ('compiled checkpoint row')",
-				);
-				const marker = Buffer.from("compiled checkpoint row");
-				expect(readFileSync(`${path}-wal`).includes(marker)).toBe(true);
-				const deadline = Date.now() + 5000;
-				while (!readFileSync(path).includes(marker) && Date.now() < deadline) await Bun.sleep(25);
-				const snapshot = join(scratch(), "snapshot.db");
-				copyFileSync(path, snapshot);
-				const copy = new Db(snapshot, { reader: true });
-				try {
-					expect(copy.raw.query("SELECT value FROM checkpoint_probe").get()).toEqual({
-						value: "compiled checkpoint row",
-					});
-				} finally {
-					copy.close();
-				}
-			} finally {
-				probe.exec("DROP TABLE checkpoint_probe");
-				probe.close();
-			}
 			// Leave a small demo; a later restart of a completed revision must preserve it.
 			await seed(new Client({ url, token: TOKEN, project: "scratch" }), {
 				project: "demo",
@@ -921,8 +900,9 @@ describe("the executable, built the way `bun run build` builds it", () => {
 		}
 		// Complete one deployment through the real refresh/HTTP flow. Serve must leave its retired project alone (#914).
 		const revision = "a".repeat(40);
-		const prepared = start(
+		const prepared = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(data),
 				dataDir: data,
 				host: "127.0.0.1",
 				port: 0,
@@ -947,6 +927,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				HOME: data,
 				USER: "robin",
 				MAINWORTHY_DATA: data,
+				MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(data),
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
 				MAINWORTHY_OWNER_TOKEN: TOKEN,
@@ -972,16 +953,18 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect((await fetch(`${url}/healthz`)).status).toBe(200);
 			const demo = new Client({ url, token: TOKEN, project: "demo" });
 			expect((await demo.call("find", { limit: 100 })).items).toHaveLength(30);
-			const retiring = new Db(join(data, "mainworthy.db"), { reader: true });
+			const retiring = await Database.open({ url: await identityDatabaseUrl(data) });
 			try {
-				const remaining = () =>
-					z
-						.object({ n: z.number() })
-						.parse(retiring.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get()).n;
+				const remaining = async () =>
+					(
+						await retiring.read((db) =>
+							db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'"),
+						)
+					)[0]?.n ?? 0;
 				// Startup runs no cleanup: the retired project stays until #914 moves cleanup off the server's thread.
-				expect(remaining()).toBe(1);
+				expect(await remaining()).toBe(1);
 			} finally {
-				retiring.close();
+				await retiring.close();
 			}
 		} finally {
 			restarted.kill("SIGTERM");

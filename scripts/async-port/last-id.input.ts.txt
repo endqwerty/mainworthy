@@ -1,0 +1,17 @@
+import type { WriteDb } from "./src/server/kernel/db.ts";
+const S = "INSERT INTO items(x) VALUES (1)";
+const IGNORE = "INSERT INTO items(x) VALUES (2) ON CONFLICT DO NOTHING";
+export function insert(db: WriteDb) {
+	return db.run(S).lastId;
+}
+export function ignore(db: WriteDb) {
+	return db.run(IGNORE).lastId;
+}
+export function stored(db: WriteDb) {
+	const result = db.run(S);
+	return result.lastId;
+}
+export function destructured(db: WriteDb) {
+	const { lastId: id } = db.run(S);
+	return id;
+}

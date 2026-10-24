@@ -259,7 +259,7 @@ original draft, kept for history:
 - Import from TestRail, Qase and CSV.
 - MCP server and a shipped agent skill (priority 2).
 - Basic reports: pass rate over time, coverage by requirement, automation rate, flaky cases.
-- Runs as the Local layer with no configuration, and as the Server layer on the home server from the same build.
+- Requires PostgreSQL 18. The Local product layer has ended; `compose.yaml` runs the app and database. Running elsewhere remains possible but not yet supported.
 
 ## Non-goals (for now)
 

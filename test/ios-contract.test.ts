@@ -61,7 +61,7 @@ beforeAll(async () => {
 	project = await made("standard");
 	strict = await made("strict");
 });
-afterAll(() => server.stop());
+afterAll(() => server?.stop());
 
 async function send(method: "GET" | "POST", path: string, body?: unknown, headers: Record<string, string> = {}) {
 	const response = await fetch(`${server.url}${path}`, {
@@ -89,8 +89,37 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
 
+test("report recovery fixtures start with unfilled pinned cases and recover one submitted result", async () => {
+	const { project: key, run } = z
+		.object({ project: z.string(), run: z.string() })
+		.parse(await result("POST", "/test/project", { kind: "run" }));
+	const slots = z
+		.object({ items: z.array(z.object({ case: z.string(), version: z.number(), fills: z.array(z.unknown()) })) })
+		.parse(await op(key, "find", { in: "slots", run }));
+	expect(slots.items).toHaveLength(6);
+	expect(slots.items.every((slot) => slot.fills.length === 0)).toBe(true);
+	const slot = slots.items[0];
+	if (!slot) throw new Error("the recovery fixture has no slot");
+	const input = {
+		cmd: crypto.randomUUID(),
+		run,
+		results: [
+			{ test: { case: slot.case }, outcome: "fail", note: "Original note", steps: [{ step: "s1", outcome: "fail" }] },
+		],
+	};
+	const receipt = await op(key, "report", input);
+	expect(await op(key, "report", input)).toEqual(receipt);
+	expect(await op(key, "command", { cmd: input.cmd })).toMatchObject({ state: "done", reply: receipt });
+	const timeline = z
+		.object({ entries: z.array(z.object({ t: z.string(), note: z.string().nullish() })) })
+		.parse(await op(key, "timeline", { ref: slot.case }));
+	expect(timeline.entries.filter((entry) => entry.t === "result")).toEqual([
+		expect.objectContaining({ note: "Original note" }),
+	]);
+});
+
 test("the iPhone reads the bound authenticator step and its completed recovery-code sign-in", async () => {
-	const instance = world();
+	const instance = await world();
 	try {
 		const password = "a password for authenticator sign-in";
 		const cookie = await joined(instance, "phone-code", password);
@@ -129,24 +158,24 @@ test("the iPhone reads the bound authenticator step and its completed recovery-c
 		expect(must(completed)).toEqual({ signedIn: true });
 		expect(completed.cookie).toMatch(/^mainworthy_sid=[A-Za-z0-9_-]{43}$/);
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 
 test("the iPhone reads a native passkey challenge from the configured instance", async () => {
-	const instance = world({ publicUrl: "https://mainworthy.example:8443" });
+	const instance = await world({ publicUrl: "https://mainworthy.example:8443" });
 	try {
 		const reply = await instance.post("/api/login/challenge", { native: true });
 		expect(reply.status).toBe(200);
 		if (!reply.body.ok) throw new Error(reply.text);
 		holds("POST /api/login/challenge", PasskeyChallenge, reply.body.result);
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 
 test("the iPhone reads why native passkey sign-in is unavailable", async () => {
-	const instance = world({ publicUrl: "http://localhost:7357" });
+	const instance = await world({ publicUrl: "http://localhost:7357" });
 	try {
 		const reply = await instance.post("/api/login/challenge", { native: true });
 		expect(reply.status).toBe(400);
@@ -154,7 +183,7 @@ test("the iPhone reads why native passkey sign-in is unavailable", async () => {
 		holds("POST /api/login/challenge refusal", Refusal, reply.body.error);
 		expect(reply.body.error).toMatchObject({ code: "invalid", details: { passkey: "native-unavailable" } });
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 

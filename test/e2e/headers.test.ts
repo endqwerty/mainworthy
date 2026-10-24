@@ -8,6 +8,7 @@ import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { securityHeaders } from "../../src/surfaces/headers.ts";
+import { testDatabase } from "../db.ts";
 import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
 type Violation = { directive: string; blocked: string };
@@ -132,8 +133,10 @@ test.skipIf(!browserAvailable)(
 			writeFileSync(join(directory, "page.js"), `document.getElementById("text").textContent = "${text}";\n`);
 		write("as first written");
 		const imported = z.object({ default: z.unknown() }).parse(await import(join(directory, "index.html")));
-		const instance = start(
+		const database = await testDatabase();
+		const instance = await start(
 			{
+				databaseUrl: database.url,
 				dataDir: join(directory, "data"),
 				host: "127.0.0.1",
 				port: 0,
@@ -190,6 +193,7 @@ test.skipIf(!browserAvailable)(
 			await browser.close();
 			await other.stop(true);
 			await instance.stop();
+			await database.close();
 			rmSync(directory, { recursive: true, force: true });
 		}
 	},

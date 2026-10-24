@@ -2,13 +2,14 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import type { InboxReply } from "../src/core/ops.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "ask" });
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 type Impact = {
 	counts: { cases: number; unreviewed: number; failing: number; uncovered: number };
@@ -25,9 +26,9 @@ type Impact = {
 };
 
 async function databaseWork<T>(read: () => Promise<T>) {
-	const gets = spyOn(h.app.db, "get");
-	const alls = spyOn(h.app.db, "all");
-	const dynamic = spyOn(h.app.db, "allDynamic");
+	const gets = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "get");
+	const alls = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "all");
+	const dynamic = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "allDynamic");
 	const fullCase = z.object({ id: z.number(), title: z.string(), head: z.number(), head_hash: z.string() });
 	const reasonLink = z.union([
 		z.strictObject({ case_id: z.number(), file: z.string() }),
@@ -35,18 +36,18 @@ async function databaseWork<T>(read: () => Promise<T>) {
 	]);
 	try {
 		const reply = await read();
-		const loaded = [...gets.mock.results, ...alls.mock.results, ...dynamic.mock.results].flatMap((result) => {
-			if (result.type !== "return") return [];
-			const value: unknown = result.value;
-			const rows: unknown[] = Array.isArray(value) ? value : [value];
-			return rows;
-		});
+		const loaded: unknown[] = [];
+		for (const result of [...alls.mock.results, ...dynamic.mock.results]) {
+			if (result.type !== "return") continue;
+			const value: unknown = await result.value;
+			loaded.push(...(Array.isArray(value) ? value : [value]));
+		}
 		return {
 			reply,
-			queries: gets.mock.calls.length + alls.mock.calls.length + dynamic.mock.calls.length,
+			queries: alls.mock.calls.length + dynamic.mock.calls.length,
 			fullCases: loaded.filter((row) => fullCase.safeParse(row).success).length,
 			reasonLinks: loaded.filter((row) => reasonLink.safeParse(row).success).length,
-			testLookups: gets.mock.calls.filter(([statement]) => statement.text === "SELECT * FROM tests WHERE id = $id")
+			testLookups: gets.mock.calls.filter(([statement]) => statement.text === "SELECT * FROM tests WHERE id = $1")
 				.length,
 		};
 	} finally {
@@ -58,9 +59,9 @@ async function databaseWork<T>(read: () => Promise<T>) {
 
 test("continuation queries and hydrated case rows stay bounded from 450 to 4500 selected cases", async () => {
 	const measure = async (count: number) => {
-		h.close();
+		await h.close();
 		h = await harness();
-		const reader = h.actor("bounded-reader", "agent", ["read"]);
+		const reader = await h.actor("bounded-reader", "agent", ["read"]);
 		await h.call("propose", {
 			edits: Array.from({ length: count }, (_, i) => ({
 				op: "create",
@@ -120,7 +121,7 @@ test("a continuation page keeps the newest result across methods and each case's
 			{ test: { key: "impact-203" }, annotation: { case: "C-203", version: 1 }, outcome: "pass" },
 		],
 	});
-	const agent = h.actor("page-agent", "agent", ["read", "produce"]);
+	const agent = await h.actor("page-agent", "agent", ["read", "produce"]);
 	await h.call(
 		"report",
 		{
@@ -267,7 +268,7 @@ test("continuations reject another selection, caller, malformed position, or cha
 			ok: false,
 			error: { code: "conflict" },
 		});
-	const other = h.actor("other-reader", "agent", ["read"]);
+	const other = await h.actor("other-reader", "agent", ["read"]);
 	expect(await h.raw("impact", { ...input, cursor: first.next }, other)).toMatchObject({
 		ok: false,
 		error: { code: "conflict" },

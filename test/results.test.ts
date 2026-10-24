@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { GateStatus, InboxReply } from "../src/core/ops.ts";
-import { declaredSql } from "../src/server/kernel/db.ts";
+import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 // What a gate counted, test by test (issue #343): every row a commit's gate counts can be read back, and the
@@ -37,7 +37,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 const COMMIT = "c0ffee0000000000000000000000000000000001";
 const target = { commit: COMMIT, repo: "acme/web", branch: "feature", pr: 7 };
@@ -202,7 +202,13 @@ describe("the results behind a gate", () => {
 	test("the test time stays bounded when historical durations exceed SQLite's integer sum", async () => {
 		await h.call("report", { ...ciReport({ commit: COMMIT, n: 1025 }), target });
 		// Earlier versions and imported archives can retain durations above today's report limit.
-		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<[], Record<string, unknown>>("UPDATE results SET duration_ms = 9000000000000000")),
+				),
+		);
 		expect(await results({ commit: COMMIT })).toMatchObject({
 			count: 1025,
 			testTime: { ms: Number.MAX_SAFE_INTEGER, timed: 1025 },
@@ -305,7 +311,7 @@ describe("the results behind a gate", () => {
 			const fresh = await read({ limit: 1 });
 			await expect(read({ limit: 500, cursor: fresh.cursor, unlinked: false })).rejects.toThrow(/conflict/);
 		} finally {
-			k.close();
+			await k.close();
 		}
 	});
 
@@ -333,7 +339,7 @@ describe("the results behind a gate", () => {
 			expect(new Set(listed).size).toBe(1100);
 			await expect(k.call("inbox", { cursor: "12" })).rejects.toThrow(/not a cursor of the queue/);
 		} finally {
-			k.close();
+			await k.close();
 		}
 	});
 
@@ -414,19 +420,54 @@ describe("what reads as flaky", () => {
 			[1, "fail", 3],
 		]);
 	});
+});
 
-	test("the flips of a page are read from each test's own flips, however many the project has", () => {
-		const reads = declaredSql().filter((text) => text.includes("json_each") && text.includes("JOIN flips f"));
-		expect(reads.length).toBeGreaterThanOrEqual(3);
-		for (const text of reads) {
-			const details = h.app.db.raw
-				.query<{ detail: string }, [Record<string, string | number>]>(`EXPLAIN QUERY PLAN ${text}`)
-				.all({ project: 1, since: 0, tests: "[1]", results: "[1]" })
-				.map((row) => row.detail);
-			expect([
-				text.slice(0, 80),
-				details.some((detail) => detail.includes("flips_test (project=? AND test=?)")),
-			]).toEqual([text.slice(0, 80), true]);
-		}
+test("a correction can name an earlier result of the same report", async () => {
+	const input = ciReport({ commit: "same-report-correction", n: 1 });
+	const initial = await h.call<ReportReceipt>("report", input);
+	const previous = initial.results[0];
+	if (previous === undefined) throw new Error("missing initial result");
+	const guessed = previous + 1;
+	const test = input.results[0]?.test;
+	if (!test) throw new Error("missing test");
+	const receipt = await h.call<ReportReceipt>("report", {
+		...input,
+		attempt: 2,
+		results: [
+			{ test, outcome: "fail", failure: { message: "withdraw this observation" } },
+			{ test, outcome: "pass", corrects: guessed },
+		],
 	});
+	expect(receipt.results).toEqual([guessed, guessed + 1]);
+	expect(receipt.declined).toEqual([]);
+	expect(receipt.gate).toMatchObject({ verdict: "passed", tally: { pass: 1, unexplained: 0 } });
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.all(
+					sql<readonly [], { id: number; corrects: number | null }>("SELECT id,corrects FROM results ORDER BY id"),
+				),
+		),
+	).toEqual([
+		{ id: previous, corrects: null },
+		{ id: guessed, corrects: null },
+		{ id: guessed + 1, corrects: guessed },
+	]);
+});
+
+test("test text search preserves literal backslashes in keys, names and files", async () => {
+	const tests = [
+		{ key: String.raw`win\path\key`, name: "key match" },
+		{ key: "name", name: String.raw`win\path\name` },
+		{ key: "file", file: String.raw`win\path\check.spec.ts` },
+	];
+	await h.call("report", {
+		target: { commit: "backslash" },
+		results: tests.map((test) => ({ test, outcome: "pass" })),
+	});
+	for (const text of [String.raw`win\path`, "win\\", "WIN%path", "win_path"]) {
+		const found = await h.call<{ items: unknown[] }>("find", { in: "tests", text });
+
+		expect(found.items).toHaveLength(3);
+	}
 });

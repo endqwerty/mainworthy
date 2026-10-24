@@ -23,13 +23,16 @@ with its workflows and data flows.
 To set up a checkout, follow these steps:
 
 1. Install Bun 1.4 or newer. CI and the container use Bun 1.4.3.
-2. Install the packages.
+2. Install PostgreSQL 18 binaries, or set `MAINWORTHY_TEST_PG` to a PostgreSQL 18 admin URL.
+   The tests clone isolated databases; the URL must permit database creation. `MAINWORTHY_PG_BIN` can name
+   the directory containing `initdb` and `pg_ctl`. `compose.yaml` runs PostgreSQL for an app deployment.
+3. Install the packages.
 
 	```
 	$ bun install --frozen-lockfile
 	```
 
-3. Install the browser the browser tests run: the Chromium headless shell that playwright-core is built for, in
+4. Install the browser the browser tests run: the Chromium headless shell that playwright-core is built for, in
    Playwright's cache (decision 0114). Run it again after a playwright-core upgrade.
 
 	```
@@ -38,7 +41,7 @@ To set up a checkout, follow these steps:
 
    `MAINWORTHY_CHROMIUM` names another browser instead. A system Chromium is not used unless it names one.
    Without a browser, the check skips the browser tests and says so at the end.
-4. Start the development server.
+5. Start the development server.
 
 	```
 	$ bun run dev
@@ -56,12 +59,13 @@ In a T3 Code worktree, `t3.json` runs the install when the worktree is created. 
 ## Keep development data apart
 
 The server keeps its data in `~/.mainworthy` unless `MAINWORTHY_DATA` names another directory. That directory
-holds the database, `mainworthy.db`, and the attachment files. To try something without touching your usual
-data, start the server on a scratch directory:
+holds attachment bytes and archive staging files. Structured records live in PostgreSQL. `bun run dev` uses
+the checkout cluster when `MAINWORTHY_DATABASE_URL` is unset. A separate app data directory alone does not
+isolate records; also point `MAINWORTHY_DATABASE_URL` at a separate database. For example:
 
 ```
-$ bun run dev    # uses ~/.mainworthy
-$ MAINWORTHY_DATA="$(bun scripts/work.ts scratch new dev)" bun run dev
+$ MAINWORTHY_DATABASE_URL=postgres://mainworthy:password@127.0.0.1:5432/mainworthy_scratch \
+	MAINWORTHY_DATA="$(bun scripts/work.ts scratch new dev)" bun run dev
 ```
 
 To fill a new project called `demo` with a shop's suite, two weeks of results, runs and a queue of questions, run
@@ -80,7 +84,7 @@ The seed writes through the same HTTP operations as any client. [Your data](../g
 | --- | --- | --- |
 | `bun run dev` | `bun --watch src/cli/main.ts serve`. Bun's development bundle of the web UI, with module reload and a looser page policy. The server restarts when a source file changes. | work on the code |
 | `bun run start` | `src/cli/main.ts serve` with `NODE_ENV=production`. The built web UI under the strict page policy, with no reload. | see what a person who runs the source tree sees |
-| `bun run build`, then `dist/mainworthy serve` | one self-contained executable with the server, the web UI, the CLI, the docs and the workers | test what the container ships |
+| `bun run build`, then `dist/mainworthy serve` | one self-contained executable with the server, the web UI, the CLI, the docs | test what the container ships |
 
 In each form, `mainworthy` means the CLI. From source it is `bun src/cli/main.ts`. Every command and flag is in
 the [command line reference](../guide/cli.md).

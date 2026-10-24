@@ -48,11 +48,11 @@ import {
 	parseCheckArgs,
 	phaseFiles,
 	phaseReport,
+	STATIC_CHECKS,
 	seconds,
 	slowest,
 	TIMINGS,
 	testArgs,
-	testReaders,
 	writeTimings,
 } from "./check-plan.ts";
 import {
@@ -62,7 +62,7 @@ import {
 	StderrTail,
 } from "./chromium-diagnostics.ts";
 import { requireReady } from "./preflight.ts";
-import { ownedChildren } from "./work/processes.ts";
+import { ownedChildren, registerOwnedChild } from "./work/processes.ts";
 
 requireReady("check");
 
@@ -78,9 +78,14 @@ const everyFile = phases.includes("parallel") && shard === undefined && chosen =
 // Warn about the whole suite with its own number of workers.
 const whole = everyFile && workers === undefined;
 
+const started = performance.now();
 const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
-const ownership = join(scratch, "owned-children");
-mkdirSync(ownership);
+const databaseRuns = await import("./work/test-databases.ts");
+const recoveredDatabases = await databaseRuns.recoverTestDatabases(process.cwd());
+if (recoveredDatabases) console.log(`check: recovered ${recoveredDatabases} recorded test databases from an ended run`);
+const databaseRun = databaseRuns.beginDatabaseRun(process.cwd());
+const ownership = databaseRun.children;
+const databaseReaper = databaseRuns.reapReleasedDatabases(databaseRun.directory);
 const budgetReports = join(scratch, "budget-warnings");
 mkdirSync(budgetReports);
 let testOutcome: Outcome | undefined;
@@ -129,7 +134,35 @@ const leave = (code: number): Promise<never> => {
 		console.log(
 			`check: ${leaked.length} owned ${leaked.length === 1 ? "child" : "children"} still alive${leaked.length ? ` (pids: ${leaked.join(", ")})` : ""}`,
 		);
-		const exit = code || (browserFailed || leaked.length > 0 ? 1 : 0);
+		let exit = code || (browserFailed || leaked.length > 0 ? 1 : 0);
+		let reaped = 0;
+		try {
+			reaped = await databaseReaper.stop();
+		} catch (error) {
+			exit = 1;
+			console.error("check: released database cleanup failed", error);
+		}
+		if (leaked.length === 0) {
+			try {
+				const peak = databaseRuns.peakDatabases(databaseRun.directory);
+				const before = everyFile ? await databaseRuns.clusterDiskBytes() : null;
+				const started = performance.now();
+				const count = reaped + (await databaseRuns.drainRecordedDatabases(databaseRun.directory));
+				const after = everyFile ? await databaseRuns.clusterDiskBytes() : null;
+				console.log(
+					`check: ${count} test databases removed; peak live ${peak}; final cleanup ${((performance.now() - started) / 1000).toFixed(1)} s (${reaped} removed during tests)`,
+				);
+				if (before !== null && after !== null)
+					console.log(
+						`check: PostgreSQL disk ${(before / 1024 / 1024).toFixed(1)} MiB before cleanup, ${(after / 1024 / 1024).toFixed(1)} MiB after cleanup`,
+					);
+				rmSync(databaseRun.directory, { recursive: true });
+			} catch (error) {
+				exit = 1;
+				console.error(`check: database cleanup failed; records kept at ${databaseRun.directory}`, error);
+			}
+		} else console.error(`check: database cleanup waits for owned children; records kept at ${databaseRun.directory}`);
+		console.log(`${"total".padEnd(16)} ${seconds((performance.now() - started) / 1000).padStart(8)}`);
 		if (junit && testOutcome) await Bun.write(outcomePath(junit), `${JSON.stringify({ ...testOutcome, exit })}\n`);
 		rmSync(scratch, { recursive: true, force: true });
 		process.exit(exit);
@@ -167,12 +200,14 @@ async function run(
 			...process.env,
 			MAINWORTHY_TEST_CHILDREN: ownership,
 			MAINWORTHY_BUDGET_REPORTS: budgetReports,
-			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
+			MAINWORTHY_TEST_DATABASES: databaseRun.directory,
 			...env,
 		},
 	});
 	children.add(child);
+	const unregister = await registerOwnedChild(child.pid, ownership);
 	const exit = await child.exited;
+	await unregister();
 	children.delete(child);
 	if (typeof out === "number") closeSync(out);
 	const took = (performance.now() - started) / 1000;
@@ -227,7 +262,10 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 					diagnosticSlots.set(slot, diagnosticSlot);
 					browser.process().on("exit", (code, signal) => {
 						// A fatal exit can arrive after phase cleanup began; expected graceful/forced stops are excluded.
-						if (leaving || (!browsers.has(browser) && (code === 0 || signal === "SIGTERM" || signal === "SIGKILL")))
+						if (
+							leaving !== undefined ||
+							(!browsers.has(browser) && (code === 0 || signal === "SIGTERM" || signal === "SIGKILL"))
+						)
 							return;
 						diagnosticSlot.unexpectedExit = { at: new Date().toISOString(), code, signal };
 					});
@@ -235,14 +273,14 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 						.process()
 						.stderr?.setEncoding("utf8")
 						.on("data", (chunk: string) => {
-							if (leaving) return;
+							if (leaving !== undefined) return;
 							stderr.append(chunk);
 							const path = chromiumDiagnosticPaths(diagnosticDirectory, slot).stderr;
 							writeFileSync(`${path}.next`, stderr.text());
 							renameSync(`${path}.next`, path);
 						});
 					browser.on("close", () => {
-						if (!browsers.has(browser) || leaving) return;
+						if (!browsers.has(browser) || leaving !== undefined) return;
 						browserFailed = true;
 						const child = browser.process();
 						diagnosticSlot.unexpectedExit ??= {
@@ -285,7 +323,6 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 	return parts;
 }
 
-const started = performance.now();
 const fixture = needsBrowserFixture(phases, shard, chosen) ? join(scratch, "browser-fixture") : undefined;
 if (fixture) {
 	const build = await run("browser fixture", [process.execPath, ...fixtureBuildArgs(fixture)], false, {
@@ -298,14 +335,8 @@ if (fixture) {
 }
 const [testParts, ...staticParts] = await Promise.all([
 	tests(!testsOnly, fixture),
-	...(testsOnly
-		? []
-		: [
-				run("typecheck", [process.execPath, "run", "typecheck"], true),
-				run("lint", [process.execPath, "run", "lint"], true),
-			]),
+	...(testsOnly ? [] : STATIC_CHECKS.map((check) => run(check.name, [process.execPath, ...check.args], true))),
 ]);
-const total = (performance.now() - started) / 1000;
 const testSeconds = testParts.reduce((sum, part) => sum + part.seconds, 0);
 const parts = [...staticParts, ...testParts];
 const failed = parts.filter((part) => part.exit !== 0);
@@ -340,7 +371,6 @@ console.log("");
 const chromium = findChromium();
 if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
-console.log(`${"total".padEnd(16)} ${seconds(total).padStart(8)}`);
 const slow = slowest(
 	measured,
 	5,

@@ -5,30 +5,41 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { ciPolicy } from "../scripts/work/ci.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { SameCodeEvidence } from "../src/core/flaky.ts";
+import { contentHash } from "../src/core/hash.ts";
 import { Policy } from "../src/core/kinds.ts";
 import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
 import { toItem } from "../src/server/decisions/decisions.ts";
-import { mustQuestion } from "../src/server/decisions/questions.ts";
+import {
+	alsoAbout,
+	attachEvidence,
+	insertQuestion,
+	mustQuestion,
+	noteCarried,
+	refsOf,
+} from "../src/server/decisions/questions.ts";
+import { sameCodeEvidence } from "../src/server/evidence/flaky.ts";
 import { ruleActor } from "../src/server/identity/identity.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
+import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
+import { type TestDatabase, testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
 const queue = async () => await h.call<InboxReply>("inbox");
@@ -40,13 +51,105 @@ const decide = async (q: { q: string; evidenceHash: string }, answer: Record<str
 			as,
 		)
 	)[0];
-const count = (table: string) =>
-	h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
+const count = async (table: string) =>
+	(await h.app.database.read(async (db) => await db.allDynamic<{ n: number }>(`SELECT count(*) AS n FROM ${table}`)))[0]
+		?.n ?? 0;
 const first = <T>(items: T[]): T => {
 	const item = items[0];
 	if (item === undefined) throw new Error("expected at least one item");
 	return item;
 };
+
+test("question reference writers batch refs and preserve deduplication, carry and touch semantics", async () => {
+	await h.app.database.write((db) =>
+		db.transaction(async () => {
+			const project = await findProject(db, "scratch");
+			if (!project) throw new Error("missing project");
+			const ctx = makeCtx(h.app, db, project, h.owner, true);
+			const refs = Array.from({ length: 64 }, (_, i) => `C-${i + 1}`);
+			let before = h.app.database.statementCount;
+			let question = await insertQuestion(ctx, {
+				kind: "finding",
+				subject: { finding: 1 },
+				fingerprint: "ref-fixture",
+				epoch: 0,
+				prior: null,
+				title: "Reference fixture",
+				producer: "human",
+				evidence: {},
+				hash: "hash",
+				basis: "basis",
+				ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+				blocks: [],
+				rank: 0,
+				refs,
+			});
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(4);
+			expect(await refsOf(db, question.id)).toEqual(refs.toSorted());
+			ctx.touched.clear();
+			const more = Array.from({ length: 205 }, (_, i) => `T-${i + 1}`);
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, [...refs, ...more, ...more])).toBe(205);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect([...ctx.touched]).toEqual([`Q-${question.no}`]);
+			ctx.touched.clear();
+			expect(await alsoAbout(ctx, question, [...more, ...refs])).toBe(0);
+			expect(ctx.touched.size).toBe(0);
+			const unique = Array.from({ length: 401 }, (_, i) => `U-${i + 1}`);
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, unique)).toBe(401);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect(await refsOf(db, question.id)).toEqual([...refs, ...more, ...unique].toSorted());
+			before = h.app.database.statementCount;
+			question = await attachEvidence(ctx, question, {
+				title: "Attached",
+				evidence: { updated: true },
+				hash: "next",
+				basis: "basis",
+				blocks: [],
+				refs: [...refs, "R-1", "R-1"],
+			});
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect(question.title).toBe("Attached");
+			expect(JSON.parse(question.evidence)).toEqual({ updated: true });
+			before = h.app.database.statementCount;
+			await noteCarried(ctx, question, [...refs, "R-2", "R-2"]);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(2);
+			expect((await mustQuestion(db, project.id, `Q-${question.no}`)).carried).toBe(1);
+			expect(await refsOf(db, question.id)).toEqual([...refs, ...more, ...unique, "R-1", "R-2"].toSorted());
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, [])).toBe(0);
+			expect(h.app.database.statementCount - before).toBe(0);
+			await stampSeq(ctx);
+		}),
+	);
+});
+
+test("same-code sample locations use one batch without changing commit order", async () => {
+	for (let i = 1; i <= 4; i++) {
+		await h.call("report", ciReport({ commit: `samples-${i}`, n: 1, attempt: 1 }));
+		await h.call("report", ciReport({ commit: `samples-${i}`, n: 1, attempt: 2, fail: { 0: "expected stable" } }));
+	}
+	const evidence = await h.app.database.read(async (db) => {
+		const before = h.app.database.statementCount;
+		const result = await sameCodeEvidence(db, {
+			project: 1,
+			test: 1,
+			now: h.app.now(),
+			settings: { enabled: true, windowDays: 14, minFlips: 2 },
+		});
+		expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+		return result;
+	});
+	expect(evidence.signals).toHaveLength(1);
+	expect(evidence.signals[0]).toMatchObject({ flips: 4, suggested: true, signature: { text: "expected stable" } });
+	expect(evidence.signals[0]?.samples.map(({ commit, location }) => ({ commit, location }))).toEqual(
+		[4, 3, 2].map((i) => ({
+			commit: `samples-${i}`,
+			location: { label: "main", commit: `samples-${i}`, change: null },
+		})),
+	);
+});
 
 describe("standing excuse precedence", () => {
 	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", async () => {
@@ -61,7 +164,12 @@ describe("standing excuse precedence", () => {
 		expect((await decide(exact, { is: "infra" }))?.status).toBe("decided");
 		expect((await decide(broad, { is: "defect" }))?.status).toBe("decided");
 		expect((await decide(exact, { is: "infra" }))?.status).toBe("decided");
-		expect(h.app.db.raw.query("SELECT target, class FROM excuses ORDER BY target").all()).toEqual([
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT target, class FROM excuses ORDER BY target")),
+			),
+		).toEqual([
 			{ target: 0, class: "attributed" },
 			{ target: 2, class: "excused" },
 		]);
@@ -90,14 +198,23 @@ describe("standing excuse precedence", () => {
 		expect(receipt.questions).toMatchObject([{ how: "decided by rule", answer: "inherited" }]);
 		const exact = first(receipt.questions);
 		// Seed overlapping older standing without refolding: refreshing inherited questions removes this overlap.
-		h.app.db.raw.run(
-			`INSERT INTO excuses (project, signature, scope, target, decision, class, expires_at)
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<
+								readonly SqlValue[],
+								Record<string, unknown>
+							>(`INSERT INTO excuses (project, signature, scope, target, decision, class, expires_at)
 			 SELECT r.project, r.signature, 'change:' || t.change, wanted.target, e.decision, e.class, e.expires_at
 			 FROM results r JOIN targets t ON t.id = r.target
 			 JOIN excuses e ON e.project = r.project AND e.signature = r.signature AND e.target = 0
-			 JOIN (SELECT 0 AS target UNION ALL SELECT target FROM results WHERE id = ?) wanted
-			 WHERE r.id = ?`,
-			[first(receipt.results), first(receipt.results)],
+			 CROSS JOIN (SELECT 0 AS target UNION ALL SELECT target FROM results WHERE id = $1) wanted
+			 WHERE r.id = $2`),
+							[first(receipt.results), first(receipt.results)],
+						),
+				),
 		);
 		const found = await h.call<{ items: { standing: string; question: string }[] }>("find", {
 			in: "results",
@@ -105,10 +222,12 @@ describe("standing excuse precedence", () => {
 			repo: "app",
 		});
 		expect(found.items).toMatchObject([{ standing: "excused", question: exact.q }]);
-		expect(h.app.db.raw.query("SELECT class FROM excuses WHERE scope LIKE 'change:%'").all()).toEqual([
-			{ class: "attributed" },
-			{ class: "attributed" },
-		]);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT class FROM excuses WHERE scope LIKE 'change:%'")),
+			),
+		).toEqual([{ class: "attributed" }, { class: "attributed" }]);
 	});
 });
 
@@ -124,11 +243,11 @@ describe("a green report", () => {
 	test("sent twice writes once and returns the same receipt", async () => {
 		const report = ciReport({ commit: "aaaaaaa1", n: 20 });
 		const one = await h.call<ReportReceipt>("report", report);
-		const rows = count("results");
+		const rows = await count("results");
 		const two = await h.call<ReportReceipt>("report", report);
 		expect(two).toEqual({ ...one, fresh: false });
-		expect(count("results")).toBe(rows);
-		expect(count("batches")).toBe(1);
+		expect(await count("results")).toBe(rows);
+		expect(await count("batches")).toBe(1);
 	});
 
 	test("a commit nobody reported on is pending, never green", async () => {
@@ -138,7 +257,7 @@ describe("a green report", () => {
 
 describe("a red report", () => {
 	test("forgetting rewrites report attribution in command replay and receipts while preserving decisions", async () => {
-		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
+		const person = await h.actor("erasure-person", "human", ["read", "produce", "answer"]);
 		const report = ciReport({ commit: "ddddddd1", n: 1, fail: { 0: "expected total" } });
 		await h.call("report", report);
 		expect((await decide(first((await queue()).items), { is: "defect" }, person))?.status).toBe("decided");
@@ -147,9 +266,14 @@ describe("a red report", () => {
 		expect(receipt.questions[0]).toMatchObject({ by: person.name, answer: "defect" });
 		const fate = await h.call<CommandFate>("command", { cmd: input.cmd });
 		if (fate.state !== "done") throw new Error("the report command did not finish");
-		const decisions = h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all();
-		const commands = h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all();
-		const results = count("results");
+		const decisions = await h.app.database.read(
+			async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions ORDER BY id")),
+		);
+		const commands = await h.app.database.read(
+			async (db) =>
+				await db.all(sql<[], Record<string, unknown>>("SELECT id, request, seq, touched FROM commands ORDER BY id")),
+		);
+		const results = await count("results");
 		await h.call("admin", { do: "actor.forget", name: person.name });
 		const expected = {
 			...receipt,
@@ -159,15 +283,27 @@ describe("a red report", () => {
 		expect(await h.call<ReportReceipt>("report", input)).toEqual(expected);
 		expect(await h.call<ReportReceipt>("report", { ...input, cmd: undefined })).toEqual({ ...expected, fresh: false });
 		expect(
-			h.app.db.raw
-				.query("SELECT receipt FROM batches WHERE receipt IS NOT NULL")
-				.all()
+			(
+				await h.app.database.read(
+					async (db) =>
+						await db.all(sql<[], Record<string, unknown>>("SELECT receipt FROM batches WHERE receipt IS NOT NULL")),
+				)
+			)
 				.map((row) => JSON.stringify(row))
 				.join(""),
 		).not.toContain(person.name);
-		expect(h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all()).toEqual(decisions);
-		expect(h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all()).toEqual(commands);
-		expect(count("results")).toBe(results);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions ORDER BY id")),
+			),
+		).toEqual(decisions);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT id, request, seq, touched FROM commands ORDER BY id")),
+			),
+		).toEqual(commands);
+		expect(await count("results")).toBe(results);
 		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items[0]?.decision?.by).toEqual([
 			`forgotten-${person.id}`,
 		]);
@@ -175,7 +311,7 @@ describe("a red report", () => {
 	});
 
 	test("forgetting rewrites known claim attribution but leaves arbitrary content and other replies alone", async () => {
-		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
+		const person = await h.actor("erasure-person", "human", ["read", "produce", "answer"]);
 		await h.call("propose", { edits: [{ op: "create", outline: person.name }] });
 		const claim = { lens: "review", findings: [{ on: "C-1", category: "ambiguous", note: person.name }] };
 		await h.call("claim", claim);
@@ -249,8 +385,8 @@ describe("a red report", () => {
 			for (const { report, receipt } of applied) {
 				expect(await h.call<ReportReceipt>("report", report)).toEqual({ ...receipt, fresh: false });
 			}
-			expect(count("results")).toBe(240);
-			expect(count("batches")).toBe(6);
+			expect(await count("results")).toBe(240);
+			expect(await count("batches")).toBe(6);
 		},
 	);
 
@@ -258,16 +394,36 @@ describe("a red report", () => {
 		const receipt = await h.call<ReportReceipt>("report", assertionShard(0));
 		const question = first((await queue()).items);
 		expect((await decide(question, { is: "flaky", reason: "the first shard's evidence" }))?.status).toBe("decided");
-		const earlier = h.app.db.raw.query("SELECT * FROM results ORDER BY id").all();
-		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all();
-		const excuses = h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all();
+		const earlier = await h.app.database.read(
+			async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM results ORDER BY id")),
+		);
+		const decisions = await h.app.database.read(
+			async (db) =>
+				await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id")),
+		);
+		const excuses = await h.app.database.read(
+			async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM excuses ORDER BY decision")),
+		);
 		const next = await h.call<ReportReceipt>("report", assertionShard(1));
 		expect(next.questions).toHaveLength(6);
 		expect(next.questions.every((q) => q.state === "open")).toBe(true);
 		expect((await gate("broad001")).tally).toMatchObject({ unexplained: 40, excused: 40 });
-		expect(h.app.db.raw.query("SELECT * FROM results ORDER BY id LIMIT 40").all()).toEqual(earlier);
-		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all()).toEqual(decisions);
-		expect(h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all()).toEqual(excuses);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM results ORDER BY id LIMIT 40")),
+			),
+		).toEqual(earlier);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id")),
+			),
+		).toEqual(decisions);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM excuses ORDER BY decision")),
+			),
+		).toEqual(excuses);
 		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items[0]).toMatchObject({
 			q: question.q,
 			title: "assertion failed",
@@ -410,24 +566,27 @@ describe("a red report", () => {
 	});
 
 	test("the guard counts applied reports even when acceptance order is reversed", async () => {
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
-				if (!project) throw new Error("no project");
-				const ctx = makeCtx(h.app, project, h.owner, true);
-				const out = fn(ctx);
-				stampSeq(ctx);
-				return out;
-			});
-		const firstBatch = inTx((ctx) => acceptReport(ctx, assertionShard(0))).batch;
-		const secondBatch = inTx((ctx) => acceptReport(ctx, assertionShard(1))).batch;
-		const firstApplied = inTx((ctx) => processBatch(ctx, secondBatch.id));
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T): Promise<T> =>
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						const project = await findProject(db, "scratch");
+						if (!project) throw new Error("no project");
+						const ctx = makeCtx(h.app, db, project, h.owner, true);
+						const out = await fn(ctx);
+						await stampSeq(ctx);
+						return out;
+					}),
+			);
+		const firstBatch = (await inTx(async (ctx) => await acceptReport(ctx, assertionShard(0)))).batch;
+		const secondBatch = (await inTx(async (ctx) => await acceptReport(ctx, assertionShard(1)))).batch;
+		const firstApplied = await inTx(async (ctx) => await processBatch(ctx, secondBatch.id));
 		expect(firstApplied.questions).toHaveLength(1);
 		expect(firstApplied.questions[0]?.title).toBe("assertion failed");
-		const secondApplied = inTx((ctx) => processBatch(ctx, firstBatch.id));
+		const secondApplied = await inTx(async (ctx) => await processBatch(ctx, firstBatch.id));
 		expect(secondApplied.questions).toHaveLength(6);
 		expect(await gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(0);
 	});
 
 	test("a broad assertion is split by file, and one answer excuses only that file", async () => {
@@ -592,7 +751,7 @@ describe("a red report", () => {
 		const again = await h.call<ReportReceipt>("report", ciReport({ commit: "ddddddd1", n: 10, fail, attempt: 2 }));
 		expect(again.questions[0]).toMatchObject({ how: "already decided", answer: "defect", by: "robin" });
 		expect((await queue()).counts.open).toBe(0);
-		expect(count("questions WHERE kind = 'failure'")).toBe(1);
+		expect(await count("questions WHERE kind = 'failure'")).toBe(1);
 	});
 
 	test("an answer on evidence that has changed is a conflict, with the new evidence", async () => {
@@ -627,27 +786,32 @@ describe("a red report", () => {
 			reason: "Taking back the selection",
 			cmd: "withdraw-selection",
 		};
-		const before = count("decisions");
+		const before = await count("decisions");
 		const reply = await h.call<DecideReply[]>("decide", input);
 		expect(reply.map(({ q, status }) => ({ q, status }))).toEqual([
 			{ q: changed.q, status: "conflict" },
 			{ q: unchanged.q, status: "reopened" },
 		]);
-		expect(count("decisions")).toBe(before + 1);
+		expect(await count("decisions")).toBe(before + 1);
 		expect(first((await h.call<InboxReply>("inbox", { state: "decided" })).items).decision).toMatchObject({
 			id: replacement.decision,
 		});
 		expect(
-			h.app.db.raw
-				.query("SELECT json_extract(signers, '$[0].reason') AS reason FROM decisions ORDER BY id DESC LIMIT 1")
-				.get(),
+			await h.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<[], Record<string, unknown>>(
+							"SELECT signers::jsonb->0->>'reason' AS reason FROM decisions ORDER BY id DESC LIMIT 1",
+						),
+					),
+			),
 		).toEqual({ reason: input.reason });
 		const state = await h.raw("inbox");
 		if (!state.ok) throw new Error("No inbox");
 		const seq = state.seq;
 		expect(seq).toBeNumber();
 		expect(await h.call<DecideReply[]>("decide", input)).toEqual(reply);
-		expect(count("decisions")).toBe(before + 1);
+		expect(await count("decisions")).toBe(before + 1);
 		expect(await h.raw("inbox")).toMatchObject({ ok: true, seq });
 	});
 
@@ -655,30 +819,128 @@ describe("a red report", () => {
 		await h.call("propose", {
 			edits: Array.from({ length: 500 }, (_, i) => ({ op: "create", outline: `Reviewed case ${i}` })),
 		});
-		for (let offset = 0; offset < 500; offset += 100)
-			await h.call("claim", {
-				lens: "undo-limit",
-				findings: Array.from({ length: 100 }, (_, i) => ({
-					on: `C-${offset + i + 1}`,
-					category: "ambiguous",
-					note: "Name the expected result",
-				})),
-			});
+		const cases = await h.app.database.read(async (db) =>
+			db.all(sql<[], { id: number; no: number; head_hash: string }>("SELECT id, no, head_hash FROM cases ORDER BY no")),
+		);
+		const template = first(cases);
+		await h.call("claim", {
+			lens: "undo-limit",
+			findings: [{ on: `C-${template.no}`, category: "ambiguous", note: "Name the expected result" }],
+		});
+		// Build the history from one real review; the 500 conditional withdrawals below still use decide.
+		const copies = cases.slice(1).map((row) => {
+			const on = `C-${row.no}`;
+			const basis = contentHash({ on, category: "ambiguous", basis: row.head_hash });
+			return {
+				id: row.id,
+				fingerprint: contentHash({ kind: "finding", key: `${on}|ambiguous` }),
+				basis,
+				hash: contentHash({ basis, target: null }),
+			};
+		});
+		await h.app.database.write(async (db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<{
+						ids: number[];
+						fingerprints: string[];
+						bases: string[];
+						hashes: string[];
+					}>(`
+ WITH seeds AS (
+  SELECT c.*, u.fingerprint, u.basis, u.hash
+  FROM unnest($ids::bigint[], $fingerprints::text[], $bases::text[], $hashes::text[])
+   AS u(id,fingerprint,basis,hash) JOIN cases c ON c.id=u.id
+ ), template AS (
+  SELECT q.* FROM questions q JOIN findings f ON f.question=q.id WHERE f.lens='undo-limit'
+ ), made AS (
+  INSERT INTO questions
+   (project,no,kind,subject,fingerprint,epoch,prior,title,producer,evidence,evidence_hash,basis,
+    seen_count,seen_first,seen_last,carried,ask,blocks,owner,rank,state,decision,opened_at,rev)
+  SELECT q.project,q.no+c.no-1,q.kind,
+   (q.subject::jsonb || jsonb_build_object('on','C-'||c.no))::text,c.fingerprint,q.epoch,q.prior,q.title,q.producer,
+   (q.evidence::jsonb || jsonb_build_object('on','C-'||c.no,'case','C-'||c.no,'caseTitle',c.title))::text,
+   c.hash,c.basis,q.seen_count,q.seen_first,q.seen_last,q.carried,q.ask,q.blocks,q.owner,q.rank-c.no+1,
+   'open',NULL,q.opened_at,q.rev FROM template q CROSS JOIN seeds c RETURNING *
+ ), refs AS (
+  INSERT INTO question_refs(project,ref,question)
+  SELECT q.project,'C-'||c.no,q.id FROM made q JOIN seeds c ON c.fingerprint=q.fingerprint
+
+ )
+ INSERT INTO findings(project,actor,lens,locus,case_id,category,note,repro,suggest,basis,question,at,seq)
+ SELECT f.project,f.actor,f.lens,'C-'||c.no,c.id,f.category,f.note,f.repro,f.suggest,c.head_hash,q.id,f.at,f.seq
+ FROM findings f CROSS JOIN seeds c JOIN made q ON q.fingerprint=c.fingerprint WHERE f.lens='undo-limit'`),
+					{
+						ids: copies.map((row) => row.id),
+						fingerprints: copies.map((row) => row.fingerprint),
+						bases: copies.map((row) => row.basis),
+						hashes: copies.map((row) => row.hash),
+					},
+				);
+				await db.exec(`UPDATE counters SET value=(SELECT max(no) FROM questions WHERE project=counters.project)
+ WHERE name='question'`);
+			}),
+		);
 		const questions = (await h.call<InboxReply>("inbox", { limit: 500 })).items;
 		expect(questions).toHaveLength(500);
-		const receipts = await h.call<DecideReply[]>("decide", {
-			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "defer" } })),
-		});
+		const chosen = first(questions);
+		const receipt = first(
+			await h.call<DecideReply[]>("decide", {
+				q: chosen.q,
+				onEvidence: chosen.evidenceHash,
+				answer: { is: "defer" },
+			}),
+		);
+		// Defer has no standing effect. Copy its ledger and owner signature, rebasing every evidence hold.
+		const receipts = await h.app.database.write(async (db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<{ decision: number | null }>(`
+ WITH template AS (SELECT * FROM decisions WHERE id=$decision), copied AS (
+  INSERT INTO decisions(project,question,kind,answer,signers,basis,holds,expires_at,supersedes,effects,at,seq,on_evidence)
+  SELECT q.project,q.id,q.kind,d.answer,d.signers,q.basis,
+   jsonb_build_array(jsonb_build_object('until','basis-changes','basis',q.basis))::text,
+   d.expires_at,NULL,d.effects,d.at,d.seq,q.evidence_hash
+  FROM questions q CROSS JOIN template d WHERE q.kind='finding' AND q.state='open' RETURNING question
+ )
+ INSERT INTO answers(question,actor,answer,reason,on_evidence,counts,at,seq)
+ SELECT q.id,a.actor,a.answer,a.reason,q.evidence_hash,a.counts,a.at,a.seq
+ FROM copied c JOIN questions q ON q.id=c.question CROSS JOIN template d JOIN answers a ON a.question=d.question`),
+					{ decision: receipt.decision },
+				);
+				await db.exec(`UPDATE questions q SET state='decided',decision=d.id,rev=d.seq
+ FROM decisions d WHERE d.question=q.id AND q.kind='finding' AND q.state='open'`);
+				return await db.all(
+					sql<[], { q: string; decision: number }>(`
+ SELECT 'Q-'||q.no AS q,d.id AS decision FROM questions q JOIN decisions d ON d.id=q.decision AND d.question=q.id
+ WHERE q.kind='finding' AND q.state='decided' ORDER BY q.rank,q.id`),
+				);
+			}),
+		);
+		expect(
+			await h.app.database.read((db) =>
+				db.all(
+					sql<readonly [], { n: number }>(`
+ SELECT count(*) AS n FROM findings f JOIN cases c ON c.id=f.case_id JOIN questions q ON q.id=f.question
+ JOIN decisions d ON d.id=q.decision AND d.question=q.id JOIN answers a ON a.question=q.id
+ WHERE f.basis=c.head_hash AND f.locus='C-'||c.no AND d.basis=q.basis AND d.on_evidence=q.evidence_hash
+ AND a.on_evidence=q.evidence_hash AND q.state='decided'
+ AND d.holds::jsonb @> jsonb_build_array(jsonb_build_object('until','basis-changes','basis',q.basis))
+`),
+				),
+			),
+		).toEqual([{ n: 500 }]);
+
 		const undo = receipts.map((reply) => ({ q: reply.q, ifDecision: reply.decision }));
-		const before = count("decisions");
+		const before = await count("decisions");
 		for (const invalid of [[], [...undo, undo[0]], [{ q: questions[0]?.q }]]) {
 			expect(await h.raw("decide", { undo: invalid })).toMatchObject({ ok: false, error: { code: "invalid" } });
 		}
-		expect(count("decisions")).toBe(before);
+		expect(await count("decisions")).toBe(before);
 		expect((await h.call<DecideReply[]>("decide", { undo })).map((reply) => reply.status)).toEqual(
 			Array(500).fill("reopened"),
 		);
-		expect(count("decisions")).toBe(before + 500);
+		expect(await count("decisions")).toBe(before + 500);
 		expect((await queue()).counts.open).toBe(500);
 	});
 
@@ -691,8 +953,8 @@ describe("a red report", () => {
 		expect(undone[0]?.status).toBe("reopened");
 		expect((await gate("fffffff1")).verdict).toBe("blocked");
 		expect((await queue()).counts.open).toBe(1);
-		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
-		expect(count("excuses")).toBe(0);
+		expect(await count("decisions WHERE kind = 'failure'")).toBe(2);
+		expect(await count("excuses")).toBe(0);
 	});
 
 	test("undo with a decision receipt leaves an intervening answer in force", async () => {
@@ -701,11 +963,11 @@ describe("a red report", () => {
 		const give = async (is: string, as = h.owner) =>
 			first(await h.call<DecideReply[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is } }, as));
 		const receipt = await give("flaky");
-		const colleague = h.actor("colleague", "human", ["read", "produce", "answer"]);
+		const colleague = await h.actor("colleague", "human", ["read", "produce", "answer"]);
 		const replacement = await give("defect", colleague);
 		expect(receipt.status).toBe("decided");
 		expect(replacement.status).toBe("decided");
-		const decisions = count("decisions");
+		const decisions = await count("decisions");
 		const stale = first(await h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: receipt.decision }));
 		expect(stale.status).toBe("conflict");
 		expect(stale.needs).toContain("decision changed");
@@ -713,14 +975,14 @@ describe("a red report", () => {
 			id: replacement.decision,
 		});
 		expect((await gate("fffffff2")).verdict).toBe("failed");
-		expect(count("decisions")).toBe(decisions);
+		expect(await count("decisions")).toBe(decisions);
 		for (const ifDecision of [0, -1, 1.5, null, "decision"]) {
 			expect(await h.raw("decide", { undo: q.q, ifDecision })).toMatchObject({
 				ok: false,
 				error: { code: "invalid" },
 			});
 		}
-		expect(count("decisions")).toBe(decisions);
+		expect(await count("decisions")).toBe(decisions);
 		expect(first(await h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
 			"reopened",
 		);
@@ -746,8 +1008,8 @@ describe("a red report", () => {
 		expect(retry.flips).toBe(1);
 		expect(retry.gate?.verdict).toBe("passed");
 		expect((await queue()).counts.open).toBe(0);
-		expect(count("questions WHERE state = 'dissolved'")).toBe(1);
-		expect(count("flips")).toBe(1);
+		expect(await count("questions WHERE state = 'dissolved'")).toBe(1);
+		expect(await count("flips")).toBe(1);
 	});
 });
 
@@ -783,7 +1045,7 @@ describe("same-code detector suggestions", () => {
 			second: { id: 3, outcome: "fail", attempt: 3 },
 		});
 		expect(failing.gate?.verdict).toBe("blocked");
-		expect(count("excuses")).toBe(0);
+		expect(await count("excuses")).toBe(0);
 		expect((await queue()).items[0]?.evidence.tests).toMatchObject([
 			{ sameCode: { signals: [{ class: "assertion", suggested: true }] } },
 		]);
@@ -920,10 +1182,10 @@ describe("same-code detector suggestions", () => {
 				Policy.parse(await other.call("admin", { do: "policy.show", project: "other" })).settings.flakyDetection,
 			).toEqual({ enabled: true, windowDays: 14, minFlips: 2 });
 		} finally {
-			other.close();
+			await other.close();
 		}
 
-		expect(count("flips")).toBe(2);
+		expect(await count("flips")).toBe(2);
 		await configure({ enabled: true, windowDays: 1, minFlips: 1 });
 		expect((await sameCode()).signals).toMatchObject([{ flips: 2, suggested: true }]);
 		h.advance(86_400_001);
@@ -965,7 +1227,7 @@ describe("same-code detector suggestions", () => {
 
 	test("one producer cannot create a flip with another producer's result", async () => {
 		await report(1, "expected 1, got 2");
-		const pipeline = h.actor("other-pipeline", "ci", ["record"]);
+		const pipeline = await h.actor("other-pipeline", "ci", ["record"]);
 		await h.call("report", ciReport({ commit: "detector1", n: 1, attempt: 2 }), pipeline);
 		expect((await sameCode()).signals).toEqual([]);
 		await report(2);
@@ -1025,7 +1287,7 @@ describe("same-code detector suggestions", () => {
 	});
 
 	test("agents and session targets do not become same-code suggestions", async () => {
-		const agent = h.actor("review-bot", "agent", ["read", "produce"]);
+		const agent = await h.actor("review-bot", "agent", ["read", "produce"]);
 		for (const attempt of [1, 2, 3])
 			await h.call(
 				"report",
@@ -1051,7 +1313,15 @@ describe("same-code detector suggestions", () => {
 	test("policies stored before detection settings still read with defaults", async () => {
 		const policy = Policy.parse(await h.call("admin", { do: "policy.show", project: "scratch" }));
 		const { flakyDetection: _, ...legacy } = policy.settings;
-		h.app.db.raw.query("UPDATE policies SET settings = ?").run(JSON.stringify(legacy));
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[], Record<string, unknown>>("UPDATE policies SET settings = $1"), [
+							JSON.stringify(legacy),
+						]),
+				),
+		);
 		expect(
 			Policy.parse(await h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection,
 		).toEqual({
@@ -1118,7 +1388,7 @@ describe("a change against its base", () => {
 		expect(pr.questions[0]).toMatchObject({ how: "new", state: "open" });
 		const open = await s.call<InboxReply>("inbox", { on: "pr:482" });
 		expect((first(open.items).evidence as { hints: string[] }).hints).toContain("fails-on-base");
-		s.close();
+		await s.close();
 	});
 });
 
@@ -1138,26 +1408,34 @@ describe("holds", () => {
 		const next = await h.call<ReportReceipt>("report", ciReport({ commit: "1111111b", n: 3, fail }));
 		expect(next.questions[0]).toMatchObject({ how: "new", state: "open" });
 		const asked = first((await queue()).items);
-		const prior = h.app.db.raw
-			.query<{ prior: number | null; epoch: number }, []>("SELECT prior, epoch FROM questions WHERE state = 'open'")
-			.get();
+		const prior = await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<[], { prior: number | null; epoch: number }>("SELECT prior, epoch FROM questions WHERE state = 'open'"),
+				),
+		);
 		expect(prior).toMatchObject({ epoch: 1 });
 		expect(prior?.prior).not.toBeNull();
 		expect(asked.kind).toBe("failure");
 	});
 
 	/** The ledger rows of a question, oldest first: each answer and how it ended. */
-	const ledger = (q: string) =>
-		h.app.db.raw
-			.query<{ answer: string; signers: string }, [number]>(
-				"SELECT d.answer, d.signers FROM decisions d JOIN questions q ON q.id = d.question WHERE q.no = ? ORDER BY d.id",
+	const ledger = async (q: string) =>
+		(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<readonly SqlValue[], { answer: string; signers: string }>(
+							"SELECT d.answer, d.signers FROM decisions d JOIN questions q ON q.id = d.question WHERE q.no = $1 ORDER BY d.id",
+						),
+						[Number(q.slice(2))],
+					),
 			)
-			.all(Number(q.slice(2)))
-			.map((row) => ({
-				is: (JSON.parse(row.answer) as { is: string }).is,
-				clause: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.clause,
-				reason: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.reason ?? null,
-			}));
+		).map((row) => ({
+			is: (JSON.parse(row.answer) as { is: string }).is,
+			clause: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.clause,
+			reason: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.reason ?? null,
+		}));
 	const state = async (q: string) => (await h.call<{ state: string }[]>("get", { refs: [q] }))[0]?.state;
 
 	test.each(["loose", "standard"])(
@@ -1166,8 +1444,8 @@ describe("holds", () => {
 			const s = await harness({ preset });
 			try {
 				await s.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
-				const ci = s.actor("pipeline", "ci", ["read", "record"]);
-				const agent = s.actor("reviewer", "agent", ["read", "produce"]);
+				const ci = await s.actor("pipeline", "ci", ["read", "record"]);
+				const agent = await s.actor("reviewer", "agent", ["read", "produce"]);
 				const old = ciReport({
 					commit: "scope001",
 					pr: 7,
@@ -1191,7 +1469,7 @@ describe("holds", () => {
 				expect((await s.call<{ state: string }[]>("get", { refs: ["Q-2"] }))[0]?.state).toBe("open");
 				expect((await s.call<InboxReply>("inbox", { kind: "failure" })).items.map((item) => item.q)).toEqual(["Q-2"]);
 			} finally {
-				s.close();
+				await s.close();
 			}
 		},
 	);
@@ -1199,7 +1477,7 @@ describe("holds", () => {
 	test.each([false, true])(
 		"a discarded head passing preserves the reset head's failure, defect answer=%s",
 		async (answered) => {
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			const at = (commit: string, attempt = 1, failing = true) =>
 				ciReport({
 					commit,
@@ -1237,7 +1515,7 @@ describe("holds", () => {
 				open: [],
 			});
 			expect(await state(asked.q)).toBe("dissolved");
-			if (answered) expect(ledger(asked.q).map((entry) => entry.is)).toEqual(["defect", "outdated"]);
+			if (answered) expect((await ledger(asked.q)).map((entry) => entry.is)).toEqual(["defect", "outdated"]);
 		},
 	);
 
@@ -1270,6 +1548,78 @@ describe("holds", () => {
 		},
 	);
 
+	test("passing many independent causes preserves each ending and its evidence across slices", async () => {
+		await ciPolicy(async (op, input) => await h.call(op, input), "scratch");
+		const n = 203;
+		await h.call(
+			"report",
+			ciReport({
+				commit: "manyfix1",
+				n,
+				fail: Object.fromEntries(Array.from({ length: n }, (_, i) => [i, `different cause ${i}`])),
+			}),
+		);
+		const decisions = () =>
+			h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<
+							readonly [],
+							{
+								id: number;
+								question: number;
+								basis: string;
+								on_evidence: string;
+								answer: string;
+								holds: string;
+								supersedes: number | null;
+								effects: string;
+								state: string;
+								signers: string;
+								expires_at: number | null;
+							}
+						>(
+							`SELECT d.*, q.state FROM questions q JOIN decisions d ON d.id = q.decision
+				 WHERE q.kind = 'failure' ORDER BY q.id`,
+						),
+					),
+			);
+		const before = await decisions();
+		const priorLedgerSize = await count("decisions");
+		expect(before).toHaveLength(n);
+		expect(await count("excuses")).toBe(n);
+		await h.call("report", ciReport({ commit: "manyfix2", n }));
+		const after = await decisions();
+		expect(after).toHaveLength(n);
+		for (const [i, row] of after.entries()) {
+			const prior = before[i];
+			expect(prior).toBeDefined();
+			expect(row).toMatchObject({
+				question: prior?.question,
+				basis: prior?.basis,
+				on_evidence: prior?.on_evidence,
+				supersedes: prior?.id,
+				state: "dissolved",
+				expires_at: null,
+				holds: "[]",
+				effects: "{}",
+			});
+			expect(JSON.parse(row.answer)).toEqual({ is: "outdated", fixed: true });
+			expect(JSON.parse(row.signers)).toMatchObject([
+				{
+					clause: "passed",
+					policy: 2,
+					reason: "Every test it named passed on manyfix2 where it had failed; the answer ended.",
+				},
+			]);
+		}
+		expect(await count("excuses")).toBe(0);
+		expect(await count("result_excuses")).toBe(0);
+		expect(await count("decisions")).toBe(priorLedgerSize + n);
+		expect(await gate("manyfix1")).toMatchObject({ verdict: "blocked", open: [] });
+		expect(await gate("manyfix2")).toMatchObject({ verdict: "passed", open: [] });
+	});
+
 	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", async () => {
 		const fail = { 0: "expected 90, got 100" };
 		await h.call("report", ciReport({ commit: "fixed01a", branch: "fix", pr: 41, n: 3, fail }));
@@ -1297,17 +1647,22 @@ describe("holds", () => {
 		]);
 		expect((await h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" })).items).toMatchObject([ended]);
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
-		const restored = new Db(":memory:");
+		await h.app.database.read(async (db) => await exportArchive(db, (chunk) => chunks.push(chunk)));
+		const restoredFixture = await testDatabase();
+		const restored = await Database.open({ url: restoredFixture.url });
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
-			const question = mustQuestion(restored, 1, asked.q);
-			expect(toItem(restored, question)).toMatchObject(ended);
+			await restored.write(
+				async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+			);
+			await restored.read(async (db) => {
+				const question = await mustQuestion(db, 1, asked.q);
+				expect(await toItem(db, question)).toMatchObject(ended);
+			});
 		} finally {
-			restored.close();
+			await restored.close();
+			await restoredFixture.close();
 		}
-		expect(ledger(asked.q)).toEqual([
+		expect(await ledger(asked.q)).toEqual([
 			{ is: "test", clause: expect.any(String), reason: null },
 			{
 				is: "outdated",
@@ -1357,16 +1712,21 @@ describe("holds", () => {
 		await h.call("change", { change: "pr:43", state: "closed" });
 		expect(await settled("pr:43")).toMatchObject(fixed("closed"));
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
-		const restored = new Db(":memory:");
+		await h.app.database.read(async (db) => await exportArchive(db, (chunk) => chunks.push(chunk)));
+		const restoredFixture = await testDatabase();
+		const restored = await Database.open({ url: restoredFixture.url });
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
+			await restored.write(
+				async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+			);
 			const question = (await settled("pr:43"))[0];
 			if (!question) throw new Error("expected the ended answer");
-			expect(toItem(restored, mustQuestion(restored, 1, question.q))).toMatchObject(fixed("open")[0] ?? {});
+			expect(await restored.read(async (db) => await toItem(db, await mustQuestion(db, 1, question.q)))).toMatchObject(
+				fixed("open")[0] ?? {},
+			);
 		} finally {
-			restored.close();
+			await restored.close();
+			await restoredFixture.close();
 		}
 		// A reset back to an older commit that passes is another commit too: the change no longer has the failure.
 		await h.call("report", ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1 }));
@@ -1397,8 +1757,8 @@ describe("holds", () => {
 		await decide(asked, { is: "flaky" });
 		await h.call("report", ciReport({ commit: "expired408b", branch: "fix", pr: 408, n: 1 }));
 		h.advance(15 * 86_400_000);
-		const rule = ruleActor(h.app.db);
-		expect(sweep(h.app, rule.id)).toBe(1);
+		const rule = await h.app.database.read(async (db) => await ruleActor(db));
+		expect(await sweep(h.app, rule.id)).toBe(1);
 		const ended = {
 			q: asked.q,
 			state: "dissolved",
@@ -1622,7 +1982,7 @@ describe("holds", () => {
 	test("an agent's later report of the cause does not keep the answer once the pipeline passes", async () => {
 		const fail = { 0: "the coupon is applied twice" };
 		await h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, fail }));
-		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const agent = await h.actor("explorer", "agent", ["read", "produce"]);
 		await h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, job: "explore", fail }), agent);
 		const asked = first((await queue()).items.filter((item) => item.kind === "failure"));
 		await decide(asked, { is: "defect" });
@@ -1878,15 +2238,18 @@ describe("a commit reported in shards", () => {
 	});
 
 	test("a shard that is accepted and not yet applied keeps the answer until it is", async () => {
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
-				if (!project) throw new Error("no project");
-				const ctx = makeCtx(h.app, project, h.owner, true);
-				const out = fn(ctx);
-				stampSeq(ctx);
-				return out;
-			});
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T): Promise<T> =>
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						const project = await findProject(db, "scratch");
+						if (!project) throw new Error("no project");
+						const ctx = makeCtx(h.app, db, project, h.owner, true);
+						const out = await fn(ctx);
+						await stampSeq(ctx);
+						return out;
+					}),
+			);
 		const cause = "the receipt total is off by one";
 		const two = (commit: string, index: number, only: number[], fail: Record<number, string> = {}) => ({
 			...ciReport({ commit, branch: "fix", pr: 89, n: 6, job: "tests", only, fail }),
@@ -1897,10 +2260,11 @@ describe("a commit reported in shards", () => {
 		const asked = first((await queue()).items);
 		await decide(asked, { is: "defect" });
 		// Shard 2 of the next commit is accepted, holding a new test that fails with the cause, and is not applied yet.
-		const late = inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))).batch;
+		const late = (await inTx(async (ctx) => await acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))))
+			.batch;
 		await h.call("report", two("unapp01b", 1, [0, 1, 2]));
 		expect(await state(asked.q)).toBe("decided");
-		const applied = inTx((ctx) => processBatch(ctx, late.id));
+		const applied = await inTx(async (ctx) => await processBatch(ctx, late.id));
 		expect(applied.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 	});
 
@@ -1915,7 +2279,7 @@ describe("a commit reported in shards", () => {
 
 describe("who may answer", () => {
 	test("loose: an agent advises on a failure and a person decides", async () => {
-		const agent = h.actor("triage-bot", "agent", ["read", "produce"]);
+		const agent = await h.actor("triage-bot", "agent", ["read", "produce"]);
 		await h.call("report", ciReport({ commit: "3333333a", n: 3, fail: { 0: "expected 1, got 2" } }));
 		const q = first((await queue()).items);
 		const advised = await decide(q, { is: "defect" }, agent);
@@ -1927,8 +2291,8 @@ describe("who may answer", () => {
 	});
 
 	test("a pipeline cannot answer, and a reader cannot answer", async () => {
-		const ci = h.actor("github-actions", "ci", ["read", "record"]);
-		const reader = h.actor("pm", "human", ["read"]);
+		const ci = await h.actor("github-actions", "ci", ["read", "record"]);
+		const reader = await h.actor("pm", "human", ["read"]);
 		await h.call("report", ciReport({ commit: "3333333b", n: 3, fail: { 0: "expected 1, got 2" } }), ci);
 		const q = first((await queue()).items);
 		// Neither may call `decide` at all: a pipeline records, a reader reads.
@@ -1977,7 +2341,7 @@ describe("basis", () => {
 		expect(wrong.rejected).toEqual([]);
 		expect(wrong.declined).toEqual([{ index: 0, reason: "C-1 has no version 9: recorded with no case" }]);
 		expect(wrong.basis).toEqual({ exact: 0, assumed: 0, unresolved: 1 });
-		s.close();
+		await s.close();
 	});
 });
 
@@ -1986,17 +2350,21 @@ describe("the horizon", () => {
 		await h.call("report", ciReport({ commit: "5555555a", n: 5 }));
 		expect((await gate("5555555a")).verdict).toBe("passed");
 
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
-				if (!project) throw new Error("no project");
-				const ctx = makeCtx(h.app, project, h.owner, true);
-				const out = fn(ctx);
-				stampSeq(ctx);
-				return out;
-			});
-		const { batch } = inTx((ctx) =>
-			acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T): Promise<T> =>
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						const project = await findProject(db, "scratch");
+						if (!project) throw new Error("no project");
+						const ctx = makeCtx(h.app, db, project, h.owner, true);
+						const out = await fn(ctx);
+						await stampSeq(ctx);
+						return out;
+					}),
+			);
+		const { batch } = await inTx(
+			async (ctx) =>
+				await acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
 		);
 		const between = await gate("5555555a");
 		expect(between).toMatchObject({
@@ -2005,7 +2373,7 @@ describe("the horizon", () => {
 			reason: "pending: 1 report accepted and not yet applied",
 		});
 
-		inTx((ctx) => processBatch(ctx, batch.id));
+		await inTx(async (ctx) => await processBatch(ctx, batch.id));
 		expect(await gate("5555555a")).toMatchObject({ verdict: "blocked", stale: false });
 	});
 });
@@ -2014,18 +2382,21 @@ describe("work the server does on its own", () => {
 	// The recovery step on its own. `test/restart.test.ts` kills a real server in the middle of a report.
 	test("a report that was accepted and never applied is applied by recovery, once; the gate was pending meanwhile", async () => {
 		await h.call("report", ciReport({ commit: "6666666a", n: 4 }));
-		h.app.db.transaction(() => {
-			const project = findProject(h.app.db, "scratch");
-			if (!project) throw new Error("no project");
-			const ctx = makeCtx(h.app, project, h.owner, true);
-			acceptReport(ctx, ciReport({ commit: "6666666a", n: 4, fail: { 0: "expected 1, got 2" }, attempt: 2 }));
-			stampSeq(ctx);
-		});
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const project = await findProject(db, "scratch");
+					if (!project) throw new Error("no project");
+					const ctx = makeCtx(h.app, db, project, h.owner, true);
+					await acceptReport(ctx, ciReport({ commit: "6666666a", n: 4, fail: { 0: "expected 1, got 2" }, attempt: 2 }));
+					await stampSeq(ctx);
+				}),
+		);
 		// ...the process dies here. Nothing is lost: the batch is staged, and the gate does not claim green.
 		expect((await gate("6666666a")).verdict).toBe("pending");
-		expect(recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(1);
 		expect(await gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(0);
 	});
 
 	// Issue #123. The server read the id of the policy's actor once, when it started, and an import replaces the
@@ -2033,27 +2404,32 @@ describe("work the server does on its own", () => {
 	test("the minute job acts as the policy after an import gave the policy's actor another id", async () => {
 		let now = 1_800_000_000_000;
 		const directories: string[] = [];
+		const databases: TestDatabase[] = [];
 		const instances: Instance[] = [];
 		const configFor = async (): Promise<Config> => {
+			const database = await testDatabase();
+			databases.push(database);
 			const directory = await mkdtemp(join(tmpdir(), "mainworthy-minute-"));
 			directories.push(directory);
 			return defaultConfig({
 				MAINWORTHY_DATA: directory,
+				MAINWORTHY_DATABASE_URL: database.url,
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_OWNER: "robin",
 				MAINWORTHY_MODE: "local",
 			});
 		};
-		const boot = (config: Config): Instance => {
-			const instance = start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {
-				readers: 0,
+		const boot = async (config: Config): Promise<Instance> => {
+			const instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {
 				now: () => now,
 			});
 			instances.push(instance);
 			return instance;
 		};
-		const actors = (instance: Instance) =>
-			instance.app.db.raw.query<{ id: number; name: string }, []>("SELECT id, name FROM actors ORDER BY id").all();
+		const actors = async (instance: Instance) =>
+			await instance.app.database.read(
+				async (db) => await db.all(sql<[], { id: number; name: string }>("SELECT id, name FROM actors ORDER BY id")),
+			);
 		const client = (instance: Instance) => new Client({ url: instance.url, token: undefined, project: "scratch" });
 		const asked = z.object({
 			counts: z.object({ open: z.number() }),
@@ -2061,18 +2437,22 @@ describe("work the server does on its own", () => {
 		});
 		try {
 			const from = await configFor();
-			const seed = openApp(from);
-			seed.db.exec(
-				"INSERT INTO orgs (name, created_at) VALUES ('default', 0); INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)",
+			const seed = await openApp(from);
+			await seed.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						await db.run(sql("INSERT INTO orgs (name, created_at) VALUES ('default', 0)"));
+						await db.run(sql("INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)"));
+					}),
 			);
-			seed.close();
-			const source = boot(from);
-			const target = boot(await configFor());
-			expect(actors(source)).toEqual([
+			await seed.close();
+			const source = await boot(from);
+			const target = await boot(await configFor());
+			expect(await actors(source)).toEqual([
 				{ id: 1, name: "robin" },
 				{ id: 2, name: "policy" },
 			]);
-			expect(actors(target)).toEqual([
+			expect(await actors(target)).toEqual([
 				{ id: 1, name: "policy" },
 				{ id: 2, name: "robin" },
 			]);
@@ -2087,7 +2467,7 @@ describe("work the server does on its own", () => {
 			const archive = await client(source).request("/api/export");
 			const imported = await client(target).request("/api/import", { method: "POST", body: await archive.text() });
 			expect(imported.status).toBe(200);
-			expect(actors(target)).toEqual(actors(source));
+			expect(await actors(target)).toEqual(await actors(source));
 			expect(asked.parse(await client(target).call("inbox", {})).counts.open).toBe(0);
 
 			const published: { op: string; actor: string }[] = [];
@@ -2098,17 +2478,21 @@ describe("work the server does on its own", () => {
 			// What every open page is told about the change names the policy, not the person who now has the id the
 			// policy had when the server started. The row that records that the excuse ran out is the policy's too.
 			expect(published).toEqual([{ op: "sweep", actor: "policy" }]);
-			const ranOut = target.app.db.raw
-				.query<{ answer: string; signers: string }, []>(
-					"SELECT answer, signers FROM decisions WHERE kind = 'failure' ORDER BY id DESC LIMIT 1",
-				)
-				.get();
+			const ranOut = await target.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<[], { answer: string; signers: string }>(
+							"SELECT answer, signers FROM decisions WHERE kind = 'failure' ORDER BY id DESC LIMIT 1",
+						),
+					),
+			);
 			expect(ranOut).toEqual({
 				answer: '{"is":"expired"}',
 				signers: '[{"by":2,"clause":"hold-expired","policy":1,"reason":null}]',
 			});
 		} finally {
 			for (const instance of instances) await instance.stop();
+			for (const database of databases) await database.close();
 			for (const directory of directories) await rm(directory, { recursive: true, force: true });
 		}
 	});
@@ -2117,15 +2501,20 @@ describe("work the server does on its own", () => {
 		await h.call("report", ciReport({ commit: "7777777a", n: 3, fail: { 0: "expected 1, got 2" } }));
 		await decide(first((await queue()).items), { is: "flaky" });
 		expect((await queue()).counts.open).toBe(0);
-		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
-		expect(sweep(h.app, rule)).toBe(0); // still holds
+		const rule =
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<[], { id: number }>("SELECT id FROM actors WHERE kind = 'rule'")),
+				)
+			)?.id ?? 0;
+		expect(await sweep(h.app, rule)).toBe(0); // still holds
 		h.advance(15 * 86_400_000);
-		expect(sweep(h.app, rule)).toBe(1);
+		expect(await sweep(h.app, rule)).toBe(1);
 		expect((await queue()).counts.open).toBe(1);
 		expect(await gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
 		// The expired decision stays in the ledger, followed by the row that records that it ran out.
-		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
-		expect(count("excuses")).toBe(0);
+		expect(await count("decisions WHERE kind = 'failure'")).toBe(2);
+		expect(await count("excuses")).toBe(0);
 	});
 });
 
@@ -2157,7 +2546,7 @@ describe("what a failure question says leaving it costs", () => {
 	});
 
 	test("the sentence is true of a failure no gate counts: an agent's, on a commit whose gate passes", async () => {
-		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		const agent = await h.actor("runner", "agent", ["read", "produce"]);
 		await h.call("report", ciReport({ commit: "stakes003", n: 1, file: "tests/passes.spec.ts" }));
 		await h.call(
 			"report",
@@ -2229,9 +2618,9 @@ describe("a question that gains occurrences while open", () => {
 		expect((q.evidence as { facts: string[] }).facts).toContain("scope:change");
 		await decide(q, { is: "infra" });
 		expect((await gate("8888888b")).verdict).toBe("passed");
-		const signer = h.app.db.raw
-			.query<{ signers: string }, []>("SELECT signers FROM decisions WHERE kind = 'failure'")
-			.get();
+		const signer = await h.app.database.read(
+			async (db) => await db.get(sql<[], { signers: string }>("SELECT signers FROM decisions WHERE kind = 'failure'")),
+		);
 		expect(JSON.parse(signer?.signers ?? "[]")[0].clause).toBe("failure-change");
 		// infrastructure is excused for the build it was given on (the latest), so the next push asks again
 		const next = await h.call<ReportReceipt>(
@@ -2268,27 +2657,39 @@ describe("a change that ends", () => {
 		await decide(asked, { is: "flaky" });
 		const before = await gate(commit);
 		expect(before.verdict).toBe("passed");
-		const decisions = h.app.db.raw.query("SELECT * FROM decisions").all();
+		const decisions = await h.app.database.read(
+			async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions")),
+		);
 		await h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } });
-		expect(h.app.db.raw.query("SELECT DISTINCT line, branch, change FROM targets").all()).toEqual([
-			{ line: "trunk", branch: "main", change: null },
-		]);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT DISTINCT line, branch, change FROM targets")),
+			),
+		).toEqual([{ line: "trunk", branch: "main", change: null }]);
 		expect(await gate(commit)).toMatchObject({
 			run: before.run,
 			verdict: "blocked",
 			tally: { unexplained: 2, excused: 0 },
 		});
 		expect(first((await queue()).items).evidence.scope).toBe("line:trunk@acme/web");
-		expect(h.app.db.raw.query("SELECT * FROM decisions").all()).toEqual(decisions);
-		expect(h.app.db.raw.query("SELECT before_scope, after_scope, actor FROM scope_moves").all()).toEqual([
-			{ before_scope: "change:1", after_scope: "line:trunk@acme/web", actor: h.owner.id },
-		]);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions")),
+			),
+		).toEqual(decisions);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT before_scope, after_scope, actor FROM scope_moves")),
+			),
+		).toEqual([{ before_scope: "change:1", after_scope: "line:trunk@acme/web", actor: h.owner.id }]);
 		expect(
 			await h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } }),
 		).toMatchObject({
 			already: true,
 		});
-		expect(count("scope_moves")).toBe(1);
+		expect(await count("scope_moves")).toBe(1);
 		expect((await h.call<InboxReply>("inbox", { state: "decided" })).items.map((q) => q.q)).toContain(asked.q);
 		await decide(first((await queue()).items), { is: "defect" });
 		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: before.run, verdict: "failed" });
@@ -2302,7 +2703,7 @@ describe("a change that ends", () => {
 			verdict: "failed",
 			tally: { attributed: 3, excused: 0 },
 		});
-		expect(count("runs")).toBe(1);
+		expect(await count("runs")).toBe(1);
 	});
 
 	test.each([true, false])("a merged change ignores code host head observations, landing=%s", async (landing) => {
@@ -2325,25 +2726,39 @@ describe("a change that ends", () => {
 			run: trunkGate.run,
 			verdict: "blocked",
 		});
-		expect(h.app.db.raw.query("SELECT head_sha FROM changes WHERE key = 'pr:68'").get()).toEqual({
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.get(sql<[], Record<string, unknown>>("SELECT head_sha FROM changes WHERE key = 'pr:68'")),
+			),
+		).toEqual({
 			head_sha: "landnew01",
 		});
-		expect(h.app.db.raw.query("SELECT ended FROM change_ends").all()).toEqual([{ ended: "merged" }]);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT ended FROM change_ends")),
+			),
+		).toEqual([{ ended: "merged" }]);
 		await h.call("report", { ...landed, job: "late-after-reset", target: { ...landed.target, env: "two" } });
 		expect((await h.call<GateStatus>("gate", { change: "pr:68" })).run).toBe(trunkGate.run);
-		expect(h.app.db.raw.query("SELECT line, branch, change FROM targets WHERE commit_sha = 'landnew01'").all()).toEqual(
-			[
-				{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
-				{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
-			],
-		);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<[], Record<string, unknown>>("SELECT line, branch, change FROM targets WHERE commit_sha = 'landnew01'"),
+					),
+			),
+		).toEqual([
+			{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
+			{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
+		]);
 		expect(await gate("landnew01")).toMatchObject({
 			run: trunkGate.run,
 			verdict: "blocked",
 			tally: { unexplained: 3 },
 		});
 		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(landing ? ["line:trunk@acme/web"] : []);
-		expect(count("scope_moves")).toBe(landing ? 1 : 0);
+		expect(await count("scope_moves")).toBe(landing ? 1 : 0);
 		await h.call("report", { ...landed, job: "head-forward", target: { ...landed.target, head: "unseen01" } });
 		expect((await h.call<ReportReceipt>("report", reset)).fresh).toBe(false);
 		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
@@ -2386,7 +2801,14 @@ describe("a change that ends", () => {
 			expect((await queue()).items.map((q) => q.q)).toEqual([asked.q]);
 			await h.call("report", { ...report, target: { ...report.target, env: "mac", head: "headX0001" } });
 			expect(
-				h.app.db.raw.query("SELECT DISTINCT line, branch, change FROM targets WHERE commit_sha = 'headY0001'").all(),
+				await h.app.database.read(
+					async (db) =>
+						await db.all(
+							sql<[], Record<string, unknown>>(
+								"SELECT DISTINCT line, branch, change FROM targets WHERE commit_sha = 'headY0001'",
+							),
+						),
+				),
 			).toEqual([{ line: "trunk", branch: "main", change: null }]);
 			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
 				run: failed.run,
@@ -2430,9 +2852,14 @@ describe("a change that ends", () => {
 		await decide(first((await queue()).items), { is: "flaky" });
 		await h.call("change", { change: "pr:68", state: "merged", landing: { commit: "merge0002", branch: "main" } });
 		expect((await gate("landed002")).verdict).toBe("passed");
-		expect(h.app.db.raw.query("SELECT DISTINCT line FROM targets WHERE commit_sha = 'landed002'").all()).toEqual([
-			{ line: "change" },
-		]);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<[], Record<string, unknown>>("SELECT DISTINCT line FROM targets WHERE commit_sha = 'landed002'"),
+					),
+			),
+		).toEqual([{ line: "change" }]);
 		expect(await changes()).toMatchObject([
 			{
 				key: "pr:68",
@@ -2581,13 +3008,13 @@ describe("a change that ends", () => {
 		await h.call("report", report);
 		expect(await gate("placed068")).toMatchObject({ run: before.run, verdict: "blocked" });
 		expect(first((await queue()).items).about).toContain("branch:feature");
-		expect(count("runs")).toBe(1);
+		expect(await count("runs")).toBe(1);
 	});
 
 	test("a typed failure keeps its open question when CI later names the commit's branch", async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
-		const tester = h.actor("tester", "human", ["read", "produce"]);
-		const ci = h.actor("ci", "ci", ["read", "record"]);
+		const tester = await h.actor("tester", "human", ["read", "produce"]);
+		const ci = await h.actor("ci", "ci", ["read", "record"]);
 		const run = await h.call<{ run: string }>("plan", {
 			name: "Dispute",
 			select: {},
@@ -2625,7 +3052,7 @@ describe("a change that ends", () => {
 		const status = await h.call<GateStatus>("gate", { run: run.run });
 		expect(status.verdict).toBe("blocked");
 		expect(status.open.toSorted()).toEqual([asked.q, disputed.q].toSorted());
-		expect(count("scope_moves")).toBe(0);
+		expect(await count("scope_moves")).toBe(0);
 	});
 
 	test("a typed failure keeps its answer when CI later names the commit's branch", async () => {
@@ -2641,7 +3068,9 @@ describe("a change that ends", () => {
 		});
 		const asked = first((await queue()).items.filter((q) => q.kind === "failure"));
 		expect((await decide(asked, { is: "flaky" }))?.status).toBe("decided");
-		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all();
+		const decisions = await h.app.database.read(
+			async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions WHERE kind = 'failure'")),
+		);
 		await h.call("report", {
 			target: { commit: "typed0069", branch: "main" },
 			results: [
@@ -2654,13 +3083,17 @@ describe("a change that ends", () => {
 			],
 		});
 		expect((await h.call<{ state: string }[]>("get", { refs: [asked.q] }))[0]?.state).toBe("decided");
-		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all()).toEqual(decisions);
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT * FROM decisions WHERE kind = 'failure'")),
+			),
+		).toEqual(decisions);
 		expect(await h.call<GateStatus>("gate", { run: run.run })).toMatchObject({
 			verdict: "passed",
 			tally: { excused: 1 },
 		});
 		expect((await queue()).items.filter((q) => q.kind === "failure")).toEqual([]);
-		expect(count("scope_moves")).toBe(0);
+		expect(await count("scope_moves")).toBe(0);
 	});
 
 	test("a landing uses trunk's existing answer while older pull request commits keep their answer", async () => {
@@ -2716,18 +3149,22 @@ describe("a change that ends", () => {
 			ok: false,
 			error: { code: "invalid" },
 		});
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		expect(await h.raw("change", { change: "pr:68", state: "merged", landing }, agent)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
 		});
-		expect(count("scope_moves")).toBe(0);
+		expect(await count("scope_moves")).toBe(0);
 		await h.call("change", { change: "pr:68", state: "merged", landing });
-		expect(h.app.db.raw.query("SELECT repo, line FROM targets ORDER BY id").all()).toEqual([
+		expect(
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT repo, line FROM targets ORDER BY id")),
+			),
+		).toEqual([
 			{ repo: "acme/web", line: "trunk" },
 			{ repo: "example/other", line: "change" },
 		]);
-		expect(count("scope_moves")).toBe(1);
+		expect(await count("scope_moves")).toBe(1);
 	});
 
 	type Ended = { change: string; state: string; questions: string[]; already: boolean };
@@ -2752,19 +3189,22 @@ describe("a change that ends", () => {
 			(await h.call<{ items: { key: string; url: string | null }[] }>("find", { in: "changes" })).items.map(
 				(c) => c.url,
 			);
-		const rev = () => h.app.db.raw.query("SELECT rev FROM changes").all();
+		const rev = async () =>
+			await h.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT rev FROM changes")),
+			);
 		const at = (attempt: number, url: string) => {
 			const report = ciReport({ commit: "url00001", branch: "fix", pr: 12, n: 2, attempt });
 			return { ...report, target: { ...report.target, url } };
 		};
 		await h.call("report", at(1, "https://github.com/acme/old/issues/12"));
 		expect(await urls()).toEqual(["https://github.com/acme/old/issues/12"]);
-		const written = rev();
+		const written = await rev();
 		await h.call("report", at(2, "https://github.com/acme/old/issues/12"));
-		expect(rev()).toEqual(written);
+		expect(await rev()).toEqual(written);
 		await h.call("report", at(3, "https://github.com/acme/new/pull/12"));
 		expect(await urls()).toEqual(["https://github.com/acme/new/pull/12"]);
-		expect(rev()).not.toEqual(written);
+		expect(await rev()).not.toEqual(written);
 	});
 
 	test("its unanswered failures are no longer asked about, and nothing else about it changes", async () => {
@@ -2865,7 +3305,7 @@ describe("a change that ends", () => {
 	test("an answer already given stands, and a finding about the change is still asked", async () => {
 		const asked = await failingPull();
 		await decide(asked, { is: "flaky" });
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
 		await h.call(
 			"claim",
@@ -3001,8 +3441,13 @@ describe("a change that ends", () => {
 		await decide(other, { is: "flaky" });
 		await end("pr:13", "closed");
 		h.advance(15 * 86_400_000);
-		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
-		sweep(h.app, rule);
+		const rule =
+			(
+				await h.app.database.read(
+					async (db) => await db.get(sql<[], { id: number }>("SELECT id FROM actors WHERE kind = 'rule'")),
+				)
+			)?.id ?? 0;
+		await sweep(h.app, rule);
 		expect((await queue()).counts.open).toBe(0);
 	});
 
@@ -3010,28 +3455,39 @@ describe("a change that ends", () => {
 		const asked = await failingPull();
 		await end("pr:12", "merged");
 		const chunks: string[] = [];
-		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		await h.app.database.read(async (db) => await exportArchive(db, (chunk) => chunks.push(chunk)));
 		expect(chunks.join("")).not.toContain("change_ends");
-		const other = new Db(":memory:");
+		const otherFixture = await testDatabase();
+		const other = await Database.open({ url: otherFixture.url });
 		try {
-			migrate(other, ":memory:");
-			importArchive(other, linesOf(chunks.join("")));
-			expect(other.raw.query("SELECT count(*) AS n FROM change_ends").get()).toEqual({ n: 0 });
-			const rows = other.raw
-				.query<{ key: string; state: string }, []>(
-					`SELECT c.key, q.state FROM changes c JOIN questions q ON q.no = ${asked.q.slice(2)}`,
-				)
-				.all();
+			await other.write(
+				async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+			);
+			expect(
+				await other.read(
+					async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM change_ends")),
+				),
+			).toEqual({ n: 0 });
+			const rows = await other.read(
+				async (db) =>
+					await db.all(
+						sql<[number], { key: string; state: string }>(
+							"SELECT c.key, q.state FROM changes c JOIN questions q ON q.no = $1",
+						),
+						[Number(asked.q.slice(2))],
+					),
+			);
 			expect(rows).toEqual([{ key: "pr:12", state: "dissolved" }]);
 		} finally {
-			other.close();
+			await other.close();
+			await otherFixture.close();
 		}
 	});
 
 	test("a pipeline or a person says so; an agent's word is not taken, and an unknown change is not found", async () => {
 		await failingPull();
-		const pipeline = h.actor("pipeline", "ci", ["record"]);
-		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
+		const agent = await h.actor("runner", "agent", ["read", "produce"]);
 		expect(await h.raw("change", { change: "pr:12", state: "merged" }, agent)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },

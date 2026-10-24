@@ -12,6 +12,7 @@ import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 import { inThisProcess, type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { openApi } from "../src/surfaces/http.ts";
 
 /** A file whose tests did not run at all, as on a runner with no browser. */
@@ -80,7 +81,7 @@ async function gate(
 		files?: string[];
 	} = {},
 ) {
-	return withInstance(
+	return await withInstance(
 		async (running) => {
 			const { instance } = running;
 			const configured = (await options.configure?.(running)) ?? {};
@@ -114,14 +115,12 @@ async function gate(
 				const env = {
 					PATH: process.env.PATH ?? "",
 					HOME: root,
+					MAINWORTHY_TEST_PG: process.env.MAINWORTHY_TEST_PG ?? "",
 					// What the job leaves in the temporary directory is this test's to count.
 					TMPDIR: join(root, "tmp"),
 					MAINWORTHY_URL: instance.url,
 					MAINWORTHY_TOKEN: "",
 					MAINWORTHY_PROJECT: "",
-					...(process.env.MAINWORTHY_READERS !== undefined
-						? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS }
-						: {}),
 					GITHUB_ACTIONS: "true",
 					GITHUB_EVENT_NAME: "pull_request",
 					GITHUB_REF: "refs/pull/77/merge",
@@ -140,7 +139,7 @@ async function gate(
 					});
 					let result: Awaited<ReturnType<typeof inThisProcess>>;
 					try {
-						result = await inThisProcess("ci-gate", () => runCiGate(argv, env, options.request), {
+						result = await inThisProcess("ci-gate", async () => await runCiGate(argv, env, options.request), {
 							environment: env,
 							cwd: root,
 							input: "",
@@ -153,10 +152,19 @@ async function gate(
 						output: result.stdout + result.stderr,
 						summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
 						left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(result.stdout))],
-						batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
-						batchJobs: instance.app.db.raw
-							.query("SELECT job, shard, count(*) AS n FROM batches GROUP BY job, shard ORDER BY job, shard")
-							.all(),
+						batches: (
+							await instance.app.database.read(
+								async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM batches")),
+							)
+						)?.n,
+						batchJobs: await instance.app.database.read(
+							async (db) =>
+								await db.all(
+									sql<readonly [], { job: string; shard: number | null; n: number }>(
+										"SELECT job, shard, count(*) AS n FROM batches GROUP BY job, shard ORDER BY job, shard",
+									),
+								),
+						),
 					};
 				}
 				const child = Bun.spawn([process.execPath, resolve("scripts/ci-gate.ts"), ...argv], {
@@ -186,7 +194,11 @@ async function gate(
 					/** What the job left behind: files in its temporary directory, and its own Mainworthy if that still runs. */
 					left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(stdout))],
 					/** How many reports the instance of the test holds. */
-					batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
+					batches: (
+						await instance.app.database.read(
+							async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM batches")),
+						)
+					)?.n,
 				};
 			} finally {
 				await rm(root, { recursive: true, force: true });
@@ -237,11 +249,16 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 	const resume = Promise.withResolvers<void>();
 	const health: number[] = [];
 	const requests: { path: string; status: number }[] = [];
-	let batches = () => 0;
+	let batches: () => Promise<number> = async () => 0;
 	const running = gate(green, {
 		inProcess: true,
 		configure: async ({ instance }) => {
-			batches = () => instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n ?? 0;
+			batches = async () =>
+				(
+					await instance.app.database.read(
+						async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM batches")),
+					)
+				)?.n ?? 0;
 			return {};
 		},
 		request: deploymentFetch(
@@ -275,7 +292,7 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 		await Bun.sleep(0);
 		expect(health).toEqual([200, 503]);
 		expect(requests).toEqual([{ path: "/healthz", status: 503 }]);
-		expect(batches()).toBe(0);
+		expect(await batches()).toBe(0);
 	} finally {
 		resume.resolve();
 		await running;
@@ -440,8 +457,16 @@ test("CI recovers a connection failure and a lost report reply without recording
 		});
 		expect([receipt.fresh, receipt.counts.total, bodies.length]).toEqual([false, 1, 2]);
 		expect(bodies[1]).toBe(bodies[0]);
-		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM batches").get()).toEqual({ n: 1 });
-		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM results").get()).toEqual({ n: 1 });
+		expect(
+			await instance.app.database.read(
+				async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM batches")),
+			),
+		).toEqual({ n: 1 });
+		expect(
+			await instance.app.database.read(
+				async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM results")),
+			),
+		).toEqual({ n: 1 });
 		expect((await client.call("gate", { commit: "c0ffee0123456789012345678901234567890123" })).verdict).toBe("passed");
 	});
 });
@@ -481,10 +506,10 @@ test("CI stops retrying unreachable requests and shares its deadline across comm
 /** Run one executable smoke, then the remaining report variants in this process. */
 function gateVariants(): typeof gate {
 	let first = true;
-	return (shards, options = {}) => {
+	return async (shards, options = {}) => {
 		const inProcess = !first;
 		first = false;
-		return gate(shards, { ...options, inProcess });
+		return await gate(shards, { ...options, inProcess });
 	};
 }
 
@@ -804,15 +829,6 @@ test("an explicit command client environment leaves the ambient environment unch
 	});
 });
 
-test("an explicit invalid reader count reaches the job's own server and its refusal leaves nothing", async () => {
-	const result = await gate(green, {
-		configure: async () => ({ MAINWORTHY_URL: "", MAINWORTHY_READERS: "invalid" }),
-	});
-	expect(result.output).toContain("MAINWORTHY_READERS must be an integer between 0 and 8");
-	expect(result.output).not.toContain("$ mainworthy report");
-	expect([result.code, result.left]).toEqual([1, []]);
-}, 20_000);
-
 test.each(["http://127.0.0.1:7357", "startup refused"])(
 	"stopping waits for the server's last directory write before removing its data (%s)",
 	async (message) => {
@@ -833,6 +849,9 @@ writeFileSync(join(data, "last-write"), "finished");
 			);
 			const spawned = spyOn(Bun, "spawn");
 			const own = startOwn(cli);
+			const ready = own.ready.catch((error: unknown) => error);
+			const deadline = Date.now() + 4000;
+			while (spawned.mock.results.length === 0 && Date.now() < deadline) await Bun.sleep(1);
 			const result = spawned.mock.results[0];
 			spawned.mockRestore();
 			if (result?.type !== "return") throw new Error("the server was not spawned");
@@ -840,7 +859,6 @@ writeFileSync(join(data, "last-write"), "finished");
 			// Hold the requested kill until the real child completes an in-flight directory write.
 			const killing = Promise.withResolvers<void>();
 			const kill = spyOn(child, "kill").mockImplementation(() => killing.resolve());
-			const ready = own.ready.catch((error: unknown) => error);
 			try {
 				await Promise.race([ready, killing.promise]);
 				const data = await readFile(join(root, "data"), "utf8");

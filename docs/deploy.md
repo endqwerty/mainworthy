@@ -1,16 +1,31 @@
 # Running Mainworthy on a server
 
-Mainworthy is one process and one SQLite file. A deployment is one container with one volume; there is no
-database container to run, upgrade or back up separately (decision 0010).
+Mainworthy runs as one app process connected to PostgreSQL 18. The app volume holds attachment bytes and
+archive staging; PostgreSQL has its own volume. `compose.yaml` runs both. Running elsewhere is possible but
+not yet supported, as amended in [decision 0026](decisions/0026-the-apps-offer-one-instance.md).
 
-**What is verified:** the image builds, starts, serves the UI and the API, keeps its data across a restart, and
-passes its health check on the development machine. It also runs on the owner's Coolify (since 2026-10-12, the
-steps under "On Coolify" as they were done): `/healthz` answers, a request with no token gets 401, and a browser
-signed in with the owner token over plain HTTP and saved a case through the page. That instance was upgraded
-across the rename on 2026-10-13: Coolify built the image, the server logged
-`moved /data/casebook.db to /data/mainworthy.db`, and the one case and the owner token were still there. An
-export taken just before is in the volume (`/data/before-rename-2026-10-13.ndjson.gz`).
-**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, an upgrade that changes the schema of an instance that holds data, and the limit on failed sign-ins counting each visitor of that instance by address ("The limit on failed sign-ins" says what is expected and what was not measured).
+## PostgreSQL cutover at merge
+
+Merging this engine change makes the owner's instance restart on an empty PostgreSQL database.
+The configured demo fills that database on startup. Existing projects, identities, tokens and sessions
+from SQLite do not carry over. This reset is the owner's choice when merging the pull request.
+There is no automatic SQLite-file conversion. Archive imports still require matching format and schema.
+
+`compose.coolify.yaml` adds an interim PostgreSQL 18 service, reachable only on an internal database network,
+with a separate named `mainworthy-postgres` volume. Its password is `SERVICE_PASSWORD_POSTGRES`, which Coolify
+generates on the first deploy (32 letters and digits), stores, and reuses on every redeploy; it is listed under
+the resource's environment variables. The app receives its database URL from Compose and waits for database health.
+The existing `mainworthy-data:/data` mount stays exactly where it is. The SQLite file remains on that volume,
+untouched; the app uses it for neither reads nor writes.
+
+Before accepting any new work, undo the cutover by redeploying the previous commit. That build reads the
+retained SQLite file again. Once the new database has accepted writes, the two stores have different histories;
+this rollback does not preserve the new PostgreSQL writes. The automatic demo seed itself writes only the new
+PostgreSQL database. Stop traffic during the decision window and do not delete either volume.
+
+The Docker jobs cannot be run on the implementation Mac because Docker is not installed. Their PostgreSQL
+networking, image startup and lockdown probes require the first CI/container run. Prior SQLite deployment
+checks are historical evidence, not verification of this cutover.
 
 ## Images published by CI
 
@@ -99,11 +114,11 @@ sending the token itself.
 | `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). Only visible ASCII characters without spaces are accepted. Whitespace, control characters and non-ASCII characters stop startup before any token or session changes. A value shorter than 20 characters or longer than 512 stops the start, in local mode too; one shorter than 32 starts, and every start warns. If unset, one is generated and printed once in the log whenever the owner holds no token that works: on the first start, on the start after an import, and on the start after the owner's last token expired. A value that is not yet a token replaces the old one: the start revokes every token that came from this variable and still works, whoever was the owner when it was set, and names them in one line ("Replacing a token" below). A value that is already a token replaces nothing. When that token was revoked, has reached its end or is somebody else's, it is not brought back: the start says which in one line on stderr, and the owner signs in again once the variable has a new value. |
 | `MAINWORTHY_OWNER` | `owner` | The owner's name, as it appears in history. Set it before the first start. The start gives this person every capability; when the name is an agent's or a pipeline's on the instance, the server does not start and says which variable to change. |
 | `MAINWORTHY_OWNER_WAS` | not set | To rename the owner: the name the owner has now, with the new name in `MAINWORTHY_OWNER`. The start renames that person, who keeps their tokens, password, passkeys, sessions and history, and says so in one line. Unset it afterwards. A former name that is nobody's, an agent's, a pipeline's, a forgotten person's or that of a person who does not hold every capability on every project stops the start, and so does a new name that is not one a person can be given. The guide has the steps: `docs/guide/configuration.md`, "Rename the owner". |
-| `MAINWORTHY_DATA` | `/data` | Where `mainworthy.db` lives. Mount a volume here. |
-| `MAINWORTHY_LOCK_WAIT_SECONDS` | `30` | Seconds to wait for another server to release the data directory. A finite nonnegative number, including fractions. `0` refuses immediately. |
+| `MAINWORTHY_DATA` | `/data` | Local attachments and archive staging. Keep the existing volume mounted here. |
+| `MAINWORTHY_DATABASE_URL` | required | PostgreSQL 18 URL; Compose points it at the database service. |
 | `MAINWORTHY_PORT` | `7357` | The port to listen on. |
 | `MAINWORTHY_HOST` | `0.0.0.0` | The address to bind. |
-| `MAINWORTHY_READERS` | available cores minus two, minimum 1, maximum 8 | Reader threads, each with its own read-only connection, so a read does not wait for a write. An integer from `0` through `8`; `0` runs reads inline on the server thread, which is slower under load and only for debugging. |
+| `MAINWORTHY_DB_POOL` / `MAINWORTHY_DB_WRITE_POOL` | `2` / `1` | PostgreSQL read and write pool sizes, each from 1 to 64. Writes remain exclusive for the whole operation. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. A value that is not one stops the start with a line that names the variable. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
 | `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Set it together with the next variable, or neither: one without the other stops the start with a line that says which is missing, and so does an entry that is not an address or a range. See "The limit on failed sign-ins". |
@@ -280,14 +295,14 @@ address:
 
 `compose.coolify.yaml` enables `MAINWORTHY_LOCKDOWN=1`. The ordinary image and `compose.yaml`
 leave it off, so outbound mail, webhooks, OIDC and other integrations keep working there.
-Lockdown blocks every new outbound connection, including those integrations. Do not enable it
+Lockdown permits the configured PostgreSQL TCP endpoint and blocks other new outbound connections, including those integrations. Do not enable it
 on a deployment that needs them.
 
 The image entrypoint installs `scripts/container/lockdown.nft` in the app's network namespace.
-It atomically replaces only its own table and compares the installed rules with the packaged
-policy. IPv4 and IPv6 share a default-drop output chain. It permits loopback except Docker's
-embedded DNS at `127.0.0.11`, and established or related replies to inbound traffic. It does not
-permit the original direction of an outbound connection. New connections to another container,
+Before installing rules, it resolves the address and port from `MAINWORTHY_DATABASE_URL`. It pins the runtime
+URL to that numeric address and adds rules for only that TCP endpoint, so the app needs no later DNS query.
+It atomically replaces only its own table and compares the installed rules with the rendered policy. IPv4 and IPv6 share a default-drop output chain. It permits loopback except Docker's
+embedded DNS at `127.0.0.11`, and established or related replies to inbound traffic. Apart from the configured database address and port, new connections to another container,
 the host, private networks, or the Internet are blocked on every attached interface. This also
 covers networks Coolify adds. Reply traffic can still carry application data to an inbound caller.
 
@@ -360,8 +375,9 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    file. Set the token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
    `TS_AUTHKEY` is a single-use Tailscale auth key (admin console → Settings → Keys), needed for the first
    deploy only; never use the sign-in link the sidecar prints, it rotates every minute.
-4. **Storage:** the compose file declares the volume `mainworthy-data` at `/data`. Coolify creates it as a named
-   volume. Bind it to a path you back up if you have one.
+4. **Storage:** retain `mainworthy-data` at `/data`. PostgreSQL gets the separate `mainworthy-postgres` volume
+   at `/var/lib/postgresql`. Back up PostgreSQL and attachments together. Coolify generates the database password
+   (`SERVICE_PASSWORD_POSTGRES`) on the first deployment; nothing needs setting.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
    the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; ingress port 758 is bound to `127.0.0.1` for the hold
@@ -553,25 +569,24 @@ rows per gate turn and transaction,
 with foreign keys enforced, then yields to foreground work. A final transaction deletes the mark and project
 together. An interrupted drain continues from remaining rows. A failed slice rolls back and logs the failure;
 its retired mark remains for retry. A new swap first drains earlier retirements, so failed cleanup prevents
-unbounded accumulation across deployments. Normal completion retains no retired project. Deleted pages become
-reusable inside SQLite; cleanup does not run a whole-file VACUUM or promise that the file immediately shrinks.
+unbounded accumulation across deployments. Normal completion retains no retired project. PostgreSQL reuses deleted storage through its ordinary maintenance; cleanup does not promise immediate disk shrinkage.
 Whole-instance exports are refused with a retry message while retired marks remain, because those marks do not
 travel in an archive. Active-project exports remain available.
 
 No whole-database audit or worker retry runs under the demo gate. Each swap and deletion slice is checked against
 a 500 ms acceptance ceiling, alongside successful unrelated HTTP reads, writes and token sign-ins on a populated
 local database. Half a second is an interactive ceiling, not an infrastructure latency guarantee. Logs identify
-a cleanup slice exceeding 100 ms. SQLite indexes and foreign-key checks still cost time, including shared CPU
+a cleanup slice exceeding 100 ms. PostgreSQL indexes and foreign-key checks still cost time, including shared CPU
 and disk contention; the rehearsal evidence belongs in the pull request.
 
-SQLite's existing OS-released instance lock admits one serving actor. In-process refresh calls also serialize
-and reread persisted state. The accepted Cloud Run design keeps this shared database and moves refresh/drain to
+This port holds PostgreSQL's database-wide advisory writer lock for each swap and cleanup slice. In-process
+refresh calls also serialize and reread persisted state. The accepted Cloud Run design keeps this shared database and moves refresh/drain to
 its job/lease interface. That port must fence swap, seeding and completion against stale lease holders, then use
 project locks for the live and retired projects. Scheduled requests must replace the renewal timer when CPU is
 allocated only during requests. Process-local locks are not a Cloud Run coordination mechanism.
 
 This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
-remain useful to enforced transfer removal and cleanup. Migration 44 adds only local operational demo state,
+remain useful to enforced transfer removal and cleanup. The PostgreSQL baseline includes only local operational demo state,
 which is excluded from archives and does not change their format.
 
 ## This repository's CI reporting to the instance
@@ -768,6 +783,9 @@ A runner node is removed from the tailnet when its job ends. A join that fails l
 and the job then starts its own Mainworthy and warns.
 
 ## An instance made before the rename
+
+The upgrade sections below are historical instructions for SQLite builds. They do not apply to PostgreSQL.
+The current cutover starts an empty database and leaves the SQLite file and its old backups untouched.
 
 The project was called Casebook until 2026-10-13 (decision 0015). An instance made before then is carried over
 by the first start of the new build. What moves by itself:
@@ -991,95 +1009,37 @@ hashes two at a time and lets thirty-two wait, so leave the container 130 MiB ab
 
 ## Backup and restore
 
-The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while running).
+PostgreSQL holds the records, including identities and credentials. `/data/blobs` holds attachment bytes.
+Archive exports include attachment bytes and exclude sign-in secrets.
 
-- **Backup:** `mainworthy export --out /backup/mainworthy-$(date +%F).ndjson.gz` writes every fact, decision and
-  document as text, from a consistent snapshot, while the server runs. Tokens, sessions, passwords, passkeys and
-  invitations are not exported: an archive holds nothing that signs somebody in.
-- **Restore:** start an empty instance, run `mainworthy import <file>` before creating any token, then restart the
-  server. The import replaces the instance's first rows, the owner's token among them, so the token you imported
-  with stops working and every browser is signed out. The restart takes the owner's token from
-  `MAINWORTHY_OWNER_TOKEN`, or, when that is not set, generates one and prints it once in the log. The people
-  and what they may do came with the archive; their passwords and passkeys did not. As the owner, run
-  `mainworthy invite new <name>` for each person, and hand each the link. A test imports
-  into an empty instance and compares every table (`src/server/transfer/transfer.test.ts`). An archive names the
-  version of what it holds, which changes only when an exported table does, so one taken before an upgrade that
-  added other tables still imports (`test/sessions.test.ts` imports one from the build before sessions).
-- **Upgrade:** a new image runs all pending migrations in one transaction on start. A failed migration rolls
-  back the entire upgrade to its starting schema and data, and removes no copies. Before changing existing
-  data, the server uses `VACUUM INTO` to write a consistent copy in a new private directory beside the database.
-  The copy inherits `synchronous=OFF` for this read-only source operation, avoiding SQLite's intermediate
-  output syncs. The source's original setting is restored before migration writes. Its journal mode is unchanged.
-  It syncs and closes that file, renames it to `mainworthy.db.v<N>.bak`, then syncs the directory. `N` is the
-  version before the upgrade. Only after all migrations commit, and only if this start completed that copy
-  itself, does it remove older upgrade copies and log each removed filename. At that same point it removes
-  abandoned copies and journals matching the exact `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal`
-  names used by older builds. It also removes the exact copy and journal regular files inside private
-  `<database>.v<N>.bak.mainworthy-copy-<six-character suffix>` workspaces, then removes a workspace only if empty.
-  Unmarked directories from earlier builds remain because they cannot be distinguished from saved operator copies.
-  Symlinks, non-regular entries, and unrelated contents remain. Normally one copy remains.
-  If the final-name copy already exists, the server leaves it unchecked and performs no cleanup.
-  Cleanup failures are logged without failing startup; extra copies remain until a later successful upgrade
-  writes a new copy. A start with no pending migrations performs no cleanup.
-  Only copies still present are rollback points. To go back, stop the container, put a retained copy in place
-  of `mainworthy.db`, and start the image that matches that copy's schema. To preserve an older rollback point
-  across further upgrades, save a separate backup before upgrading.
+- `mainworthy export --out backup.ndjson.gz` writes a consistent archive while the app runs. Test it by
+  importing into a fresh PostgreSQL database with a matching app version. Restart after import and issue new
+  tokens or invitations, since sign-in secrets are not exported.
+- To retain sign-in secrets too, stop the app, dump PostgreSQL with `pg_dump` and copy its matching `blobs/`.
+  Restore with PostgreSQL tools into an isolated PostgreSQL 18 database before trusting the backup.
+  Copying `/data` alone does not back up the database; copying a running PostgreSQL data directory is unsafe.
+- Mainworthy creates no automatic upgrade copy. Keep a tested backup before changing the image or schema.
+  The PostgreSQL conversion does not read or migrate the SQLite file. Archive imports must match format and schema.
 
-Nothing schedules the backup yet, and the home server's own backups do not leave the host: until that is set
-up (#59), a failed disk loses the instance.
+Nothing schedules these backups yet. Keep tested backups outside the server.
 
 ### Health while upgrading
 
-`mainworthy serve` acquires the instance lock, opens its HTTP listener and runs the copy and migration on a
-worker. During that work, `GET /healthz` returns HTTP 200 with this shape:
+`mainworthy serve` opens its startup listener before applying the PostgreSQL baseline and recovery.
+`GET /healthz` returns HTTP 200 with `ok: false, state: "upgrading"` until startup finishes.
+`mainworthy health` exits 0 during that state; it proves liveness, not readiness. Other routes answer 503
+with `Retry-After: 5`. Startup failure closes the listener.
 
-```json
-{"ok":false,"state":"upgrading","version":"0.1.0","apiVersion":1,"commit":"0123456789012345678901234567890123456789"}
-```
-
-The commit is null when unknown, as it is after startup. Every other path and method returns HTTP 503 with
-`{"ok":false,"error":{"code":"upgrading","message":"Mainworthy is upgrading; try again shortly."}}` and
-`Retry-After: 5`. No application route runs before the worker has closed the upgraded database and startup
-recovery has finished. The listener changes to the normal routes on the same port.
-
-The Dockerfile's `mainworthy health` checks liveness: it exits 0 for both ready and upgrading. This lets
-Compose's `service_healthy` dependency start the ingress while an upgrade runs, and the ingress's wget probe
-also accepts the HTTP 200. The host hold can then pass traffic through; application requests receive 503
-until ready. A migration error closes the listener and fails startup. The startup worker's watchdog stops it
-after 30 minutes without observable progress: copy/database file size or modification time changes, or
-bounded recovery progress messages. This is an inactivity allowance, not a total upgrade duration. A copy
-that keeps progressing is allowed to finish and publish its backup. Health replies themselves do not reset
-the watchdog. Docker's short start period is retained.
-
-The parent owns a private `<database>.mainworthy-start-<six-character suffix>` copy workspace. It removes
-that exact workspace after awaiting the worker on failure, cancellation or inactivity; it keeps a published
-`.v<N>.bak`, which a restart reuses. A whole-process crash leaves a marked workspace for the next successful
-upgrade's exact regular-file cleanup. Files not matching the copy/journal names and symlinks remain. Bootstrap,
-attachment pruning, assertion reconstruction and pending-report/dispute/hand-off recovery run on the worker,
-so health keeps answering during those data-dependent steps too.
-
-Readiness is different: require HTTP 200, `ok: true` and the full expected commit. Merely receiving HTTP 200
-or seeing the commit is insufficient. The image job checks both fields, and `change.yml` waits through the
-upgrading state for at most 30 minutes before sending its lifecycle write. The CLI's authenticated requests
-stop with an upgrading message; the iPhone client does not probe health and receives the ordinary 503 reply.
-CI's instance chooser and deployment transport retry upgrading within their existing deadlines. If the
-instance remains upgrading, the chooser uses its documented isolated-instance fallback with a warning.
-The external TestFlight upload job also reads health; it must require `ok: true` before acting on the commit
-(see `ios/README.md`). That external job is not changed or verified here.
-
-The autodeploy scheduler and its in-flight window are outside this checkout. Its installed 45-minute allowance
-for an upgrading attempt is separate from the application's inactivity watchdog. The external job must keep
-the same pinned deployment in flight while its expected commit reports `upgrading`, within its own deployment
-budget, including its image-build and container-replacement allowance. The application has no total-duration
-cutoff while progressing. Never deploy a newer
-candidate over that work. Declare success only on `ok: true` with the pinned commit, and retain and notify
-on a failed deployment or expired deadline. This repository-only change does not update or verify that job.
+The deployer must require `ok: true` and its pinned commit before declaring success. Do not replace a
+candidate while its startup is still in progress. The external deployment scheduler and its deadline are
+outside this repository; this change does not verify them.
 
 ## Without Docker
 
 ```
 bun install && bun run build      # dist/mainworthy, one self-contained executable
-MAINWORTHY_MODE=server MAINWORTHY_HOST=0.0.0.0 MAINWORTHY_DATA=/var/lib/mainworthy ./dist/mainworthy serve
+MAINWORTHY_DATABASE_URL=postgres://mainworthy:password@127.0.0.1:5432/mainworthy \
+  MAINWORTHY_MODE=server MAINWORTHY_HOST=0.0.0.0 MAINWORTHY_DATA=/var/lib/mainworthy ./dist/mainworthy serve
 ```
 
 ## Checks a deployment must wait for

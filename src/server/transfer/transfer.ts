@@ -9,7 +9,7 @@ import { readSubject } from "../decisions/questions.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import { retiredDemos } from "../kernel/ctx.ts";
-import type { Db } from "../kernel/db.ts";
+import { arrayLiteral, isConstraintViolation, type ReadDb, type SqlValue, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION } from "../kernel/migrate.ts";
 import { searchText } from "../suite/suite.ts";
@@ -17,6 +17,8 @@ import { searchText } from "../suite/suite.ts";
 const CHUNK_BYTES = 64 * 1024;
 const Count = z.number().int().nonnegative();
 const StagedResults = ResultIn.array();
+const DataError = z.object({ errno: z.string().startsWith("22") });
+const invalidStoredValue = (error: unknown) => isConstraintViolation(error) || DataError.safeParse(error).success;
 
 // Maps preserve every JSON key, including __proto__, which Zod object records discard.
 function jsonMap<T extends z.ZodType>(values: T) {
@@ -45,18 +47,29 @@ const Entry = z.union([
 ]);
 type Value = z.infer<typeof Value>;
 type Header = z.infer<typeof Header>;
-const TableName = z.object({ name: z.string() });
-const TableKind = z.object({ schema: z.string(), name: z.string(), type: z.string() });
-const Column = z.object({ name: z.string(), pk: Count, notnull: Count });
-const ForeignKey = z.object({ table: z.string(), from: z.string() });
-const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAINT"), message: z.string() });
 type Table = {
 	name: string;
 	columns: string[];
 	nullable: Set<string>;
 	primary: string[];
 	parents: string[];
-	references: z.infer<typeof ForeignKey>[];
+	references: { table: string; from: string }[];
+	identities: string[];
+	types: Map<string, string>;
+};
+const LEDGER = ["schema_version", "baseline_hash", "archive_version"];
+const Q = {
+	project: sql<{ key: string }, { id: number }>("SELECT id FROM projects WHERE key = $key"),
+	anyProject: sql<readonly [], { id: number }>("SELECT id FROM projects LIMIT 1"),
+	projects: sql<readonly [], { key: string; name: string; seq: number }>("SELECT key, name, seq FROM projects"),
+	policy: sql<readonly [], { key: string; preset: string; clauses: string; settings: string }>(
+		`SELECT p.key, o.preset, o.clauses, o.settings FROM projects p
+ JOIN policies o ON o.project = p.id AND o.version = (SELECT max(version) FROM policies WHERE project = p.id)`,
+	),
+	heads: sql<readonly [], { id: number; project: number; tags: string; body: string | null }>(
+		`SELECT c.id, c.project, c.tags, v.body FROM cases c
+ LEFT JOIN versions v ON v.case_id = c.id AND v.no = c.head ORDER BY c.id`,
+	),
 };
 
 /**
@@ -127,39 +140,23 @@ function literal(text: string): string {
 }
 
 function where(table: Table): string {
-	return table.name === "meta" ? "WHERE key <> 'schema_version'" : "";
+	return table.name === "meta" ? `WHERE key NOT IN (${LEDGER.map(literal).join(", ")})` : "";
 }
 
-function discoverTables(db: Db): Table[] {
-	const shadowTables = new Set(
-		TableKind.array()
-			.parse(db.raw.query("PRAGMA table_list").all())
-			.filter((table) => table.schema === "main" && table.type === "shadow" && table.name.startsWith("search_docs_"))
-			.map((table) => table.name),
-	);
-	const names = TableName.array()
-		.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-		.map((table) => table.name)
-		.filter(
-			(name) =>
-				!UNEXPORTED.includes(name) && name !== "search_docs" && !shadowTables.has(name) && !name.startsWith("sqlite_"),
-		);
+async function discoverTables(db: ReadDb, exported = true): Promise<Table[]> {
+	const catalog = await db.catalog();
 	const tables = new Map<string, Table>();
-	for (const name of names) {
-		const columns = Column.array().parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all());
-		const foreignKeys = ForeignKey.array().parse(db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all());
-		tables.set(name, {
-			name,
-			columns: columns.map((column) => column.name),
-			nullable: new Set(
-				columns.filter((column) => column.notnull === 0 && column.pk === 0).map((column) => column.name),
-			),
-			primary: columns
-				.filter((column) => column.pk > 0)
-				.sort((a, b) => a.pk - b.pk)
-				.map((column) => column.name),
-			parents: [...new Set(foreignKeys.map((foreign) => foreign.table))].sort(),
-			references: foreignKeys,
+	for (const table of catalog) {
+		if (exported && (UNEXPORTED.includes(table.name) || table.name === "search_docs")) continue;
+		tables.set(table.name, {
+			name: table.name,
+			columns: table.columns.filter((column) => column.generated !== "stored").map((column) => column.name),
+			nullable: new Set(table.columns.filter((column) => column.nullable).map((column) => column.name)),
+			primary: [...table.primary],
+			parents: [...new Set(table.foreignKeys.map((key) => key.parent))].sort(),
+			references: table.foreignKeys.flatMap((key) => key.columns.map((from) => ({ table: key.parent, from }))),
+			types: new Map(table.columns.map((column) => [column.name, column.type])),
+			identities: table.columns.filter((column) => column.generated === "identity").map((column) => column.name),
 		});
 	}
 	const ordered: Table[] = [];
@@ -169,11 +166,10 @@ function discoverTables(db: Db): Table[] {
 		visited.add(name);
 		const table = tables.get(name);
 		if (!table) return;
-		// Parent tables precede children. Self references and cycles require the importer's deferred keys.
 		for (const parent of table.parents) visit(parent);
 		ordered.push(table);
 	};
-	for (const name of names) visit(name);
+	for (const name of [...tables.keys()].sort()) visit(name);
 	return ordered;
 }
 
@@ -222,16 +218,10 @@ const INSTANCE_TABLES = [
 	"commit_status_delivery",
 ];
 
-/**
- * The project's ID as an SQL expression: read as text, since SQLite IDs need not fit in a JavaScript number, and
- * cast back to an integer, since a column of the search index has no type to convert the text to.
- */
-function projectLiteral(db: Db, key: string): string {
-	const project = db.raw
-		.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key = ?")
-		.get(key);
+async function projectLiteral(db: ReadDb, key: string): Promise<string> {
+	const project = await db.get(Q.project, { key });
 	if (!project) throw new OpError("not_found", `project ${key} not found`);
-	return `CAST(${literal(project.id)} AS INTEGER)`;
+	return String(project.id);
 }
 
 /** The rows of `table` that project `id` owns, as a WHERE clause; it throws for a table with no rule. */
@@ -246,8 +236,8 @@ function ownedBy(table: { name: string; columns: string[] }, id: string, what: s
 	return `WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} ${filter})`;
 }
 
-function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {
-	const id = projectLiteral(db, key);
+async function projectFilters(db: ReadDb, metadata: readonly Table[], key: string): Promise<Map<string, string>> {
+	const id = await projectLiteral(db, key);
 	const teams = `SELECT team FROM team_grants WHERE project IN (0, ${id}) UNION SELECT team FROM team_events WHERE project IN (0, ${id})`;
 	const filters = new Map<string, string>([
 		["teams", `WHERE id IN (${teams})`],
@@ -258,7 +248,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 	for (const table of metadata) {
 		if (filters.has(table.name)) continue;
 		if (["actors", "orgs", "grants", "mail_contacts"].includes(table.name)) continue;
-		filters.set(table.name, table.name === "meta" ? "WHERE 0" : ownedBy(table, id, "project export"));
+		filters.set(table.name, table.name === "meta" ? "WHERE false" : ownedBy(table, id, "project export"));
 	}
 	// Declared actor references plus the schema's intentional non-FK references. Keep actors who have access,
 	// even if they have not yet acted, and follow on_behalf_of so historical delegation still has its person.
@@ -282,7 +272,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 		for (const column of columns) actors.push(`SELECT ${identifier(column)} FROM ${identifier(table.name)} ${filter}`);
 	}
 	actors.push(
-		`SELECT json_extract(s.value, '$.by') FROM decisions d, json_each(d.signers) s WHERE d.project = ${id} AND s.type = 'object'`,
+		`SELECT (s.value->>'by')::bigint FROM decisions d, jsonb_array_elements(d.signers::jsonb) s WHERE d.project = ${id} AND jsonb_typeof(s.value) = 'object'`,
 	);
 	const included = `WITH RECURSIVE included(id) AS (${actors.join(" UNION ")} UNION SELECT a.on_behalf_of FROM actors a JOIN included i ON a.id = i.id WHERE a.on_behalf_of IS NOT NULL) SELECT id FROM included`;
 	filters.set("actors", `WHERE id IN (${included})`);
@@ -295,105 +285,94 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 	return filters;
 }
 
-/**
- * Streams a migrated instance, or one project and its referenced identity, inside one consistent read snapshot.
- * Rows follow primary keys;
- * JSON-typed TEXT remains text, and SQLite serializes integers exactly, including values outside JS's safe range.
- * Tokens, sessions, passwords, passkeys and invitations never travel (`UNEXPORTED`). The FTS index is omitted and
- * rebuilt during import. The header names the archive version, not the schema version (`ARCHIVE_VERSION`).
- * Invalid UTF-8 in stored TEXT is refused because replacing bytes would make the archive lossy.
- * Chunks contain whole lines and are at most about 64 KiB, except for a single larger row. The synchronous
- * writer must not mutate this database connection. A writer failure propagates and releases the snapshot.
- */
-export function exportArchive(
-	db: Db,
+/** Streams an archive from the caller's consistent read scope. Stored JSON text stays text. */
+export async function exportArchive(
+	db: ReadDb,
 	write: (chunk: string) => void,
 	options: { now?: number; project?: string; blobs?: BlobStore } = {},
-): ExportedArchive {
+): Promise<ExportedArchive> {
 	const exportedAt = options.now ?? Date.now();
 	if (!Number.isSafeInteger(exportedAt) || exportedAt < 0)
 		throw invalid("exportedAt must be a nonnegative integer millisecond timestamp");
-	return db.snapshot(() => {
-		// An archive omits demo marks, so it cannot preserve a retired project's cleanup obligation.
-		if (retiredDemos(db).some((project) => options.project === undefined || project.key === options.project))
-			throw new OpError("conflict", "retired demo cleanup is still running; export again after it finishes");
-		const metadata = discoverTables(db);
-		const filters = options.project === undefined ? null : projectFilters(db, metadata, options.project);
-		const filter = (table: Table): string => filters?.get(table.name) ?? where(table);
-		const warnings: string[] = [];
-		const tables = Object.fromEntries(
-			metadata.map((table) => {
-				const timed = table.name === "results" || table.name === "result_tries";
-				const durationCheck = timed
-					? `, max(duration_ms IS NOT NULL AND (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN ${resultDuration.minValue} AND ${resultDuration.maxValue})) AS invalid`
-					: "";
-				const counts = db.raw
-					.query<{ count: number; invalid?: number | null }, []>(
-						`SELECT count(*) AS count${durationCheck} FROM ${identifier(table.name)} ${filter(table)}`,
-					)
-					.get();
-				if (counts?.invalid) {
-					warnings.push(
-						`Archive contains ${table.name}.duration_ms outside the integer range ${resultDuration.minValue} to ${resultDuration.maxValue} ms; this build will refuse to import it. Original values were preserved. See /docs/data#import-into-a-new-instance.`,
-					);
-				}
-				return [table.name, counts?.count ?? 0];
-			}),
+	if ((await retiredDemos(db)).some((project) => options.project === undefined || project.key === options.project))
+		throw invalid("an instance archive waits for retired demo cleanup; export a live project or finish cleanup first");
+	const metadata = await discoverTables(db);
+	const filters = options.project === undefined ? null : await projectFilters(db, metadata, options.project);
+	const filter = (table: Table): string => filters?.get(table.name) ?? where(table);
+	const warnings: string[] = [];
+	const countsByTable = new Map<string, number>();
+	for (const table of metadata) {
+		const timed = table.name === "results" || table.name === "result_tries";
+		const durationCheck = timed
+			? `, bool_or(duration_ms NOT BETWEEN ${resultDuration.minValue} AND ${resultDuration.maxValue}) AS invalid`
+			: "";
+		const [counts] = await db.allDynamic<{ count: number; invalid?: boolean | null }>(
+			`SELECT count(*) AS count${durationCheck} FROM ${identifier(table.name)} ${filter(table)}`,
 		);
-		const hash = createHash("sha256");
-		const decoder = new TextDecoder("utf-8", { fatal: true });
-		let chunk = "";
-		let bytes = 0;
-		let rows = 0;
-		const flush = (): void => {
-			if (chunk.length === 0) return;
-			write(chunk);
-			chunk = "";
-			bytes = 0;
-		};
-		const append = (line: string, hashed = true): void => {
-			const size = Buffer.byteLength(line);
-			if (bytes + size > CHUNK_BYTES) flush();
-			if (hashed) hash.update(line);
-			chunk += line;
-			bytes += size;
-			if (bytes >= CHUNK_BYTES) flush();
-		};
-		append(`${JSON.stringify({ mainworthy: "archive", format: 1, schema: ARCHIVE_VERSION, exportedAt, tables })}\n`);
-		for (const table of metadata) {
-			const fields = table.columns.flatMap((column) => [literal(column), identifier(column)]);
-			const order = (table.primary.length > 0 ? table.primary : table.columns).map(identifier).join(", ");
-			const statement = db.raw.prepare<{ json: Uint8Array }, []>(
-				`SELECT CAST(json_object(${fields.join(", ")}) AS BLOB) AS json FROM ${identifier(table.name)} ${filter(table)} ORDER BY ${order}`,
+		countsByTable.set(table.name, counts?.count ?? 0);
+		if (counts?.invalid)
+			warnings.push(
+				`Archive contains ${table.name}.duration_ms outside the integer range ${resultDuration.minValue} to ${resultDuration.maxValue} ms; this build will refuse to import it. Original values were preserved. See /docs/data#import-into-a-new-instance.`,
 			);
-			try {
-				for (const row of statement.iterate()) {
-					let json: string;
-					try {
-						json = decoder.decode(row.json);
-					} catch {
-						throw invalid(`cannot export table ${table.name} losslessly: stored TEXT contains invalid UTF-8`);
-					}
-					let blob = "";
-					if (table.name === "attachments") {
-						const item = Attachment.parse(JSON.parse(json));
-						const bytes = options.blobs?.get(item.hash);
-						if (!bytes || bytes.length !== item.size || attachmentType(bytes) !== item.type)
-							throw invalid(`attachment ${item.id} is missing or damaged; restore its content before exporting`);
-						blob = `,"blob":${JSON.stringify(Buffer.from(bytes).toString("base64"))}`;
-					}
-					append(`{"t":${JSON.stringify(table.name)},"r":${json}${blob}}\n`);
-					rows++;
+	}
+	const tables = Object.fromEntries(countsByTable);
+	const hash = createHash("sha256");
+	let chunk = "";
+	let bytes = 0;
+	let rows = 0;
+	const flush = (): void => {
+		if (!chunk.length) return;
+		write(chunk);
+		chunk = "";
+		bytes = 0;
+	};
+	const append = (line: string, hashed = true): void => {
+		const size = Buffer.byteLength(line);
+		if (bytes + size > CHUNK_BYTES) flush();
+		if (hashed) hash.update(line);
+		chunk += line;
+		bytes += size;
+		if (bytes >= CHUNK_BYTES) flush();
+	};
+	append(`${JSON.stringify({ mainworthy: "archive", format: 1, schema: ARCHIVE_VERSION, exportedAt, tables })}\n`);
+	for (const table of metadata) {
+		const fields = table.columns.flatMap((column) => [literal(column), identifier(column)]);
+		const keys = table.primary.length ? table.primary : table.columns;
+		const order = keys.map(identifier).join(", ");
+		let after: SqlValue[] = [];
+		for (;;) {
+			const base = filter(table);
+			const page = after.length
+				? `${base ? " AND" : "WHERE"} (${order}) > (${keys.map((_, i) => `$${i + 1}`).join(", ")})`
+				: "";
+			const batch = await db.allDynamic<{ json: string }>(
+				`SELECT json_build_object(${fields.join(", ")})::text AS json FROM ${identifier(table.name)} ${base} ${page} ORDER BY ${order} LIMIT 1000`,
+				after,
+			);
+			for (const row of batch) {
+				row.json = row.json.replace(/"(?:[^"\\]|\\.)*"|\s+/g, (token) => (token.startsWith('"') ? token : ""));
+				let blob = "";
+				if (table.name === "attachments") {
+					const item = Attachment.parse(JSON.parse(row.json));
+					const content = options.blobs?.get(item.hash);
+					if (!content || content.length !== item.size || attachmentType(content) !== item.type)
+						throw invalid(`attachment ${item.id} is missing or damaged; restore its content before exporting`);
+					blob = `,"blob":${JSON.stringify(Buffer.from(content).toString("base64"))}`;
 				}
-			} finally {
-				statement.finalize();
+				append(`{"t":${JSON.stringify(table.name)},"r":${row.json}${blob}}\n`);
+				rows++;
 			}
+			if (batch.length < 1000) break;
+			const last = batch.at(-1);
+			if (!last) break;
+			const values = jsonMap(Value).parse(parseLine(last.json, rows));
+			after = keys.map((key) => values.get(key) ?? null);
 		}
-		const sha256 = hash.digest("hex");
-		append(`${JSON.stringify({ end: true, rows, sha256 })}\n`, false);
-		flush();
-		return { rows, tables, sha256, warnings };
-	});
+	}
+	const sha256 = hash.digest("hex");
+	append(`${JSON.stringify({ end: true, rows, sha256 })}\n`, false);
+	flush();
+	return { rows, tables, sha256, warnings };
 }
 
 function parseLine(line: string, position: number): unknown {
@@ -439,36 +418,20 @@ function readHeader(line: string, metadata: readonly Table[]): Header {
 	return header;
 }
 
-function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: number) => void = () => {}): T {
-	const checking = performance.now();
-	const deferred =
-		db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()?.defer_foreign_keys ?? 0;
+async function importTransaction<T>(
+	db: WriteDb,
+	fn: () => T | Promise<T>,
+	progress: (step: string, ms: number) => void = () => {},
+): Promise<T> {
+	const began = performance.now();
 	try {
-		if (db.raw.inTransaction && deferred === 0 && db.raw.query("PRAGMA foreign_key_check").get()) {
-			throw new OpError(
-				"conflict",
-				"the caller has pending foreign key violations; resolve them before importing or removing a project",
-			);
-		}
+		return await db.transaction(() => db.checkedBulk(fn));
+	} catch (error) {
+		if (invalidStoredValue(error))
+			throw invalid(`archive constraint violation: ${error instanceof Error ? error.message : String(error)}`);
+		throw error;
 	} finally {
-		progress("check pending foreign keys", performance.now() - checking);
-	}
-	let finishing = performance.now();
-	try {
-		return db.checkedBulk(() => {
-			try {
-				return fn();
-			} finally {
-				finishing = performance.now();
-			}
-		});
-	} finally {
-		// Restore only after a failing savepoint has rolled back its pending references.
-		if (db.raw.inTransaction) {
-			const current = db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get();
-			if (current?.defer_foreign_keys !== deferred) db.raw.exec(`PRAGMA defer_foreign_keys = ${deferred}`);
-		}
-		progress("finish transfer transaction", performance.now() - finishing);
+		progress("finish transfer transaction", performance.now() - began);
 	}
 }
 
@@ -478,24 +441,45 @@ function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: 
  * such columns need not change the archive version when NULL preserves the earlier behavior. Every count, digest,
  * column, duration, failure subject, pending result input and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
  * search index. Tokens and sessions are discarded on success along with bootstrap identity rows.
- * Migration-owned schema_version is retained.
+ * Migration-owned schema and baseline metadata are retained.
  * Lines exclude the LF separator and retain all other characters, since their bytes determine the digest.
- * Import uses one write transaction, or a savepoint if its caller already owns a write transaction, restoring
- * the caller's foreign-key deferral setting. Archived rows violating SQLite constraints are invalid operations.
- * A caller with pending deferred constraints and global deferral off must resolve those references first,
- * because restoring that PRAGMA would otherwise discard its pending constraint checks.
+ * Import uses one write transaction, or a savepoint if its caller already owns a write transaction.
+ * Deferred foreign keys are checked before it returns. Invalid stored values refuse the archive.
  */
-export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?: BlobStore } = {}): ArchiveCounts {
-	return importTransaction(db, () => {
-		if (db.raw.query("SELECT 1 FROM projects LIMIT 1").get()) {
+export async function importArchive(
+	db: WriteDb,
+	lines: Iterable<string>,
+	options: { blobs?: BlobStore } = {},
+): Promise<ArchiveCounts> {
+	return await importTransaction(db, async () => {
+		if (await db.get(Q.anyProject)) {
 			throw new OpError(
 				"conflict",
 				"importing into a non-empty instance is not supported yet; use an instance with no projects",
 			);
 		}
-		const metadata = discoverTables(db);
+		const metadata = await discoverTables(db);
 		const iterator = lines[Symbol.iterator]();
-		const inserts = new Map<string, ReturnType<typeof db.raw.prepare<unknown, Value[]>>>();
+		const pending = new Map<string, Value[][]>();
+		const flushRows = async (table: Table): Promise<void> => {
+			const batch = pending.get(table.name) ?? [];
+			if (!batch.length) return;
+			const values = table.columns.map((_, i) => arrayLiteral(batch.map((row) => row[i] ?? null)));
+			const arrays = table.columns.map((column, i) => `$${i + 1}::${identifier(table.types.get(column) ?? "text")}[]`);
+			try {
+				await db.runDynamic(
+					`INSERT INTO ${identifier(table.name)} (${table.columns.map(identifier).join(", ")}) SELECT * FROM unnest(${arrays.join(", ")})`,
+					values,
+				);
+			} catch (error) {
+				if (invalidStoredValue(error))
+					throw invalid(
+						`invalid archive row in table ${table.name}: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				throw error;
+			}
+			pending.set(table.name, []);
+		};
 		try {
 			const first = iterator.next();
 			if (first.done) throw invalid("empty archive: the header is missing");
@@ -506,18 +490,10 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 			let rows = 0;
 			let position = 1;
 			let ended = false;
-			db.raw.exec("PRAGMA defer_foreign_keys = ON");
-			for (const name of UNEXPORTED) db.raw.exec(`DELETE FROM ${identifier(name)}`);
-			db.raw.exec("DELETE FROM search_docs");
-			for (const table of [...metadata].reverse()) {
-				db.raw.exec(`DELETE FROM ${identifier(table.name)} ${where(table)}`);
-				inserts.set(
-					table.name,
-					db.raw.prepare<unknown, Value[]>(
-						`INSERT INTO ${identifier(table.name)} (${table.columns.map(identifier).join(", ")}) VALUES (${table.columns.map(() => "?").join(", ")})`,
-					),
-				);
-			}
+			for (const name of UNEXPORTED) await db.runDynamic(`DELETE FROM ${identifier(name)}`);
+			await db.runDynamic("DELETE FROM search_docs");
+			for (const table of [...metadata].reverse())
+				await db.runDynamic(`DELETE FROM ${identifier(table.name)} ${where(table)}`);
 			for (let next = iterator.next(); !next.done; next = iterator.next()) {
 				position++;
 				if (ended) throw invalid(`trailing data after archive footer on line ${position}`);
@@ -539,8 +515,7 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 					continue;
 				}
 				const table = tables.get(entry.t);
-				const insert = inserts.get(entry.t);
-				if (!table || !insert) throw invalid(`unknown or excluded archive table ${entry.t}`);
+				if (!table) throw invalid(`unknown or excluded archive table ${entry.t}`);
 				if (entry.t === "attachments") {
 					const item = Attachment.safeParse(Object.fromEntries(entry.r));
 					const content = AttachmentData.safeParse(entry.blob);
@@ -599,40 +574,40 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 						throw invalid(`${context}: pending results fail result input: ${issues}`);
 					}
 				}
-				if (entry.t === "meta" && entry.r.get("key") === "schema_version")
-					throw invalid("archive must not overwrite meta.schema_version");
-				try {
-					insert.run(...table.columns.map((column) => entry.r.get(column) ?? null));
-				} catch (error) {
-					const constraint = ConstraintError.safeParse(error);
-					if (constraint.success) {
-						throw invalid(`invalid archive row in table ${entry.t} on line ${position}: ${constraint.data.message}`);
-					}
-					throw error;
-				}
+				if (entry.t === "meta" && LEDGER.includes(z.string().parse(entry.r.get("key"))))
+					throw invalid("archive must not overwrite meta.schema_version or other migration metadata");
+				const batch = pending.get(table.name) ?? [];
+				batch.push(table.columns.map((column) => entry.r.get(column) ?? null));
+				pending.set(table.name, batch);
+				if (batch.length >= 500) await flushRows(table);
 				counts.set(entry.t, (counts.get(entry.t) ?? 0) + 1);
 				rows++;
 				hash.update(`${next.value}\n`);
 			}
 			if (!ended) throw invalid("truncated archive: footer is missing");
-			rebuildSearch(db);
+			for (const table of metadata) await flushRows(table);
+			await rebuildSearch(db);
 			// Earlier versions are history; the policy in force is what the next report is asked under.
-			const current = db.raw.query<{ key: string; preset: string; clauses: string; settings: string }, []>(
-				`SELECT p.key, o.preset, o.clauses, o.settings FROM projects p
-				 JOIN policies o ON o.project = p.id AND o.version = (SELECT max(version) FROM policies WHERE project = p.id)`,
-			);
-			for (const row of current.all()) {
+			const current = await db.all(Q.policy);
+			for (const row of current) {
 				const parsed = Policy.safeParse(storedPolicy(row));
 				const problem = parsed.success ? policyProblem(parsed.data) : "policy is not valid";
 				if (problem) throw invalid(`archive policy of project ${row.key} is refused: ${problem}`);
 			}
-			const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
-			if (foreign)
-				throw invalid(`archive foreign key violation in table ${foreign.table}, referencing ${foreign.parent}`);
-			rebuildAssertionIndexes(db, true);
+			await rebuildAssertionIndexes(db, true);
+			await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
+			for (const table of await discoverTables(db, false))
+				for (const column of table.identities) {
+					const [row] = await db.allDynamic<{ next: number }>(
+						`SELECT coalesce(max(${identifier(column)}), 0) + 1 AS next FROM ${identifier(table.name)}`,
+					);
+					if (!row) throw new Error("identity allocation has no next value");
+					await db.exec(
+						`ALTER TABLE ${identifier(table.name)} ALTER COLUMN ${identifier(column)} RESTART WITH ${row.next}`,
+					);
+				}
 			return { rows, tables: Object.fromEntries(counts) };
 		} finally {
-			for (const insert of inserts.values()) insert.finalize();
 			iterator.return?.();
 		}
 	});
@@ -640,31 +615,27 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 
 const Tags = z.array(z.string());
 
-function rebuildSearch(db: Db): void {
-	const heads = db.raw.prepare<{ id: string; project: string; tags: string; body: string | null }, []>(`
-		SELECT CAST(c.id AS TEXT) AS id, CAST(c.project AS TEXT) AS project, c.tags, v.body
-		FROM cases c LEFT JOIN versions v ON v.case_id = c.id AND v.no = c.head ORDER BY c.id
-	`);
-	const insert = db.raw.prepare<unknown, [bigint, string, string, string, bigint]>(
-		"INSERT INTO search_docs (rowid, title, body, tags, project) VALUES (?, ?, ?, ?, ?)",
-	);
-	try {
-		for (const row of heads.iterate()) {
-			if (row.body === null) throw invalid(`case ${row.id} has no head version; cannot rebuild search`);
-			try {
-				const body = CaseBody.parse(JSON.parse(row.body));
-				const tags = Tags.parse(JSON.parse(row.tags));
-				const text = searchText(db, Number(row.project), body);
-				insert.run(BigInt(row.id), body.title, text, tags.join(" "), BigInt(row.project));
-			} catch (error) {
-				throw invalid(
-					`cannot rebuild search for case ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
+async function rebuildSearch(db: WriteDb): Promise<void> {
+	const rows: [number, string, string, string, number][] = [];
+	for (const row of await db.all(Q.heads)) {
+		if (row.body === null) throw invalid(`case ${row.id} has no head version; cannot rebuild search`);
+		try {
+			const body = CaseBody.parse(JSON.parse(row.body));
+			const tags = Tags.parse(JSON.parse(row.tags));
+			rows.push([row.id, body.title, await searchText(db, row.project, body), tags.join(" "), row.project]);
+		} catch (error) {
+			throw invalid(
+				`cannot rebuild search for case ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
-	} finally {
-		heads.finalize();
-		insert.finalize();
+	}
+	for (let start = 0; start < rows.length; start += 500) {
+		const batch = rows.slice(start, start + 500);
+		const tuples = batch.map((_, i) => `(${[1, 2, 3, 4, 5].map((n) => `$${i * 5 + n}`).join(", ")})`);
+		await db.runDynamic(
+			`INSERT INTO search_docs (id, title, body, tags, project) VALUES ${tuples.join(", ")}`,
+			batch.flat(),
+		);
 	}
 }
 
@@ -674,29 +645,27 @@ function rebuildSearch(db: Db): void {
  * else (another project, a command that ran, another actor, a changed policy) is refused: an import never
  * overwrites work.
  */
-export function removeBootstrap(db: Db): void {
-	const projects = z
-		.array(z.object({ key: z.string(), name: z.string(), seq: z.number() }))
-		.parse(db.raw.query("SELECT key, name, seq FROM projects").all());
+export async function removeBootstrap(db: WriteDb): Promise<void> {
+	const projects = await db.all(Q.projects);
 	if (projects.length === 0) return;
 	const first = projects[0];
-	const count = (query: string): number => z.object({ n: z.number() }).parse(db.raw.query(query).get()).n;
+	const count = async (query: string): Promise<number> => (await db.allDynamic<{ n: number }>(query))[0]?.n ?? 0;
 	if (
 		projects.length !== 1 ||
 		!first ||
 		first.key !== "scratch" ||
 		first.name !== "scratch" ||
 		first.seq !== 1 ||
-		count("SELECT count(*) AS n FROM commands") !== 0 ||
-		count("SELECT count(*) AS n FROM actors") !== 2 ||
-		count("SELECT count(*) AS n FROM teams") !== 0 ||
-		count("SELECT count(*) AS n FROM policies WHERE version <> 1 OR preset <> 'loose'") !== 0
+		(await count("SELECT count(*) AS n FROM commands")) !== 0 ||
+		(await count("SELECT count(*) AS n FROM actors")) !== 2 ||
+		(await count("SELECT count(*) AS n FROM teams")) !== 0 ||
+		(await count("SELECT count(*) AS n FROM policies WHERE version <> 1 OR preset <> 'loose'")) !== 0
 	) {
 		throw new OpError("conflict", "import needs a fresh instance; existing projects or user data will not be replaced");
 	}
 	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
 	// the same id is not one.
-	db.exec(
+	await db.exec(
 		"DELETE FROM assertion_seen; DELETE FROM assertion_spreads; DELETE FROM assertion_roots; DELETE FROM assertion_index; DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects",
 	);
 }
@@ -708,49 +677,29 @@ export function removeBootstrap(db: Db): void {
  * no row names (`start`). The project's key is free afterwards, and a project made under it starts empty.
  * A table with no ownership rule refuses the removal before a row goes, as it refuses a project export.
  *
- * No operation offers this. Demo deployment uses removeProjectSlice after swapping the visible project.
+ * No operation offers this. `mainworthy serve` calls it for the demo it seeds again (`MAINWORTHY_DEMO`, in
+ * `src/cli/demo.ts`), and only for a project `mainworthy seed` made.
  */
-export function removeProject(
-	db: Db,
+export async function removeProject(
+	db: WriteDb,
 	key: string,
 	progress: (step: string, ms: number) => void = () => {},
 	validation: "audit" | "deferred" = "audit",
-): ArchiveCounts {
-	if (
-		validation === "deferred" &&
-		(!db.raw.inTransaction ||
-			db.raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1 ||
-			db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()?.defer_foreign_keys !== 1)
-	)
+): Promise<ArchiveCounts> {
+	if (validation === "deferred" && !db.inTransaction)
 		throw new Error("deferred removal needs an enforced deferred transaction");
-	const remove = () => {
+	const remove = async () => {
 		const began = performance.now();
-		const id = projectLiteral(db, key);
-		const shadow = new Set(
-			TableKind.array()
-				.parse(db.raw.query("PRAGMA table_list").all())
-				.filter((table) => table.type === "shadow")
-				.map((table) => table.name),
-		);
-		const statements = TableName.array()
-			.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-			.map((table) => table.name)
-			.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name))
-			.map((name) => {
-				const columns = Column.array()
-					.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
-					.map((column) => column.name);
-				const parents = ForeignKey.array()
-					.parse(db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all())
-					.map((key) => key.table);
-				return {
-					name,
-					parents,
-					parentOwned: name in PROJECT_PARENT,
-					rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}`,
-				};
-			})
-			// A table that finds its rows through a parent goes first, while the parent's rows are still there.
+		const id = await projectLiteral(db, key);
+		const metadata = await discoverTables(db, false);
+		const statements = metadata
+			.filter((table) => !INSTANCE_TABLES.includes(table.name))
+			.map((table) => ({
+				name: table.name,
+				parents: table.parents,
+				parentOwned: table.name in PROJECT_PARENT,
+				rows: `FROM ${identifier(table.name)} ${ownedBy(table, id, "removing a project")}`,
+			}))
 			.sort((a, b) => Number(!a.parentOwned) - Number(!b.parentOwned));
 		const remaining = new Map(statements.map((statement) => [statement.name, statement]));
 		const ordered: typeof statements = [];
@@ -766,43 +715,47 @@ export function removeProject(
 		for (const statement of statements) visit(statement);
 		progress("discover tables", performance.now() - began);
 		// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
-		const tables = Object.fromEntries(
-			statements.map(({ name, rows }) => {
-				const start = performance.now();
-				const n = db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0;
-				progress(`count ${name}`, performance.now() - start);
-				return [name, n];
-			}),
-		);
-		db.raw.exec("PRAGMA defer_foreign_keys = ON");
+		const countsByTable = new Map<string, number>();
+		for (const { name, rows } of statements) {
+			const start = performance.now();
+			countsByTable.set(name, (await db.allDynamic<{ n: number }>(`SELECT count(*) AS n ${rows}`))[0]?.n ?? 0);
+			progress(`count ${name}`, performance.now() - start);
+		}
 		for (const { name, rows } of ordered) {
 			const start = performance.now();
-			db.raw.exec(`DELETE ${rows}`);
+			await db.runDynamic(`DELETE ${rows}`);
 			progress(`delete ${name}`, performance.now() - start);
 		}
-		const checking = performance.now();
-		const foreign =
-			validation === "audit"
-				? db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get()
-				: null;
-		if (validation === "audit") progress("check foreign keys", performance.now() - checking);
-		if (foreign)
-			throw new OpError(
-				"internal",
-				`removing project ${key} left rows in ${foreign.table} that refer to ${foreign.parent}`,
-			);
+		if (validation === "audit") await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
+		const tables = Object.fromEntries(countsByTable);
 		return { rows: Object.values(tables).reduce((sum, count) => sum + count, 0), tables };
 	};
-	return validation === "deferred" ? db.savepoint(remove) : importTransaction(db, remove, progress);
+	return validation === "deferred" ? await db.savepoint(remove) : await importTransaction(db, remove, progress);
 }
 
-const SliceForeignKey = z.object({
-	id: Count,
-	seq: Count,
-	table: z.string(),
-	from: z.string(),
-	to: z.string().nullable(),
-});
+/**
+ * The sequence number of the first write to project `key` after it was made, or null when there was none. Every
+ * write stamps the instance's sequence on the rows it leaves (`seq`, `first_seq`, and `rev` where a row records
+ * its last change), so the smallest one the project owns is its first write. The policy a project is made with is
+ * part of making it, and the project's own row keeps a counter, not a write.
+ */
+export async function firstWrite(db: ReadDb, key: string): Promise<number | null> {
+	const id = await projectLiteral(db, key);
+	const parts: string[] = [];
+	for (const table of await discoverTables(db, false)) {
+		if (table.name === "projects" || INSTANCE_TABLES.includes(table.name)) continue;
+		const filter = ownedBy(table, id, "reading a project's first write");
+		const made = table.name === "policies" ? " AND version > 1" : "";
+		for (const column of table.columns.filter((column) => ["seq", "first_seq", "rev"].includes(column)))
+			parts.push(`SELECT min(${identifier(column)}) AS n FROM ${identifier(table.name)} ${filter}${made}`);
+	}
+	if (!parts.length) return null;
+	return (
+		(await db.allDynamic<{ n: number | null }>(`SELECT min(n) AS n FROM (${parts.join(" UNION ALL ")}) writes`))[0]
+			?.n ?? null
+	);
+}
+
 type SliceReference = { child: SliceTable; columns: { from: string; to: string }[] };
 type SliceTable = {
 	name: string;
@@ -811,59 +764,36 @@ type SliceTable = {
 	incoming: SliceReference[];
 	parents: string[];
 };
-const slicePlans = new WeakMap<Db, { version: number; tables: SliceTable[] }>();
-
-function slicePlan(db: Db): SliceTable[] {
-	const version = db.raw.query<{ schema_version: number }, []>("PRAGMA schema_version").get()?.schema_version ?? 0;
-	const cached = slicePlans.get(db);
-	if (cached?.version === version) return cached.tables;
-	const kinds = TableKind.array().parse(db.raw.query("PRAGMA table_list").all());
+async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
+	const catalog = await db.catalog();
 	const tables = new Map<string, SliceTable>();
-	const foreigns = new Map<string, z.infer<typeof SliceForeignKey>[]>();
-	for (const { name, type, schema } of kinds) {
-		if (schema !== "main" || type === "shadow" || name.startsWith("sqlite_")) continue;
-		const columns = Column.array().parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all());
-		const keys = columns
-			.filter((column) => column.pk > 0)
-			.sort((a, b) => a.pk - b.pk)
-			.map((column) => column.name);
-		const references = SliceForeignKey.array().parse(
-			db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all(),
-		);
-		foreigns.set(name, references);
-		tables.set(name, {
-			name,
-			keys: keys.length > 0 ? keys : ["rowid"],
-			owned: INSTANCE_TABLES.includes(name)
+	for (const table of catalog) {
+		tables.set(table.name, {
+			name: table.name,
+			keys: [...table.primary],
+			owned: INSTANCE_TABLES.includes(table.name)
 				? null
 				: ownedBy(
-						{ name, columns: columns.map((column) => column.name) },
-						"CAST(?1 AS INTEGER)",
+						{ name: table.name, columns: table.columns.map((column) => column.name) },
+						"$1::bigint",
 						"removing a project",
 					).slice(6),
 			incoming: [],
-			parents: references.map((reference) => reference.table),
+			parents: table.foreignKeys.map((reference) => reference.parent),
 		});
 	}
-	for (const [name, references] of foreigns) {
-		const child = tables.get(name);
+	for (const table of catalog) {
+		const child = tables.get(table.name);
 		if (!child) continue;
-		const grouped = new Map<number, typeof references>();
-		for (const reference of references) {
-			const group = grouped.get(reference.id) ?? [];
-			group.push(reference);
-			grouped.set(reference.id, group);
-		}
-		for (const group of grouped.values()) {
-			const first = group[0];
-			const parent = first && tables.get(first.table);
-			if (!parent) throw invalid(`removing a project cannot resolve references from ${name}`);
+		for (const reference of table.foreignKeys) {
+			const parent = tables.get(reference.parent);
+			if (!parent) throw invalid(`removing a project cannot resolve references from ${table.name}`);
 			parent.incoming.push({
 				child,
-				columns: group.map((reference) => {
-					const to = reference.to ?? parent.keys[reference.seq];
-					if (!to) throw invalid(`removing a project cannot resolve reference ${name}.${reference.from}`);
-					return { from: reference.from, to };
+				columns: reference.columns.map((from, i) => {
+					const to = reference.parentColumns[i];
+					if (!to) throw invalid(`removing a project cannot resolve reference ${table.name}.${from}`);
+					return { from, to };
 				}),
 			});
 		}
@@ -884,16 +814,15 @@ function slicePlan(db: Db): SliceTable[] {
 		visit(table);
 	// Removing live capture roots first prevents later source deletes from refilling dirty buckets.
 	ordered.sort((a, b) => Number(b.name === "merge_receipt_heads") - Number(a.name === "merge_receipt_heads"));
-	slicePlans.set(db, { version, tables: ordered });
 	return ordered;
 }
 
 function sliceKeys(table: SliceTable, alias = ""): string {
-	return `json_array(${table.keys.map((key) => `CAST(${alias}${identifier(key)} AS TEXT)`).join(",")})`;
+	return `json_build_array(${table.keys.map((key) => `CAST(${alias}${identifier(key)} AS TEXT)`).join(",")})::text`;
 }
 
-function sliceIdentity(table: SliceTable, alias = ""): string {
-	return table.keys.map((key, i) => `${alias}${identifier(key)} = ?${2 + i}`).join(" AND ");
+function sliceIdentity(table: SliceTable, alias = "", first = 2): string {
+	return table.keys.map((key, i) => `${alias}${identifier(key)} = $${first + i}`).join(" AND ");
 }
 
 /**
@@ -904,118 +833,119 @@ function sliceIdentity(table: SliceTable, alias = ""): string {
  * The last transaction deletes the demo mark and project together (at most two rows, even for limit=1).
  * `rows` counts deleted owned rows, including the mark and cascades; FTS shadow writes and trigger work are additional.
  */
-export function removeProjectSlice(
-	db: Db,
+export async function removeProjectSlice(
+	db: WriteDb,
 	key: string,
 	limit = 128,
-): { done: boolean; table: string | null; rows: number } {
+): Promise<{ done: boolean; table: string | null; rows: number }> {
 	if (!Number.isSafeInteger(limit) || limit < 1)
 		throw invalid("project removal slice limit must be a positive safe integer");
-	if (db.raw.inTransaction || db.inTransaction) throw new Error("project removal slice needs its own transaction");
-	if (db.raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1)
-		throw new Error("project removal slice needs foreign key enforcement");
-	return db.transaction(() => {
-		const project = db.raw
-			.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key=?")
-			.get(key);
-		if (!project) return { done: true, table: null, rows: 0 };
-		const tables = slicePlan(db);
-		const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
-		let blocked: string | null = null;
-		for (const table of ordinary) {
-			const blockers = table.incoming.map(({ child, columns }) => {
-				const matches = columns
-					.map(({ from, to }) => `c.${identifier(from)} = ${identifier(table.name)}.${identifier(to)}`)
-					.join(" AND ");
-				const same =
-					child === table
-						? ` AND NOT (${table.keys.map((key) => `c.${identifier(key)} = ${identifier(table.name)}.${identifier(key)}`).join(" AND ")})`
-						: "";
-				return `NOT EXISTS (SELECT 1 FROM ${identifier(child.name)} c WHERE ${matches}${same})`;
-			});
-			const roots = db.raw
-				.query<{ keys: string }, [string, number]>(
-					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned}${blockers.length ? ` AND ${blockers.join(" AND ")}` : ""} LIMIT ?2`,
-				)
-				.all(project.id, limit);
-			if (roots.length > 0) {
-				const identity = `(${table.keys.map(identifier).join(",")})`;
-				const selected = roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys)));
-				const placeholders = selected
-					.map((keys, row) => `(${keys.map((_, i) => `?${2 + row * table.keys.length + i}`).join(",")})`)
-					.join(",");
-				db.raw
-					.query(`DELETE FROM ${identifier(table.name)} WHERE ${table.owned} AND ${identity} IN (${placeholders})`)
-					.run(project.id, ...selected.flat());
-				return { done: false, table: table.name, rows: roots.length };
-			}
-			const root = db.raw
-				.query<{ keys: string }, [string]>(
-					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned} LIMIT 1`,
-				)
-				.get(project.id);
-			if (!root) continue;
-			const pending = [{ table, keys: z.array(z.string()).parse(JSON.parse(root.keys)) }];
-			const included = new Set([`${table.name}:${root.keys}`]);
-			let oversized = false;
-			for (let at = 0; at < pending.length && !oversized; at++) {
-				const row = pending[at];
-				if (!row) continue;
-				for (const { child, columns } of row.table.incoming) {
-					const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
-					const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
-					const dependants = db.raw
-						.query<{ keys: string; owned: number }, string[]>(
-							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "0"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
-						)
-						.all(project.id, ...row.keys);
-					for (const dependant of dependants) {
-						if (dependant.owned !== 1 || child.name === "projects" || child.name === "demo_projects")
-							throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
-						const identity = `${child.name}:${dependant.keys}`;
-						if (included.has(identity)) continue;
-						included.add(identity);
-						pending.push({ table: child, keys: z.array(z.string()).parse(JSON.parse(dependant.keys)) });
-						if (pending.length > limit) {
-							oversized = true;
-							break;
+	if (db.inTransaction) throw new Error("project removal slice needs its own transaction");
+	return db.transaction(() =>
+		db.checkedBulk(async () => {
+			const project = (
+				await db.allDynamic<{ id: string }>("SELECT id::text AS id FROM projects WHERE key=$1", [key])
+			)[0];
+			if (!project) return { done: true, table: null, rows: 0 };
+			const tables = await slicePlan(db);
+			const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
+			let blocked: string | null = null;
+			for (const table of ordinary) {
+				const blockers = table.incoming.map(({ child, columns }) => {
+					const matches = columns
+						.map(({ from, to }) => `c.${identifier(from)} = ${identifier(table.name)}.${identifier(to)}`)
+						.join(" AND ");
+					const same =
+						child === table
+							? ` AND NOT (${table.keys.map((key) => `c.${identifier(key)} = ${identifier(table.name)}.${identifier(key)}`).join(" AND ")})`
+							: "";
+					return `NOT EXISTS (SELECT 1 FROM ${identifier(child.name)} c WHERE ${matches}${same})`;
+				});
+				const roots = await db.allDynamic<{ keys: string }>(
+					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned}${blockers.length ? ` AND ${blockers.join(" AND ")}` : ""} LIMIT $2::bigint`,
+					[project.id, limit],
+				);
+				if (roots.length > 0) {
+					const identity = `(${table.keys.map(identifier).join(",")})`;
+					const selected = roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys)));
+					const placeholders = selected
+						.map((keys, row) => `(${keys.map((_, i) => `$${2 + row * table.keys.length + i}`).join(",")})`)
+						.join(",");
+					await db.runDynamic(
+						`DELETE FROM ${identifier(table.name)} WHERE ${table.owned} AND ${identity} IN (${placeholders})`,
+						[project.id, ...selected.flat()],
+					);
+					return { done: false, table: table.name, rows: roots.length };
+				}
+				const root = (
+					await db.allDynamic<{ keys: string }>(
+						`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned} LIMIT 1`,
+						[project.id],
+					)
+				)[0];
+				if (!root) continue;
+				const pending = [{ table, keys: z.array(z.string()).parse(JSON.parse(root.keys)) }];
+				const included = new Set([`${table.name}:${root.keys}`]);
+				let oversized = false;
+				for (let at = 0; at < pending.length && !oversized; at++) {
+					const row = pending[at];
+					if (!row) continue;
+					for (const { child, columns } of row.table.incoming) {
+						const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
+						const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
+						const dependants = await db.allDynamic<{ keys: string; owned: boolean }>(
+							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "FALSE"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE (${row.table.owned}) AND ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
+							[project.id, ...row.keys],
+						);
+						for (const dependant of dependants) {
+							if (!dependant.owned || child.name === "projects" || child.name === "demo_projects")
+								throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
+							const identity = `${child.name}:${dependant.keys}`;
+							if (included.has(identity)) continue;
+							included.add(identity);
+							pending.push({ table: child, keys: z.array(z.string()).parse(JSON.parse(dependant.keys)) });
+							if (pending.length > limit) {
+								oversized = true;
+								break;
+							}
 						}
+						if (oversized) break;
 					}
-					if (oversized) break;
+				}
+				if (oversized) {
+					blocked = table.name;
+					continue;
+				}
+				for (const row of pending.reverse())
+					await db.runDynamic(
+						`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table, "", 1)}`,
+						row.keys,
+					);
+				return { done: false, table: table.name, rows: pending.length };
+			}
+			if (blocked)
+				throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
+			for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
+				for (const { child, columns } of table.incoming) {
+					if (child.name === "demo_projects") continue;
+					const from = columns.map((column) => identifier(column.from)).join(",");
+					const to = columns.map((column) => identifier(column.to)).join(",");
+					if (
+						(
+							await db.allDynamic(
+								`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${table.owned}) LIMIT 1`,
+								[project.id],
+							)
+						)[0]
+					)
+						throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
 				}
 			}
-			if (oversized) {
-				blocked = table.name;
-				continue;
-			}
-			db.raw.exec("PRAGMA defer_foreign_keys=ON");
-			for (const row of pending.reverse())
-				db.raw
-					.query(`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table)}`)
-					.run(project.id, ...row.keys);
-			return { done: false, table: table.name, rows: pending.length };
-		}
-		if (blocked)
-			throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
-		for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
-			for (const { child, columns } of table.incoming) {
-				if (child.name === "demo_projects") continue;
-				const from = columns.map((column) => identifier(column.from)).join(",");
-				const to = columns.map((column) => identifier(column.to)).join(",");
-				if (
-					db.raw
-						.query(
-							`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${table.owned}) LIMIT 1`,
-						)
-						.get(project.id)
-				)
-					throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
-			}
-		}
-		let rows = db.raw.query("DELETE FROM demo_projects WHERE project=?").run(project.id).changes;
-		rows += db.raw.query("DELETE FROM projects WHERE id=?").run(project.id).changes;
-		return { done: true, table: "projects", rows };
-	});
+			let rows = (await db.runDynamic("DELETE FROM demo_projects WHERE project=$1", [project.id])).changes;
+			rows += (await db.runDynamic("DELETE FROM projects WHERE id=$1", [project.id])).changes;
+			return { done: true, table: "projects", rows };
+		}),
+	);
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */

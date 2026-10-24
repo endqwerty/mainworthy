@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "de737a44d10e90ba00789642f160298f6f165bd3",
+      "revision": "0f0e9f5182fc5fbe811f29a764bcb314c81f9939",
       "link_mode": "local-only"
     },
     "column_fit": "spread"
@@ -54,11 +54,11 @@
       "id": "ops",
       "type": "backend",
       "label": "OPS",
-      "sublabel": "invokeAsync",
+      "sublabel": "invoke",
       "sources": [
         {
           "path": "src/server/ops/registry.ts",
-          "label": "execute; invokeAsync"
+          "label": "execute; invoke"
         },
         {
           "path": "src/server/ops/writes.ts",
@@ -73,16 +73,16 @@
     {
       "id": "db",
       "type": "database",
-      "label": "mainworthy.db",
-      "sublabel": "Writer + reader threads",
+      "label": "PostgreSQL 18",
+      "sublabel": "Write lease + read pool",
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "app.db; app.readers; app.gate"
+          "label": "App.database; read; write"
         },
         {
           "path": "src/server/kernel/db.ts",
-          "label": "commit; snapshot; query_only"
+          "label": "commit; read-only snapshot"
         },
         {
           "path": "src/server/runs/runs.ts",
@@ -213,7 +213,7 @@
       "from": "ops",
       "to": "db",
       "y": 513,
-      "label": "reader thread: snapshot",
+      "label": "read scope: snapshot",
       "variant": "default"
     },
     {

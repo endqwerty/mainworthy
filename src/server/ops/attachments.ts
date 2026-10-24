@@ -3,11 +3,12 @@ import { REPLIES } from "../../core/replies.ts";
 import { attachmentContent, attachmentsOf, recordAttachments } from "../evidence/attachments.ts";
 import { resultById } from "../evidence/evidence.ts";
 import type { Ctx } from "../kernel/ctx.ts";
+import type { ReadDb } from "../kernel/db.ts";
 import { forbidden, notFound } from "../kernel/errors.ts";
 import { defineOp } from "./registry.ts";
 
-function mustResult(ctx: Ctx, id: number) {
-	const result = resultById(ctx.db, id);
+async function mustResult(ctx: Ctx<ReadDb>, id: number) {
+	const result = await resultById(ctx.db, id);
 	if (!result || result.project !== ctx.project.id) throw notFound(`result ${id}`);
 	return result;
 }
@@ -20,10 +21,10 @@ export const attachOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: null,
-	run(ctx, input) {
-		const result = mustResult(ctx, input.result);
+	async run(ctx, input) {
+		const result = await mustResult(ctx, input.result);
 		if (result.actor !== ctx.actor.id) throw forbidden("Only the producer of a result may attach evidence to it");
-		const saved = recordAttachments(ctx, result.id, [input.attachment])[0];
+		const saved = (await recordAttachments(ctx, result.id, [input.attachment]))[0];
 		if (!saved) throw new Error("attachment was not recorded");
 		return saved;
 	},
@@ -37,10 +38,10 @@ export const attachmentOp = defineOp({
 	scope: "project",
 	effect: "read",
 	mcp: null,
-	run(ctx, input) {
-		mustResult(ctx, input.result);
+	async run(ctx, input) {
+		await mustResult(ctx, input.result);
 		return input.id === undefined
-			? { kind: "list" as const, items: attachmentsOf(ctx.db, input.result) }
-			: attachmentContent(ctx, input.result, input.id);
+			? { kind: "list" as const, items: await attachmentsOf(ctx.db, input.result) }
+			: await attachmentContent(ctx, input.result, input.id);
 	},
 });

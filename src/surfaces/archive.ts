@@ -2,9 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
-import { clearChallenges, clearUses, requireRecentSessionProof, type Session } from "../server/identity/identity.ts";
+import {
+	clearChallenges,
+	clearUses,
+	requireRecentSessionProof,
+	resolveCaller,
+	type Session,
+} from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
+import type { WriteDb } from "../server/kernel/db.ts";
 import { OpError } from "../server/kernel/errors.ts";
 import { runArchive } from "../server/ops/archives.ts";
 
@@ -27,7 +34,7 @@ function scratch(dataDir: string): { path: string; remove: () => void } {
 	return { path: join(directory, "archive.ndjson"), remove: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
-/** Spooling keeps download backpressure separate from the worker's snapshot. File I/O also leaves HTTP free. */
+/** Spooling keeps download backpressure separate from the database snapshot. File I/O also leaves HTTP free. */
 async function fileStream(file: { path: string; remove: () => void }): Promise<ReadableStream<Uint8Array>> {
 	const fd = await open(file.path, "r");
 	let closing: Promise<void> | undefined;
@@ -74,10 +81,11 @@ export function archiveRoutes(
 	app: App,
 	owner?: Actor,
 ): Record<string, (req: Request, session: Session) => Response | Promise<Response>> {
-	const allowed = (session: Session): boolean => session.actor(0)?.can.includes("admin") ?? false;
+	const allowed = async (session: Session): Promise<boolean> =>
+		(await session.actor(0))?.can.includes("admin") ?? false;
 	return {
 		"/api/export": async (req, session) => {
-			if (!allowed(session)) return failure(new OpError("forbidden", "export needs the admin capability"));
+			if (!(await allowed(session))) return failure(new OpError("forbidden", "export needs the admin capability"));
 			if (req.method !== "GET")
 				return json({ ok: false, error: { code: "invalid", message: "export requires GET" } }, 405);
 			const file = scratch(app.config.dataDir);
@@ -86,7 +94,7 @@ export function archiveRoutes(
 				if (project === "") throw new OpError("invalid", "export needs a nonempty project key");
 				const result = await runArchive(app, { op: "export", path: file.path, now: app.now(), project });
 				const stream = await fileStream(file);
-				if (!allowed(session)) {
+				if (!(await allowed(session))) {
 					await stream.cancel();
 					throw new OpError(
 						"forbidden",
@@ -108,30 +116,38 @@ export function archiveRoutes(
 			}
 		},
 		"/api/import": async (req, session) => {
-			if (!allowed(session)) return failure(new OpError("forbidden", "import needs the admin capability"));
+			if (!(await allowed(session))) return failure(new OpError("forbidden", "import needs the admin capability"));
 			if (req.method !== "POST")
 				return json({ ok: false, error: { code: "invalid", message: "import requires POST" } }, 405);
 			const file = scratch(app.config.dataDir);
-			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
+			const localOwner = owner ?? (session.via === "local" ? await session.actor(0) : null);
 			try {
-				requireRecentSessionProof(app, session);
+				await app.database.read((db) => requireRecentSessionProof(app, db, session));
 				await stageBody(req, file.path);
-				const result = await app.gate.run(async () => {
-					if (!allowed(session))
-						throw new OpError(
-							"forbidden",
-							"import needs the admin capability; the token or grant changed while uploading",
-						);
-					requireRecentSessionProof(app, session);
-					const restored = await runArchive(app, {
-						op: "import",
-						path: file.path,
-						...(app.now === Date.now ? {} : { now: app.now() }),
-						mode: app.config.mode,
-						owner: app.config.owner,
-						ownerToken: app.config.ownerToken,
-						...(app.config.ownerWas ? { ownerWas: app.config.ownerWas } : {}),
-					});
+				const result = await (async () => {
+					const authorize = async (db: WriteDb) => {
+						const ref = session.reference?.();
+						const actor = ref ? (await resolveCaller(app, db, ref, 0))?.actor : await session.actor(0);
+						if (!actor?.can.includes("admin"))
+							throw new OpError(
+								"forbidden",
+								"import needs the admin capability; the token or grant changed while uploading",
+							);
+						await requireRecentSessionProof(app, db, session);
+					};
+					const restored = await runArchive(
+						app,
+						{
+							op: "import",
+							path: file.path,
+							...(app.now === Date.now ? {} : { now: app.now() }),
+							mode: app.config.mode,
+							owner: app.config.owner,
+							ownerToken: app.config.ownerToken,
+							...(app.config.ownerWas ? { ownerWas: app.config.ownerWas } : {}),
+						},
+						authorize,
+					);
 					// The import is committed: every token and session row is gone, and the next ones made take
 					// their ids. What was noted of the old rows' use must not become the new rows' use.
 					clearUses(app);
@@ -144,7 +160,7 @@ export function archiveRoutes(
 					// at its next start.
 					for (const event of restored.events) app.publish(event);
 					return restored.counts;
-				});
+				})();
 				return json({
 					ok: true,
 					result: {

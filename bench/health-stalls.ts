@@ -26,17 +26,15 @@ async function modules(root: string) {
 	const startup: typeof import("../src/app/start.ts") = await import(`${root}/src/app/start.ts`);
 	const dataset: typeof import("./dataset.ts") = await import(`${root}/bench/dataset.ts`);
 	const archive: typeof import("../src/surfaces/archive.ts") = await import(`${root}/src/surfaces/archive.ts`);
-	const readers: typeof import("../src/server/ops/readers.ts") = await import(`${root}/src/server/ops/readers.ts`);
 	const demo: typeof import("../src/cli/demo.ts") = await import(`${root}/src/cli/demo.ts`);
 	const seeding: typeof import("../src/cli/seed.ts") = await import(`${root}/src/cli/seed.ts`);
-	return { ...startup, ...dataset, ...archive, ...demo, ...readers, ...seeding };
+	return { ...startup, ...dataset, ...archive, ...demo, ...seeding };
 }
 
 async function server(root: string, directory: string, demoFile: string) {
-	const { start, config, archiveRoutes, renewDemoWork, ciActor, Readers } = await modules(root);
-	const instance = start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
-	if (instance.app.readers instanceof Readers) await instance.app.readers.ready(60_000);
-	const ci = ciActor(instance.app);
+	const { start, config, archiveRoutes, renewDemoWork, ciActor } = await modules(root);
+	const instance = await start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const ci = await ciActor(instance.app);
 	const demo = Demo.parse(JSON.parse(readFileSync(demoFile, "utf8")));
 	let phase = "idle";
 	let last = performance.now();
@@ -55,23 +53,27 @@ async function server(root: string, directory: string, demoFile: string) {
 				break;
 			case "renew": {
 				const lease = () =>
-					z
-						.object({ until: z.number() })
-						.parse(instance.app.reader.raw.query("SELECT until FROM slot_leases WHERE slot = ?").get(demo.workSlot));
-				const previous = lease().until;
+					instance.app.database.read(async (db) =>
+						z
+							.object({ until: z.number() })
+							.parse((await db.allDynamic("SELECT until FROM slot_leases WHERE slot = $1", [demo.workSlot]))[0]),
+					);
+				const previous = (await lease()).until;
 				await renewDemoWork(instance, "demo", demo);
-				ensure(lease().until > previous, "demo renewal must extend the lease");
+				ensure((await lease()).until > previous, "demo renewal must extend the lease");
 				break;
 			}
 			case "stop": {
 				const results =
 					"SELECT r.id FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = b.target WHERE t.commit_sha = 'bench-health'";
 				const count = (query: string) =>
-					z.object({ n: z.number() }).parse(instance.app.reader.raw.query(query).get()).n;
+					instance.app.database.read(
+						async (db) => z.object({ n: z.number() }).parse((await db.allDynamic(query))[0]).n,
+					);
 				const evidence = Evidence.parse({
-					results: count(`SELECT count(*) n FROM results WHERE id IN (${results})`),
-					tries: count(`SELECT count(*) n FROM result_tries WHERE result IN (${results})`),
-					attachments: count(`SELECT count(*) n FROM attachments WHERE result IN (${results})`),
+					results: await count(`SELECT count(*) n FROM results WHERE id IN (${results})`),
+					tries: await count(`SELECT count(*) n FROM result_tries WHERE result IN (${results})`),
+					attachments: await count(`SELECT count(*) n FROM attachments WHERE result IN (${results})`),
 				});
 				await Bun.sleep(100);
 				clearInterval(timer);
@@ -100,8 +102,12 @@ async function seed(directory: string, root: string) {
 			queueTimeMs: 30_000,
 		}),
 	});
-	const { start, config, archiveRoutes, seed: seedDemo } = await modules(root);
-	const instance = start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const { start, config, archiveRoutes, seed: seedDemo, cloneDataset, postgres } = await modules(root);
+	const fixture = await cloneDataset(directory, directory);
+	const instance = await start({ ...config(directory), databaseUrl: fixture.url }, (app, owner) => ({
+		ui: null,
+		routes: archiveRoutes(app, owner),
+	}));
 	try {
 		const demo = await seedDemo(new Client({ url: instance.url, token: undefined, project: "demo" }), {
 			project: "demo",
@@ -114,14 +120,23 @@ async function seed(directory: string, root: string) {
 		console.log(JSON.stringify({ counts: dataset.metadata.counts }));
 	} finally {
 		await instance.stop();
+		postgres("pg_dump", [
+			"--format=custom",
+			"--no-owner",
+			"--no-privileges",
+			"--file",
+			directory + "/baseline.dump",
+			fixture.url,
+		]);
+		await fixture.close();
 	}
 }
 
 async function probe(dataset: string, artifacts: string, root: string, profile: boolean) {
-	const { ingestInput } = await modules(root);
+	const { ingestInput, cloneDataset } = await modules(root);
 	const metadata = Metadata.parse(JSON.parse(readFileSync(`${dataset}/dataset.json`, "utf8")));
 	const directory = mkdtempSync(`${artifacts}/health-`);
-	cpSync(`${dataset}/mainworthy.db`, `${directory}/mainworthy.db`);
+	const fixture = await cloneDataset(dataset, directory);
 	cpSync(`${dataset}/blobs`, `${directory}/blobs`, { recursive: true });
 	let receive: (message: unknown) => void = () => {};
 	const next = () =>
@@ -310,6 +325,7 @@ async function probe(dataset: string, artifacts: string, root: string, profile: 
 		await child.exited;
 		const text = await output;
 		if (text) console.error(text);
+		await fixture.close();
 		rmSync(directory, { recursive: true, force: true });
 	}
 }

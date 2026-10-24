@@ -14,7 +14,7 @@
 // `test/ci-scope.test.ts`.
 import { appendFileSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
-import { CI_SHARDS, PERFORMANCE } from "./check-plan.ts";
+import { CI_SHARDS, CI_TEST_WORKERS, PERFORMANCE } from "./check-plan.ts";
 
 /** Patterns, and patterns a file must not match. */
 type Paths = { include: readonly string[]; exclude?: readonly string[] };
@@ -35,11 +35,21 @@ export const CI: Paths = {
 };
 
 /**
- * What the type-check and the lint read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
+ * What the type-check, lint and async-port guard read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
  * `vcs.useIgnoreFile`), and the packages with what installs them.
  */
 export const STATIC: Paths = {
-	include: ["src/**", "test/**", "bench/**", "scripts/**", "*.json", ".gitignore", "bun.lock", "bunfig.toml"],
+	include: [
+		"src/**",
+		"test/**",
+		"bench/**",
+		"scripts/**",
+		"*.json",
+		"**/*.{ts,tsx}",
+		".gitignore",
+		"bun.lock",
+		"bunfig.toml",
+	],
 };
 
 /** What the image is built from: the Dockerfile's COPY lines, and the two files that decide what they copy. */
@@ -75,6 +85,12 @@ export const IOS: Paths = {
 		"scripts/ios.ts",
 		"scripts/ios/**",
 		"test/oidc-support.ts",
+		"test/db.ts",
+		"scripts/pg.ts",
+		"scripts/work/scratch.ts",
+		"scripts/work/processes.ts",
+		"scripts/work/run.ts",
+		"scripts/work/test-databases.ts",
 		"src/**",
 		"package.json",
 		"bun.lock",
@@ -170,7 +186,7 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 		return [
 			...Array.from({ length: CI_SHARDS }, (_, i) => ({
 				name: `tests-${i + 1}`,
-				phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`,
+				phase: `--only=parallel --workers=${CI_TEST_WORKERS} --shard=${i + 1}/${CI_SHARDS}`,
 				files: "",
 			})),
 			{ name: "performance", phase: "--only=performance", files: "" },
@@ -178,7 +194,9 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 	const performance = tests.filter((file) => PERFORMANCE.includes(file));
 	const parallel = tests.filter((file) => !PERFORMANCE.includes(file));
 	return [
-		...(parallel.length > 0 ? [{ name: "tests", phase: "--only=parallel", files: parallel.join(" ") }] : []),
+		...(parallel.length > 0
+			? [{ name: "tests", phase: `--only=parallel --workers=${CI_TEST_WORKERS}`, files: parallel.join(" ") }]
+			: []),
 		...(performance.length > 0
 			? [{ name: "performance", phase: "--only=performance", files: performance.join(" ") }]
 			: []),

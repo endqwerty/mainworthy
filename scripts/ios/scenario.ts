@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { Client } from "../../src/cli/client.ts";
 import type { Capability } from "../../src/core/kinds.ts";
+import type { CaseBody } from "../../src/core/model.ts";
 
 const Token = z.object({ token: z.string() });
 const Linked = z.object({ tests: z.array(z.object({ t: z.string(), name: z.string() })) });
@@ -85,6 +86,29 @@ const CASES: { folder: string; tags: string[]; title: string; pre: string; steps
 	},
 ];
 
+const caseBody = (item: (typeof CASES)[number]): CaseBody => ({
+	title: item.title,
+	pre: item.pre,
+	methods: ["human", "auto", "agent"],
+	automate: "none",
+	fields: {},
+	steps: item.steps.map(([action, expected], index) => ({ id: `s${index + 1}`, action, expected })),
+});
+
+/** Recovery exercises manual reports; unrelated CI evidence and review questions need no fixture work. */
+export async function recoveryRun(url: string, ownerToken: string, project: string) {
+	const owner = new Client({ url, token: ownerToken, project });
+	await owner.call("admin", { do: "project.create", key: project, preset: "standard" });
+	const created = await owner.call("propose", {
+		edits: CASES.map((item) => ({ op: "create" as const, body: caseBody(item) })),
+	});
+	const planned = await owner.call("plan", {
+		name: "Checkout regression",
+		select: { cases: created.cases.map((stamp) => stamp.ref) },
+	});
+	return { project, run: planned.run };
+}
+
 /**
  * Fills a project that does not exist yet, as the owner whose token this is. The project asks a person about
  * an agent's edit and about a test with no case (`standard`, `ask`), so every kind of question but a sign-off
@@ -117,14 +141,7 @@ export async function scenario(url: string, ownerToken: string, project: string,
 			op: "create" as const,
 			folder: item.folder,
 			tags: item.tags,
-			body: {
-				title: item.title,
-				pre: item.pre,
-				methods: ["human", "auto", "agent"] as ("human" | "auto" | "agent")[],
-				automate: "none" as const,
-				fields: {},
-				steps: item.steps.map(([action, expected], index) => ({ id: `s${index + 1}`, action, expected })),
-			},
+			body: caseBody(item),
 		})),
 	});
 	const cases = created.cases.map((stamp) => stamp.ref);

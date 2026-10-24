@@ -10,7 +10,7 @@
 // The notes belong to one `App`. A reader thread has an `App` of its own and notes nothing: nobody is admitted
 // there.
 import type { App } from "../kernel/app.ts";
-import { sql } from "../kernel/db.ts";
+import { sql, type WriteDb } from "../kernel/db.ts";
 
 type Kind = "token" | "session";
 /**
@@ -38,18 +38,26 @@ function notesOf(app: App): Notes {
 // the note has one and is not older than the row, so a use with no address erases none, and an old use does not
 // put its address over a newer one. (Every expression of an UPDATE reads the row as it was before the statement.)
 const Q = {
-	touchToken: sql<{ id: number; at: number; addr: string | null }>(
-		`UPDATE tokens SET
-			last_used_addr = CASE WHEN $addr IS NOT NULL AND $at >= coalesce(last_used_at, 0) THEN $addr ELSE last_used_addr END,
-			last_used_at = max(coalesce(last_used_at, 0), $at)
-		 WHERE id = $id`,
-	),
-	touchSession: sql<{ id: number; at: number; addr: string | null }>(
-		`UPDATE sessions SET
-			last_seen_addr = CASE WHEN $addr IS NOT NULL AND $at >= last_seen_at THEN $addr ELSE last_seen_addr END,
-			last_seen_at = max(last_seen_at, $at)
-		 WHERE id = $id AND ended_at IS NULL`,
-	),
+	touchToken: sql<{
+		ids: readonly number[];
+		times: readonly number[];
+		addresses: readonly string[];
+		hasAddresses: readonly number[];
+	}>(`
+ UPDATE tokens t SET
+ last_used_addr = CASE WHEN n.has_addr = 1 AND n.at >= coalesce(t.last_used_at, 0) THEN n.addr ELSE t.last_used_addr END,
+ last_used_at = greatest(coalesce(t.last_used_at, 0), n.at)
+ FROM unnest($ids::bigint[], $times::bigint[], $addresses::text[], $hasAddresses::bigint[]) AS n(id, at, addr, has_addr) WHERE t.id = n.id`),
+	touchSession: sql<{
+		ids: readonly number[];
+		times: readonly number[];
+		addresses: readonly string[];
+		hasAddresses: readonly number[];
+	}>(`
+ UPDATE sessions s SET
+ last_seen_addr = CASE WHEN n.has_addr = 1 AND n.at >= s.last_seen_at THEN n.addr ELSE s.last_seen_addr END,
+ last_seen_at = greatest(s.last_seen_at, n.at)
+ FROM unnest($ids::bigint[], $times::bigint[], $addresses::text[], $hasAddresses::bigint[]) AS n(id, at, addr, has_addr) WHERE s.id = n.id AND s.ended_at IS NULL`),
 };
 
 /**
@@ -110,22 +118,32 @@ export function forgetNotedAddresses(app: App, kind: Kind, ids: readonly number[
  * stays. A note for a row that is gone, or for a session that has ended, updates nothing and is dropped, which
  * is what keeps the maps as small as the tokens and sessions used since the last flush.
  */
-export function writeUses(app: App): void {
+export async function writeUses(app: App, db: WriteDb): Promise<void> {
 	const notes = notesOf(app);
 	const taken = { token: [...notes.token], session: [...notes.session] };
 	if (taken.token.length + taken.session.length === 0) return;
-	app.db.transaction(() => {
-		for (const [id, note] of taken.token) app.db.run(Q.touchToken, { id, ...note });
-		for (const [id, note] of taken.session) app.db.run(Q.touchSession, { id, ...note });
+	await db.transaction(async () => {
+		for (const kind of ["token", "session"] as const) {
+			const entries = taken[kind];
+			if (entries.length)
+				await db.run(kind === "token" ? Q.touchToken : Q.touchSession, {
+					ids: entries.map(([id]) => id),
+					times: entries.map(([, note]) => note.at),
+					addresses: entries.map(([, note]) => note.addr ?? ""),
+					hasAddresses: entries.map(([, note]) => (note.addr === null ? 0 : 1)),
+				});
+		}
+		db.afterCommit(() => {
+			for (const kind of ["token", "session"] as const) {
+				for (const [id, note] of taken[kind]) if (notes[kind].get(id) === note) notes[kind].delete(id);
+			}
+		});
 	});
-	for (const kind of ["token", "session"] as const) {
-		for (const [id, note] of taken[kind]) if (notes[kind].get(id) === note) notes[kind].delete(id);
-	}
 }
 
 /** Writes what is noted, waiting its turn at the gate. Rejects when the write failed; nothing is lost then. */
-export function flushUses(app: App): Promise<void> {
-	return app.gate.run(() => writeUses(app));
+export async function flushUses(app: App): Promise<void> {
+	return await app.database.write(async (db) => await writeUses(app, db));
 }
 
 /**

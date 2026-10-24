@@ -14,8 +14,9 @@ import { Client } from "../../src/cli/client.ts";
 import { seed } from "../../src/cli/seed.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
+import { testDatabase } from "../../test/db.ts";
 import { type Provider, provider } from "../../test/oidc-support.ts";
-import { passedRun, scenario } from "./scenario.ts";
+import { passedRun, recoveryRun, scenario } from "./scenario.ts";
 
 export const OWNER = "robin";
 export const TOKEN = "ios-test-owner-0123456789abcdef";
@@ -30,11 +31,12 @@ export type TestInstance = {
 	stop: () => Promise<void>;
 };
 
-const Ask = z.object({ kind: z.enum(["standard", "strict", "demo"]).default("standard") });
+const Ask = z.object({ kind: z.enum(["standard", "strict", "demo", "run"]).default("standard") });
 const Invited = z.object({ ok: z.literal(true), result: z.object({ code: z.string() }) });
 const Issued = z.object({ ok: z.literal(true), result: z.object({ token: z.string() }) });
 
 export async function testInstance(): Promise<TestInstance> {
+	const database = await testDatabase();
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-ios-"));
 	let token = TOKEN;
 	let instance: Instance | null = null;
@@ -60,6 +62,7 @@ export async function testInstance(): Promise<TestInstance> {
 		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
 		await instance?.stop();
+		await database.close();
 		idp?.stop();
 		rmSync(dataDir, { recursive: true, force: true });
 	};
@@ -76,8 +79,9 @@ export async function testInstance(): Promise<TestInstance> {
 			},
 		});
 		elsewhere = other;
-		const made = start(
+		const made = await start(
 			{
+				databaseUrl: database.url,
 				dataDir,
 				oidc: idp.config(),
 				host: "127.0.0.1",
@@ -122,13 +126,17 @@ export async function testInstance(): Promise<TestInstance> {
 												days: 0,
 											})),
 										}
-									: await scenario(made.url, token, key);
+									: asked.data.kind === "run"
+										? await recoveryRun(made.url, token, key)
+										: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
 					},
 					"/test/replace-project": async (req) => {
 						const { project } = z.object({ project: z.string() }).parse(await req.json());
-						await made.app.gate.run(() => {
-							removeProject(made.app.db, project);
+						await made.app.database.write(async (db) => {
+							await db.transaction(async () => {
+								await removeProject(db, project);
+							});
 						});
 						return Response.json({
 							ok: true,
@@ -271,7 +279,6 @@ export async function testInstance(): Promise<TestInstance> {
 					"/test/privacy-openings": () => Response.json({ ok: true, result: { urls: privacyOpenings } }),
 				},
 			}),
-			{ readers: 0 },
 		);
 		instance = made;
 		const publicUrl = made.url.replace("127.0.0.1", "localhost");

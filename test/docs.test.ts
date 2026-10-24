@@ -35,6 +35,7 @@ import { OP_LIST } from "../src/server/ops/index.ts";
 import { DIAGRAMS, PAGES, SCREENSHOTS } from "../src/surfaces/docs/content.ts";
 import { renderArticle } from "../src/surfaces/docs/render.ts";
 import { docsRoutes, SKILL_URL, withoutRepositoryAddress } from "../src/surfaces/docs/site.ts";
+import { type TestDatabase, testDatabase } from "./db.ts";
 
 const GUIDE = "docs/guide";
 const files = readdirSync(GUIDE)
@@ -249,21 +250,28 @@ describe("the diagrams", () => {
 
 describe("the site", () => {
 	let instance: Instance;
+	let database: TestDatabase;
 	let directory: string;
 	const get = (path: string, headers: Record<string, string> = {}): Promise<Response> =>
 		fetch(`${instance.url}${path}`, { headers, redirect: "manual" });
 
 	beforeAll(async () => {
 		directory = await mkdtemp(join(tmpdir(), "mainworthy-docs-"));
+		database = await testDatabase();
 		// Server mode, and no token in any request below: the documentation is read without an account.
-		instance = start(
-			defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_MODE: "server" }),
+		instance = await start(
+			defaultConfig({
+				MAINWORTHY_DATA: directory,
+				MAINWORTHY_DATABASE_URL: database.url,
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_MODE: "server",
+			}),
 			() => ({ ui: null, open: docsRoutes(VERSION) }),
-			{ readers: 0 },
 		);
 	});
 	afterAll(async () => {
 		await instance.stop();
+		await database.close();
 		await rm(directory, { recursive: true, force: true });
 	});
 

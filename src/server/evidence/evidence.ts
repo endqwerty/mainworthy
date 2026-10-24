@@ -12,14 +12,14 @@ import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
 import { attachmentType } from "../kernel/blobs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
+import { json, type ReadDb, type SqlValue, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
-import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
-import { assertionScope, ensureAssertionIndex, finishAssertionScope, observeAssertion } from "./assertions.ts";
-import { recordAttachments } from "./attachments.ts";
+import { type CaseRow, caseRef, casesByIds, findCases, versionsOf } from "../suite/suite.ts";
+import { assertionScope, ensureAssertionIndex, finishAssertionScope, observeFailureSlice } from "./assertions.ts";
+import { recordAttachmentSlice } from "./attachments.ts";
 import { buildWhat } from "./releases.ts";
-import { ensureSignature, fileSignature, type SignatureRow, signatureByHash, signatureById } from "./signatures.ts";
+import { failureSignature, fileSignature, type SignatureRow, signaturesByHashes } from "./signatures.ts";
 
 export { type SignatureRow, signatureById } from "./signatures.ts";
 
@@ -127,6 +127,7 @@ export type ResultRow = {
 	quarantine_decision: number | null;
 	quarantine_exit: number | null;
 };
+export type ResultComparison = ResultRow & { env: string; job: string | null };
 
 export const resultTrail = (row: ResultRow): ResultStep[] | null =>
 	row.trail === null ? null : json<ResultStep[]>(row.trail);
@@ -149,7 +150,146 @@ type ChangeWrite = {
 
 const TRUNK_BRANCHES = new Set(["main", "master", "trunk"]);
 
+type TestWrite = {
+	project: number;
+	no: number;
+	kind: string;
+	key: string;
+	name: string;
+	file: string | null;
+	caseId: number | null;
+	seq: number;
+};
+type ResultWrite = {
+	project: number;
+	test: number;
+	seq: number;
+	ord: number;
+	batch: number;
+	target: number;
+	method: string;
+	actor: number;
+	model: string | null;
+	basis: string;
+	basisCase: number | null;
+	basisVersion: number | null;
+	basisClaim: string | null;
+	outcome: string;
+	attempt: number;
+	duration: number | null;
+	signature: number | null;
+	message: string | null;
+	detail: string | null;
+	atStep: string | null;
+	trail: string | null;
+	note: string | null;
+	run: number | null;
+	corrects: number | null;
+	at: number;
+};
+type TryWrite = {
+	project: number;
+	result: number;
+	try: number;
+	outcome: Outcome;
+	duration: number | null;
+	signature: number | null;
+	message: string | null;
+	detail: string | null;
+};
+type FlipWrite = {
+	project: number;
+	test: number;
+	target: number;
+	first: number;
+	second: number;
+	firstTry: number | null;
+	secondTry: number | null;
+	seq: number;
+};
+
+type Columns<T> = { [K in keyof T]: readonly T[K][] };
+
 const Q = {
+	caseResultsOnTargets: sql<{ caseId: number; targets: readonly number[] }, ResultRow>(`
+ SELECT r.* FROM results r WHERE r.basis_case=$caseId AND r.target=ANY($targets::bigint[]) AND ${uncorrectedResults("r.id")} ORDER BY r.seq,r.ord`),
+
+	correctedIds: sql<{ ids: readonly number[] }, { id: number }>(
+		"SELECT DISTINCT corrects AS id FROM results WHERE corrects=ANY($ids::bigint[])",
+	),
+	setResultExcuses: sql<{
+		results: readonly number[];
+		slot: number | null;
+		decision: number;
+		class: string;
+		expires: number | null;
+	}>(`
+ INSERT INTO result_excuses(result,slot,decision,class,expires_at) SELECT DISTINCT result,$slot::bigint,$decision::bigint,$class::text,$expires::bigint FROM unnest($results::bigint[]) AS u(result)
+ ON CONFLICT(result) WHERE slot IS NULL DO UPDATE SET decision=excluded.decision,class=excluded.class,expires_at=excluded.expires_at`),
+	setSlotExcuses: sql<{
+		results: readonly number[];
+		slot: number | null;
+		decision: number;
+		class: string;
+		expires: number | null;
+	}>(`
+ INSERT INTO result_excuses(result,slot,decision,class,expires_at) SELECT DISTINCT result,$slot::bigint,$decision::bigint,$class::text,$expires::bigint FROM unnest($results::bigint[]) AS u(result)
+ ON CONFLICT(slot,result) WHERE slot IS NOT NULL DO UPDATE SET decision=excluded.decision,class=excluded.class,expires_at=excluded.expires_at`),
+
+	testsByKeys: sql<{ project: number; keys: readonly string[] }, TestRow>(
+		"SELECT * FROM tests WHERE project=$project AND key=ANY($keys::text[])",
+	),
+	resultsByIds: sql<{ ids: readonly number[] }, ResultRow & { job: string; standing: boolean }>(
+		`SELECT r.*,b.job,${uncorrectedResults("r.id")} AS standing FROM results r JOIN batches b ON b.id=r.batch WHERE r.id=ANY($ids::bigint[])`,
+	),
+	sliceHistory: sql<
+		{
+			target: number;
+			actor: number;
+			job: string;
+			tests: readonly number[];
+			methods: readonly string[];
+			corrects: readonly number[];
+		},
+		Pick<ResultRow, "id" | "test" | "method" | "outcome" | "attempt">
+	>(`
+ SELECT previous.* FROM unnest($tests::bigint[],$methods::text[]) AS lane(test,method)
+ CROSS JOIN LATERAL (
+ SELECT r.id,r.test,r.method,r.outcome,r.attempt FROM results r JOIN batches b ON b.id=r.batch
+ WHERE r.target=$target AND r.actor=$actor AND b.job=$job AND r.test=lane.test AND r.method=lane.method
+ AND r.outcome IN ('pass','fail','error') AND NOT(r.id=ANY($corrects::bigint[])) AND ${uncorrectedResults("r.id")}
+ ORDER BY r.attempt DESC,CASE WHEN r.outcome='pass' THEN 0 ELSE 1 END DESC,r.id DESC LIMIT 1
+ ) previous`),
+
+	touchTests: sql<{ ids: readonly number[]; seq: number }>(
+		"UPDATE tests SET last_seq=$seq WHERE id=ANY($ids::bigint[])",
+	),
+	splitResults: sql<{ ids: readonly number[]; signatures: readonly number[] }>(
+		"UPDATE results r SET signature=u.signature FROM unnest($ids::bigint[],$signatures::bigint[]) AS u(id,signature) WHERE r.id=u.id",
+	),
+	splitTries: sql<{ ids: readonly number[]; signatures: readonly number[] }>(
+		"UPDATE result_tries r SET signature=u.signature FROM unnest($ids::bigint[],$signatures::bigint[]) AS u(id,signature) WHERE r.id=u.id",
+	),
+
+	insertTests: sql<
+		Columns<TestWrite>,
+		TestRow
+	>(`INSERT INTO tests (project, no, kind, key, name, file, case_id, first_seq, last_seq)
+ SELECT u.project, u.no, u.kind, u.key, u.name, u.file, u.caseId, u.seq, u.seq FROM unnest($project::bigint[], $no::bigint[], $kind::text[], $key::text[], $name::text[], $file::text[], $caseId::bigint[], $seq::bigint[]) WITH ORDINALITY AS u(project, no, kind, key, name, file, caseId, seq, position) ORDER BY u.position RETURNING *`),
+	insertResults: sql<
+		Columns<ResultWrite>,
+		{ id: number; ord: number }
+	>(`INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case, basis_version, basis_claim, outcome, attempt, duration_ms, signature, message, detail, at_step, trail, note, run, corrects, at)
+ SELECT u.project, u.test, u.seq, u.ord, u.batch, u.target, u.method, u.actor, u.model, u.basis, u.basisCase, u.basisVersion, u.basisClaim, u.outcome, u.attempt, u.duration, u.signature, u.message, u.detail, u.atStep, u.trail, u.note, u.run, u.corrects, u.at FROM unnest($project::bigint[], $test::bigint[], $seq::bigint[], $ord::bigint[], $batch::bigint[], $target::bigint[], $method::text[], $actor::bigint[], $model::text[], $basis::text[], $basisCase::bigint[], $basisVersion::bigint[], $basisClaim::text[], $outcome::text[], $attempt::bigint[], $duration::bigint[], $signature::bigint[], $message::text[], $detail::text[], $atStep::text[], $trail::text[], $note::text[], $run::bigint[], $corrects::bigint[], $at::bigint[]) WITH ORDINALITY AS u(project, test, seq, ord, batch, target, method, actor, model, basis, basisCase, basisVersion, basisClaim, outcome, attempt, duration, signature, message, detail, atStep, trail, note, run, corrects, at, position) ORDER BY u.position RETURNING id, ord`),
+	insertTries: sql<
+		Columns<TryWrite>,
+		{ id: number; result: number; try: number }
+	>(`INSERT INTO result_tries (project, result, try, outcome, duration_ms, signature, message, detail)
+ SELECT u.project, u.result, u.try, u.outcome, u.duration, u.signature, u.message, u.detail FROM unnest($project::bigint[], $result::bigint[], $try::bigint[], $outcome::text[], $duration::bigint[], $signature::bigint[], $message::text[], $detail::text[]) WITH ORDINALITY AS u(project, result, try, outcome, duration, signature, message, detail, position) ORDER BY u.position RETURNING id, result, try`),
+	insertFlips: sql<
+		Columns<FlipWrite>
+	>(`INSERT INTO flips (project, test, target, first_result, second_result, first_try, second_try, seq)
+ SELECT u.project, u.test, u.target, u.first, u.second, u.firstTry, u.secondTry, u.seq FROM unnest($project::bigint[], $test::bigint[], $target::bigint[], $first::bigint[], $second::bigint[], $firstTry::bigint[], $secondTry::bigint[], $seq::bigint[]) WITH ORDINALITY AS u(project, test, target, first, second, firstTry, secondTry, seq, position) ORDER BY u.position`),
 	resultExcuse: sql<
 		{ result: number },
 		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
@@ -166,24 +306,21 @@ const Q = {
 		 JOIN results r ON r.id = e.result WHERE e.slot = $slot AND r.signature = $signature
 		 ORDER BY e.decision DESC`,
 	),
-	setResultExcuse: sql<{
-		result: number;
-		slot: number | null;
-		decision: number;
-		class: string;
-		expires: number | null;
-	}>(
-		`INSERT INTO result_excuses (result, slot, decision, class, expires_at) VALUES ($result, $slot, $decision, $class, $expires)
-   ON CONFLICT DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
-	),
 	dropResultExcuses: sql<{ decision: number }>("DELETE FROM result_excuses WHERE decision = $decision"),
 	changesBasedOn: sql<{ project: number; base: string; repo: string | null }, { id: number }>(
-		"SELECT id FROM changes WHERE project = $project AND base_sha = $base AND repo IS $repo",
+		"SELECT id FROM changes WHERE project = $project AND base_sha = $base AND repo IS NOT DISTINCT FROM $repo",
 	),
 	target: sql<{ project: number; what: string; env: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what AND env = $env",
 	),
 	targetById: sql<{ id: number }, TargetRow>("SELECT * FROM targets WHERE id = $id"),
+	targetsOfCommits: sql<{ project: number; whats: readonly string[] }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND what = ANY($whats::text[]) ORDER BY id",
+	),
+	changesByIds: sql<{ ids: readonly number[] }, ChangeRow>("SELECT * FROM changes WHERE id = ANY($ids::bigint[])"),
+	shardsForTargets: sql<{ ids: readonly number[] }, { target: number; job: string; shards: number; reported: string }>(
+		"SELECT target, job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches WHERE target = ANY($ids::bigint[]) AND shards IS NOT NULL AND method != 'agent' GROUP BY target, job, shards ORDER BY target, job",
+	),
 	targetsOfCommit: sql<{ project: number; what: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what",
 	),
@@ -202,30 +339,33 @@ const Q = {
 		`INSERT INTO scope_moves (project, what, before_scope, after_scope, actor, at, seq)
 		 VALUES ($project, $what, $before, $after, $actor, $at, $seq)`,
 	),
-	insertTarget: sql<{
-		project: number;
-		what: string;
-		env: string;
-		repo: string | null;
-		commit: string | null;
-		branch: string | null;
-		line: string;
-		change: number | null;
-		seq: number;
-	}>(
+	insertTarget: sql<
+		{
+			project: number;
+			what: string;
+			env: string;
+			repo: string | null;
+			commit: string | null;
+			branch: string | null;
+			line: string;
+			change: number | null;
+			seq: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO targets (project, what, env, repo, commit_sha, branch, line, change, first_seq)
-		 VALUES ($project, $what, $env, $repo, $commit, $branch, $line, $change, $seq)`,
+		 VALUES ($project, $what, $env, $repo, $commit, $branch, $line, $change, $seq) RETURNING id`,
 	),
 	// A change is read with how it ended, which is a row of `change_ends` or none.
 	change: sql<{ project: number; key: string }, ChangeRow>(
 		`SELECT c.*, e.ended, e.at AS ended_at, e.receipt, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project AND c.key = $key`,
 	),
-	locationChanges: sql<{ targets: string }, { target: number; key: string | null; title: string | null }>(
-		`SELECT t.id AS target, c.key, c.title FROM json_each($targets) requested
+	locationChanges: sql<{ targets: readonly number[] }, { target: number; key: string | null; title: string | null }>(
+		`SELECT t.id AS target, c.key, c.title FROM unnest($targets::bigint[]) AS requested(value)
 		 JOIN targets t ON t.id = requested.value
 		 LEFT JOIN change_ends e ON t.change IS NULL AND t.line = 'trunk' AND e.ended = 'merged'
-		   AND e.landing_commit = t.commit_sha AND e.landing_repo IS t.repo AND e.landing_branch = t.branch
+		   AND e.landing_commit = t.commit_sha AND e.landing_repo IS NOT DISTINCT FROM t.repo AND e.landing_branch = t.branch
 		 JOIN changes c ON c.id = coalesce(t.change, e.change) AND c.project = t.project`,
 	),
 	changeById: sql<{ id: number }, ChangeRow>(
@@ -235,21 +375,24 @@ const Q = {
 		`SELECT c.*, e.ended, e.at AS ended_at, e.receipt, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project ORDER BY c.rev DESC LIMIT $limit`,
 	),
-	insertChange: sql<{
-		project: number;
-		key: string;
-		repo: string | null;
-		base: string | null;
-		head: string | null;
-		observed: number | null;
-		branch: string | null;
-		title: string | null;
-		url: string | null;
-		files: string;
-		rev: number;
-	}>(
+	insertChange: sql<
+		{
+			project: number;
+			key: string;
+			repo: string | null;
+			base: string | null;
+			head: string | null;
+			observed: number | null;
+			branch: string | null;
+			title: string | null;
+			url: string | null;
+			files: string;
+			rev: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO changes (project, key, repo, base_sha, head_sha, head_observed_seq, branch, title, url, files, rev)
-		 VALUES ($project, $key, $repo, $base, $head, $observed, $branch, $title, $url, $files, $rev)`,
+		 VALUES ($project, $key, $repo, $base, $head, $observed, $branch, $title, $url, $files, $rev) RETURNING id`,
 	),
 	updateChange: sql<ChangeWrite>(
 		"UPDATE changes SET base_sha = $base, head_sha = $head, head_observed_seq = $observed, title = $title, url = $url, files = $files, rev = $rev WHERE id = $id",
@@ -262,7 +405,7 @@ const Q = {
 	landChange: sql<{ id: number; commit: string; repo: string | null; branch: string }>(
 		`UPDATE change_ends SET landing_commit = $commit, landing_repo = $repo, landing_branch = $branch
 		 WHERE change = $id AND ended = 'merged'
-		 AND (landing_commit IS NOT $commit OR landing_repo IS NOT $repo OR landing_branch IS NOT $branch)`,
+		 AND (landing_commit IS DISTINCT FROM $commit OR landing_repo IS DISTINCT FROM $repo OR landing_branch IS DISTINCT FROM $branch)`,
 	),
 	setMergeReceipt: sql<{ id: number; receipt: number }>(
 		"UPDATE change_ends SET receipt = $receipt WHERE change = $id AND ended = 'merged'",
@@ -273,27 +416,30 @@ const Q = {
 		"SELECT * FROM batches WHERE project = $project AND key = $key",
 	),
 	batchById: sql<{ id: number }, BatchRow>("SELECT * FROM batches WHERE id = $id"),
-	insertBatch: sql<{
-		project: number;
-		key: string;
-		target: number;
-		job: string;
-		nothingRequired: number;
-		attempt: number;
-		shard: number | null;
-		shards: number | null;
-		method: string;
-		actor: number;
-		model: string | null;
-		run: number | null;
-		url: string | null;
-		counts: string;
-		staged: string;
-		at: number;
-		seq: number;
-	}>(
+	insertBatch: sql<
+		{
+			project: number;
+			key: string;
+			target: number;
+			job: string;
+			nothingRequired: number;
+			attempt: number;
+			shard: number | null;
+			shards: number | null;
+			method: string;
+			actor: number;
+			model: string | null;
+			run: number | null;
+			url: string | null;
+			counts: string;
+			staged: string;
+			at: number;
+			seq: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, model, run, build_url, state, counts, staged, at, seq)
-		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $model, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $model, $run, $url, 'accepted', $counts, $staged, $at, $seq) RETURNING id`,
 	),
 	// The shards a job of a target has reported, by the number of shards they said the job has. An agent's report
 	// under the job's name is not the job.
@@ -301,19 +447,19 @@ const Q = {
 		{ project: number; what: string; target: number; job: string; shards: number },
 		{ target: number; job: string; env: string; shards: number; reported: string }
 	>(
-		`SELECT t.id AS target,b.job,t.env,b.shards,group_concat(DISTINCT b.shard) AS reported
+		`SELECT t.id AS target,b.job,t.env,b.shards,string_agg(DISTINCT b.shard::text, ',') AS reported
  FROM targets t JOIN batches b ON b.target=t.id
  WHERE t.project=$project AND t.what=$what AND b.shards IS NOT NULL AND b.method!='agent'
  AND (t.id,b.job,b.shards)>($target,$job,$shards)
  GROUP BY t.id,b.job,b.shards ORDER BY t.id,b.job,b.shards LIMIT 50`,
 	),
 	shardsOf: sql<{ target: number }, { job: string; shards: number; reported: string }>(
-		`SELECT job, shards, group_concat(DISTINCT shard) AS reported FROM batches
+		`SELECT job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches
 		 WHERE target = $target AND shards IS NOT NULL AND method != 'agent' GROUP BY job, shards ORDER BY job`,
 	),
 	emptyReports: sql<{ target: number }, { declared: number; ordinary: number }>(
-		`SELECT coalesce(max(nothing_required = 1 AND method = 'auto'), 0) AS declared,
-		 coalesce(max(nothing_required = 0), 0) AS ordinary FROM batches WHERE target = $target AND state = 'processed'`,
+		`SELECT coalesce(max((nothing_required = 1 AND method = 'auto')::integer), 0) AS declared,
+		 coalesce(max((nothing_required = 0)::integer), 0) AS ordinary FROM batches WHERE target = $target AND state = 'processed'`,
 	),
 	markProcessed: sql<{ id: number; counts: string }>(
 		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL WHERE id = $id",
@@ -330,9 +476,9 @@ const Q = {
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
 	pendingCorrections: sql<{ project: number; actor: number }, { result: number }>(
-		`SELECT json_extract(staged.value, '$.corrects') AS result FROM batches, json_each(batches.staged) staged
+		`SELECT (staged.value->>'corrects')::bigint AS result FROM batches, jsonb_array_elements(batches.staged::jsonb) staged(value)
 		 WHERE batches.project = $project AND batches.actor = $actor AND batches.state = 'accepted'
-		 AND json_extract(staged.value, '$.corrects') IS NOT NULL`,
+		 AND staged.value->>'corrects' IS NOT NULL`,
 	),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND key = $key",
@@ -342,22 +488,12 @@ const Q = {
 	testsOfCase: sql<{ project: number; id: number }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND case_id = $id ORDER BY id",
 	),
-	insertTest: sql<{
-		project: number;
-		no: number;
-		kind: string;
-		key: string;
-		name: string;
-		file: string | null;
-		caseId: number | null;
-		seq: number;
-	}>(
-		`INSERT INTO tests (project, no, kind, key, name, file, case_id, first_seq, last_seq)
-		 VALUES ($project, $no, $kind, $key, $name, $file, $caseId, $seq, $seq)`,
-	),
-	touchTest: sql<{ id: number; seq: number }>("UPDATE tests SET last_seq = $seq WHERE id = $id"),
 	linkTest: sql<{ id: number; caseId: number | null; by: number | null }>(
 		"UPDATE tests SET case_id = $caseId, linked_by = $by WHERE id = $id",
+	),
+	linkTests: sql<{ ids: readonly number[]; cases: readonly number[]; by: number }>(
+		`UPDATE tests SET case_id = asked.case_id, linked_by = $by
+		 FROM unnest($ids::bigint[], $cases::bigint[]) AS asked(id, case_id) WHERE tests.id = asked.id`,
 	),
 	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
@@ -367,43 +503,6 @@ const Q = {
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
-	),
-	splitResult: sql<{ id: number; signature: number }>("UPDATE results SET signature = $signature WHERE id = $id"),
-	splitTry: sql<{ id: number; signature: number }>("UPDATE result_tries SET signature = $signature WHERE id = $id"),
-	assertionTries: sql<{ result: number }, { id: number; signature: number }>(
-		"SELECT tr.id, tr.signature FROM result_tries tr JOIN signatures s ON s.id = tr.signature WHERE tr.result = $result AND s.class = 'assertion' ORDER BY tr.try LIMIT 100",
-	),
-	insertResult: sql<{
-		project: number;
-		test: number;
-		seq: number;
-		ord: number;
-		batch: number;
-		target: number;
-		method: string;
-		actor: number;
-		model: string | null;
-		basis: string;
-		basisCase: number | null;
-		basisVersion: number | null;
-		basisClaim: string | null;
-		outcome: string;
-		attempt: number;
-		duration: number | null;
-		signature: number | null;
-		message: string | null;
-		detail: string | null;
-		atStep: string | null;
-		trail: string | null;
-		note: string | null;
-		run: number | null;
-		corrects: number | null;
-		at: number;
-	}>(
-		`INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case, basis_version, basis_claim,
-		                      outcome, attempt, duration_ms, signature, message, detail, at_step, trail, note, run, corrects, at)
-		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $model, $basis, $basisCase, $basisVersion, $basisClaim,
-		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $trail, $note, $run, $corrects, $at)`,
 	),
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
@@ -415,53 +514,17 @@ const Q = {
 		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
 	),
 	resultById: sql<{ id: number }, ResultRow>("SELECT * FROM results WHERE id = $id"),
-	testTime: sql<{ results: string }, { ms: number; timed: number }>(
-		`SELECT CAST(max(0, min(total(r.duration_ms), ${Number.MAX_SAFE_INTEGER})) AS INTEGER) AS ms,
+	testTime: sql<{ results: readonly number[] }, { ms: number; timed: number }>(
+		`SELECT greatest(0, least(coalesce(sum(r.duration_ms), 0), ${Number.MAX_SAFE_INTEGER}))::bigint AS ms,
 		        count(r.duration_ms) AS timed
-		 FROM json_each($results) requested JOIN results r ON r.id = requested.value`,
-	),
-	previousOnTarget: sql<
-		{ target: number; test: number; actor: number; job: string; method: string },
-		{ id: number; outcome: Outcome; attempt: number }
-	>(
-		`SELECT r.id, r.outcome, r.attempt FROM results r JOIN batches b ON b.id = r.batch
-		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
-		   AND r.method = $method AND r.outcome IN ('pass', 'fail', 'error')
-		   AND ${uncorrectedResults("r.id")}
-		 ORDER BY r.attempt DESC, CASE WHEN r.outcome = 'pass' THEN 0 ELSE 1 END DESC, r.id DESC LIMIT 1`,
-	),
-	insertFlip: sql<{
-		project: number;
-		test: number;
-		target: number;
-		first: number;
-		second: number;
-		firstTry: number | null;
-		secondTry: number | null;
-		seq: number;
-	}>(
-		`INSERT INTO flips (project, test, target, first_result, second_result, first_try, second_try, seq)
-		 VALUES ($project, $test, $target, $first, $second, $firstTry, $secondTry, $seq)`,
-	),
-	insertTry: sql<{
-		project: number;
-		result: number;
-		try: number;
-		outcome: Outcome;
-		duration: number | null;
-		signature: number | null;
-		message: string | null;
-		detail: string | null;
-	}>(
-		`INSERT INTO result_tries (project, result, try, outcome, duration_ms, signature, message, detail)
-		 VALUES ($project, $result, $try, $outcome, $duration, $signature, $message, $detail)`,
+		 FROM unnest($results::bigint[]) AS requested(value) JOIN results r ON r.id = requested.value`,
 	),
 	triesOf: sql<
-		{ results: string },
+		{ results: readonly number[] },
 		{ result: number; outcome: Outcome; duration_ms: number | null; message: string | null }
 	>(
 		`SELECT t.result, t.outcome, t.duration_ms, t.message
-		 FROM json_each($results) asked CROSS JOIN result_tries t ON t.result = asked.value ORDER BY t.result, t.try`,
+		 FROM unnest($results::bigint[]) AS asked(value) JOIN result_tries t ON t.result = asked.value ORDER BY t.result, t.try`,
 	),
 	// A flip one of whose results its producer corrected is not counted: the pass and the failure were not both what
 	// happened (issue #630).
@@ -471,10 +534,10 @@ const Q = {
 	),
 	// Of these results, those in a lane with a flip on their target that no correction withdrew. The flips are read
 	// test by test (`flips_test`), however many the project has.
-	flippedLanes: sql<{ results: string }, { result: number }>(`
+	flippedLanes: sql<{ results: readonly number[] }, { result: number }>(`
 		SELECT DISTINCT c.id AS result
-		FROM json_each($results) asked
-		CROSS JOIN results c ON c.id = asked.value
+		FROM unnest($results::bigint[]) AS asked(value)
+		JOIN results c ON c.id = asked.value
 		JOIN batches cb ON cb.id = c.batch
 		JOIN flips f ON f.project = c.project AND f.test = c.test
 		JOIN results s ON s.id = f.second_result
@@ -488,10 +551,10 @@ const Q = {
 	// failed and then passed inside the runner recovered this failure too. Its passing end may be a try, but the
 	// attempt it belongs to must have ended passing: one that passed on a try and ended failing recovered nothing.
 	// Nothing of it corrected.
-	passedOnRetry: sql<{ results: string }, { result: number; attempt: number }>(`
+	passedOnRetry: sql<{ results: readonly number[] }, { result: number; attempt: number }>(`
 		SELECT a.id AS result, min(s.attempt) AS attempt
-		FROM json_each($results) asked
-		CROSS JOIN results a ON a.id = asked.value
+		FROM unnest($results::bigint[]) AS asked(value)
+		JOIN results a ON a.id = asked.value
 		JOIN batches ab ON ab.id = a.batch
 		JOIN flips f ON f.project = a.project AND f.test = a.test
 		JOIN results p ON p.id = f.first_result
@@ -512,10 +575,28 @@ const Q = {
 		`SELECT * FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT $limit`,
 	),
-	latestOfCaseByMethod: sql<{ id: number; method: string }, ResultRow>(
-		`SELECT * FROM results WHERE basis_case = $id AND method = $method
-		 ORDER BY seq DESC, ord DESC LIMIT 1`,
+	proofsForCases: sql<{ ids: readonly number[] }, ResultRow>(
+		"SELECT r.* FROM unnest($ids::bigint[]) asked(id) CROSS JOIN unnest(ARRAY['human','auto','agent']) methods(method) JOIN LATERAL (SELECT * FROM results WHERE basis_case = asked.id AND method = methods.method ORDER BY seq DESC, ord DESC LIMIT 1) r ON true",
 	),
+	receiptDetails: sql<
+		{ ids: readonly number[] },
+		Pick<TestRow, "no" | "name" | "file"> &
+			Pick<ResultRow, "id" | "method"> &
+			Pick<BatchRow, "job"> &
+			Pick<TargetRow, "env">
+	>(
+		"SELECT r.id,t.no,t.name,t.file,r.method,b.job,g.env FROM results r JOIN tests t ON t.id=r.test JOIN batches b ON b.id=r.batch JOIN targets g ON g.id=r.target WHERE r.id=ANY($ids::bigint[])",
+	),
+	comparisons: sql<{ ids: readonly number[] }, ResultComparison>(
+		"SELECT r.*,t.env,b.job FROM results r JOIN targets t ON t.id=r.target LEFT JOIN batches b ON b.id=r.batch WHERE r.id=ANY($ids::bigint[])",
+	),
+	unknownSignatureIds: sql<{ ids: readonly (number | null)[] }, { id: number }>(
+		"SELECT id FROM signatures WHERE id=ANY($ids::bigint[]) AND class='unknown'",
+	),
+	targetsByIds: sql<{ ids: readonly number[] }, TargetRow>("SELECT * FROM targets WHERE id = ANY($ids::bigint[])"),
+	batchesByIds: sql<{ ids: readonly number[] }, BatchRow>("SELECT * FROM batches WHERE id = ANY($ids::bigint[])"),
+	testsByIds: sql<{ ids: readonly number[] }, TestRow>("SELECT * FROM tests WHERE id = ANY($ids::bigint[])"),
+
 	ofBatch: sql<{ batch: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE batch = $batch ORDER BY ord LIMIT $limit",
 	),
@@ -526,6 +607,28 @@ const Q = {
 		`SELECT decision, class, expires_at FROM excuses
 		 WHERE project = $project AND signature = $signature AND scope = $scope AND target = $target`,
 	),
+	excusesForResults: sql<
+		{
+			project: number;
+			ids: readonly number[];
+			signatures: readonly (number | null)[];
+			scopes: readonly string[];
+			targets: readonly number[];
+		},
+		{ id: number; decision: number; class: "attributed" | "excused"; expires_at: number | null }
+	>(`WITH choices AS (
+ SELECT asked.id, coalesce(s.decision,g.decision) AS broad_decision, coalesce(s.class,g.class) AS broad_class,
+  CASE WHEN s.decision IS NOT NULL THEN s.expires_at ELSE g.expires_at END AS broad_expires,
+  e.decision AS exact_decision,e.class AS exact_class,e.expires_at AS exact_expires
+ FROM unnest($ids::bigint[],$signatures::bigint[],$scopes::text[],$targets::bigint[]) asked(id,signature,scope,target)
+ LEFT JOIN excuses s ON s.project=$project AND s.signature=asked.signature AND s.scope=asked.scope AND s.target=asked.target
+ LEFT JOIN excuses g ON g.project=$project AND g.signature=asked.signature AND g.scope=asked.scope AND g.target=0
+ LEFT JOIN result_excuses e ON e.result=asked.id AND e.slot IS NULL
+ ) SELECT id,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_decision ELSE broad_decision END AS decision,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_class ELSE broad_class END AS class,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_expires ELSE broad_expires END AS expires_at
+ FROM choices WHERE coalesce(broad_decision,exact_decision) IS NOT NULL`),
 	setExcuse: sql<{
 		project: number;
 		signature: number;
@@ -533,10 +636,10 @@ const Q = {
 		decision: number;
 		class: string;
 		expires: number | null;
-		target: number;
+		targets: readonly number[];
 	}>(
 		`INSERT INTO excuses (project, signature, scope, target, decision, class, expires_at)
-		 VALUES ($project, $signature, $scope, $target, $decision, $class, $expires)
+		 SELECT DISTINCT $project::bigint, $signature::bigint, $scope::text, target, $decision::bigint, $class::text, $expires::bigint FROM unnest($targets::bigint[]) AS u(target)
 		 ON CONFLICT (project, signature, scope, target)
 		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
 	),
@@ -557,26 +660,29 @@ const Q = {
 	targetsByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id",
 	),
-	caseSelectionOfFiles: sql<{ project: number; files: string }, { ids: string; files: string }>(
-		`SELECT json_group_array(DISTINCT t.case_id) AS ids, json_group_array(DISTINCT t.file) AS files
-		 FROM json_each($files) asked
-		 CROSS JOIN tests t ON t.project = $project AND t.file = asked.value
+	caseSelectionOfFiles: sql<{ project: number; files: readonly string[] }, { ids: string; files: string }>(
+		`SELECT coalesce(json_agg(DISTINCT t.case_id), '[]')::text AS ids, coalesce(json_agg(DISTINCT t.file), '[]')::text AS files
+		 FROM unnest($files::text[]) AS asked(value)
+		 JOIN tests t ON t.project = $project AND t.file = asked.value
 		 WHERE t.case_id IS NOT NULL`,
 	),
-	caseLinksOfFiles: sql<{ project: number; files: string; cases: string }, { case_id: number; file: string }>(
-		`SELECT DISTINCT t.case_id, t.file FROM json_each($cases) asked
-		 CROSS JOIN tests t ON t.case_id = asked.value AND t.project = $project
-		 WHERE t.file IN (SELECT value FROM json_each($files))`,
+	caseLinksOfFiles: sql<
+		{ project: number; files: readonly string[]; cases: readonly number[] },
+		{ case_id: number; file: string }
+	>(
+		`SELECT DISTINCT t.case_id, t.file FROM unnest($cases::bigint[]) AS asked(value)
+		 JOIN tests t ON t.case_id = asked.value AND t.project = $project
+		 WHERE t.file IN (SELECT value FROM unnest($files::text[]) AS listed(value))`,
 	),
-	caseIdsOfTests: sql<{ project: number; tests: string }, { case_id: number }>(
-		`SELECT DISTINCT t.case_id FROM json_each($tests) asked CROSS JOIN tests t ON t.id = asked.value
+	caseIdsOfTests: sql<{ project: number; tests: readonly number[] }, { case_id: number }>(
+		`SELECT DISTINCT t.case_id FROM unnest($tests::bigint[]) AS asked(value) JOIN tests t ON t.id = asked.value
 		 WHERE t.project = $project AND t.case_id IS NOT NULL`,
 	),
-	lastOfCases: sql<{ cases: string }, { case_id: number; outcome: string; basis_version: number | null }>(
+	lastOfCases: sql<{ cases: readonly number[] }, { case_id: number; outcome: string; basis_version: number | null }>(
 		`WITH candidates AS MATERIALIZED (
 			SELECT (SELECT id FROM results WHERE basis_case = asked.value AND method = kind.value
 				ORDER BY seq DESC, ord DESC LIMIT 1) AS id
-			FROM json_each($cases) asked CROSS JOIN json_each('["human","auto","agent"]') kind
+			FROM unnest($cases::bigint[]) AS asked(value) CROSS JOIN unnest(ARRAY['human','auto','agent']) AS kind(value)
 		), ranked AS (
 			SELECT r.basis_case AS case_id, r.outcome, r.basis_version,
 				row_number() OVER (PARTITION BY r.basis_case ORDER BY r.seq DESC, r.ord DESC) AS position
@@ -588,6 +694,27 @@ const Q = {
 		`SELECT DISTINCT test, target FROM results
 		 WHERE project = $project AND signature = $signature
 		   AND outcome IN ('fail', 'error') AND method != 'agent'`,
+	),
+	failedWithCauses: sql<
+		{ project: number; signatures: readonly number[]; tests: readonly number[] },
+		{ signature: number; test: number; target: number }
+	>(
+		`SELECT DISTINCT signature, test, target FROM results WHERE project = $project
+		 AND signature = ANY($signatures::bigint[]) AND test = ANY($tests::bigint[])
+		 AND outcome IN ('fail', 'error') AND method != 'agent'`,
+	),
+	dropCauseExcuses: sql<{
+		project: number;
+		signatures: readonly number[];
+		scopes: readonly string[];
+		decisions: readonly number[];
+	}>(
+		`DELETE FROM excuses e USING unnest($signatures::bigint[], $scopes::text[], $decisions::bigint[])
+		 AS ending(signature, scope, decision) WHERE e.project = $project AND e.signature = ending.signature
+		 AND e.scope = ending.scope AND e.decision = ending.decision`,
+	),
+	dropCauseResultExcuses: sql<{ decisions: readonly number[] }>(
+		"DELETE FROM result_excuses WHERE decision = ANY($decisions::bigint[])",
 	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
 		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope AND decision = $decision",
@@ -606,14 +733,14 @@ export const codeWhat = (repo: string | undefined | null, commit: string): strin
  * A change belongs to one repository. The first repository to report `pr:12` in a project has that key; the same
  * number from another repository is another change, keyed `<repo>#pr:12`, with its own decisions and gate.
  */
-export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = true): TargetRow {
+export async function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = true): Promise<TargetRow> {
 	const project = ctx.project.id;
 	if ("build" in input) {
-		const what = buildWhat(ctx.db, project, input.build, input.env);
+		const what = await buildWhat(ctx.db, project, input.build, input.env);
 		const env = input.env ?? "";
-		const found = ctx.db.get(Q.target, { project, what, env });
+		const found = await ctx.db.get(Q.target, { project, what, env });
 		if (found) return found;
-		const { lastId } = ctx.db.run(Q.insertTarget, {
+		const { id: lastId } = await ctx.db.one(Q.insertTarget, {
 			project,
 			what,
 			env,
@@ -624,13 +751,13 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 			change: null,
 			seq: ctx.seq,
 		});
-		return mustTarget(ctx.db, lastId);
+		return await mustTarget(ctx.db, lastId);
 	}
 	if ("session" in input) {
 		const what = `session:${input.session}`;
-		const found = ctx.db.get(Q.target, { project, what, env: "" });
+		const found = await ctx.db.get(Q.target, { project, what, env: "" });
 		if (found) return found;
-		const { lastId } = ctx.db.run(Q.insertTarget, {
+		const { id: lastId } = await ctx.db.one(Q.insertTarget, {
 			project,
 			what,
 			env: "",
@@ -641,25 +768,25 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 			change: null,
 			seq: ctx.seq,
 		});
-		return mustTarget(ctx.db, lastId);
+		return await mustTarget(ctx.db, lastId);
 	}
 	const what = codeWhat(input.repo, input.commit);
 	const env = input.env ?? "";
-	const found = ctx.db.get(Q.target, { project, what, env });
-	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
+	const found = await ctx.db.get(Q.target, { project, what, env });
+	const first = (await ctx.db.all(Q.targetsOfCommit, { project, what }))[0];
 	// A pipeline or person names a commit's scope. An agent's report settles nothing, and a hash-only report
 	// leaves the place provisional until a pipeline or person names a branch or pull request, unless somebody
 	// has a human batch or result there, even if uncounted: their question and answer keep that scope.
 	const advisory = ctx.actor.kind === "agent";
-	const placed = first !== undefined && firstSeen(ctx.db, project, input.repo ?? null, input.commit) !== null;
-	const own = first?.change !== null && first?.change !== undefined ? changeById(ctx.db, first.change) : null;
+	const placed = first !== undefined && (await firstSeen(ctx.db, project, input.repo ?? null, input.commit)) !== null;
+	const own = first?.change !== null && first?.change !== undefined ? await changeById(ctx.db, first.change) : null;
 	const named = input.pr !== undefined || input.branch !== undefined;
 	const gainsPlace =
 		!advisory &&
 		named &&
 		own !== null &&
-		own.key === changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null) &&
-		!ctx.db.get(Q.humanReported, { project, what });
+		own.key === (await changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null)) &&
+		!(await ctx.db.get(Q.humanReported, { project, what }));
 	const settled = first !== undefined && (placed || advisory || first.line === "trunk") && !gainsPlace;
 	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	if (input.head !== undefined && (trunk || (input.pr === undefined && !input.branch)))
@@ -670,8 +797,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 		// named one (the name stays free for whoever really reports it). A commit only an agent has reported is on
 		// its own, like a commit reported by its hash alone; one that is placed already is where it is.
 		if (first === undefined) {
-			const key = changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
-			change = upsertChange(ctx, key, input, updateExistingChange);
+			const key = await changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
+			change = await upsertChange(ctx, key, input, updateExistingChange);
 		}
 	} else if (!trunk) {
 		const key =
@@ -680,7 +807,12 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 		// commit whose place is known, no change of its own is made up for it.
 		const known = input.pr === undefined && input.branch === undefined && settled;
 		if (!known)
-			change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input, updateExistingChange);
+			change = await upsertChange(
+				ctx,
+				await changeKey(ctx.db, project, key, input.repo ?? null),
+				input,
+				updateExistingChange,
+			);
 	}
 	// One commit, one scope across every environment. Automated hash-only reports leave the place open until
 	// a branch or pull request is named. Typed results keep their scope; a named scope moves on landing.
@@ -690,9 +822,9 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 			? { line: "change", branch: null, change: change?.id ?? null }
 			: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
 	// A scope is shared by every environment, including environments reported before its place was named.
-	if (first !== undefined && !settled) moveCommit(ctx, first, place);
-	if (found) return settled ? found : mustTarget(ctx.db, found.id);
-	const { lastId } = ctx.db.run(Q.insertTarget, {
+	if (first !== undefined && !settled) await moveCommit(ctx, first, place);
+	if (found) return settled ? found : await mustTarget(ctx.db, found.id);
+	const { id: lastId } = await ctx.db.one(Q.insertTarget, {
 		project,
 		what,
 		env,
@@ -703,15 +835,20 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 		change: place.change,
 		seq: ctx.seq,
 	});
-	return mustTarget(ctx.db, lastId);
+	return await mustTarget(ctx.db, lastId);
 }
 
 /**
  * The provisional change given to a commit reported only by hash (`commit:<hash>`), or null. Its questions
  * belong there until a pipeline or person names a scope for it.
  */
-export function ownChangeOf(db: Db, project: number, repo: string | null, commit: string): ChangeRow | null {
-	return db.get(Q.change, { project, key: changeKey(db, project, ownKey(commit), repo) });
+export async function ownChangeOf(
+	db: ReadDb,
+	project: number,
+	repo: string | null,
+	commit: string,
+): Promise<ChangeRow | null> {
+	return await db.get(Q.change, { project, key: await changeKey(db, project, ownKey(commit), repo) });
 }
 
 /**
@@ -721,8 +858,8 @@ export function ownChangeOf(db: Db, project: number, repo: string | null, commit
 const ownKey = (commit: string): string => `commit:${commit}`;
 
 /** The key of a change in a repository: the plain key, unless another repository holds it in this project. */
-function changeKey(db: Db, project: number, key: string, repo: string | null): string {
-	const holder = db.get(Q.change, { project, key });
+async function changeKey(db: ReadDb, project: number, key: string, repo: string | null): Promise<string> {
+	const holder = await db.get(Q.change, { project, key });
 	return !holder || holder.repo === repo ? key : `${repo ?? "(no repository)"}#${key}`;
 }
 
@@ -730,8 +867,8 @@ function changeKey(db: Db, project: number, key: string, repo: string | null): s
  * When a pipeline or a person first reported a commit in this project, or null when none has. An agent's report
  * of a commit does not count: the order of a change's commits is the order in which the gates heard of them.
  */
-const firstSeen = (db: Db, project: number, repo: string | null, commit: string): number | null =>
-	db.get(Q.firstCounted, { project, what: codeWhat(repo, commit) })?.seq ?? null;
+const firstSeen = async (db: ReadDb, project: number, repo: string | null, commit: string): Promise<number | null> =>
+	(await db.get(Q.firstCounted, { project, what: codeWhat(repo, commit) }))?.seq ?? null;
 
 /**
  * Whether this batch is the first report of its commit that a gate counts. That report is the one that says
@@ -739,9 +876,9 @@ const firstSeen = (db: Db, project: number, repo: string | null, commit: string)
  * agent's results on it has its failures answered there from now on. Read from the batches, so it is the same
  * answer when the report is applied after a restart.
  */
-export function firstCountedReport(db: Db, batch: BatchRow, target: TargetRow): boolean {
+export async function firstCountedReport(db: ReadDb, batch: BatchRow, target: TargetRow): Promise<boolean> {
 	if (target.commit_sha === null || batch.method === "agent") return false;
-	return db.get(Q.firstCounted, { project: batch.project, what: target.what })?.seq === batch.seq;
+	return (await db.get(Q.firstCounted, { project: batch.project, what: target.what }))?.seq === batch.seq;
 }
 
 /**
@@ -749,13 +886,13 @@ export function firstCountedReport(db: Db, batch: BatchRow, target: TargetRow): 
  * order still decides. A known late job cannot undo a newer head observation, even after a reset.
  * A merged change keeps its recorded head and metadata until explicitly reopened.
  */
-function upsertChange(
+async function upsertChange(
 	ctx: Ctx,
 	key: string,
 	input: Extract<TargetIn, { commit: string }>,
 	updateExisting: boolean,
-): ChangeRow {
-	const existing = ctx.db.get(Q.change, { project: ctx.project.id, key });
+): Promise<ChangeRow> {
+	const existing = await ctx.db.get(Q.change, { project: ctx.project.id, key });
 	// What an agent says about a change is not what the change is: no gate counts its results, so its report
 	// neither moves the head nor rewrites the base, the title or the files. It can name a change nobody has
 	// reported yet, and then the change has no head: the first pipeline or person to report it says where its
@@ -763,7 +900,7 @@ function upsertChange(
 	const advisory = ctx.actor.kind === "agent";
 	if (existing && (advisory || !updateExisting || existing.ended === "merged")) return existing;
 	if (!existing) {
-		const { lastId } = ctx.db.run(Q.insertChange, {
+		const { id: lastId } = await ctx.db.one(Q.insertChange, {
 			project: ctx.project.id,
 			key,
 			repo: input.repo ?? null,
@@ -777,13 +914,13 @@ function upsertChange(
 			rev: ctx.seq,
 		});
 		ctx.touched.add(key);
-		const row = ctx.db.get(Q.changeById, { id: lastId });
+		const row = await ctx.db.get(Q.changeById, { id: lastId });
 		if (!row) throw new Error("change was not stored");
 		return row;
 	}
 	if (input.head === undefined && input.commit !== existing.head_sha && existing.head_sha !== null) {
-		const head = firstSeen(ctx.db, ctx.project.id, existing.repo, existing.head_sha);
-		const mine = firstSeen(ctx.db, ctx.project.id, existing.repo, input.commit);
+		const head = await firstSeen(ctx.db, ctx.project.id, existing.repo, existing.head_sha);
+		const mine = await firstSeen(ctx.db, ctx.project.id, existing.repo, input.commit);
 		if (mine !== null && mine <= Math.max(head ?? 0, existing.head_observed_seq ?? 0)) return existing;
 	}
 	const files = input.files ?? json<string[]>(existing.files);
@@ -811,29 +948,34 @@ function upsertChange(
 	};
 	if ((Object.keys(next) as (keyof ChangeWrite)[]).some((field) => next[field] !== stored[field])) {
 		if (next.base !== existing.base_sha) ctx.changedBases.add(existing.id);
-		ctx.db.run(Q.updateChange, next);
+		await ctx.db.run(Q.updateChange, next);
 		ctx.touched.add(key);
 	}
-	return ctx.db.get(Q.changeById, { id: existing.id }) ?? existing;
+	return (await ctx.db.get(Q.changeById, { id: existing.id })) ?? existing;
 }
 
-export function mustTarget(db: Db, id: number): TargetRow {
-	const row = db.get(Q.targetById, { id });
+export async function mustTarget(db: ReadDb, id: number): Promise<TargetRow> {
+	const row = await db.get(Q.targetById, { id });
 	if (!row) throw new Error(`target ${id} is missing`);
 	return row;
 }
-export const targetsOfCommit = (db: Db, project: number, what: string): TargetRow[] =>
-	db.all(Q.targetsOfCommit, { project, what });
+export const targetsOfCommit = async (db: ReadDb, project: number, what: string): Promise<TargetRow[]> =>
+	await db.all(Q.targetsOfCommit, { project, what });
 /** Presentation only: a landing does not put trunk evidence back in a change's decision scope. */
-export function resultLocation(db: Db, target: TargetRow): ResultLocation {
-	return resultLocations(db, [target])(target);
+export async function resultLocation(db: ReadDb, target: TargetRow): Promise<ResultLocation> {
+	return (await resultLocations(db, [target]))(target);
 }
 
 /** One indexed lookup for all targets on a result page, including direct change names. */
-export function resultLocations(db: Db, targets: TargetRow[]): (target: TargetRow) => ResultLocation {
+export async function resultLocations(
+	db: ReadDb,
+	targets: TargetRow[],
+): Promise<(target: TargetRow) => ResultLocation> {
 	const names = new Map<number, { key: string | null; title: string | null } | null>();
 	if (targets.length > 0)
-		for (const row of db.all(Q.locationChanges, { targets: JSON.stringify([...new Set(targets.map((t) => t.id))]) }))
+		for (const row of await db.all(Q.locationChanges, {
+			targets: [...new Set(targets.map((t) => t.id))],
+		}))
 			names.set(row.target, names.has(row.target) ? null : row);
 	return (target) => {
 		const change = names.get(target.id);
@@ -856,18 +998,19 @@ export const landingOf = (change: ChangeRow): { commit: string; branch: string }
 		? { commit: change.landing_commit, branch: change.landing_branch }
 		: null;
 
-export const changeByKey = (db: Db, project: number, key: string): ChangeRow | null =>
-	db.get(Q.change, { project, key });
-export const changeById = (db: Db, id: number): ChangeRow | null => db.get(Q.changeById, { id });
+export const changeByKey = async (db: ReadDb, project: number, key: string): Promise<ChangeRow | null> =>
+	await db.get(Q.change, { project, key });
+export const changeById = async (db: ReadDb, id: number): Promise<ChangeRow | null> =>
+	await db.get(Q.changeById, { id });
 
 /**
  * Records that a change ended, or with null that it is open again. A fact about the change, like where its head
  * is: said by whoever reports for it, and not a decision. What follows for its questions is the caller's.
  */
-export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["ended"]): ChangeRow {
-	if (ended === null) ctx.db.run(Q.reopenChange, { id: change.id });
-	else ctx.db.run(Q.endChange, { id: change.id, ended, at: ctx.now });
-	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+export async function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["ended"]): Promise<ChangeRow> {
+	if (ended === null) await ctx.db.run(Q.reopenChange, { id: change.id });
+	else await ctx.db.run(Q.endChange, { id: change.id, ended, at: ctx.now });
+	await ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 	ctx.touched.add(change.key);
 	// A new end, or none, has no landing yet: `endChange` and `reopenChange` clear it.
 	return {
@@ -882,10 +1025,10 @@ export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["en
 }
 
 /** Only the receipt decision machinery can select a frozen gate for this merge. */
-export function setMergeReceipt(ctx: Ctx, witness: Witness, change: ChangeRow): void {
+export async function setMergeReceipt(ctx: Ctx, witness: Witness, change: ChangeRow): Promise<void> {
 	const receipt = decisionOf(witness, "merge-receipt");
-	ctx.db.run(Q.setMergeReceipt, { id: change.id, receipt });
-	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+	await ctx.db.run(Q.setMergeReceipt, { id: change.id, receipt });
+	await ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 	ctx.touched.add(change.key);
 }
 
@@ -893,9 +1036,9 @@ export function setMergeReceipt(ctx: Ctx, witness: Witness, change: ChangeRow): 
  * Where a change's head is, as the code host said when it reported how the change ended. It is taken even from a
  * merged change, whose head reports cannot move: the merge is what says which head merged.
  */
-export function observeEndingHead(ctx: Ctx, change: ChangeRow, head: string): ChangeRow {
+export async function observeEndingHead(ctx: Ctx, change: ChangeRow, head: string): Promise<ChangeRow> {
 	if (change.head_sha === head) return change;
-	ctx.db.run(Q.updateChange, {
+	await ctx.db.run(Q.updateChange, {
 		id: change.id,
 		base: change.base_sha,
 		head,
@@ -913,24 +1056,26 @@ export function observeEndingHead(ctx: Ctx, change: ChangeRow, head: string): Ch
  * A landing records the commit that reached trunk and places it there, even before evidence arrives. It is not the
  * change's head: a rebase or a squash writes a commit the pull request never had, with a gate of its own.
  */
-export function landChange(
+export async function landChange(
 	ctx: Ctx,
 	change: ChangeRow,
 	landing: NonNullable<ChangeInput["landing"]>,
-): TargetRow | null {
+): Promise<TargetRow | null> {
 	const landingChanged =
-		ctx.db.run(Q.landChange, {
-			id: change.id,
-			commit: landing.commit,
-			repo: change.repo,
-			branch: landing.branch,
-		}).changes > 0;
+		(
+			await ctx.db.run(Q.landChange, {
+				id: change.id,
+				commit: landing.commit,
+				repo: change.repo,
+				branch: landing.branch,
+			})
+		).changes > 0;
 	if (landingChanged) {
-		ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+		await ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 		ctx.touched.add(change.key);
 	}
 	const what = codeWhat(change.repo, landing.commit);
-	const existing = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
+	const existing = (await targetsOfCommit(ctx.db, ctx.project.id, what))[0];
 	if (existing && existing.line === "trunk" && existing.branch === landing.branch && existing.change === null) {
 		if (!landingChanged) return null;
 		ctx.touched.add(change.key);
@@ -938,21 +1083,25 @@ export function landChange(
 	}
 	const target =
 		existing ??
-		ensureTarget(ctx, {
+		(await ensureTarget(ctx, {
 			commit: landing.commit,
 			...(change.repo === null ? {} : { repo: change.repo }),
 			branch: landing.branch,
-		});
-	moveCommit(ctx, target, { line: "trunk", branch: landing.branch, change: null });
+		}));
+	await moveCommit(ctx, target, { line: "trunk", branch: landing.branch, change: null });
 	ctx.touched.add(change.key);
-	return mustTarget(ctx.db, target.id);
+	return await mustTarget(ctx.db, target.id);
 }
 
-function moveCommit(ctx: Ctx, target: TargetRow, place: Pick<TargetRow, "line" | "branch" | "change">): void {
+async function moveCommit(
+	ctx: Ctx,
+	target: TargetRow,
+	place: Pick<TargetRow, "line" | "branch" | "change">,
+): Promise<void> {
 	const before = scopeOf(target, null);
 	const after = scopeOf({ ...target, ...place }, null);
 	if (before !== after)
-		ctx.db.run(Q.scopeMove, {
+		await ctx.db.run(Q.scopeMove, {
 			project: ctx.project.id,
 			what: target.what,
 			before,
@@ -961,17 +1110,17 @@ function moveCommit(ctx: Ctx, target: TargetRow, place: Pick<TargetRow, "line" |
 			at: ctx.now,
 			seq: ctx.seq,
 		});
-	ctx.db.run(Q.placeCommit, { project: ctx.project.id, what: target.what, ...place });
+	await ctx.db.run(Q.placeCommit, { project: ctx.project.id, what: target.what, ...place });
 }
 
 /** Whether the change a scope names (`change:<id>`) has ended. A line and a run never end this way. */
-export function scopeEnded(db: Db, scope: string): boolean {
+export async function scopeEnded(db: ReadDb, scope: string): Promise<boolean> {
 	if (!scope.startsWith("change:")) return false;
-	const change = db.get(Q.changeById, { id: Number(scope.slice("change:".length)) });
+	const change = await db.get(Q.changeById, { id: Number(scope.slice("change:".length)) });
 	return change !== null && change.ended !== null;
 }
-export const recentChanges = (db: Db, project: number, limit: number): ChangeRow[] =>
-	db.all(Q.changes, { project, limit });
+export const recentChanges = async (db: ReadDb, project: number, limit: number): Promise<ChangeRow[]> =>
+	await db.all(Q.changes, { project, limit });
 
 /** Where a failure on this target is answered: per change, on trunk, or within the run it was typed into. */
 export function scopeOf(target: TargetRow, run: number | null): string {
@@ -1028,7 +1177,7 @@ function batchMethod(actor: ActorKind, results: readonly ResultIn[]): MethodKind
  * Stores a report durably under its batch key and returns the batch. A second report with the same target, job,
  * attempt, producer and content returns the first batch with `fresh: false` and writes nothing.
  */
-export function accept(
+export async function accept(
 	ctx: Ctx,
 	input: {
 		target: TargetRow;
@@ -1043,7 +1192,7 @@ export function accept(
 		 */
 		nonce: string | null;
 	},
-): { batch: BatchRow; fresh: boolean } {
+): Promise<{ batch: BatchRow; fresh: boolean }> {
 	const { report } = input;
 	for (const result of report.results) {
 		for (const step of result.steps ?? []) {
@@ -1085,20 +1234,29 @@ export function accept(
 				}
 			: {}),
 	});
-	const existing = ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
+	const existing = await ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
 	if (existing) return { batch: existing, fresh: false };
 	// A refusal after acceptance would leave a durable batch pending, so check new corrections before storing it.
 	const corrected = new Set<number>();
 	const pending = new Set(
 		report.results.some((result) => result.corrects !== undefined)
-			? ctx.db.all(Q.pendingCorrections, { project: ctx.project.id, actor: ctx.actor.id }).map((row) => row.result)
+			? (await ctx.db.all(Q.pendingCorrections, { project: ctx.project.id, actor: ctx.actor.id })).map(
+					(row) => row.result,
+				)
 			: [],
+	);
+	const correctionIds = report.results.flatMap((result) => (result.corrects === undefined ? [] : [result.corrects]));
+	const priorResults = new Map(
+		(correctionIds.length ? await ctx.db.all(Q.resultsByIds, { ids: correctionIds }) : []).map((row) => [row.id, row]),
+	);
+	const withdrawn = new Set(
+		(correctionIds.length ? await ctx.db.all(Q.correctedIds, { ids: correctionIds }) : []).map((row) => row.id),
 	);
 	for (const result of report.results) {
 		if (result.corrects === undefined) continue;
-		const earlier = ctx.db.get(Q.resultById, { id: result.corrects });
+		const earlier = priorResults.get(result.corrects);
 		if (!earlier || earlier.project !== ctx.project.id || earlier.actor !== ctx.actor.id) continue;
-		if (corrected.has(earlier.id) || isWithdrawn(ctx.db, earlier.id))
+		if (corrected.has(earlier.id) || withdrawn.has(earlier.id))
 			throw conflict(
 				`result ${earlier.id} was already corrected; read the latest results and correct the current result instead`,
 			);
@@ -1109,15 +1267,15 @@ export function accept(
 		corrected.add(earlier.id);
 	}
 	if (report.shard) {
-		const other = ctx.db
-			.all(Q.shardsOf, { target: input.target.id })
-			.find((row) => row.job === job && row.shards !== report.shard?.of);
+		const other = (await ctx.db.all(Q.shardsOf, { target: input.target.id })).find(
+			(row) => row.job === job && row.shards !== report.shard?.of,
+		);
 		if (other)
 			throw invalid(
 				`job "${job}" of this commit was reported in ${other.shards} shards; this report says ${report.shard.of}`,
 			);
 	}
-	const { lastId } = ctx.db.run(Q.insertBatch, {
+	const { id: lastId } = await ctx.db.one(Q.insertBatch, {
 		project: ctx.project.id,
 		key,
 		target: input.target.id,
@@ -1136,25 +1294,25 @@ export function accept(
 		at: ctx.now,
 		seq: ctx.seq,
 	});
-	const batch = ctx.db.get(Q.batchById, { id: lastId });
+	const batch = await ctx.db.get(Q.batchById, { id: lastId });
 	if (!batch) throw new Error("batch was not stored");
 	return { batch, fresh: true };
 }
 
-export const batchById = (db: Db, id: number): BatchRow | null => db.get(Q.batchById, { id });
-export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
+export const batchById = async (db: ReadDb, id: number): Promise<BatchRow | null> => await db.get(Q.batchById, { id });
+export const acceptedBatches = async (db: ReadDb): Promise<BatchRow[]> => await db.all(Q.accepted);
 
 /**
  * The shards a commit is still waiting for: for each job of each of its targets that reported in shards, the shards
  * that have not reported, sent or applied. Empty when every job reported whole, or every shard of it arrived.
  */
 /** Walk a commit's shard waits without collecting every target, job or missing index in one array. */
-export function* waitingShardPages(db: Db, project: number, what: string): Generator<ShardWait[]> {
+export async function* waitingShardPages(db: ReadDb, project: number, what: string): AsyncGenerator<ShardWait[]> {
 	let target = 0;
 	let job = "";
 	let shards = 0;
 	for (;;) {
-		const rows = db.all(Q.receiptShards, { project, what, target, job, shards });
+		const rows = await db.all(Q.receiptShards, { project, what, target, job, shards });
 		if (!rows.length) return;
 		yield rows.flatMap((row) => {
 			const reported = new Set(row.reported.split(",").map(Number));
@@ -1169,21 +1327,40 @@ export function* waitingShardPages(db: Db, project: number, what: string): Gener
 	}
 }
 
-export function waitingShards(db: Db, targets: readonly TargetRow[]): ShardWait[] {
-	return targets.flatMap((target) =>
-		db.all(Q.shardsOf, { target: target.id }).flatMap((row) => {
-			const reported = new Set(row.reported.split(",").map(Number));
-			const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
-			return missing.length > 0 ? [{ job: row.job, env: target.env, missing, of: row.shards }] : [];
-		}),
-	);
+/** The missing shards for all requested commits, loaded in one statement. */
+export async function waitingShardsByCommit(
+	db: ReadDb,
+	targets: readonly TargetRow[],
+): Promise<Map<string, ShardWait[]>> {
+	const out = new Map<string, ShardWait[]>();
+	const byId = new Map(targets.map((target) => [target.id, target]));
+	if (!targets.length) return out;
+	for (const row of await db.all(Q.shardsForTargets, { ids: targets.map((target) => target.id) })) {
+		const target = byId.get(row.target);
+		if (!target) throw new Error("shard target was not requested");
+		const reported = new Set(row.reported.split(",").map(Number));
+		const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
+		if (missing.length) {
+			const waits = out.get(target.what) ?? [];
+			waits.push({ job: row.job, env: target.env, missing, of: row.shards });
+			out.set(target.what, waits);
+		}
+	}
+	return out;
 }
+export async function waitingShards(db: ReadDb, targets: readonly TargetRow[]): Promise<ShardWait[]> {
+	return [...(await waitingShardsByCommit(db, targets)).values()].flat();
+}
+export const targetsOfCommits = async (db: ReadDb, project: number, whats: readonly string[]): Promise<TargetRow[]> =>
+	await db.all(Q.targetsOfCommits, { project, whats });
+export const changesByIds = async (db: ReadDb, ids: readonly number[]): Promise<ChangeRow[]> =>
+	await db.all(Q.changesByIds, { ids });
 
 /** A declaration proves nothing once any ordinary report exists on any target the commit counts. */
-export function nothingRequiredOn(db: Db, targets: readonly TargetRow[]): boolean {
+export async function nothingRequiredOn(db: ReadDb, targets: readonly TargetRow[]): Promise<boolean> {
 	let declared = false;
 	for (const target of targets) {
-		const reports = db.get(Q.emptyReports, { target: target.id });
+		const reports = await db.get(Q.emptyReports, { target: target.id });
 		if (reports?.ordinary) return false;
 		if (reports?.declared) declared = true;
 	}
@@ -1196,10 +1373,11 @@ export function nothingRequiredOn(db: Db, targets: readonly TargetRow[]): boolea
  * result was skipped or could not run says the job ran nothing, and a person's own pass of a case sent along
  * with it is theirs, not the job's.
  */
-export const processedJobs = (db: Db, target: number): Set<string> =>
-	new Set(db.all(Q.processedJobs, { target }).map((r) => r.job));
+export const processedJobs = async (db: ReadDb, target: number): Promise<Set<string>> =>
+	new Set((await db.all(Q.processedJobs, { target })).map((r) => r.job));
 /** Whether its producer has since corrected this result. */
-export const isWithdrawn = (db: Db, result: number): boolean => db.get(Q.correctionOf, { result }) !== null;
+export const isWithdrawn = async (db: ReadDb, result: number): Promise<boolean> =>
+	(await db.get(Q.correctionOf, { result })) !== null;
 
 // ── Apply ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1252,16 +1430,15 @@ export const SLICE = 200;
  * against a case that refuses the result (`rejected`). For an automated test the outcome is still a fact about
  * the commit, and dropping it could hide a failure from the gate: it is kept with no case (`declined`).
  */
-export function* applySteps(
+export async function* applySteps(
 	ctx: Ctx,
 	batch: BatchRow,
 	producer: ActorKind,
 	pinned: (caseId: number) => number | null,
-): Generator<undefined, ApplyResult, void> {
+): AsyncGenerator<undefined, ApplyResult, void> {
 	if (batch.state !== "accepted" || batch.staged === null) throw new Error(`batch ${batch.id} was already applied`);
 	yield* ensureAssertionIndex(ctx.db, ctx.project.id);
-	const scope = assertionScope(mustTarget(ctx.db, batch.target), batch.id);
-	let observations = 0;
+	const scope = assertionScope(await mustTarget(ctx.db, batch.target), batch.id);
 	const staged = json<ResultIn[]>(batch.staged);
 	const project = ctx.project.id;
 	const out: ApplyResult = {
@@ -1272,413 +1449,629 @@ export function* applySteps(
 		rejected: [],
 		declined: [],
 	};
+	const namedCases = new Map<string, CaseRow | null>();
 	const heads = new Map<number, CaseRow | null>();
-	const head = (id: number): CaseRow | null => {
-		if (!heads.has(id)) heads.set(id, caseById(ctx.db, id));
-		return heads.get(id) ?? null;
-	};
 	const claimAt = new Map<string, string | null>();
-	const claimOf = (caseId: number, version: number): string | null => {
-		const key = `${caseId}@${version}`;
-		if (!claimAt.has(key)) {
-			claimAt.set(key, versionOf(ctx.db, caseId, version)?.claim_hash ?? null);
-		}
-		return claimAt.get(key) ?? null;
-	};
+	const head = (id: number) => heads.get(id) ?? null;
+	const claimOf = (caseId: number, version: number) => claimAt.get(`${caseId}@${version}`) ?? null;
 
-	for (let index = 0; index < staged.length; index++) {
-		const input = staged[index];
-		if (!input) continue;
-		// A pause every slice: the transaction stays open, and the server may answer reads in between.
-		if (index > 0 && index % SLICE === 0) yield;
-		const resolved = resolveTest(ctx, input);
-		if ("reject" in resolved) {
-			out.rejected.push({ index, reason: resolved.reject });
-			continue;
+	const triedCauses: { id: number; signature: SignatureRow; file: string | null }[] = [];
+	let observations = 0;
+	for (let start = 0; start < staged.length; ) {
+		if (start > 0 && start % SLICE === 0) yield;
+		let slice = staged.slice(start, Math.min(staged.length, (Math.floor(start / SLICE) + 1) * SLICE));
+		const correctedIds = slice.flatMap((input) => (input.corrects === undefined ? [] : [input.corrects]));
+		const earlierResults = new Map(
+			(correctedIds.length ? await ctx.db.all(Q.resultsByIds, { ids: correctedIds }) : []).map((row) => [row.id, row]),
+		);
+		// An id guessed for an earlier row in this same batch must be resolved after that prefix is stored.
+		const prefix = slice.findIndex(
+			(input, index) => index > 0 && input.corrects !== undefined && !earlierResults.has(input.corrects),
+		);
+		if (prefix > 0) slice = slice.slice(0, prefix);
+		const sliceStart = start;
+		start += slice.length;
+		const references = new Set<string>();
+		for (const input of slice) {
+			if ("case" in input.test) references.add(input.test.case);
+			if (input.annotation) references.add(input.annotation.case);
+			else if ("key" in input.test)
+				for (const token of (input.test.name ?? input.test.key).matchAll(/@([a-z0-9][a-z0-9_.:/@-]*)/gi)) {
+					const claim = caseNameAnnotation(token[0], () => true);
+					if (claim) references.add(claim.case);
+				}
 		}
-		const { test, fresh } = resolved;
-		const typed = "case" in input.test;
-		const method = methodFor(producer, input);
+		const missingRefs = [...references].filter((ref) => !namedCases.has(ref));
+		for (let start = 0; start < missingRefs.length; start += SLICE)
+			for (const [ref, row] of await findCases(ctx.db, project, missingRefs.slice(start, start + SLICE))) {
+				namedCases.set(ref, row);
+				if (row) heads.set(row.id, row);
+			}
 
-		// The basis: every claim about the case and the version, then the assumption, then nothing.
-		let refused: string | null = null;
-		const annotation =
-			input.annotation ??
-			caseNameAnnotation(
-				"key" in input.test ? (input.test.name ?? input.test.key) : "",
-				(alias) => findCase(ctx.db, project, alias) !== null,
-			);
-		const annotated = annotation ? findCase(ctx.db, project, annotation.case) : null;
-		const linked = test.case_id !== null ? head(test.case_id) : null;
-		if (annotation && !annotated) refused = `the annotation names ${annotation.case}, which does not exist`;
-		else if (annotated && linked && annotated.id !== linked.id) {
-			refused = typed
-				? `the result names ${caseRef(linked)} and its annotation names ${caseRef(annotated)}`
-				: `${testRef(test)} is linked to ${caseRef(linked)} and annotated with ${caseRef(annotated)}`;
+		const resolvedTests = await resolveTests(ctx, slice, namedCases);
+		const linkedIds = [
+			...new Set(
+				resolvedTests.flatMap((row) =>
+					"test" in row && row.test.case_id !== null && !heads.has(row.test.case_id) ? [row.test.case_id] : [],
+				),
+			),
+		];
+		for (const id of linkedIds) heads.set(id, null);
+		for (const row of await casesByIds(ctx.db, linkedIds)) heads.set(row.id, row);
+		const annotations = slice.map(
+			(input) =>
+				input.annotation ??
+				caseNameAnnotation(
+					"key" in input.test ? (input.test.name ?? input.test.key) : "",
+					(alias) => namedCases.get(alias) != null,
+				),
+		);
+		const neededVersions = new Map<string, { caseId: number; no: number }>();
+		for (const [index, resolved] of resolvedTests.entries()) {
+			if (!("test" in resolved)) continue;
+			const annotation = annotations[index];
+			const subject = (annotation ? namedCases.get(annotation.case)?.id : undefined) ?? resolved.test.case_id;
+			if (subject === null) continue;
+			const version = pinned(subject) ?? annotation?.version ?? head(subject)?.head;
+			if (version !== undefined && !claimAt.has(`${subject}@${version}`))
+				neededVersions.set(`${subject}@${version}`, { caseId: subject, no: version });
 		}
-		let subject = annotated?.id ?? test.case_id;
-		const pin = subject !== null ? pinned(subject) : null;
-		const claims = [pin, annotation?.version ?? null].filter((v): v is number => v !== null);
-		if (refused === null && claims.length === 2 && claims[0] !== claims[1]) {
-			refused = `basis conflict: the run pinned version ${claims[0]}, the annotation says ${claims[1]}`;
-		}
-		let basis: ResultRow["basis"] = "unresolved";
-		let basisVersion: number | null = null;
-		if (refused === null && subject !== null) {
-			const row = head(subject);
-			if (claims[0] !== undefined) {
-				basis = "exact";
-				basisVersion = claims[0];
-			} else if (row) {
-				basis = "assumed";
-				basisVersion = row.head;
-			}
-			if (basisVersion !== null && (basisVersion < 1 || (row && basisVersion > row.head))) {
-				refused = `${row ? caseRef(row) : "the case"} has no version ${basisVersion}`;
-			}
-		}
-		let corrects = input.corrects ?? null;
-		// A correction stands where the result it corrects stood: it is never an older attempt than that one,
-		// whatever number the report that carries it has.
-		let attempt = batch.attempt;
-		if (refused === null && corrects !== null) {
-			const earlier = ctx.db.get(Q.resultById, { id: corrects });
-			if (earlier) attempt = Math.max(attempt, earlier.attempt);
-			if (
-				!earlier ||
-				earlier.project !== project ||
-				earlier.actor !== batch.actor ||
-				earlier.test !== test.id ||
-				earlier.target !== batch.target ||
-				earlier.run !== batch.run
-			) {
-				refused =
-					"a result can only correct an earlier result of the same producer for the same test, recorded on the same target and in the same run";
-			}
-		}
-		if (refused !== null) {
-			if (typed) {
-				out.rejected.push({ index, reason: refused });
-				continue;
-			}
-			out.declined.push({ index, reason: `${refused}: recorded with no case` });
-			basis = "unresolved";
-			basisVersion = null;
-			subject = null;
-			corrects = null;
-			attempt = batch.attempt;
-		}
-		const basisCase = basis === "unresolved" ? null : subject;
-		const basisClaim = basisCase !== null && basisVersion !== null ? claimOf(basisCase, basisVersion) : null;
+		for (const key of neededVersions.keys()) claimAt.set(key, null);
+		for (const row of await versionsOf(ctx.db, [...neededVersions.values()]))
+			claimAt.set(`${row.case_id}@${row.no}`, row.claim_hash);
 
-		let signature: SignatureRow | null = null;
-		let message: string | null = null;
-		if (input.outcome === "fail" || input.outcome === "error") {
-			message = input.failure?.message?.trim() || input.note?.trim() || null;
-			signature = ensureSignature(ctx, test.key, {
-				message: message ?? "",
+		const rootFor = (
+			test: TestRow,
+			input: {
+				outcome: Outcome;
+				failure?: { message: string; detail?: string | undefined } | undefined;
+				note?: string | undefined;
+			},
+		) => {
+			if (input.outcome !== "fail" && input.outcome !== "error") return null;
+			const message = input.failure?.message?.trim() || input.note?.trim() || "";
+			return failureSignature(test.key, {
+				message,
 				...(input.failure?.detail ? { detail: input.failure.detail } : {}),
 			});
+		};
+		const newTests = new Set(resolvedTests.flatMap((row) => ("test" in row && row.fresh ? [row.test.id] : [])));
+		const lanes = new Map<string, { test: number; method: MethodKind }>();
+		for (const [index, input] of slice.entries()) {
+			const resolved = resolvedTests[index];
+			if (!resolved || !("test" in resolved) || newTests.has(resolved.test.id)) continue;
+			const method = methodFor(producer, input);
+			lanes.set(`${resolved.test.id}:${method}`, { test: resolved.test.id, method });
 		}
+		const correctedInSlice = new Set(slice.flatMap((input) => (input.corrects === undefined ? [] : [input.corrects])));
+		const history = lanes.size
+			? await ctx.db.all(Q.sliceHistory, {
+					target: batch.target,
+					actor: batch.actor,
+					job: batch.job,
+					tests: [...lanes.values()].map((lane) => lane.test),
+					methods: [...lanes.values()].map((lane) => lane.method),
+					corrects: [...correctedInSlice],
+				})
+			: [];
+		for (const row of earlierResults.values())
+			if (
+				correctedInSlice.has(row.id) &&
+				row.standing &&
+				row.target === batch.target &&
+				row.actor === batch.actor &&
+				row.job === batch.job &&
+				lanes.has(`${row.test}:${row.method}`) &&
+				["pass", "fail", "error"].includes(row.outcome)
+			)
+				history.push(row);
 
-		if (signature) observeAssertion(ctx, scope, signature, test);
-		const previous = ctx.db.get(Q.previousOnTarget, {
-			target: batch.target,
-			test: test.id,
-			actor: batch.actor,
-			job: batch.job,
-			method,
-		});
-		const ord = ctx.ord();
-		const { lastId } = ctx.db.run(Q.insertResult, {
-			project,
-			test: test.id,
-			seq: ctx.seq,
-			ord,
-			batch: batch.id,
-			target: batch.target,
-			method,
-			actor: batch.actor,
-			model: batch.model,
-			basis,
-			basisCase,
-			basisVersion,
-			basisClaim,
-			outcome: input.outcome,
-			attempt,
-			duration: input.durationMs ?? null,
-			signature: signature?.id ?? null,
-			message,
-			detail: input.failure?.detail ?? null,
-			atStep: input.steps === undefined ? (input.failure?.at ?? null) : null,
-			trail: input.steps === undefined ? null : JSON.stringify(input.steps),
-			note: input.note ?? null,
-			run: batch.run,
-			corrects,
-			at: ctx.now,
-		});
-		recordAttachments(ctx, lastId, input.attachments ?? []);
-		// What the runner saw, in order: its earlier tries, then the result (decision 0129).
-		const seen: { outcome: Outcome; try: number | null }[] = [];
-		for (const [index, tried] of (input.tries ?? []).entries()) {
-			const message = tried.failure?.message.trim() || null;
-			const cause =
-				tried.outcome === "fail" || tried.outcome === "error"
-					? ensureSignature(ctx, test.key, {
-							message: message ?? "",
-							...(tried.failure?.detail ? { detail: tried.failure.detail } : {}),
-						})
+		const pending: { input: ResultIn; row: ResultWrite; result: Omit<Applied, "id" | "flipped"> }[] = [];
+		for (const [offset, input] of slice.entries()) {
+			const index = sliceStart + offset;
+			const resolved = resolvedTests[offset];
+			if (!resolved) continue;
+			if ("reject" in resolved) {
+				out.rejected.push({ index, reason: resolved.reject });
+				continue;
+			}
+			const { test, fresh } = resolved;
+			const typed = "case" in input.test;
+			const method = methodFor(producer, input);
+
+			// The basis: every claim about the case and the version, then the assumption, then nothing.
+			let refused: string | null = null;
+			const annotation = annotations[offset];
+			const annotated = annotation ? (namedCases.get(annotation.case) ?? null) : null;
+			const linked = test.case_id !== null ? head(test.case_id) : null;
+			if (annotation && !annotated) refused = `the annotation names ${annotation.case}, which does not exist`;
+			else if (annotated && linked && annotated.id !== linked.id) {
+				refused = typed
+					? `the result names ${caseRef(linked)} and its annotation names ${caseRef(annotated)}`
+					: `${testRef(test)} is linked to ${caseRef(linked)} and annotated with ${caseRef(annotated)}`;
+			}
+			let subject = annotated?.id ?? test.case_id;
+			const pin = subject !== null ? pinned(subject) : null;
+			const claims = [pin, annotation?.version ?? null].filter((v): v is number => v !== null);
+			if (refused === null && claims.length === 2 && claims[0] !== claims[1]) {
+				refused = `basis conflict: the run pinned version ${claims[0]}, the annotation says ${claims[1]}`;
+			}
+			let basis: ResultRow["basis"] = "unresolved";
+			let basisVersion: number | null = null;
+			if (refused === null && subject !== null) {
+				const row = head(subject);
+				if (claims[0] !== undefined) {
+					basis = "exact";
+					basisVersion = claims[0];
+				} else if (row) {
+					basis = "assumed";
+					basisVersion = row.head;
+				}
+				if (basisVersion !== null && (basisVersion < 1 || (row && basisVersion > row.head))) {
+					refused = `${row ? caseRef(row) : "the case"} has no version ${basisVersion}`;
+				}
+			}
+			let corrects = input.corrects ?? null;
+			// A correction stands where the result it corrects stood: it is never an older attempt than that one,
+			// whatever number the report that carries it has.
+			let attempt = batch.attempt;
+			if (refused === null && corrects !== null) {
+				const earlier = earlierResults.get(corrects);
+				if (earlier) attempt = Math.max(attempt, earlier.attempt);
+				if (
+					!earlier ||
+					earlier.project !== project ||
+					earlier.actor !== batch.actor ||
+					earlier.test !== test.id ||
+					earlier.target !== batch.target ||
+					earlier.run !== batch.run
+				) {
+					refused =
+						"a result can only correct an earlier result of the same producer for the same test, recorded on the same target and in the same run";
+				}
+			}
+			if (refused !== null) {
+				if (typed) {
+					out.rejected.push({ index, reason: refused });
+					continue;
+				}
+				out.declined.push({ index, reason: `${refused}: recorded with no case` });
+				basis = "unresolved";
+				basisVersion = null;
+				subject = null;
+				corrects = null;
+				attempt = batch.attempt;
+			}
+			const basisCase = basis === "unresolved" ? null : subject;
+			const basisClaim = basisCase !== null && basisVersion !== null ? claimOf(basisCase, basisVersion) : null;
+
+			const signature: SignatureRow | null = null;
+			const message =
+				input.outcome === "fail" || input.outcome === "error"
+					? input.failure?.message?.trim() || input.note?.trim() || null
 					: null;
-			const { lastId: tryId } = ctx.db.run(Q.insertTry, {
-				project,
-				result: lastId,
-				try: index + 1,
-				outcome: tried.outcome,
-				duration: tried.durationMs ?? null,
-				signature: cause?.id ?? null,
-				message,
-				detail: tried.failure?.detail ?? null,
-			});
-			if (cause) observeAssertion(ctx, scope, cause, test);
-			seen.push({ outcome: tried.outcome, try: tryId });
-			if (++observations % SLICE === 0) yield;
-		}
-		seen.push({ outcome: input.outcome, try: null });
-		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
-		const flip = (first: number, firstTry: number | null, secondTry: number | null) => {
-			ctx.db.run(Q.insertFlip, {
+			const ord = ctx.ord();
+			const row: ResultWrite = {
 				project,
 				test: test.id,
-				target: batch.target,
-				first,
-				second: lastId,
-				firstTry,
-				secondTry,
 				seq: ctx.seq,
+				ord,
+				batch: batch.id,
+				target: batch.target,
+				method,
+				actor: batch.actor,
+				model: batch.model,
+				basis,
+				basisCase,
+				basisVersion,
+				basisClaim,
+				outcome: input.outcome,
+				attempt,
+				duration: input.durationMs ?? null,
+				signature: null,
+				message,
+				detail: input.failure?.detail ?? null,
+				atStep: input.steps === undefined ? (input.failure?.at ?? null) : null,
+				trail: input.steps === undefined ? null : JSON.stringify(input.steps),
+				note: input.note ?? null,
+				run: batch.run,
+				corrects,
+				at: ctx.now,
+			};
+			pending.push({
+				input,
+				row,
+				result: {
+					ord,
+					test,
+					outcome: input.outcome,
+					method,
+					attempt,
+					basis,
+					basisCase,
+					basisVersion,
+					basisClaim,
+					signature,
+					message,
+					corrects,
+					fresh,
+				},
 			});
-			out.flips++;
-		};
-		const decided = seen.filter((observed) => decisive(observed.outcome) !== null);
-		// Across attempts, the earlier result meets this run's first decisive try, so a recovery is one flip whether
-		// the pipeline or the runner retried first.
-		const opening = decided[0];
-		const across =
-			previous !== null &&
-			opening !== undefined &&
-			previous.attempt < attempt &&
-			corrects === null &&
-			decisive(previous.outcome) !== null &&
-			decisive(previous.outcome) !== decisive(opening.outcome);
-		if (across && previous && opening) flip(previous.id, null, opening.try);
-		let within = false;
-		for (let index = 1; index < decided.length; index++) {
-			const before = decided[index - 1];
-			const after = decided[index];
-			if (before && after && decisive(before.outcome) !== decisive(after.outcome)) {
-				flip(lastId, before.try, after.try);
-				within = true;
+		}
+		const failureObservations: { signature: ReturnType<typeof failureSignature>; test: TestRow }[] = [];
+		for (const item of pending) {
+			const cause = rootFor(item.result.test, item.input);
+			if (cause) failureObservations.push({ signature: cause, test: item.result.test });
+			for (const tried of item.input.tries ?? []) {
+				const cause = rootFor(item.result.test, tried);
+				if (cause) failureObservations.push({ signature: cause, test: item.result.test });
 			}
 		}
-		const flipped = across || within;
-		if (!fresh) ctx.db.run(Q.touchTest, { id: test.id, seq: ctx.seq });
-		out.basis[basis]++;
-		out.results.push({
-			id: lastId,
-			ord,
-			test,
-			outcome: input.outcome,
-			method,
-			attempt,
-			basis,
-			basisCase,
-			basisVersion,
-			basisClaim,
-			signature,
-			message,
-			corrects,
-			flipped,
-			fresh,
-		});
+		const signatures = await observeFailureSlice(ctx, scope, failureObservations);
+		for (const item of pending) {
+			const cause = rootFor(item.result.test, item.input);
+			item.result.signature = cause ? (signatures.get(cause.hash) ?? null) : null;
+			item.row.signature = item.result.signature?.id ?? null;
+		}
+
+		const inserted = new Map(
+			(
+				await insertResults(
+					ctx,
+					pending.map((item) => item.row),
+				)
+			).map((row) => [row.ord, row.id]),
+		);
+		const tries: TryWrite[] = [];
+		const attachments: { result: number; files: NonNullable<ResultIn["attachments"]> }[] = [];
+		for (const item of pending) {
+			const id = inserted.get(item.row.ord);
+			if (id === undefined) throw new Error("result was not stored");
+			if (item.input.attachments?.length) attachments.push({ result: id, files: item.input.attachments });
+			for (const [i, tried] of (item.input.tries ?? []).entries()) {
+				const cause = rootFor(item.result.test, tried);
+				const signature = cause ? (signatures.get(cause.hash) ?? null) : null;
+				tries.push({
+					project,
+					result: id,
+					try: i + 1,
+					outcome: tried.outcome,
+					duration: tried.durationMs ?? null,
+					signature: signature?.id ?? null,
+					message: tried.failure?.message.trim() || null,
+					detail: tried.failure?.detail ?? null,
+				});
+			}
+		}
+		await recordAttachmentSlice(ctx, attachments);
+		const tryIds = new Map<string, number>();
+		for (let start = 0; start < tries.length; ) {
+			const end = Math.min(tries.length, start + SLICE - (observations % SLICE));
+			for (const row of await insertTries(ctx, tries.slice(start, end))) tryIds.set(`${row.result}:${row.try}`, row.id);
+			observations += end - start;
+			start = end;
+			if (observations % SLICE === 0) yield;
+		}
+		for (const tried of tries) {
+			if (tried.signature === null) continue;
+			const signature = [...signatures.values()].find((row) => row.id === tried.signature);
+			const item = pending.find((item) => inserted.get(item.row.ord) === tried.result);
+			const id = tryIds.get(`${tried.result}:${tried.try}`);
+			if (signature && item && id !== undefined) triedCauses.push({ id, signature, file: item.result.test.file });
+		}
+		const flips: FlipWrite[] = [];
+		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
+		for (const item of pending) {
+			const id = inserted.get(item.row.ord);
+			if (id === undefined) throw new Error("result was not stored");
+			const { test, method, attempt, corrects } = item.result;
+			const previous =
+				history
+					.filter((row) => row.test === test.id && row.method === method)
+					.sort(
+						(a, b) =>
+							b.attempt - a.attempt || Number(b.outcome !== "pass") - Number(a.outcome !== "pass") || b.id - a.id,
+					)[0] ?? null;
+			const seen = (item.input.tries ?? []).map((tried, i) => ({
+				outcome: tried.outcome,
+				try: tryIds.get(`${id}:${i + 1}`) ?? null,
+			}));
+			seen.push({ outcome: item.input.outcome, try: null });
+			const decided = seen.filter((observed) => decisive(observed.outcome) !== null);
+			const opening = decided[0];
+			const across =
+				previous !== null &&
+				opening !== undefined &&
+				previous.attempt < attempt &&
+				corrects === null &&
+				decisive(previous.outcome) !== decisive(opening.outcome);
+			const flip = (first: number, firstTry: number | null, secondTry: number | null) => {
+				flips.push({
+					project,
+					test: test.id,
+					target: batch.target,
+					first,
+					second: id,
+					firstTry,
+					secondTry,
+					seq: ctx.seq,
+				});
+				out.flips++;
+			};
+			if (across && previous && opening) flip(previous.id, null, opening.try);
+			let within = false;
+			for (let i = 1; i < decided.length; i++) {
+				const before = decided[i - 1],
+					after = decided[i];
+				if (before && after && decisive(before.outcome) !== decisive(after.outcome)) {
+					flip(id, before.try, after.try);
+					within = true;
+				}
+			}
+			if (corrects !== null) {
+				const at = history.findIndex((row) => row.id === corrects);
+				if (at >= 0) history.splice(at, 1);
+			}
+			if (decisive(item.input.outcome) !== null)
+				history.push({ id, test: test.id, method, outcome: item.input.outcome, attempt });
+			out.basis[item.result.basis]++;
+			out.results.push({ id, ...item.result, flipped: across || within });
+		}
+		await insertFlips(ctx, flips);
+		const touched = pending.filter((item) => !item.result.fresh).map((item) => item.result.test.id);
+		if (touched.length) await ctx.db.run(Q.touchTests, { ids: touched, seq: ctx.seq });
 	}
-	for (const result of out.results) {
-		if (result.signature?.class === "assertion") {
-			const split = signatureByHash(ctx.db, project, fileSignature(result.signature, result.test.file).hash);
+	// Assertion spreading can activate in the last slice, so rewrite all of this batch's roots after observations.
+	for (let start = 0; start < out.results.length; start += SLICE) {
+		const slice = out.results.slice(start, start + SLICE);
+		const resultRoots = slice.flatMap((result) =>
+			result.signature?.class === "assertion"
+				? [{ result, signature: result.signature, hash: fileSignature(result.signature, result.test.file).hash }]
+				: [],
+		);
+		const ids: number[] = [],
+			signatures: number[] = [];
+		const splits = new Map(
+			(
+				await signaturesByHashes(
+					ctx.db,
+					project,
+					resultRoots.map((root) => root.hash),
+				)
+			).map((row) => [row.hash, row]),
+		);
+		for (const root of resultRoots) {
+			const split = splits.get(root.hash);
 			if (split) {
-				result.signature = split;
-				ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
+				root.result.signature = split;
+				ids.push(root.result.id);
+				signatures.push(split.id);
 			}
 		}
-		for (const tried of ctx.db.all(Q.assertionTries, { result: result.id })) {
-			const root = signatureById(ctx.db, tried.signature);
-			if (root) {
-				const split = signatureByHash(ctx.db, project, fileSignature(root, result.test.file).hash);
-				if (split) ctx.db.run(Q.splitTry, { id: tried.id, signature: split.id });
-			}
-			if (++observations % SLICE === 0) yield;
-		}
-		if (++observations % SLICE === 0) yield;
+		if (ids.length) await ctx.db.run(Q.splitResults, { ids, signatures });
+		if (start + SLICE < out.results.length) yield;
 	}
-	finishAssertionScope(ctx, scope);
+	for (let start = 0; start < triedCauses.length; start += SLICE) {
+		const slice = triedCauses.slice(start, start + SLICE).filter((tried) => tried.signature.class === "assertion");
+		const splits = new Map(
+			(
+				await signaturesByHashes(
+					ctx.db,
+					project,
+					slice.map((tried) => fileSignature(tried.signature, tried.file).hash),
+				)
+			).map((row) => [row.hash, row]),
+		);
+		const ids: number[] = [],
+			signatures: number[] = [];
+		for (const tried of slice) {
+			const split = splits.get(fileSignature(tried.signature, tried.file).hash);
+			if (split) {
+				ids.push(tried.id);
+				signatures.push(split.id);
+			}
+		}
+		if (ids.length) await ctx.db.run(Q.splitTries, { ids, signatures });
+		yield;
+	}
+
+	await finishAssertionScope(ctx, scope);
 	out.counts = countOutcomes(out.results);
 	return out;
 }
 
 /** `applySteps` run to the end without pausing. */
-export function apply(
+export async function apply(
 	ctx: Ctx,
 	batch: BatchRow,
 	producer: ActorKind,
 	pinned: (caseId: number) => number | null,
-): ApplyResult {
+): Promise<ApplyResult> {
 	const steps = applySteps(ctx, batch, producer, pinned);
-	for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
+	for (let step = await steps.next(); ; step = await steps.next()) if (step.done) return step.value;
 }
 
 /**
  * Marks a batch applied: its results are rows now and its job has reported. Called before the runs are folded, so
  * a run that requires this job counts it.
  */
-export function markProcessed(ctx: Ctx, batch: BatchRow, counts: Counts): void {
-	ctx.db.run(Q.markProcessed, { id: batch.id, counts: JSON.stringify(counts) });
+export async function markProcessed(ctx: Ctx, batch: BatchRow, counts: Counts): Promise<void> {
+	await ctx.db.run(Q.markProcessed, { id: batch.id, counts: JSON.stringify(counts) });
 }
 
 /** Keeps the reply to a report, so the same report sent again gets the same answer. */
-export function keepReceipt(ctx: Ctx, batch: BatchRow, receipt: unknown): void {
-	ctx.db.run(Q.setReceipt, { id: batch.id, receipt: JSON.stringify(receipt) });
+export async function keepReceipt(ctx: Ctx, batch: BatchRow, receipt: unknown): Promise<void> {
+	await ctx.db.run(Q.setReceipt, { id: batch.id, receipt: JSON.stringify(receipt) });
 }
 
 /** Rewrites saved report replies without changing the report's identity or its results. */
-export function rewriteReportReceipts(db: Db, rewrite: (receipt: string) => string): void {
-	for (const row of db.all(Q.receipts)) {
+export async function rewriteReportReceipts(db: WriteDb, rewrite: (receipt: string) => string): Promise<void> {
+	for (const row of await db.all(Q.receipts)) {
 		const receipt = rewrite(row.receipt);
-		if (receipt !== row.receipt) db.run(Q.setReceipt, { id: row.id, receipt });
+		if (receipt !== row.receipt) await db.run(Q.setReceipt, { id: row.id, receipt });
 	}
 }
 
-function resolveTest(ctx: Ctx, input: ResultIn): { test: TestRow; fresh: boolean } | { reject: string } {
-	const project = ctx.project.id;
-	if ("case" in input.test) {
-		const row = findCase(ctx.db, project, input.test.case);
-		if (!row) return { reject: `case ${input.test.case} does not exist` };
-		const key = `case:${row.id}`;
-		const found = ctx.db.get(Q.testByKey, { project, key });
-		if (found) return { test: found, fresh: false };
-		return { test: insertTest(ctx, { kind: "manual", key, name: row.title, file: null, caseId: row.id }), fresh: true };
-	}
-	const key = input.test.key.trim();
-	const found = ctx.db.get(Q.testByKey, { project, key });
-	if (found) return { test: found, fresh: false };
-	const name = input.test.name?.trim() || key.split("::").at(-1) || key;
-	const file = input.test.file?.trim() || (key.includes("::") ? (key.split("::")[0] ?? null) : null);
-	return { test: insertTest(ctx, { kind: "auto", key, name, file, caseId: null }), fresh: true };
-}
-
-function insertTest(
+async function resolveTests(
 	ctx: Ctx,
-	input: { kind: "manual" | "auto"; key: string; name: string; file: string | null; caseId: number | null },
-): TestRow {
-	const no = ctx.nextNo("test");
-	const { lastId } = ctx.db.run(Q.insertTest, { project: ctx.project.id, no, ...input, seq: ctx.seq });
-	return {
-		id: lastId,
-		project: ctx.project.id,
-		no,
-		...input,
-		case_id: input.caseId,
-		linked_by: null,
-		first_seq: ctx.seq,
-		last_seq: ctx.seq,
-	};
+	inputs: readonly ResultIn[],
+	namedCases: ReadonlyMap<string, CaseRow | null>,
+): Promise<({ test: TestRow; fresh: boolean } | { reject: string })[]> {
+	const requests: (
+		| { key: string; kind: "manual" | "auto"; name: string; file: string | null; caseId: number | null }
+		| { reject: string }
+	)[] = [];
+	for (const input of inputs) {
+		if ("case" in input.test) {
+			const row = namedCases.get(input.test.case);
+			requests.push(
+				row
+					? { key: `case:${row.id}`, kind: "manual", name: row.title, file: null, caseId: row.id }
+					: { reject: `case ${input.test.case} does not exist` },
+			);
+		} else {
+			const key = input.test.key.trim();
+			requests.push({
+				key,
+				kind: "auto",
+				name: input.test.name?.trim() || key.split("::").at(-1) || key,
+				file: input.test.file?.trim() || (key.includes("::") ? (key.split("::")[0] ?? null) : null),
+				caseId: null,
+			});
+		}
+	}
+	const found = new Map(
+		(
+			await ctx.db.all(Q.testsByKeys, {
+				project: ctx.project.id,
+				keys: requests.flatMap((request) => ("key" in request ? [request.key] : [])),
+			})
+		).map((row) => [row.key, row]),
+	);
+	const missing = new Map<string, Extract<(typeof requests)[number], { key: string }>>();
+	for (const request of requests)
+		if ("key" in request && !found.has(request.key) && !missing.has(request.key)) missing.set(request.key, request);
+
+	const fresh = new Set<string>();
+	if (missing.size) {
+		const end = await ctx.nextNo("test", missing.size);
+		const rows = [...missing.values()].map((request, i) => ({
+			project: ctx.project.id,
+			no: end - missing.size + i + 1,
+			...request,
+			seq: ctx.seq,
+		}));
+		for (const test of await insertTests(ctx, rows)) {
+			found.set(test.key, test);
+			fresh.add(test.key);
+		}
+	}
+	return requests.map((request) => {
+		if ("reject" in request) return request;
+		const test = found.get(request.key);
+		if (!test) throw new Error("test was not stored");
+		const first = fresh.delete(request.key);
+		found.set(request.key, { ...test, last_seq: ctx.seq });
+		return { test, fresh: first };
+	});
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const testRef = (row: { no: number }): string => `T-${row.no}`;
-export const testById = (db: Db, id: number): TestRow | null => db.get(Q.testById, { id });
-export function findTest(db: Db, project: number, text: string): TestRow | null {
+export const testById = async (db: ReadDb, id: number): Promise<TestRow | null> => await db.get(Q.testById, { id });
+export async function findTest(db: ReadDb, project: number, text: string): Promise<TestRow | null> {
 	const match = /^(?:T-)?(\d+)$/i.exec(text.trim());
 	return match
-		? db.get(Q.testByNo, { project, no: Number(match[1]) })
-		: db.get(Q.testByKey, { project, key: text.trim() });
+		? await db.get(Q.testByNo, { project, no: Number(match[1]) })
+		: await db.get(Q.testByKey, { project, key: text.trim() });
 }
-export const testsOfCase = (db: Db, project: number, caseId: number): TestRow[] =>
-	db.all(Q.testsOfCase, { project, id: caseId });
+export const testsOfCase = async (db: ReadDb, project: number, caseId: number): Promise<TestRow[]> =>
+	await db.all(Q.testsOfCase, { project, id: caseId });
 /** What the question about tests that name no file calls their file. */
 export const NO_FILE = "(no file)";
 /**
  * The tests with no case in a file. For `NO_FILE` they are those that came with no file and no class name to take
  * one from, and with them the tests of a file that is really called that: the two share one question.
  */
-export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[] =>
-	db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file });
-export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
-export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
+export const unlinkedInFile = async (db: ReadDb, project: number, file: string): Promise<TestRow[]> =>
+	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file });
+export const unlinkedCount = async (db: ReadDb, project: number): Promise<number> =>
+	(await db.get(Q.unlinkedCount, { project }))?.n ?? 0;
+export const resultById = async (db: ReadDb, id: number): Promise<ResultRow | null> =>
+	await db.get(Q.resultById, { id });
 
 /**
  * How long these results took, as their reports said: the sum of their durations, and how many of them named one.
  * Results that ran side by side add up, so this is the time spent testing, not how long a build waited for it.
  */
-export function testTime(db: Db, results: readonly number[]): { ms: number; timed: number } {
-	return db.get(Q.testTime, { results: JSON.stringify(results) }) ?? { ms: 0, timed: 0 };
+export async function testTime(db: ReadDb, results: readonly number[]): Promise<{ ms: number; timed: number }> {
+	return (await db.get(Q.testTime, { results })) ?? { ms: 0, timed: 0 };
 }
 
 /**
  * Every result one producer reported for one test from one job on one target that it has not since corrected,
  * in the order they arrived: the history a commit's gate folds when a correction or a decision takes one out.
  */
-export const laneHistory = (db: Db, lane: { target: number; test: number; actor: number; job: string }): ResultRow[] =>
-	db.all(Q.laneHistory, lane);
+export const laneHistory = async (
+	db: ReadDb,
+	lane: { target: number; test: number; actor: number; job: string },
+): Promise<ResultRow[]> => await db.all(Q.laneHistory, lane);
 
 /**
  * Where an actor has reported a failure with this cause: each target, and the run it was typed into if any. Read
  * from the results themselves, so it is complete however the question about the cause came to be asked.
  */
-export const producedCause = (
-	db: Db,
+export const producedCause = async (
+	db: ReadDb,
 	project: number,
 	signature: number,
 	actor: number,
-): { target: number; run: number | null }[] => db.all(Q.producedOn, { project, signature, actor });
-export const lastResultsOfTest = (db: Db, project: number, test: number, limit: number): ResultRow[] =>
-	db.all(Q.lastOfTest, { project, test, limit });
+): Promise<{ target: number; run: number | null }[]> => await db.all(Q.producedOn, { project, signature, actor });
+export const lastResultsOfTest = async (
+	db: ReadDb,
+	project: number,
+	test: number,
+	limit: number,
+): Promise<ResultRow[]> => await db.all(Q.lastOfTest, { project, test, limit });
 /**
  * The newest results recorded for a case, from every producer. Read as three short index ranges (one per method)
  * and merged, so a case with ten thousand pipeline results costs the same as one with ten.
  */
-export function lastResultsOfCase(db: Db, caseId: number, limit: number): ResultRow[] {
-	const methods: readonly MethodKind[] = ["human", "auto", "agent"];
-	return methods
-		.flatMap((method) => db.all(Q.lastOfCaseByMethod, { id: caseId, method, limit }))
-		.sort((a, b) => b.seq - a.seq || b.ord - a.ord)
-		.slice(0, limit);
+export async function lastResultsOfCase(db: ReadDb, caseId: number, limit: number): Promise<ResultRow[]> {
+	const rows: ResultRow[] = [];
+	for (const method of ["human", "auto", "agent"])
+		rows.push(...(await db.all(Q.lastOfCaseByMethod, { id: caseId, method, limit })));
+	return rows.sort((a, b) => b.seq - a.seq || b.ord - a.ord).slice(0, limit);
 }
-export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[] =>
-	db.all(Q.ofBatch, { batch, limit });
+
+export const resultsOfBatch = async (db: ReadDb, batch: number, limit: number): Promise<ResultRow[]> =>
+	await db.all(Q.ofBatch, { batch, limit });
 /** A runner's earlier tries of each of these results, oldest first (decision 0129). */
-export function triesOf(
-	db: Db,
+export async function triesOf(
+	db: ReadDb,
 	results: readonly number[],
-): Map<number, { outcome: Outcome; message: string | null; durationMs: number | null }[]> {
+): Promise<Map<number, { outcome: Outcome; message: string | null; durationMs: number | null }[]>> {
 	const out = new Map<number, { outcome: Outcome; message: string | null; durationMs: number | null }[]>();
 	if (results.length === 0) return out;
-	for (const row of db.all(Q.triesOf, { results: JSON.stringify(results) })) {
+	for (const row of await db.all(Q.triesOf, { results: results })) {
 		const list = out.get(row.result) ?? [];
 		list.push({ outcome: row.outcome, message: row.message, durationMs: row.duration_ms });
 		out.set(row.result, list);
 	}
 	return out;
 }
-export const flipCount = (db: Db, project: number, test: number): number =>
-	db.get(Q.flipCount, { project, test })?.n ?? 0;
+export const flipCount = async (db: ReadDb, project: number, test: number): Promise<number> =>
+	(await db.get(Q.flipCount, { project, test }))?.n ?? 0;
 /** Which of these results stand in a lane whose test both passed and failed on their target, as reported. */
-export function flippedLanes(db: Db, results: readonly number[]): Set<number> {
+export async function flippedLanes(db: ReadDb, results: readonly number[]): Promise<Set<number>> {
 	if (results.length === 0) return new Set();
-	return new Set(db.all(Q.flippedLanes, { results: JSON.stringify(results) }).map((row) => row.result));
+	return new Set((await db.all(Q.flippedLanes, { results: results })).map((row) => row.result));
 }
 /** Of these results, each failure that a later attempt of the same lane passed, with the attempt that passed. */
-export function passedOnRetry(db: Db, results: readonly number[]): Map<number, number> {
+export async function passedOnRetry(db: ReadDb, results: readonly number[]): Promise<Map<number, number>> {
 	if (results.length === 0) return new Map();
-	return new Map(db.all(Q.passedOnRetry, { results: JSON.stringify(results) }).map((row) => [row.result, row.attempt]));
+	return new Map((await db.all(Q.passedOnRetry, { results: results })).map((row) => [row.result, row.attempt]));
 }
 
 /**
@@ -1686,11 +2079,11 @@ export function passedOnRetry(db: Db, results: readonly number[]): Map<number, n
  * matches one commit only: one per repository and environment it was reported for. Empty when nothing was
  * reported for it or the prefix is ambiguous.
  */
-export function targetsWithCommit(db: Db, project: number, commit: string): TargetRow[] {
-	const exact = db.all(Q.targetsByCommit, { project, commit });
+export async function targetsWithCommit(db: ReadDb, project: number, commit: string): Promise<TargetRow[]> {
+	const exact = await db.all(Q.targetsByCommit, { project, commit });
 	if (exact.length > 0) return exact;
 	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return [];
-	const rows = db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
+	const rows = await db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
 	return new Set(rows.map((row) => row.commit_sha)).size === 1 ? rows : [];
 }
 
@@ -1699,11 +2092,11 @@ export function targetsWithCommit(db: Db, project: number, commit: string): Targ
  * abbreviation is settled once, here: the text itself when a commit with exactly that hash was reported or none
  * starts with it, the one reported commit that starts with it, and a refusal when more than one does.
  */
-export function resolveCommit(db: Db, project: number, commit: string): string {
-	if (db.all(Q.targetsByCommit, { project, commit }).length > 0) return commit;
+export async function resolveCommit(db: ReadDb, project: number, commit: string): Promise<string> {
+	if ((await db.all(Q.targetsByCommit, { project, commit })).length > 0) return commit;
 	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return commit;
 	const found = new Set<string>();
-	for (const row of db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` }))
+	for (const row of await db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` }))
 		if (row.commit_sha !== null) found.add(row.commit_sha);
 	if (found.size > 1) {
 		throw invalid(
@@ -1721,8 +2114,13 @@ export function resolveCommit(db: Db, project: number, commit: string): string {
  * answer is that repository's; without it, a commit reported for more than one repository is refused, never
  * guessed. Null when nothing was reported for it.
  */
-export function targetByCommit(db: Db, project: number, commit: string, repo?: string | null): TargetRow | null {
-	const all = targetsWithCommit(db, project, commit);
+export async function targetByCommit(
+	db: ReadDb,
+	project: number,
+	commit: string,
+	repo?: string | null,
+): Promise<TargetRow | null> {
+	const all = await targetsWithCommit(db, project, commit);
 	const rows = repo === undefined ? all : all.filter((row) => row.repo === (repo ?? null));
 	const repos = [...new Set(rows.map((row) => row.repo ?? "(no repository)"))];
 	if (repos.length > 1) {
@@ -1749,78 +2147,135 @@ const RESERVED_KEY = /^case:\d+$/i;
  * first: what a new run can count at once. A corrected result is withdrawn by the one that corrects it, wherever
  * it would otherwise count.
  */
-export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly number[]): ResultRow[] {
+export async function resultsOfCaseOnTargets(
+	db: ReadDb,
+	caseId: number,
+	targets: readonly number[],
+): Promise<ResultRow[]> {
 	if (targets.length === 0) return [];
-	return db.allDynamic<ResultRow>(
-		`SELECT r.* FROM results r WHERE r.basis_case = ? AND r.target IN (${placeholders(targets.length)})
-		 AND ${uncorrectedResults("r.id")}
-		 ORDER BY r.seq, r.ord`,
-		[caseId, ...targets],
-	);
+	return await db.all(Q.caseResultsOnTargets, { caseId, targets });
 }
 
-export function caseSelectionOfFiles(db: Db, project: number, files: ReadonlySet<string>) {
-	const selected = files.size ? db.get(Q.caseSelectionOfFiles, { project, files: JSON.stringify([...files]) }) : null;
+export async function caseSelectionOfFiles(db: ReadDb, project: number, files: ReadonlySet<string>) {
+	const selected = files.size ? await db.get(Q.caseSelectionOfFiles, { project, files: [...files] }) : null;
 	return {
 		ids: selected ? json<number[]>(selected.ids) : [],
 		covered: new Set(selected ? json<string[]>(selected.files) : []),
 	};
 }
 
-export const caseLinksOfFiles = (db: Db, project: number, files: ReadonlySet<string>, cases: readonly number[]) =>
-	files.size && cases.length
-		? db.all(Q.caseLinksOfFiles, { project, files: JSON.stringify([...files]), cases: JSON.stringify(cases) })
-		: [];
+export const caseLinksOfFiles = async (
+	db: ReadDb,
+	project: number,
+	files: ReadonlySet<string>,
+	cases: readonly number[],
+) => (files.size && cases.length ? await db.all(Q.caseLinksOfFiles, { project, files: [...files], cases: cases }) : []);
 
-export const caseIdsOfTests = (db: Db, project: number, tests: readonly number[]): number[] =>
-	tests.length ? db.all(Q.caseIdsOfTests, { project, tests: JSON.stringify(tests) }).map((row) => row.case_id) : [];
+export const caseIdsOfTests = async (db: ReadDb, project: number, tests: readonly number[]): Promise<number[]> =>
+	tests.length ? (await db.all(Q.caseIdsOfTests, { project, tests: tests })).map((row) => row.case_id) : [];
 
 /** Three indexed result seeks per requested case, without reading its result history or payloads. */
-export const lastResultsOfCases = (db: Db, cases: readonly number[]) =>
-	new Map(db.all(Q.lastOfCases, { cases: JSON.stringify(cases) }).map((row) => [row.case_id, row]));
+export const lastResultsOfCases = async (db: ReadDb, cases: readonly number[]) =>
+	new Map((await db.all(Q.lastOfCases, { cases: cases })).map((row) => [row.case_id, row]));
 
 /**
  * A page of automated tests, newest first, optionally only those with no case or matching a text. The manual test
  * a case's hand-run results hang on is the case's, and is not listed.
  */
-export function listTests(
-	db: Db,
+export async function listTests(
+	db: ReadDb,
 	input: { project: number; unlinked: boolean; text: string | undefined; before: number | null; limit: number },
-): TestRow[] {
-	const where: string[] = ["project = ?", "kind = 'auto'"];
+): Promise<TestRow[]> {
+	const where: string[] = ["project = $1", "kind = 'auto'"];
 	const params: SqlValue[] = [input.project];
 	if (input.unlinked) where.push("case_id IS NULL");
 	if (input.text) {
-		where.push("(key LIKE ? OR name LIKE ? OR file LIKE ?)");
-		params.push(`%${input.text}%`, `%${input.text}%`, `%${input.text}%`);
+		where.push("(key ILIKE $2 ESCAPE '' OR name ILIKE $2 ESCAPE '' OR file ILIKE $2 ESCAPE '')");
+		params.push(`%${input.text}%`);
 	}
 	if (input.before !== null) {
-		where.push("id < ?");
+		where.push(`id < $${params.length + 1}`);
 		params.push(input.before);
 	}
-	return db.allDynamic<TestRow>(`SELECT * FROM tests WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`, [
-		...params,
-		input.limit,
-	]);
+	return await db.allDynamic<TestRow>(
+		`SELECT * FROM tests WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT $${params.length + 1}`,
+		[...params, input.limit],
+	);
 }
 
 export type Proof = { result: ResultRow; current: boolean } | null;
 
 /** The proof strip of a case: per producer, the latest result and whether it was on the current version. */
-export function proofOf(db: Db, row: { id: number; head: number }): Record<MethodKind, Proof> {
-	const one = (method: MethodKind): Proof => {
-		const latest = db.get(Q.latestOfCaseByMethod, { id: row.id, method });
-		return latest ? { result: latest, current: latest.basis_version === row.head } : null;
-	};
-	return { human: one("human"), auto: one("auto"), agent: one("agent") };
+export async function proofsOf(
+	db: ReadDb,
+	rows: readonly { id: number; head: number }[],
+): Promise<Map<number, Record<MethodKind, Proof>>> {
+	const out = new Map<number, Record<MethodKind, Proof>>(
+		rows.map((row) => [row.id, { human: null, auto: null, agent: null }]),
+	);
+	const heads = new Map(rows.map((row) => [row.id, row.head]));
+	if (rows.length)
+		for (const result of await db.all(Q.proofsForCases, { ids: rows.map((row) => row.id) })) {
+			if (result.basis_case === null) continue;
+			const proofs = out.get(result.basis_case);
+			if (proofs) proofs[result.method] = { result, current: result.basis_version === heads.get(result.basis_case) };
+		}
+	return out;
 }
+export async function proofOf(db: ReadDb, row: { id: number; head: number }): Promise<Record<MethodKind, Proof>> {
+	return (await proofsOf(db, [row])).get(row.id) ?? { human: null, auto: null, agent: null };
+}
+export const receiptDetails = async (db: ReadDb, ids: readonly number[]) =>
+	ids.length ? await db.all(Q.receiptDetails, { ids }) : [];
+
+export const resultsByIds = async (
+	db: ReadDb,
+	ids: readonly number[],
+): Promise<(ResultRow & { job: string; standing: boolean })[]> =>
+	ids.length ? await db.all(Q.resultsByIds, { ids }) : [];
+export async function unknownSignatureIds(db: ReadDb, ids: readonly (number | null)[]): Promise<Set<number>> {
+	const found = new Set<number>();
+	const unique = [...new Set(ids)];
+	for (let start = 0; start < unique.length; start += SLICE)
+		for (const row of await db.all(Q.unknownSignatureIds, { ids: unique.slice(start, start + SLICE) }))
+			found.add(row.id);
+	return found;
+}
+export async function comparisonsByIds(db: ReadDb, ids: readonly number[]): Promise<Map<number, ResultComparison>> {
+	const found = new Map<number, ResultComparison>();
+	for (let start = 0; start < ids.length; start += SLICE)
+		for (const row of await db.all(Q.comparisons, { ids: ids.slice(start, start + SLICE) })) found.set(row.id, row);
+	return found;
+}
+export const targetsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TargetRow[]> =>
+	ids.length ? await db.all(Q.targetsByIds, { ids }) : [];
+export const batchesByIds = async (db: ReadDb, ids: readonly number[]): Promise<BatchRow[]> =>
+	ids.length ? await db.all(Q.batchesByIds, { ids }) : [];
+export const testsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TestRow[]> =>
+	ids.length ? await db.all(Q.testsByIds, { ids }) : [];
 
 // ── Standing ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Links a test to a case, or unlinks it with null. Standing: only by a `map` decision, which the link records. */
-export function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: number | null): void {
-	ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness, "map") });
+export async function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: number | null): Promise<void> {
+	await ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness, "map") });
 	ctx.touched.add(testRef(test));
+}
+
+/** Links a slice of distinct tests under one map decision. */
+export async function linkTests(
+	ctx: Ctx,
+	witness: Witness,
+	links: readonly { test: TestRow; caseId: number }[],
+): Promise<void> {
+	const by = decisionOf(witness, "map");
+	if (links.length === 0) return;
+	await ctx.db.run(Q.linkTests, {
+		ids: links.map(({ test }) => test.id),
+		cases: links.map(({ caseId }) => caseId),
+		by,
+	});
+	for (const { test } of links) ctx.touched.add(testRef(test));
 }
 
 /**
@@ -1829,14 +2284,14 @@ export function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: numb
  * decision's: a newer decision made it, and withdrawing an older one must not undo it. `to` is the earlier link
  * and the decision that made it, or nulls when there was none or its decision no longer stands.
  */
-export function restoreLink(
+export async function restoreLink(
 	ctx: Ctx,
 	test: TestRow,
 	from: number,
 	to: { caseId: number | null; by: number | null },
-): boolean {
+): Promise<boolean> {
 	if (test.linked_by !== from) return false;
-	ctx.db.run(Q.linkTest, { id: test.id, caseId: to.caseId, by: to.by });
+	await ctx.db.run(Q.linkTest, { id: test.id, caseId: to.caseId, by: to.by });
 	ctx.touched.add(testRef(test));
 	return true;
 }
@@ -1847,22 +2302,43 @@ export function restoreLink(
  * test from one job to another; so is who reported, because a pipeline's token can be replaced. A gate counts
  * pipelines and people, so an agent's failure is left out.
  */
-export function failedIn(
-	db: Db,
+export async function failedIn(
+	db: ReadDb,
 	input: { project: number; signature: number; scope: string; tests: ReadonlySet<number> },
-): { test: number; env: string; commit: string | null }[] {
+): Promise<{ test: number; env: string; commit: string | null }[]> {
 	const targets = new Map<number, TargetRow>();
-	return db.all(Q.failedWith, { project: input.project, signature: input.signature }).flatMap((row) => {
-		if (!input.tests.has(row.test)) return [];
+	const out: { test: number; env: string; commit: string | null }[] = [];
+	for (const row of await db.all(Q.failedWith, { project: input.project, signature: input.signature })) {
+		if (!input.tests.has(row.test)) continue;
 		let target = targets.get(row.target);
 		if (!target) {
-			target = mustTarget(db, row.target);
+			target = await mustTarget(db, row.target);
 			targets.set(row.target, target);
 		}
-		return scopeOf(target, null) === input.scope
-			? [{ test: row.test, env: target.env, commit: target.commit_sha }]
-			: [];
+		if (scopeOf(target, null) === input.scope) out.push({ test: row.test, env: target.env, commit: target.commit_sha });
+	}
+	return out;
+}
+
+/** Reported failure history for several causes; the caller resolves targets once for the whole reconciliation. */
+export const failedWithCauses = async (
+	db: ReadDb,
+	input: { project: number; signatures: readonly number[]; tests: readonly number[] },
+): Promise<{ signature: number; test: number; target: number }[]> => await db.all(Q.failedWithCauses, input);
+
+/** Reverts independent cause decisions, leaving any other decision's excuses intact. */
+export async function dropCauseExcuses(
+	ctx: Ctx,
+	rows: readonly { signature: number; scope: string; decision: number }[],
+): Promise<void> {
+	const decisions = rows.map((row) => row.decision);
+	await ctx.db.run(Q.dropCauseExcuses, {
+		project: ctx.project.id,
+		decisions,
+		signatures: rows.map((row) => row.signature),
+		scopes: rows.map((row) => row.scope),
 	});
+	await ctx.db.run(Q.dropCauseResultExcuses, { decisions });
 }
 
 /**
@@ -1870,87 +2346,186 @@ export function failedIn(
  * otherwise by the answer for every target of the scope. (The two coexist only where the narrower one is the
  * later judgement, or is the answer to a dispute, which another question's answer does not end.)
  */
-export const excuseFor = (db: Db, project: number, signature: number, scope: string, target: number) =>
-	db.get(Q.excuse, { project, signature, scope, target }) ?? db.get(Q.excuse, { project, signature, scope, target: 0 });
+export const excuseFor = async (db: ReadDb, project: number, signature: number, scope: string, target: number) =>
+	(await db.get(Q.excuse, { project, signature, scope, target })) ??
+	(await db.get(Q.excuse, { project, signature, scope, target: 0 }));
 
 /**
  * Records how a cause is answered in a scope. Standing: only by a `failure` decision. `targets` limits it to the
  * targets named, for a decision that holds there only: the same cause on another commit of the scope, or in
  * another environment of the same commit, stays unexplained. Null covers every target of the scope.
  */
-export function setExcuse(
+export async function setExcuse(
 	ctx: Ctx,
 	witness: Witness,
 	input: { signature: number; scope: string; class: "attributed" | "excused"; targets: readonly number[] | null },
-): void {
+): Promise<void> {
 	const decision = decisionOf(witness, "failure");
-	for (const target of input.targets ?? [0]) {
-		ctx.db.run(Q.setExcuse, {
-			project: ctx.project.id,
-			signature: input.signature,
-			scope: input.scope,
-			decision,
-			class: input.class,
-			expires: witness.expiresAt,
-			target,
-		});
-	}
+	await ctx.db.run(Q.setExcuse, {
+		project: ctx.project.id,
+		signature: input.signature,
+		scope: input.scope,
+		decision,
+		class: input.class,
+		expires: witness.expiresAt,
+		targets: input.targets ?? [0],
+	});
 }
 
 /**
  * Removes the excuses `decision` made, when that decision is withdrawn or stops holding. An excuse another
  * decision made for the same cause and scope is left alone.
  */
-export function dropExcuse(ctx: Ctx, signature: number, scope: string, decision: number): void {
-	ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope, decision });
+export async function dropExcuse(ctx: Ctx, signature: number, scope: string, decision: number): Promise<void> {
+	await ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope, decision });
 }
 
 /** An exact result's answer and the broader cause's answer, with the newer judgement taking precedence. */
-export function excuseForResult(
-	db: Db,
+export async function excuseForResult(
+	db: ReadDb,
 	result: Pick<ResultRow, "id" | "project" | "signature" | "target">,
 	scope: string,
 ) {
 	const broad =
-		result.signature === null ? null : excuseFor(db, result.project, result.signature, scope, result.target);
-	const exact = db.get(Q.resultExcuse, { result: result.id });
+		result.signature === null ? null : await excuseFor(db, result.project, result.signature, scope, result.target);
+	const exact = await db.get(Q.resultExcuse, { result: result.id });
 	return exact && (!broad || exact.decision > broad.decision) ? exact : broad;
 }
 
+/** One snapshot of the standing needed by a caller's results; precedence matches excuseForResult. */
+export async function excusesForResults(
+	db: ReadDb,
+	project: number,
+	results: readonly { id: number; signature: number | null; target: number; scope: string }[],
+) {
+	const found = new Map<number, NonNullable<Awaited<ReturnType<typeof excuseForResult>>>>();
+	for (let start = 0; start < results.length; start += SLICE) {
+		const page = results.slice(start, start + SLICE);
+		for (const { id, ...excuse } of await db.all(Q.excusesForResults, {
+			project,
+			ids: page.map((row) => row.id),
+			signatures: page.map((row) => row.signature),
+			scopes: page.map((row) => row.scope),
+			targets: page.map((row) => row.target),
+		}))
+			found.set(id, excuse);
+	}
+	return found;
+}
+
 /** A disputed slot needs its own judgement; a cause or another slot's answer cannot settle it. */
-export function excuseForDisputedSlot(db: Db, slot: number, result: number, run: number) {
-	const exact = db.get(Q.slotExcuse, { result, slot });
+export async function excuseForDisputedSlot(db: ReadDb, slot: number, result: number, run: number) {
+	const exact = await db.get(Q.slotExcuse, { result, slot });
 	if (exact) return exact;
-	const current = resultById(db, result);
+	const current = await resultById(db, result);
 	if (current?.method !== "agent" || current.signature === null) return null;
-	const scope = scopeOf(mustTarget(db, current.target), run);
-	return (
-		db
-			.all(Q.slotCauseExcuses, { slot, signature: current.signature })
-			.find((prior) => scopeOf(mustTarget(db, prior.target), run) === scope) ?? null
-	);
+	const scope = scopeOf(await mustTarget(db, current.target), run);
+	for (const prior of await db.all(Q.slotCauseExcuses, { slot, signature: current.signature })) {
+		if (scopeOf(await mustTarget(db, prior.target), run) === scope) return prior;
+	}
+	return null;
 }
 
 /** Standing for precisely the results named by a failure decision. */
-export function setResultExcuses(
+export async function setResultExcuses(
 	ctx: Ctx,
 	witness: Witness,
 	results: readonly number[],
 	klass: "attributed" | "excused",
 	scope: { kind: "result" } | { kind: "slot"; slot: number } = { kind: "result" },
-): void {
+): Promise<void> {
 	const decision = decisionOf(witness, "failure");
-	for (const result of results)
-		ctx.db.run(Q.setResultExcuse, {
-			result,
+	if (results.length)
+		await ctx.db.run(scope.kind === "slot" ? Q.setSlotExcuses : Q.setResultExcuses, {
+			results,
 			slot: scope.kind === "slot" ? scope.slot : null,
 			decision,
 			class: klass,
 			expires: witness.expiresAt,
 		});
 }
-export function dropResultExcuses(ctx: Ctx, decision: number): void {
-	ctx.db.run(Q.dropResultExcuses, { decision });
+export async function dropResultExcuses(ctx: Ctx, decision: number): Promise<void> {
+	await ctx.db.run(Q.dropResultExcuses, { decision });
 }
-export const changesBasedOn = (db: Db, project: number, base: string, repo: string | null): number[] =>
-	db.all(Q.changesBasedOn, { project, base, repo }).map((row) => row.id);
+export const changesBasedOn = async (
+	db: ReadDb,
+	project: number,
+	base: string,
+	repo: string | null,
+): Promise<number[]> => (await db.all(Q.changesBasedOn, { project, base, repo })).map((row) => row.id);
+
+async function insertTests(ctx: Ctx, rows: readonly TestWrite[]): Promise<TestRow[]> {
+	if (!rows.length) return [];
+	return await ctx.db.all(Q.insertTests, {
+		project: rows.map((row) => row.project),
+		no: rows.map((row) => row.no),
+		kind: rows.map((row) => row.kind),
+		key: rows.map((row) => row.key),
+		name: rows.map((row) => row.name),
+		file: rows.map((row) => row.file),
+		caseId: rows.map((row) => row.caseId),
+		seq: rows.map((row) => row.seq),
+	});
+}
+
+async function insertResults(ctx: Ctx, rows: readonly ResultWrite[]): Promise<{ id: number; ord: number }[]> {
+	if (!rows.length) return [];
+	return await ctx.db.all(Q.insertResults, {
+		project: rows.map((row) => row.project),
+		test: rows.map((row) => row.test),
+		seq: rows.map((row) => row.seq),
+		ord: rows.map((row) => row.ord),
+		batch: rows.map((row) => row.batch),
+		target: rows.map((row) => row.target),
+		method: rows.map((row) => row.method),
+		actor: rows.map((row) => row.actor),
+		model: rows.map((row) => row.model),
+		basis: rows.map((row) => row.basis),
+		basisCase: rows.map((row) => row.basisCase),
+		basisVersion: rows.map((row) => row.basisVersion),
+		basisClaim: rows.map((row) => row.basisClaim),
+		outcome: rows.map((row) => row.outcome),
+		attempt: rows.map((row) => row.attempt),
+		duration: rows.map((row) => row.duration),
+		signature: rows.map((row) => row.signature),
+		message: rows.map((row) => row.message),
+		detail: rows.map((row) => row.detail),
+		atStep: rows.map((row) => row.atStep),
+		trail: rows.map((row) => row.trail),
+		note: rows.map((row) => row.note),
+		run: rows.map((row) => row.run),
+		corrects: rows.map((row) => row.corrects),
+		at: rows.map((row) => row.at),
+	});
+}
+
+async function insertTries(
+	ctx: Ctx,
+	rows: readonly TryWrite[],
+): Promise<{ id: number; result: number; try: number }[]> {
+	if (!rows.length) return [];
+	return await ctx.db.all(Q.insertTries, {
+		project: rows.map((row) => row.project),
+		result: rows.map((row) => row.result),
+		try: rows.map((row) => row.try),
+		outcome: rows.map((row) => row.outcome),
+		duration: rows.map((row) => row.duration),
+		signature: rows.map((row) => row.signature),
+		message: rows.map((row) => row.message),
+		detail: rows.map((row) => row.detail),
+	});
+}
+
+async function insertFlips(ctx: Ctx, rows: readonly FlipWrite[]): Promise<void> {
+	if (!rows.length) return;
+	await ctx.db.run(Q.insertFlips, {
+		project: rows.map((row) => row.project),
+		test: rows.map((row) => row.test),
+		target: rows.map((row) => row.target),
+		first: rows.map((row) => row.first),
+		second: rows.map((row) => row.second),
+		firstTry: rows.map((row) => row.firstTry),
+		secondTry: rows.map((row) => row.secondTry),
+		seq: rows.map((row) => row.seq),
+	});
+}

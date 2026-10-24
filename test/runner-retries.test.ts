@@ -5,22 +5,24 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { budget } from "../scripts/budget.ts";
 import { type GateStatus, type InboxReply, ReportInput, type ReportReceipt } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
+import { fileSignature, type SignatureRow } from "../src/server/evidence/signatures.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
+import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { acceptReport, processBatchSteps } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { parseReport } from "../src/surfaces/formats/report.ts";
-import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
+import { testDatabase } from "./db.ts";
+import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 type Try = { outcome: string; failure?: { message: string }; durationMs?: number };
 const result = (outcome: string, tries: Try[] = [], extra: Record<string, unknown> = {}) => ({
@@ -304,7 +306,11 @@ test("unknown tries never make a reported assertion broad or support a detector 
 	expect((await h.call<Page[]>("get", { refs: ["T-31"] }))[0]?.sameCode.signals).toMatchObject([
 		{ signature: { text: "expected 1 to be 2" }, flips: 1 },
 	]);
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 30 });
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_seen")),
+		),
+	).toEqual({ n: 30 });
 });
 
 test.each([
@@ -326,9 +332,10 @@ test.each([
 		expect(receipt.gate?.open).toHaveLength(2);
 		let questions = (await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" })).items;
 		expect(questions).toHaveLength(2);
-		const signatures = h.app.db.raw
-			.query<{ id: number; class: string }, []>("SELECT id, class FROM signatures ORDER BY id")
-			.all();
+		const signatures = await h.app.database.read(
+			async (db) =>
+				await db.all(sql<[], { id: number; class: string }>("SELECT id, class FROM signatures ORDER BY id")),
+		);
 		expect(signatures).toEqual([
 			{ id: expect.any(Number), class: "unknown" },
 			{ id: expect.any(Number), class: "unknown" },
@@ -385,47 +392,6 @@ test("diagnostic detail supplies a result and its runner try with a known cause"
 	]);
 });
 
-test("the unknown cause migration preserves known classes, ids and references", () => {
-	const migration = MIGRATIONS.find((entry) => entry.name === "unknown_causes");
-	if (!migration) throw new Error("missing unknown cause migration");
-	const db = new Db(":memory:");
-	try {
-		for (const earlier of MIGRATIONS.filter((entry) => entry.version < migration.version)) db.exec(earlier.sql);
-		db.raw.exec(`
-			INSERT INTO meta VALUES ('schema_version', '${migration.version - 1}');
-			INSERT INTO orgs VALUES (1, 'Example', 1);
-			INSERT INTO projects (id, org, key, name, created_at, identity) VALUES (1, 1, 'shop', 'Shop', 1, 'shop-identity');
-			INSERT INTO signatures (id, project, hash, class, text, first_seq) VALUES
-			 (10, 1, 'assertion', 'assertion', 'expected 1', 1),
-			 (11, 1, 'timeout', 'timeout', 'TimeoutError', 2),
-			 (12, 1, 'infra', 'infra', 'ECONNRESET', 3);
-			INSERT INTO assertion_roots VALUES (1, 10, 10);
-		`);
-		const before = db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all();
-		migrate(db, ":memory:");
-		expect(db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all()).toEqual(
-			before,
-		);
-		expect(db.raw.query("SELECT * FROM assertion_roots").all()).toEqual([{ project: 1, signature: 10, root: 10 }]);
-		db.raw.exec(
-			"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'unknown', 'unknown', 'Unknown failure cause', 4)",
-		);
-		expect(() =>
-			db.raw.exec(
-				"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'unknown', 'unknown', 'Unknown failure cause', 4)",
-			),
-		).toThrow("UNIQUE");
-		expect(() =>
-			db.raw.exec(
-				"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'invalid', 'invalid', 'invalid', 4)",
-			),
-		).toThrow("CHECK");
-		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-	} finally {
-		db.close();
-	}
-});
-
 test("an unknown failure on the base cannot explain the head's unknown failure", async () => {
 	const results = [{ test: { key: "one" }, outcome: "fail" }];
 	await h.call("report", { target: { commit: "silentbase", repo: "acme/web", branch: "main" }, results });
@@ -455,55 +421,75 @@ test("unknown causes and their decisions survive archive replay for later report
 	if (!question) throw new Error("missing failure question");
 	await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
 	const chunks: string[] = [];
-	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
-	const db = new Db(":memory:");
+	await h.app.database.read(
+		async (db) => await exportArchive(db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 }),
+	);
+	const dbFixture = await testDatabase();
+	const db = await Database.open({ url: dbFixture.url });
 	try {
-		migrate(db, ":memory:");
-		importArchive(db, linesOf(chunks.join("")));
-		expect(db.raw.query("SELECT class, text FROM signatures").all()).toEqual([
-			{ class: "unknown", text: "Unknown failure cause" },
-		]);
-		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-		const project = findProject(db, "scratch");
-		if (!project) throw new Error("missing project");
-		const app = { ...h.app, db };
-		db.transaction(() => {
-			const ctx = makeCtx(app, project, h.owner, true);
-			acceptReport(ctx, ReportInput.parse({ target, results, attempt: 2 }));
-			stampSeq(ctx);
-		});
-		expect(recoverAccepted(app)).toBe(1);
-		expect(db.raw.query("SELECT class, text FROM signatures").all()).toHaveLength(1);
+		await db.write(async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))));
+		expect(
+			await db.read(async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT class, text FROM signatures"))),
+		).toEqual([{ class: "unknown", text: "Unknown failure cause" }]);
+		const app = { ...h.app, database: db };
+		await db.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const project = await findProject(db, "scratch");
+					if (!project) throw new Error("missing project");
+					const ctx = makeCtx(app, db, project, h.owner, true);
+					await acceptReport(ctx, ReportInput.parse({ target, results, attempt: 2 }));
+					await stampSeq(ctx);
+				}),
+		);
+		expect(await recoverAccepted(app)).toBe(1);
+		expect(
+			await db.read(async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT class, text FROM signatures"))),
+		).toHaveLength(1);
 		expect(
 			await invoke(app, OPS, {
 				op: "gate",
 				project: "scratch",
 				input: { change: "pr:7", repo: "acme/web" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({
 			ok: true,
 			result: { verdict: "passed", open: [], tally: { excused: 1, unexplained: 0 } },
 		});
 	} finally {
-		db.close();
+		await db.close();
+		await dbFixture.close();
 	}
 });
 
 test("large assertion history cannot make a report materialize unbounded rows", async () => {
-	const ci = h.actor("pipeline", "ci", ["read", "record"]);
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 	const target = { repo: "acme/web", commit: "history-bound-01", branch: "main" };
-	const db = h.app.db;
-	const all = db.all.bind(db);
+	const database = h.app.database;
+	const write = database.write.bind(database);
 	let largestRead = 0;
+	let largestStatement = "";
 	let probing = false;
 	let probeRows = 0;
-	db.all = (statement, ...params) => {
-		const rows = all(statement, ...params);
-		largestRead = Math.max(largestRead, rows.length);
-		if (probing) probeRows += rows.length;
-		return rows;
-	};
+	database.write = async (fn, options) =>
+		await write(async (db) => {
+			const all = db.all.bind(db);
+			db.all = async (statement, ...params) => {
+				const rows = await all(statement, ...params);
+				if (rows.length > largestRead) {
+					largestRead = rows.length;
+					largestStatement = statement.text;
+				}
+				if (probing) probeRows += rows.length;
+				return rows;
+			};
+			try {
+				return await fn(db);
+			} finally {
+				db.all = all;
+			}
+		}, options);
 	try {
 		await h.call(
 			"report",
@@ -532,7 +518,7 @@ test("large assertion history cannot make a report materialize unbounded rows", 
 		budget("largest read of a retried report", largestRead, 200, "rows");
 		budget("probe rows of a retried report", probeRows, 512, "rows");
 	} finally {
-		db.all = all;
+		database.write = write;
 	}
 	expect((await gate(target.commit)).tally.unexplained).toBe(61);
 });
@@ -541,44 +527,183 @@ test.each(["rebuild", "archive"])(
 	"first recovery after %s of broad history uses bounded single-row reads",
 	async (maintenance) => {
 		const tests = Array.from({ length: 1200 }, (_, i) => ({ key: `history-${i}`, file: `history-${i}.test.ts` }));
-		const input = broadReport(tests);
-		await h.call("report", input, h.actor("pipeline", "ci", ["read", "record"]));
-		const pending = inContext((ctx) =>
-			acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+		const input = broadReport(tests.slice(0, 1));
+		const receipt = await h.call<ReportReceipt>("report", input, await h.actor("pipeline", "ci", ["read", "record"]));
+		if (!receipt.gate) throw new Error("history report did not create a gate");
+		const counts = { ...receipt.counts, total: tests.length, pass: tests.length };
+		const tally = { ...receipt.gate.tally, pass: tests.length };
+		const expanded: ReportReceipt = {
+			...receipt,
+			counts,
+			basis: { ...receipt.basis, unresolved: tests.length },
+			unlinked: tests.length,
+			flips: tests.length,
+			results: [],
+			gate: { ...receipt.gate, tally, reason: `passed: ${tests.length} results proven` },
+		};
+		const root = await h.app.database.read((db) =>
+			db.one(
+				sql<{ batch: number }, SignatureRow>(`
+ SELECT s.* FROM result_tries tr JOIN results r ON r.id=tr.result JOIN signatures s ON s.id=tr.signature WHERE r.batch=$batch`),
+				{ batch: receipt.batch },
+			),
+		);
+		const signatures = tests.map((test) => ({ file: test.file, ...fileSignature(root, test.file) }));
+		// Keep the authoritative file-specific causes; maintenance below reconstructs their derived observations.
+
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					await db.run(
+						sql<{ batch: number; total: number }>(`WITH seed AS (
+ SELECT * FROM results WHERE batch = $batch
+), added_tests AS (
+ INSERT INTO tests (project, no, kind, key, name, file, case_id, linked_by, first_seq, last_seq)
+ SELECT t.project, n.ord + 1, t.kind, 'history-' || n.ord, 'history-' || n.ord,
+ 'history-' || n.ord || '.test.ts', t.case_id, t.linked_by, t.first_seq, t.last_seq
+ FROM seed s JOIN tests t ON t.id = s.test CROSS JOIN generate_series(1, $total::bigint - 1) AS n(ord)
+ RETURNING id, no
+), added_results AS (
+ INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case,
+ basis_version, basis_claim, outcome, attempt, duration_ms, signature, message, detail, at_step,
+ trail, note, run, corrects, at, quarantine_decision, quarantine_exit)
+ SELECT s.project, t.id, s.seq, t.no - 1, s.batch, s.target, s.method, s.actor, s.model, s.basis,
+ s.basis_case, s.basis_version, s.basis_claim, s.outcome, s.attempt, s.duration_ms, s.signature,
+ s.message, s.detail, s.at_step, s.trail, s.note, s.run, s.corrects, s.at, s.quarantine_decision, s.quarantine_exit
+ FROM seed s CROSS JOIN added_tests t RETURNING id, test
+), added_tries AS (
+ INSERT INTO result_tries (project, result, try, outcome, duration_ms, signature, message, detail)
+ SELECT tr.project, r.id, tr.try, tr.outcome, tr.duration_ms, tr.signature, tr.message, tr.detail
+ FROM seed s JOIN result_tries tr ON tr.result = s.id CROSS JOIN added_results r
+ RETURNING id, result, try
+), added_flips AS (
+ INSERT INTO flips (project, test, target, first_result, second_result, seq, first_try, second_try)
+ SELECT f.project, r.test, f.target, r.id, r.id, f.seq, tr.id, f.second_try
+ FROM seed s JOIN flips f ON f.first_result = s.id AND f.second_result = s.id
+ JOIN result_tries original_try ON original_try.id = f.first_try
+ JOIN added_tries tr ON tr.try = original_try.try JOIN added_results r ON r.id = tr.result
+)
+ INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
+ SELECT rt.run, r.test, r.id, rt.outcome, rt.signature, rt.attempt, rt.flipped, rt.lane, rt.target
+ FROM seed s JOIN run_tests rt ON rt.result = s.id CROSS JOIN added_results r`),
+						{ batch: receipt.batch, total: tests.length },
+					);
+					await db.run(
+						sql<{ batch: number; hashes: string[]; texts: string[]; files: string[] }>(`
+ WITH asked AS (SELECT * FROM unnest($hashes::text[],$texts::text[],$files::text[]) u(hash,text,file)), added AS (
+ INSERT INTO signatures(project,hash,text,first_seq,class)
+ SELECT r.project,a.hash,a.text,r.seq,'assertion' FROM results r CROSS JOIN asked a WHERE r.batch=$batch AND r.ord=0
+ ON CONFLICT (project,hash) DO UPDATE SET text=excluded.text RETURNING id,hash
+ ) UPDATE result_tries tr SET signature=s.id FROM results r JOIN tests t ON t.id=r.test
+ JOIN asked a ON a.file=t.file JOIN added s ON s.hash=a.hash WHERE r.batch=$batch AND tr.result=r.id
+ `),
+						{
+							batch: receipt.batch,
+							hashes: signatures.map((s) => s.hash),
+							texts: signatures.map((s) => s.text),
+							files: signatures.map((s) => s.file),
+						},
+					);
+					expect(
+						await db.one(
+							sql<
+								{ batch: number },
+								{ tests: number; results: number; tries: number; flips: number; projections: number }
+							>(`
+ SELECT count(DISTINCT t.id) AS tests,count(DISTINCT r.id) AS results,count(DISTINCT tr.id) AS tries,
+ count(DISTINCT f.id) AS flips,count(DISTINCT m.test) AS projections FROM results r
+ JOIN tests t ON t.id=r.test JOIN result_tries tr ON tr.result=r.id JOIN signatures s ON s.id=tr.signature
+ JOIN flips f ON f.first_result=r.id AND f.first_try=tr.id JOIN run_tests m ON m.result=r.id
+ WHERE r.batch=$batch AND s.text='Split by file ('||t.file||'): assertion failed'
+ `),
+							{ batch: receipt.batch },
+						),
+					).toEqual({ tests: 1200, results: 1200, tries: 1200, flips: 1200, projections: 1200 });
+
+					await db.run(
+						sql<{ batch: number; total: number }>(`UPDATE counters c SET value = $total
+ FROM batches b WHERE b.id = $batch AND c.project = b.project AND c.name = 'test'`),
+						{ batch: receipt.batch, total: tests.length },
+					);
+					await db.run(
+						sql<{ batch: number; counts: string; receipt: string }>(
+							"UPDATE batches SET counts = $counts, receipt = $receipt WHERE id = $batch",
+						),
+						{ batch: receipt.batch, counts: JSON.stringify(counts), receipt: JSON.stringify(expanded) },
+					);
+					await db.run(
+						sql<{ batch: number; tally: string }>(`UPDATE runs SET tally = $tally WHERE id IN (
+ SELECT rt.run FROM run_tests rt JOIN results r ON r.id = rt.result WHERE r.batch = $batch)`),
+						{ batch: receipt.batch, tally: JSON.stringify(tally) },
+					);
+				}),
+		);
+		const pending = (
+			await inContext(
+				async (ctx) => await acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+			)
 		).batch;
-		const imported = maintenance === "archive" ? new Db(":memory:") : null;
-		const db = imported ?? h.app.db;
+		const importedFixture = maintenance === "archive" ? await testDatabase() : null;
+		const imported = importedFixture ? await Database.open({ url: importedFixture.url }) : null;
+		const db = imported ?? h.app.database;
+		const beforeMaintenance = db.statementCount;
 		try {
 			if (imported) {
 				const chunks: string[] = [];
-				exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
-				migrate(imported, ":memory:");
-				importArchive(imported, linesOf(chunks.join("")));
-			} else rebuildAssertionIndexes(db, true);
-			const get = db.get.bind(db);
+				await h.app.database.read(
+					async (db) => await exportArchive(db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 }),
+				);
+
+				await imported.write(
+					async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+				);
+			} else await db.write(async (db) => await db.transaction(async () => await rebuildAssertionIndexes(db, true)));
+			if (!imported) expect(db.statementCount - beforeMaintenance).toBeLessThanOrEqual(100);
+			const write = db.write.bind(db);
 			let rowsRead = 0;
-			db.get = (statement, ...params) => {
-				const row = get(statement, ...params);
-				if (row) rowsRead++;
-				return row;
-			};
+			db.write = async (fn, options) =>
+				await write(async (db) => {
+					const get = db.get.bind(db);
+					db.get = async (statement, ...params) => {
+						const row = await get(statement, ...params);
+						if (row) rowsRead++;
+						return row;
+					};
+					try {
+						return await fn(db);
+					} finally {
+						db.get = get;
+					}
+				}, options);
 			try {
-				const app = { ...h.app, db };
-				expect(recoverAccepted(app)).toBe(1);
+				const app = { ...h.app, database: db };
+				expect(await recoverAccepted(app)).toBe(1);
 				budget("rows read recovering an accepted report", rowsRead, 512, "rows");
-				expect(recoverAccepted(app)).toBe(0);
+				expect(await recoverAccepted(app)).toBe(0);
 			} finally {
-				db.get = get;
+				db.write = write;
 			}
 			expect(
-				db.raw
-					.query(`SELECT s.text FROM result_tries tr JOIN results r ON r.id = tr.result
-				JOIN signatures s ON s.id = tr.signature WHERE r.batch = ?`)
-					.all(pending.id),
+				await db.read(
+					async (db) =>
+						await db.all(
+							sql<
+								readonly SqlValue[],
+								Record<string, unknown>
+							>(`SELECT s.text FROM result_tries tr JOIN results r ON r.id = tr.result
+				JOIN signatures s ON s.id = tr.signature WHERE r.batch = $1`),
+							[pending.id],
+						),
+				),
 			).toEqual([{ text: "Split by file (history-1199.test.ts): assertion failed" }]);
-			expect(db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
+			expect(
+				await db.read(
+					async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_seen")),
+				),
+			).toEqual({ n: 51 });
 		} finally {
-			imported?.close();
+			await imported?.close();
+			await importedFixture?.close();
 		}
 	},
 );
@@ -590,21 +715,28 @@ test("repeated tries and reports stop retaining threshold observations once the 
 		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
 	}));
 	for (let attempt = 1; attempt <= 3; attempt++) await h.call("report", { ...input, attempt });
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_seen")),
+		),
+	).toEqual({ n: 51 });
 	expect((await page())?.sameCode.signals).toMatchObject([
 		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 5 },
 	]);
 });
 
-const inContext = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
-		if (!project) throw new Error("missing project");
-		const ctx = makeCtx(h.app, project, h.owner, true);
-		const value = fn(ctx);
-		stampSeq(ctx);
-		return value;
-	});
+const inContext = async <T>(fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T): Promise<T> =>
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				if (!project) throw new Error("missing project");
+				const ctx = makeCtx(h.app, db, project, h.owner, true);
+				const value = await fn(ctx);
+				await stampSeq(ctx);
+				return value;
+			}),
+	);
 
 test("application yields within a batch's tries, and recovery after rollback applies it once", async () => {
 	const input = broadReport(broadTests(6));
@@ -612,52 +744,28 @@ test("application yields within a batch's tries, and recovery after rollback app
 		...result,
 		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
 	}));
-	const batch = inContext((ctx) => acceptReport(ctx, ReportInput.parse(input))).batch;
-	expect(() =>
-		inContext((ctx) => {
+	const batch = (await inContext(async (ctx) => await acceptReport(ctx, ReportInput.parse(input)))).batch;
+	await expect(
+		inContext(async (ctx) => {
 			const steps = processBatchSteps(ctx, batch.id);
-			expect(steps.next().done).toBe(false);
-			expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 200 });
+			expect((await steps.next()).done).toBe(false);
+			expect(await ctx.db.get(sql<[], { n: number }>("SELECT count(*) AS n FROM result_tries"))).toEqual({ n: 200 });
 			throw new Error("interrupted application");
 		}),
-	).toThrow("interrupted application");
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 0 });
-	expect(recoverAccepted(h.app)).toBe(1);
-	expect(recoverAccepted(h.app)).toBe(0);
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 600 });
-	expect((await gate(input.target.commit)).verdict).toBe("passed");
-});
-
-test("old unsplit tries rebuild before pending recovery without rewriting historical causes", async () => {
-	const input = broadReport();
-	await h.call("report", input);
-	dropReceiptSchema(h.app.db);
-	h.app.db.raw.exec(`
-		UPDATE result_tries SET signature = (SELECT root FROM assertion_roots WHERE signature = result_tries.signature);
-
-		DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index;
-		DROP INDEX results_assertion_rebuild;
-		UPDATE meta SET value = '39' WHERE key = 'schema_version';
-	`);
-	migrate(h.app.db, ":memory:");
-	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
-	inContext((ctx) =>
-		acceptReport(
-			ctx,
-			ReportInput.parse({
-				...input,
-				attempt: 2,
-				results: [{ test: input.results[0]?.test, outcome: "fail", failure: { message: "assertion failed" } }],
-			}),
+	).rejects.toThrow("interrupted application");
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_seen")),
 		),
-	);
-	rebuildAssertionIndexes(h.app.db);
-	expect(h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
-	expect(recoverAccepted(h.app)).toBe(1);
-	expect((await page())?.sameCode.signals).toMatchObject([
-		{ signature: { text: "assertion failed" }, flips: 1 },
-		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
-	]);
+	).toEqual({ n: 0 });
+	expect(await recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(0);
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM result_tries")),
+		),
+	).toEqual({ n: 600 });
+	expect((await gate(input.target.commit)).verdict).toBe("passed");
 });
 
 test("archive import reconstructs roots using full filenames and keeps split-looking original causes", async () => {
@@ -668,37 +776,41 @@ test("archive import reconstructs roots using full filenames and keeps split-loo
 		tries: [failed("Split by file (literal): assertion failed")],
 	}));
 	await h.call("report", input);
-	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
+	const before = await h.app.database.read(
+		async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT id, signature FROM result_tries ORDER BY id")),
+	);
 	const chunks: string[] = [];
-	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
+	await h.app.database.read(
+		async (db) => await exportArchive(db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 }),
+	);
 	const text = chunks.join("");
 	expect(text).not.toContain('"t":"assertion_');
-	const to = new Db(":memory:");
+	const toFixture = await testDatabase();
+	const to = await Database.open({ url: toFixture.url });
 	try {
-		migrate(to, ":memory:");
-		importArchive(to, linesOf(text));
-		expect(to.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
-		expect(to.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
-		expect(to.raw.query("SELECT count(*) AS n FROM assertion_roots WHERE root != signature").get()).toEqual({ n: 6 });
+		await to.write(async (db) => await db.transaction(async () => await importArchive(db, linesOf(text))));
+		expect(
+			await to.read(
+				async (db) =>
+					await db.all(sql<[], Record<string, unknown>>("SELECT id, signature FROM result_tries ORDER BY id")),
+			),
+		).toEqual(before);
+		expect(
+			await to.read(
+				async (db) => await db.get(sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_seen")),
+			),
+		).toEqual({ n: 51 });
+		expect(
+			await to.read(
+				async (db) =>
+					await db.get(
+						sql<[], Record<string, unknown>>("SELECT count(*) AS n FROM assertion_roots WHERE root != signature"),
+					),
+			),
+		).toEqual({ n: 6 });
 	} finally {
-		to.close();
-	}
-});
-
-test("assertion file thresholds use covering index seeks without sorting or scanning duplicate history", () => {
-	const queries = declaredSql().filter((text) => text.startsWith("SELECT file FROM assertion_seen"));
-	expect(queries).toHaveLength(3);
-	for (const text of queries) {
-		const params = Object.fromEntries(
-			[...text.matchAll(/\$(\w+)/g)].map((match) => [match[1] ?? "", match[1] === "after" ? "file-0" : 1]),
-		);
-		const plan = h.app.db.raw
-			.query<{ detail: string }, [Record<string, string | number>]>(`EXPLAIN QUERY PLAN ${text}`)
-			.all(params)
-			.map((row) => row.detail)
-			.join("\n");
-		expect(plan).toContain("SEARCH assertion_seen USING COVERING INDEX assertion_seen_files");
-		expect(plan).not.toContain("TEMP B-TREE");
+		await to.close();
+		await toFixture.close();
 	}
 });
 
@@ -707,21 +819,59 @@ test("legacy missing file causes are created only when that file recurs on its b
 	await h.call("report", broadReport(earlier));
 	await h.call("report", broadReport(broadTests(20), { job: "later-shard" }));
 	const missing = "Split by file (old-file-0): assertion failed";
-	h.app.db.raw
-		.query("DELETE FROM assertion_roots WHERE signature IN (SELECT id FROM signatures WHERE text = ?)")
-		.run(missing);
-	h.app.db.raw.query("DELETE FROM signatures WHERE text = ?").run(missing);
-	rebuildAssertionIndexes(h.app.db, true);
-	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).toBeNull();
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"DELETE FROM assertion_roots WHERE signature IN (SELECT id FROM signatures WHERE text = $1)",
+						),
+						[missing],
+					),
+			),
+	);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(sql<readonly SqlValue[], Record<string, unknown>>("DELETE FROM signatures WHERE text = $1"), [
+						missing,
+					]),
+			),
+	);
+	await h.app.database.write(async (db) => await db.transaction(async () => await rebuildAssertionIndexes(db, true)));
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT 1 FROM signatures WHERE text = $1"), [
+					missing,
+				]),
+		),
+	).toBeNull();
 	const another = broadReport(earlier.slice(0, 1), {
 		target: { repo: "acme/web", commit: "another-commit", branch: "main" },
 	});
 	await h.call("report", another);
 	expect((await page())?.sameCode.signals).toMatchObject([{ signature: { text: "assertion failed" }, flips: 2 }]);
 	await h.call("report", broadReport(broadTests(1), { job: "activate" }));
-	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).toBeNull();
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT 1 FROM signatures WHERE text = $1"), [
+					missing,
+				]),
+		),
+	).toBeNull();
 	await h.call("report", broadReport(earlier.slice(0, 1), { job: "recurring-file" }));
-	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).not.toBeNull();
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT 1 FROM signatures WHERE text = $1"), [
+					missing,
+				]),
+		),
+	).not.toBeNull();
 	await h.call("report", { ...another, attempt: 2 });
 	expect((await page())?.sameCode.signals).toMatchObject([
 		{ signature: { text: "assertion failed" }, flips: 2 },

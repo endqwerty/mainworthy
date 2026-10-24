@@ -2,7 +2,7 @@
 //
 // The link carries a code of 32 random bytes and this file never sees it: it is given the code's SHA-256 and
 // stores that, as `sessions.ts` does for a cookie. An invitation is good once, until it runs out or is revoked.
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 
 /** `join`: a new person's first way in. `recover`: accepted, it replaces every way the person signed in. */
 export type InvitationPurpose = "join" | "recover";
@@ -20,9 +20,12 @@ export type InvitationRow = {
 
 const Q = {
 	byHash: sql<{ hash: string }, InvitationRow>("SELECT * FROM invitations WHERE hash = $hash"),
-	insert: sql<{ actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expires: number }>(
+	insert: sql<
+		{ actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expires: number },
+		{ id: number }
+	>(
 		`INSERT INTO invitations (actor, hash, purpose, created_by, created_at, expires_at)
-		 VALUES ($actor, $hash, $purpose, $by, $at, $expires)`,
+		 VALUES ($actor, $hash, $purpose, $by, $at, $expires) RETURNING id`,
 	),
 	// Spent only while it is still good, so of two acceptances of one code the second changes no row.
 	use: sql<{ hash: string; at: number }>(
@@ -51,41 +54,46 @@ export const isOpen = (row: Pick<InvitationRow, "used_at" | "revoked_at" | "expi
 	row.used_at === null && row.revoked_at === null && now < row.expires_at;
 
 /** The invitation whose code has this hash, in whatever state it is, or null. */
-export const invitationByHash = (db: Db, hash: string): InvitationRow | null => db.get(Q.byHash, { hash });
+export const invitationByHash = async (db: ReadDb, hash: string): Promise<InvitationRow | null> =>
+	await db.get(Q.byHash, { hash });
 
 /** Stores an invitation for a person. `hash` is the SHA-256 of the code the link will carry. */
-export function insertInvitation(
-	db: Db,
+export async function insertInvitation(
+	db: WriteDb,
 	input: { actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expiresAt: number },
-): number {
-	return db.run(Q.insert, {
-		actor: input.actor,
-		hash: input.hash,
-		purpose: input.purpose,
-		by: input.by,
-		at: input.at,
-		expires: input.expiresAt,
-	}).lastId;
+): Promise<number> {
+	return (
+		await db.one(Q.insert, {
+			actor: input.actor,
+			hash: input.hash,
+			purpose: input.purpose,
+			by: input.by,
+			at: input.at,
+			expires: input.expiresAt,
+		})
+	).id;
 }
 
 /** Spends an invitation. False, with nothing written, when it is not good any more: used, revoked or run out. */
-export const spendInvitation = (db: Db, hash: string, at: number): boolean => db.run(Q.use, { hash, at }).changes === 1;
+export const spendInvitation = async (db: WriteDb, hash: string, at: number): Promise<boolean> =>
+	(await db.run(Q.use, { hash, at })).changes === 1;
 
 /** Revokes an invitation nobody has accepted. False when it was used or revoked, or does not exist. */
-export const revokeInvitation = (db: Db, id: number, at: number): boolean => db.run(Q.revoke, { id, at }).changes > 0;
+export const revokeInvitation = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
+	(await db.run(Q.revoke, { id, at })).changes > 0;
 
 /** Revokes every invitation of a person that nobody has accepted. Returns how many. */
-export const revokeInvitationsOf = (db: Db, actor: number, at: number): number =>
-	db.run(Q.revokeOf, { actor, at }).changes;
+export const revokeInvitationsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
+	(await db.run(Q.revokeOf, { actor, at })).changes;
 
 /** Deletes invitations thirty days after their first end. Under the write gate. */
-export function sweepInvitations(db: Db, now: number): number {
-	return db.run(Q.dropEnded, { before: now - 30 * 86_400_000 }).changes;
+export async function sweepInvitations(db: WriteDb, now: number): Promise<number> {
+	return (await db.run(Q.dropEnded, { before: now - 30 * 86_400_000 })).changes;
 }
 
 /** Every invitation, with who it is for and who made it. Never the hash: nothing outside this file needs it. */
-export function listInvitations(db: Db, now: number) {
-	return db.all(Q.list).map((row) => ({
+export async function listInvitations(db: ReadDb, now: number) {
+	return (await db.all(Q.list)).map((row) => ({
 		id: row.id,
 		name: row.name,
 		purpose: row.purpose,

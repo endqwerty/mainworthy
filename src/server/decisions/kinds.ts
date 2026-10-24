@@ -12,19 +12,21 @@ import {
 	dropResultExcuses,
 	findTest,
 	linkTest,
+	linkTests,
 	mustTarget,
 	producedCause,
 	restoreLink,
 	scopeOf,
 	setExcuse,
 	setResultExcuses,
+	targetsByIds,
 	testById,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { setQuarantine, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { actorById, requirePolicyRoles } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { json } from "../kernel/db.ts";
+import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
@@ -46,6 +48,7 @@ import {
 	caseById,
 	caseRef,
 	cleanBody,
+	findCases,
 	mustCase,
 	proposalById,
 	resolvedOf,
@@ -64,9 +67,9 @@ import {
 } from "./questions.ts";
 
 type Tools = {
-	raiseSteps: (ctx: Ctx, r: Raise) => Generator<undefined, Raised, void>;
+	raiseSteps: (ctx: Ctx, r: Raise) => AsyncGenerator<undefined, Raised, void>;
 	/** Apply the new policy to inherited standing and open questions about tests with no case. */
-	reconsiderPolicySteps: (ctx: Ctx) => Generator<undefined, number, void>;
+	reconsiderPolicySteps: (ctx: Ctx) => AsyncGenerator<undefined, number, void>;
 };
 
 type Handler<K extends Kind> = {
@@ -76,8 +79,8 @@ type Handler<K extends Kind> = {
 		question: QuestionRow & { kind: K },
 		answer: AnswerOf<K>,
 		tools: Tools,
-	) => Generator<undefined, Record<string, unknown>, void>;
-	revert: (ctx: Ctx, question: QuestionRow & { kind: K }, decision: DecisionRow) => void;
+	) => AsyncGenerator<undefined, Record<string, unknown>, void>;
+	revert: (ctx: Ctx, question: QuestionRow & { kind: K }, decision: DecisionRow) => Promise<void>;
 	holds: (input: {
 		question: QuestionRow & { kind: K };
 		answer: AnswerOf<K>;
@@ -85,9 +88,9 @@ type Handler<K extends Kind> = {
 		policy: Policy;
 	}) => HoldTerm[];
 	/** Whether the acting actor wrote the thing in question (the author of a proposal). */
-	isAuthor: (ctx: Ctx, question: QuestionRow & { kind: K }) => boolean;
+	isAuthor: (ctx: Ctx<ReadDb>, question: QuestionRow & { kind: K }) => Promise<boolean>;
 	/** Whether the acting actor produced the evidence in question. */
-	isProducer: (ctx: Ctx, question: QuestionRow & { kind: K }) => boolean;
+	isProducer: (ctx: Ctx<ReadDb>, question: QuestionRow & { kind: K }) => Promise<boolean>;
 	undoable: boolean;
 	undoHint: string;
 };
@@ -96,18 +99,18 @@ const untilBasisChanges = (question: QuestionRow): HoldTerm[] => [{ until: "basi
 const DAY = 86_400_000;
 
 /** Raises the `adopt` question for a sealed proposal. Shared by every path that proposes: there is only this one. */
-export function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Raise) => T }, sealed: Sealed): T {
+export async function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Raise) => T }, sealed: Sealed): Promise<T> {
 	const { proposal, resolved } = sealed;
 	for (const edit of resolved)
-		if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
-	const summary = resolved.slice(0, 20).map((edit) => {
+		if (edit.op === "policy") await requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
+	const summary = await mapAsync(resolved.slice(0, 20), async (edit) => {
 		switch (edit.op) {
 			case "create":
 				return { op: edit.op, title: edit.body.title, steps: edit.body.steps.length };
 			case "edit":
 			case "restore":
 			case "cover": {
-				const row = caseById(ctx.db, edit.caseId);
+				const row = await caseById(ctx.db, edit.caseId);
 				return {
 					op: edit.op,
 					case: row ? `C-${row.no}` : null,
@@ -159,22 +162,23 @@ export function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Raise) => 
 }
 
 const adoptHandler: Handler<"adopt"> = {
-	*effect(ctx, witness, question, answer, tools) {
+	async *effect(ctx, witness, question, answer, tools) {
 		const { proposal: id } = json<{ proposal: number }>(question.subject);
-		const proposal = proposalById(ctx.db, id);
+		const proposal = await proposalById(ctx.db, id);
 		if (!proposal) throw notFound("proposal");
 		if (answer.is === "reject") return { rejected: true };
 		if (answer.is === "merge") return yield* resolveConflictSteps(ctx, proposal, answer, tools);
 		for (const edit of resolvedOf(proposal))
-			if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
+			if (edit.op === "policy") await requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
 		const quarantine = resolvedOf(proposal).find((edit) => edit.op === "quarantine");
 		if (quarantine) {
-			const test = validateQuarantineEdit(ctx, quarantine);
+			const test = await validateQuarantineEdit(ctx, quarantine);
 			if (ctx.actor.kind !== "human") throw invalid("a person decides quarantine");
-			setQuarantine(ctx, witness, {
+			await setQuarantine(ctx, witness, {
 				test: test.id,
 				exit: quarantine.exit,
-				reason: answersOf(ctx.db, question.id).findLast((row) => row.counts === 1)?.reason ?? proposal.reason ?? "",
+				reason:
+					(await answersOf(ctx.db, question.id)).findLast((row) => row.counts === 1)?.reason ?? proposal.reason ?? "",
 			});
 			return { cases: [], created: [], policyVersion: null, quarantine };
 		}
@@ -186,20 +190,20 @@ const adoptHandler: Handler<"adopt"> = {
 			policyVersion: adopted.policyVersion,
 		};
 		if (adopted.policyVersion === null) return effects;
-		reconsiderEmptyReports(ctx);
+		await reconsiderEmptyReports(ctx);
 		const ruled = yield* tools.reconsiderPolicySteps(ctx);
 		return ruled > 0 ? { ...effects, ruled } : effects;
 	},
-	revert() {
+	async revert() {
 		throw invalid("an adopted edit is undone by restoring the earlier version, which keeps both in the history");
 	},
 	holds: ({ question }) => untilBasisChanges(question),
-	isAuthor(ctx, question) {
+	async isAuthor(ctx, question) {
 		const { proposal } = json<{ proposal: number }>(question.subject);
-		return proposalById(ctx.db, proposal)?.author === ctx.actor.id;
+		return (await proposalById(ctx.db, proposal))?.author === ctx.actor.id;
 	},
-	isProducer(ctx, question) {
-		return adoptHandler.isAuthor(ctx, question);
+	async isProducer(ctx, question) {
+		return await adoptHandler.isAuthor(ctx, question);
 	},
 	undoable: false,
 	undoHint: "restore the earlier version of the case instead; both versions stay in its history",
@@ -212,12 +216,12 @@ const adoptHandler: Handler<"adopt"> = {
  * in, or shown as a new conflict, instead of being overwritten. A single case's tag and requirement-link deltas
  * accompany its body, so the entire replacement is judged within its current and proposed tag scope.
  */
-function* resolveConflictSteps(
+async function* resolveConflictSteps(
 	ctx: Ctx,
-	proposal: NonNullable<ReturnType<typeof proposalById>>,
+	proposal: NonNullable<Awaited<ReturnType<typeof proposalById>>>,
 	answer: Extract<AnswerOf<"adopt">, { is: "merge" }>,
 	tools: Tools,
-): Generator<undefined, Record<string, unknown>, void> {
+): AsyncGenerator<undefined, Record<string, unknown>, void> {
 	const tags = new Set(answer.tags ?? []);
 	const covers = new Set(answer.covers ?? []);
 	const existingCovers = new Set<string>();
@@ -229,9 +233,9 @@ function* resolveConflictSteps(
 			"a merge resolves one case body with only its tag and requirement-link deltas; reject other edits and propose them again on current versions",
 		);
 	if (bodies.length !== 1 || !only || only.exact) throw unsupported();
-	const row = caseById(ctx.db, only.caseId);
+	const row = await caseById(ctx.db, only.caseId);
 	if (!row) throw notFound("case");
-	const snapshots = [bodyOf(ctx.db, row.id, only.head), bodyOf(ctx.db, row.id, only.base)];
+	const snapshots = [await bodyOf(ctx.db, row.id, only.head), await bodyOf(ctx.db, row.id, only.base)];
 	const unparsed = [answer.body, cleanBody(answer.body, answer.body)].some((body) => {
 		const inline = parseBodyInline(body, snapshots);
 		return inline.tags.length > 0 || inline.covers.length > 0;
@@ -266,13 +270,13 @@ function* resolveConflictSteps(
 	if (tags.size) replacement.push({ op: "place", cases: [ref], tags: { add: [...tags] } });
 	for (const requirement of covers)
 		if (!existingCovers.has(requirement)) replacement.push({ op: "cover", case: ref, requirement, on: true });
-	const asAuthor: Ctx = { ...ctx, actor: actorById(ctx.db, proposal.author, ctx.project.id) };
+	const asAuthor: Ctx = { ...ctx, actor: await actorById(ctx.db, proposal.author, ctx.project.id) };
 	const sealed = yield* sealSteps(asAuthor, {
 		edits: replacement,
 		reason: proposal.reason ?? `Resolves the conflict in P-${proposal.no}`,
 	});
 	if (!sealed) return { cases: [], placements: [], status: "unchanged" };
-	const raised = yield* raiseAdopt(asAuthor, { raise: tools.raiseSteps }, sealed);
+	const raised = yield* await raiseAdopt(asAuthor, { raise: tools.raiseSteps }, sealed);
 	return {
 		cases: raised.s === "decided" ? (raised.effects.cases ?? []) : [],
 		placements: raised.s === "decided" ? (raised.effects.placements ?? []) : [],
@@ -283,9 +287,9 @@ function* resolveConflictSteps(
 }
 
 /** Whether a decision is still the one in force on its question. */
-function stands(ctx: Ctx, decisionId: number): boolean {
-	const decision = decisionById(ctx.db, decisionId);
-	const question = decision ? questionById(ctx.db, decision.question) : null;
+async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
+	const decision = await decisionById(ctx.db, decisionId);
+	const question = decision ? await questionById(ctx.db, decision.question) : null;
 	return question?.state === "decided" && question.decision === decisionId;
 }
 
@@ -293,19 +297,19 @@ function stands(ctx: Ctx, decisionId: number): boolean {
 type Relinked = [test: number, previous: number | null, by?: number | null];
 
 const mapHandler: Handler<"map"> = {
-	*effect(ctx, witness, question, answer, tools) {
+	async *effect(ctx, witness, question, answer, tools) {
 		const { file } = json<{ file: string }>(question.subject);
 		switch (answer.is) {
 			case "link": {
 				const linked: Relinked[] = [];
 				for (const [testText, caseText] of answer.pairs) {
-					const test = findTest(ctx.db, ctx.project.id, testText);
+					const test = await findTest(ctx.db, ctx.project.id, testText);
 					if (!test) throw notFound(`test ${testText}`);
 					if (test.kind === "manual")
 						throw invalid(`${testText} is the manual run of a case and cannot be linked to another`);
-					const row = mustCase(ctx.db, ctx.project.id, caseText);
+					const row = await mustCase(ctx.db, ctx.project.id, caseText);
 					linked.push([test.id, test.case_id, test.linked_by]);
-					linkTest(ctx, witness, test, row.id);
+					await linkTest(ctx, witness, test, row.id);
 					ctx.touched.add(`C-${row.no}`);
 				}
 				return { linked };
@@ -313,12 +317,12 @@ const mapHandler: Handler<"map"> = {
 			case "create": {
 				// New cases go through the same adopt path as any edit. If policy does not adopt them now, the
 				// tests stay unlinked and this question is asked again when the proposal lands.
-				const tests = unlinkedInFile(ctx.db, ctx.project.id, file);
+				const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
 				if (tests.length === 0) return { linked: [] };
 				// Creating and linking in one answer works only where the policy adopts this actor's new cases at
 				// once. Where a person must adopt them first, nothing is created here: saying so is better than
 				// pointing at a proposal that this answer's refusal would take away again.
-				const adoption = clauseFor(currentPolicy(ctx.db, ctx.project.id), {
+				const adoption = clauseFor(await currentPolicy(ctx.db, ctx.project.id), {
 					kind: "adopt",
 					facts: new Set([`author:${ctx.actor.kind}`]),
 				});
@@ -340,21 +344,29 @@ const mapHandler: Handler<"map"> = {
 				}));
 				const sealed = yield* sealSteps(ctx, { edits, reason: `Cases for the tests in ${file}` });
 				if (!sealed) return { linked: [] };
-				const raised = yield* raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
+				const raised = yield* await raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
 				if (raised.s !== "decided")
 					throw invalid("the new cases need a person to adopt them first; accept that proposal, then link");
 				const created = raised.effects.created;
 				if (!Array.isArray(created) || created.length !== tests.length)
 					throw invalid("the adoption rule did not create every requested case; no tests were linked");
-				const linked: Relinked[] = [];
-				for (const [i, test] of tests.entries()) {
-					const ref = created[i];
+				const refs = created.map((ref) => {
 					if (typeof ref !== "string")
 						throw invalid("the adoption rule did not create every requested case; no tests were linked");
-					const row = mustCase(ctx.db, ctx.project.id, ref);
-					linked.push([test.id, null, null]);
-					linkTest(ctx, witness, test, row.id);
-					if ((i + 1) % 200 === 0) yield;
+					return ref;
+				});
+				const cases = await findCases(ctx.db, ctx.project.id, refs);
+				const linked: Relinked[] = [];
+				for (let at = 0; at < tests.length; at += 200) {
+					const links = tests.slice(at, at + 200).map((test, offset) => {
+						const ref = refs[at + offset];
+						const row = ref === undefined ? null : cases.get(ref);
+						if (!row) throw notFound(`case ${ref}`);
+						linked.push([test.id, null, null]);
+						return { test, caseId: row.id };
+					});
+					await linkTests(ctx, witness, links);
+					if (links.length === 200) yield;
 				}
 				return { linked, created };
 			}
@@ -363,10 +375,10 @@ const mapHandler: Handler<"map"> = {
 			case "unlink": {
 				const linked: Relinked[] = [];
 				for (const id of json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []) {
-					const test = testById(ctx.db, id.id);
+					const test = await testById(ctx.db, id.id);
 					if (!test || test.case_id === null || test.kind === "manual") continue;
 					linked.push([test.id, test.case_id, test.linked_by]);
-					linkTest(ctx, witness, test, null);
+					await linkTest(ctx, witness, test, null);
 				}
 				return { linked };
 			}
@@ -376,23 +388,23 @@ const mapHandler: Handler<"map"> = {
 			}
 		}
 	},
-	revert(ctx, _question, decision) {
+	async revert(ctx, _question, decision) {
 		// Put back each link this decision made, and only those: a link a newer decision has since made stays. The
 		// earlier link returns only while the decision that made it still stands; otherwise the test is unlinked.
 		const { linked } = json<{ linked?: Relinked[] }>(decision.effects);
 		for (const [testId, previous, by] of linked ?? []) {
-			const test = testById(ctx.db, testId);
+			const test = await testById(ctx.db, testId);
 			if (!test) continue;
-			const earlier = by != null && stands(ctx, by) ? { caseId: previous, by } : { caseId: null, by: null };
-			restoreLink(ctx, test, decision.id, earlier);
+			const earlier = by != null && (await stands(ctx, by)) ? { caseId: previous, by } : { caseId: null, by: null };
+			await restoreLink(ctx, test, decision.id, earlier);
 		}
 	},
 	// "Track" is a judgement about the file as it was: it is asked again when the file's tests with no case
 	// change. A link is about the tests it names: it does not carry to a test that turns up later in the file,
 	// and that test's question does not undo it.
 	holds: ({ question, answer }) => (answer.is === "track" ? untilBasisChanges(question) : [{ until: "results-named" }]),
-	isAuthor: () => false,
-	isProducer: () => false,
+	isAuthor: async () => false,
+	isProducer: async () => false,
 	undoable: true,
 	undoHint: "",
 };
@@ -408,24 +420,24 @@ function folderFor(file: string): string {
  * The runs a question is about: the runs it lists as waiting for it and every run it names. A decision on a
  * failure changes how each of them counts the failure.
  */
-export function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
+export async function runsAbout(ctx: Ctx<ReadDb>, question: QuestionRow): Promise<number[]> {
 	const ids = new Set(json<number[]>(question.blocks));
-	for (const about of refsOf(ctx.db, question.id)) {
+	for (const about of await refsOf(ctx.db, question.id)) {
 		if (!/^R-\d+$/.test(about)) continue;
-		const run = findRun(ctx.db, ctx.project.id, about);
+		const run = await findRun(ctx.db, ctx.project.id, about);
 		if (run) ids.add(run.id);
 	}
 	return [...ids];
 }
 
 /** The result producers in this slot, kept on its question after settlement too. */
-export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
+export async function disputeParties(ctx: Ctx<ReadDb>, question: QuestionRow): Promise<number[]> {
 	if (question.kind !== "failure" || question.subject.kind !== "slot") return [];
-	return [...new Set(fillsOf(ctx.db, question.subject.slot).map((fill) => fill.actor))];
+	return [...new Set((await fillsOf(ctx.db, question.subject.slot)).map((fill) => fill.actor))];
 }
 
 const failureHandler: Handler<"failure"> = {
-	*effect(ctx, witness, question, answer) {
+	async *effect(ctx, witness, question, answer) {
 		const subject = question.subject;
 		if (subject.kind !== "slot" && answer.is === "mistaken")
 			throw invalid("`mistaken` answers a slot dispute, not the whole cause");
@@ -433,18 +445,18 @@ const failureHandler: Handler<"failure"> = {
 			case "slot": {
 				const { results } = json<{ results: number[] }>(question.evidence);
 				if (answer.is === "mistaken") {
-					const corrected = discountResults(ctx, witness, results);
+					const corrected = await discountResults(ctx, witness, results);
 					if (corrected.length === 0) throw invalid("this slot no longer counts the failing results");
 					return { corrected };
 				}
 				const klass = failureClass(answer);
-				setResultExcuses(ctx, witness, results, klass, { kind: "slot", slot: subject.slot });
+				await setResultExcuses(ctx, witness, results, klass, { kind: "slot", slot: subject.slot });
 				return { class: klass, results, slot: subject.slot };
 			}
 			case "inherited": {
 				const klass = failureClass(answer);
 				const { inherited } = json<{ inherited: { result: number; base: number[] }[] }>(question.evidence);
-				setResultExcuses(
+				await setResultExcuses(
 					ctx,
 					witness,
 					inherited.map((row) => row.result),
@@ -465,11 +477,11 @@ const failureHandler: Handler<"failure"> = {
 		}
 		const klass = failureClass(answer);
 		// A decision that holds on certain targets excuses those and no other.
-		const policy = currentPolicy(ctx.db, ctx.project.id);
+		const policy = await currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
 			.holds({ question, answer, now: ctx.now, policy })
 			.find((term) => term.until === "this-target");
-		setExcuse(ctx, witness, {
+		await setExcuse(ctx, witness, {
 			signature: subject.signature,
 			scope: subject.scope,
 			class: klass,
@@ -480,12 +492,19 @@ const failureHandler: Handler<"failure"> = {
 		// gate is never left blocked by a failure nobody is being asked about.
 		const covered = here?.until === "this-target" ? here.targets : null;
 		const [decidedOn] = covered ?? [];
-		const reask =
-			decidedOn === undefined
-				? []
-				: (json<{ targets?: number[] }>(question.evidence).targets ?? []).filter(
-						(other) => other !== decidedOn && mustTarget(ctx.db, other).what === mustTarget(ctx.db, decidedOn).what,
-					);
+		let reask: number[] = [];
+		if (decidedOn !== undefined) {
+			const seen = json<{ targets?: number[] }>(question.evidence).targets ?? [];
+			const targets = new Map(
+				(await targetsByIds(ctx.db, [...new Set([decidedOn, ...seen])])).map((row) => [row.id, row]),
+			);
+			const where = (id: number) => {
+				const target = targets.get(id);
+				if (!target) throw new Error(`target ${id} is missing`);
+				return target.what;
+			};
+			reask = seen.filter((other) => other !== decidedOn && where(other) === where(decidedOn));
+		}
 		return {
 			class: klass,
 			signature: subject.signature,
@@ -494,13 +513,13 @@ const failureHandler: Handler<"failure"> = {
 			...(reask.length > 0 ? { reask } : {}),
 		};
 	},
-	revert(ctx, question, decision) {
+	async revert(ctx, question, decision) {
 		const subject = question.subject;
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
-		if (effects.corrected) restoreFailures(ctx, decision.id);
+		if (effects.corrected) await restoreFailures(ctx, decision.id);
 		if (effects.class) {
-			dropExcuse(ctx, subject.signature, subject.scope, decision.id);
-			dropResultExcuses(ctx, decision.id);
+			await dropExcuse(ctx, subject.signature, subject.scope, decision.id);
+			await dropResultExcuses(ctx, decision.id);
 		}
 	},
 	holds({ question, answer, now, policy }) {
@@ -549,18 +568,19 @@ const failureHandler: Handler<"failure"> = {
 			}
 		}
 	},
-	isAuthor: () => false,
+	isAuthor: async () => false,
 	/**
 	 * A cause answer judges its failure producers in its scope. A slot settlement judges only that slot's parties.
 	 */
-	isProducer(ctx, question) {
+	async isProducer(ctx, question) {
 		const subject = question.subject;
 		const actor = ctx.actor.id;
 		const kept = json<{ producers?: number[]; parties?: number[] }>(question.evidence);
 		if ((kept.producers ?? []).includes(actor) || (kept.parties ?? []).includes(actor)) return true;
-		if (subject.kind === "slot") return disputeParties(ctx, question).includes(actor);
-		const reported = producedCause(ctx.db, ctx.project.id, subject.signature, actor).some(
-			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
+		if (subject.kind === "slot") return (await disputeParties(ctx, question)).includes(actor);
+		const reported = await someAsync(
+			await producedCause(ctx.db, ctx.project.id, subject.signature, actor),
+			async (seen) => scopeOf(await mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);
 		if (reported) return true;
 		return false;
@@ -574,7 +594,7 @@ type Suggestion =
 	| { case: { title: string; folder?: string; steps: string[] } };
 
 const findingHandler: Handler<"finding"> = {
-	*effect(ctx, _witness, question, answer, tools) {
+	async *effect(ctx, _witness, question, answer, tools) {
 		if (answer.is !== "accept" || !answer.apply) return {};
 		const evidence = json<{ suggest?: Suggestion; finderId?: number; case?: string; step?: string }>(question.evidence);
 		if (!evidence.suggest)
@@ -589,8 +609,8 @@ const findingHandler: Handler<"finding"> = {
 			};
 		} else {
 			if (!evidence.case) throw invalid("the finding does not name a case to change");
-			const row = mustCase(ctx.db, ctx.project.id, evidence.case);
-			const body: CaseBody = bodyOf(ctx.db, row.id, row.head);
+			const row = await mustCase(ctx.db, ctx.project.id, evidence.case);
+			const body: CaseBody = await bodyOf(ctx.db, row.id, row.head);
 			const stepId = evidence.suggest.step ?? evidence.step;
 			const suggestion = evidence.suggest;
 			const steps = body.steps.map((step) =>
@@ -603,11 +623,12 @@ const findingHandler: Handler<"finding"> = {
 			edit = { op: "edit", case: evidence.case, base: row.head, body: { steps } };
 		}
 		// The suggestion becomes a proposal authored by the finder, and meets the same adopt policy as any edit.
-		const finder = evidence.finderId !== undefined ? actorById(ctx.db, evidence.finderId, ctx.project.id) : ctx.actor;
+		const finder =
+			evidence.finderId !== undefined ? await actorById(ctx.db, evidence.finderId, ctx.project.id) : ctx.actor;
 		const asFinder: Ctx = { ...ctx, actor: finder };
 		const sealed = yield* sealSteps(asFinder, { edits: [edit], reason: `From finding ${question.title}` });
 		if (!sealed) return { applied: false };
-		const raised = yield* raiseAdopt(asFinder, { raise: tools.raiseSteps }, sealed);
+		const raised = yield* await raiseAdopt(asFinder, { raise: tools.raiseSteps }, sealed);
 		// A batch can apply many single-case suggestions, each too small for the case-loop slices.
 		yield;
 		return {
@@ -616,10 +637,10 @@ const findingHandler: Handler<"finding"> = {
 			status: raised.s === "decided" ? "adopted" : "open",
 		};
 	},
-	revert() {},
+	async revert() {},
 	holds: ({ question }) => untilBasisChanges(question),
-	isAuthor: () => false,
-	isProducer(ctx, question) {
+	isAuthor: async () => false,
+	async isProducer(ctx, question) {
 		return json<{ finderId?: number }>(question.evidence).finderId === ctx.actor.id;
 	},
 	undoable: true,
@@ -628,25 +649,25 @@ const findingHandler: Handler<"finding"> = {
 
 const signoffHandler: Handler<"signoff"> = {
 	// biome-ignore lint/correctness/useYield: every decision effect is a generator; sign-off has no bulk work.
-	*effect(ctx, witness, question, answer) {
+	async *effect(ctx, witness, question, answer) {
 		if (answer.is === "reject") return {};
-		const run = runById(ctx.db, json<{ run: number }>(question.subject).run);
+		const run = await runById(ctx.db, json<{ run: number }>(question.subject).run);
 		if (!run) throw notFound("run");
 		// A run is closed on what it shows now, never on what it showed when the sign-off was asked.
-		const now = gateOf(ctx, run);
+		const now = await gateOf(ctx, run);
 		if (now.verdict !== "passed")
 			throw conflict(`${runRef(run)} no longer passes (${now.reason}); it cannot be closed`);
-		closeRun(ctx, witness, run);
+		await closeRun(ctx, witness, run);
 		return { closed: `R-${run.no}` };
 	},
-	revert(ctx, question, decision) {
+	async revert(ctx, question, decision) {
 		if (!json<{ closed?: string }>(decision.effects).closed) return;
-		const run = runById(ctx.db, json<{ run: number }>(question.subject).run);
-		if (run) reopenRun(ctx, run, decision.id);
+		const run = await runById(ctx.db, json<{ run: number }>(question.subject).run);
+		if (run) await reopenRun(ctx, run, decision.id);
 	},
 	holds: ({ question }) => untilBasisChanges(question),
-	isAuthor: () => false,
-	isProducer: () => false,
+	isAuthor: async () => false,
+	isProducer: async () => false,
 	undoable: true,
 	undoHint: "",
 };
@@ -658,7 +679,7 @@ type AnyHandler = {
 		question: QuestionRow,
 		answer: AnyAnswer,
 		tools: Tools,
-	) => Generator<undefined, Record<string, unknown>, void>;
+	) => AsyncGenerator<undefined, Record<string, unknown>, void>;
 	revert: Handler<Kind>["revert"];
 	holds: (input: { question: QuestionRow; answer: AnyAnswer; now: number; policy: Policy }) => HoldTerm[];
 	isAuthor: Handler<Kind>["isAuthor"];
@@ -680,3 +701,14 @@ const TYPED: { [K in Kind]: Handler<K> } = {
  * what makes handing each handler its own answer type sound; this map only erases that pairing for the lookup.
  */
 export const HANDLERS: Record<Kind, AnyHandler> = TYPED as unknown as Record<Kind, AnyHandler>;
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
+}
+
+async function someAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return true;
+	return false;
+}

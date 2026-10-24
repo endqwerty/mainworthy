@@ -72,7 +72,7 @@ actor ReportReplies: Transport {
 @MainActor struct RunReportRecoveryTests {
 	func setup() async throws -> (OpenRunScreen, ProjectClient, ReportReplies, RunExecution) {
 		let transport = ReportReplies()
-		let client = try await Live.signedIn(transport: transport).project(try await Live.project())
+		let client = try await Live.signedIn(transport: transport).project(try await Live.recoveryProject())
 		let run = try #require(try await client.runs().runs.first { $0.name == "Checkout regression" })
 		let screen = OpenRunScreen(project: client, run: run,
 			permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "record", "produce"]), person: Live.name)

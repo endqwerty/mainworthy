@@ -1,6 +1,6 @@
 # Mainworthy: rules for coding agents
 
-A test case management system: TypeScript on Bun 1.4, one SQLite file, a React web UI. Personal project, public on
+A test case management system: TypeScript on Bun 1.4, PostgreSQL 18, a React web UI. Personal project, public on
 GitHub; the owner is `endqwerty`, the person your global instructions name. Your global `~/.<agent>/AGENTS.md` applies
 too.
 
@@ -16,8 +16,8 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and functional tests, browsers included |
-| `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357` |
+| `bun run check` | type-check, lint and functional tests; prerequisites: `scripts/preflight.ts` |
+| `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357`, on the checkout's PostgreSQL cluster if no URL is set |
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
 | `bun scripts/work.ts stop-server` | stop the servers you started |
@@ -31,7 +31,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **One registry.** A capability is an operation in `src/server/ops/index.ts`; HTTP, the OpenAPI document, the CLI, the MCP tools and the web client come from it. Add no route, command or tool beside it | `test/architecture.test.ts`, "the registry" |
 | **The module map.** Imports go down the map. SQL is declared with `sql()` in the module that owns the table; read another module's data through its functions. `src/core` is pure (no I/O); `src/web` imports only `src/core`. Fix the design, not the test | `test/architecture.test.ts`, "the module map" |
 | **Standing changes only through a decision.** Anything "current" (a case's head, a link, an excuse, a closed run, the policy) is written by a function that takes a `Witness`. Add no writer without one | `test/architecture.test.ts`, witness tests |
-| **Schema changes are a new migration** in `src/server/kernel/migrations/`; a shipped one is never edited. Mark `archive` as the comment on `MIGRATIONS` says, and test the behaviour too | `test/architecture.test.ts` keeps versions contiguous and `archive` marks true to the SQL; never editing a shipped one is review judgment |
+| **Schema changes update the PostgreSQL baseline**, `src/server/kernel/schema.sql`, and its snapshot, with a behaviour test. Keep archive compatibility explicit | `test/schema.test.ts` checks the catalog snapshot and prepares declared SQL |
 | **Who a request is, is asked once.** A surface calls `admit` (`src/server/identity/identity.ts`) and holds no secret. A table with the hash of a secret is in `UNEXPORTED` | `test/architecture.test.ts`, identity tests |
 | **A phone is styled in one file**, `src/web/phone.css`, each rule under `:root[data-layout="phone"]`. A screen adds no touch control for what a key does. A binding is `list: true` only when it decides nothing about the selected row | `test/architecture.test.ts`, "the phone layout" |
 | **The iPhone app reads the server through one contract** (decision 0023): `scripts/ios/contract.ts`. Never edit a `Generated/` directory (`bun scripts/ios.ts gen`). Write no team id into the repository | `test/ios-contract.test.ts`; `ios/README.md` says what to do when it fails |
@@ -40,7 +40,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
 | **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). After adding or splitting tests, refresh `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
 | **Guard only what the design allows.** Before adding a check, test or audit fix, name who reaches the state; if the design rules it out, say so and add nothing (the owner, 2026-10-24: "Don't overly guard against situations that have been architected to not happen") | review judgment |
-| **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Elapsed-time measurements run separately with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
+| **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Timing and database process cleanup tests run alone with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
 | **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` holds the failure question's sentence to the server; other screen copy is review judgment |
 | **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither knows if a sentence is still true) |

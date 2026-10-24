@@ -154,9 +154,13 @@ test.skipIf(!browserAvailable)(
 			await h.page.getByLabel("Case title", { exact: true }).press("Enter");
 			await h.page.getByLabel("Step 1", { exact: true }).fill("Open the application");
 			await h.page.getByLabel("Step 1", { exact: true }).press("Escape");
+			await eventually(
+				() => server.api("find", { in: "cases" }),
+				(reply) => reply.items.some((item) => item.ref === "C-1"),
+			);
 			const view = await eventually(
 				async () => CaseView.safeParse((await server.api("get", { refs: ["C-1"] }))[0]),
-				(parsed) => parsed.success,
+				(parsed) => parsed.success && parsed.data.steps[0]?.action === "Open the application",
 			);
 			expect(view).toMatchObject({
 				success: true,

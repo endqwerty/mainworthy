@@ -3,6 +3,7 @@ import { random } from "../src/cli/demo/cases.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { replacesInLane } from "../src/core/runs.ts";
 import { RerunsReply, type StatsKind, type StatsOf } from "../src/core/stats.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { parsePlaywright } from "../src/surfaces/formats/playwright.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -12,7 +13,7 @@ import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const DAY = 86_400_000;
 let h: Harness;
-afterEach(() => h.close());
+afterEach(async () => await h?.close());
 
 const stats = async <K extends StatsKind>(input: { of: K } & Record<string, unknown>) =>
 	await h.call<StatsOf<K>>("stats", input);
@@ -193,7 +194,13 @@ describe("flaky tests and time lost to reruns", () => {
 			unknown: 0,
 		});
 		// Earlier builds and archives can contain durations above today's input limit.
-		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 9000000000000000");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<[], Record<string, unknown>>("UPDATE result_tries SET duration_ms = 9000000000000000")),
+				),
+		);
 		expect(await stats({ of: "reruns", days: 1 })).toMatchObject({
 			reruns: 2200,
 			lostMs: Number.MAX_SAFE_INTEGER,
@@ -201,14 +208,26 @@ describe("flaky tests and time lost to reruns", () => {
 			items: [{ lostMs: Number.MAX_SAFE_INTEGER }, { lostMs: Number.MAX_SAFE_INTEGER }],
 		});
 		// Each execution's own sum can overflow too, before costs are added across executions.
-		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 9000000000000000000");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<[], Record<string, unknown>>("UPDATE result_tries SET duration_ms = 9000000000000000000")),
+				),
+		);
 		expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 2200, lostMs: Number.MAX_SAFE_INTEGER });
 	});
 
 	test("historical repeated pipeline durations cannot overflow the reruns report", async () => {
 		h = await harness({ unlinked: "track" });
 		for (const attempt of [1, 2, 3]) await h.call("report", ciReport({ commit: "aaaa0001", n: 1, attempt }));
-		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000000");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<[], Record<string, unknown>>("UPDATE results SET duration_ms = 9000000000000000000")),
+				),
+		);
 		expect(await stats({ of: "reruns", days: 1 })).toMatchObject({
 			reruns: 2,
 			lostMs: Number.MAX_SAFE_INTEGER,
@@ -229,8 +248,18 @@ describe("flaky tests and time lost to reruns", () => {
 		});
 		await h.call("report", ciReport({ commit: "aaaa0001", n: 3, attempt: 2, only: [1] }));
 		// The archive format can retain signed durations that a new report would refuse.
-		h.app.db.raw.exec("UPDATE results SET duration_ms = -10");
-		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = -1");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () => await db.run(sql<[], Record<string, unknown>>("UPDATE results SET duration_ms = -10")),
+				),
+		);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () => await db.run(sql<[], Record<string, unknown>>("UPDATE result_tries SET duration_ms = -1")),
+				),
+		);
 		const read = async () => RerunsReply.parse(await stats({ of: "reruns", days: 1 }));
 		expect(await read()).toMatchObject({
 			reruns: 3,
@@ -238,7 +267,17 @@ describe("flaky tests and time lost to reruns", () => {
 			unknown: 0,
 			items: [{ lostMs: 0 }, { lostMs: 0 }, { lostMs: 0 }],
 		});
-		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 7 WHERE id = (SELECT max(id) FROM result_tries)");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<[], Record<string, unknown>>(
+								"UPDATE result_tries SET duration_ms = 7 WHERE id = (SELECT max(id) FROM result_tries)",
+							),
+						),
+				),
+		);
 		expect(await read()).toMatchObject({
 			reruns: 3,
 			lostMs: 7,
@@ -506,7 +545,7 @@ describe("what a flip and a rerun are (review of #461)", () => {
 	test("an automated test an agent reports is one of the automated tests", async () => {
 		h = await harness({ unlinked: "track" });
 		await h.call("report", ciReport({ commit: "aaaa0001", n: 2 }));
-		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 		const extra = ciReport({ commit: "aaaa0001", n: 3, only: [2] });
 		await h.call("report", { ...extra, method: "agent" }, agent);
 		expect(await stats({ of: "flaky", days: 1 })).toMatchObject({ tests: 3 });
@@ -530,7 +569,7 @@ describe("what a flip and a rerun are (review of #461)", () => {
 				batchAttempt,
 				{ reruns: 1, lostMs: 999 },
 			]);
-			h.close();
+			await h.close();
 		}
 		h = await harness();
 	});
@@ -558,7 +597,16 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		await send("pass", 777, { corrects: first });
 		const sibling = await send("fail", 555);
 		// Stored history from before second corrections were refused still folds, including after archive import.
-		h.app.db.raw.query("UPDATE results SET corrects = ? WHERE id = ?").run(original, sibling);
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<readonly SqlValue[], Record<string, unknown>>("UPDATE results SET corrects = $1 WHERE id = $2"),
+							[original, sibling],
+						),
+				),
+		);
 		// Two corrections stand, 777 ms (pass) and 555 ms (fail): the attempt counts the worse, as the gate does.
 		expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 555 });
 	});
@@ -617,13 +665,23 @@ describe("automation and its backlog", () => {
 				body: { title, methods: ["human"], automate: "wanted" },
 			})),
 		});
-		for (let i = 0; i < 1025; i++)
-			await h.call("report", {
-				target: { session: `manual-${i}` },
-				results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 1 }],
-			});
+		await h.call("report", {
+			target: { session: "manual-history" },
+			results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 1 }],
+		});
 		// Historical and restored rows are not restricted by today's report input limit.
-		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000");
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.exec(`
+ UPDATE results SET duration_ms = 9000000000000000;
+ INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at)
+ SELECT r.project,r.test,r.seq,r.ord+u.n,r.batch,r.target,r.method,r.actor,r.basis,r.basis_case,r.basis_version,r.basis_claim,r.outcome,r.attempt+u.n,r.duration_ms,r.at
+ FROM results r CROSS JOIN generate_series(1,1024) AS u(n);
+`),
+				),
+		);
 		await h.call("report", {
 			target: { session: "zero" },
 			results: [{ test: { case: "C-2" }, outcome: "pass", durationMs: 0 }],

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Policy } from "../core/kinds.ts";
 import { parseCase } from "../core/markdown.ts";
 import { ReportReceipt } from "../core/ops.ts";
+import { type SqlValue, sql } from "../server/kernel/db.ts";
 import { withInstance } from "./test-support.ts";
 
 const Case = z.object({ ref: z.string(), title: z.string(), methods: z.array(z.string()), automate: z.string() });
@@ -164,7 +165,14 @@ test("bad CSV, encoding, options and existing aliases leave the project unchange
 		])
 			expect(await run(["import", file, ...flags])).toMatchObject({ code: 4 });
 		expect(z.object({ items: z.array(z.unknown()) }).parse(await client.call("find", {})).items).toHaveLength(0);
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals").get()?.n).toBe(0);
+		expect(
+			(
+				await instance.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], { n: number }>("SELECT count(*) AS n FROM proposals"), []),
+				)
+			)?.n,
+		).toBe(0);
 		await Bun.write(file, "id,title\nOLD1,First");
 		expect(await run(["import", file, "--format", "csv"])).toMatchObject({ code: 0 });
 		await Bun.write(file, "id,title\nOLD2,New\nOLD1,Duplicate");

@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import tempfile
@@ -28,6 +29,7 @@ source = (
 )
 env = {
     **os.environ,
+    "SERVICE_PASSWORD_POSTGRES": "synthetic0database0password",
     "MAINWORTHY_TRUSTED_PROXY": "172.30.231.0/24",
     "MAINWORTHY_CLIENT_ADDRESS_HEADER": "x-mainworthy-client",
 }
@@ -57,6 +59,21 @@ assert app_config["environment"]["MAINWORTHY_LOCKDOWN"] == "1" and not app_confi
     "ports"
 )
 assert config["services"]["tailscale"]["environment"]["TS_USERSPACE"] == "true"
+assert config["networks"]["database"]["internal"] is True
+assert set(config["services"]["postgres"]["networks"]) == {"database"}
+assert not config["services"]["postgres"].get("ports")
+assert app_config["environment"]["MAINWORTHY_DATABASE_URL"].endswith(
+    "@postgres:5432/mainworthy"
+)
+assert any(
+    mount["source"] == "mainworthy-data" and mount["target"] == "/data"
+    for mount in app_config["volumes"]
+)
+assert any(
+    mount["source"] == "mainworthy-postgres"
+    and mount["target"] == "/var/lib/postgresql"
+    for mount in config["services"]["postgres"]["volumes"]
+)
 # Start the real Compose service once: this validates interpolation and read-only startup.
 compose_path = WORK / "compose.yaml"
 compose_path.write_text(source)
@@ -319,6 +336,23 @@ try:
     assert state(fixture)["State"]["Running"], docker("logs", fixture).stderr
     ips = state(fixture)["NetworkSettings"]["Networks"][net]
     peer4, peer6 = ips["IPAddress"], ips["GlobalIPv6Address"]
+    database = run(
+        "postgres",
+        "--network", net,
+        "--network-alias", "database",
+        "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
+        "-e", "POSTGRES_INITDB_ARGS=--locale=C --encoding=UTF8",
+        image="postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6",
+    )
+    for _ in range(150):
+        if docker(
+            "exec", database, "pg_isready", "-U", "postgres", ok=False
+        ).returncode == 0:
+            break
+        time.sleep(0.2)
+    else:
+        raise AssertionError("PostgreSQL not ready")
+    database_url = "postgres://postgres@database:5432/postgres"
     setup = [
         "--user",
         "0:0",
@@ -342,6 +376,8 @@ try:
         "-e",
         "MAINWORTHY_LOCKDOWN=1",
         "-e",
+        "MAINWORTHY_DATABASE_URL=" + database_url,
+        "-e",
         "MAINWORTHY_OWNER_TOKEN=synthetic-round-five-token-at-least-32",
         "-e",
         "MAINWORTHY_DEMO=",
@@ -364,6 +400,37 @@ try:
     )
     wait(app, True)
     appns = "container:" + app
+    rules = docker(
+        "exec", app, "nft", "list", "table", "inet", "mainworthy_lockdown"
+    ).stdout
+    allowed = re.findall(r"ip6? daddr (\S+) tcp dport 5432 ct state new accept", rules)
+    assert len(allowed) == 1, rules
+    database_ip = allowed[0]
+    database_network = state(database)["NetworkSettings"]["Networks"][net]
+    assert database_ip in (
+        database_network["IPAddress"], database_network["GlobalIPv6Address"]
+    )
+    # SSLRequest has a one-byte response even when PostgreSQL has no TLS certificate.
+    pg_probe = (
+        'import socket,struct; '
+        f's=socket.create_connection(({database_ip!r},5432),timeout=2); '
+        's.sendall(struct.pack("!II",8,80877103)); '
+        'assert s.recv(1) in (b"S",b"N")'
+    )
+    assert probe(appns, pg_probe).returncode == 0
+    report("locked app namespace reaches configured PostgreSQL endpoint")
+    # A reachable listener at the database address on another port is still denied.
+    run(
+        "database-other-port", "--network", "container:" + database,
+        image=TOOLS_IMAGE, command=("python3", "-c", FIXTURE),
+    )
+    time.sleep(0.3)
+    other_port = 7359 if ":" in database_ip else 7357
+    tcp(net, database_ip, other_port, True)
+    tcp(appns, database_ip, other_port, False)
+    tcp(net, peer4, 7357, True)
+    tcp(appns, peer4, 7357, False)
+    report("database wrong port and unrelated reachable address stay blocked")
     caps = docker("exec", app, "cat", "/proc/1/status").stdout
     for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
         assert field + ":\t0000000000000000" in caps
@@ -463,6 +530,7 @@ try:
         docker("restart", app)
         wait(app, True)
         assert request(port).status == 200
+        assert probe(appns, pg_probe).returncode == 0
         caps2 = docker("exec", app, "cat", "/proc/1/status").stdout
         for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
             assert field + ":\t0000000000000000" in caps2
@@ -649,6 +717,15 @@ try:
     report("direct internal sidecar hop reaches app")
     for label, extra in [
         ("invalid-mode", ["-e", "MAINWORTHY_LOCKDOWN=bad"]),
+        ("invalid-database", ["-e", "MAINWORTHY_DATABASE_URL=not-a-url"]),
+        (
+            "invalid-database-port",
+            ["-e", "MAINWORTHY_DATABASE_URL=postgres://database:65536/postgres"],
+        ),
+        (
+            "unresolved-database",
+            ["-e", "MAINWORTHY_DATABASE_URL=postgres://unresolved.invalid/postgres"],
+        ),
         (
             "invalid-policy",
             [
@@ -680,6 +757,8 @@ try:
         "/data:uid=10001,gid=10001",
         "-e",
         "MAINWORTHY_OWNER_TOKEN=synthetic-round-five-token-at-least-32",
+        "-e",
+        "MAINWORTHY_DATABASE_URL=" + database_url,
     )
     wait(default)
     tcp("container:" + default, peer4, 7357, True)

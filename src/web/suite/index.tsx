@@ -308,7 +308,7 @@ export function SuiteScreen() {
 	const readCase = useCallback(
 		(ref: string): Promise<{ rows: Api["get"]["reply"] } | { failure: string }> => {
 			const pending = owedReads.current.get(ref);
-			if (pending) return pending;
+			if (pending !== undefined) return pending;
 			const reading = (async () => {
 				try {
 					const rows = await call("get", { refs: [ref] }, { project, owner });
@@ -1198,7 +1198,7 @@ export function SuiteScreen() {
 		liveDrafts.current.set(snapshot.id, snapshot);
 		setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
 		const existing = pending.current.get(snapshot.id);
-		if (existing) {
+		if (existing !== undefined) {
 			await existing;
 			const latest = liveDrafts.current.get(adoptedRefs.current.get(snapshot.id) ?? snapshot.id);
 			if (sessionCurrent(owner) && latest?.dirty) await sealDraft({ keepalive, saved: latest });
@@ -1290,7 +1290,7 @@ export function SuiteScreen() {
 				if (after?.startsWith("draft:")) {
 					const predecessor = after;
 					const request = pending.current.get(predecessor);
-					if (request) await request;
+					if (request !== undefined) await request;
 					if (!sessionCurrent(owner)) return;
 					after = adoptedRefs.current.get(predecessor) ?? null;
 				}
@@ -1962,7 +1962,7 @@ export function SuiteScreen() {
 				return next;
 			});
 		return {
-			rollback: remove,
+			discard: remove,
 			confirm(edits = entry.edits): void {
 				entry.edits = edits;
 				supersedeMoves(earlier, entry);
@@ -2031,13 +2031,13 @@ export function SuiteScreen() {
 			const reply = await ready;
 			if (!sessionCurrent(owner)) return;
 			if (reply.status !== "adopted") {
-				optimistic.rollback();
+				optimistic.discard();
 				if (undo.current === action) undo.current = previous;
 				setStatus(waitingStatus("Proposed", reply.question ?? ""));
 			} else {
 				const changed = new Set(reply.placements.flatMap((edit) => edit.cases)).size;
 				if (changed) optimistic.confirm();
-				else optimistic.rollback();
+				else optimistic.discard();
 				if (undo.current === action && (!action.queued || !changed)) {
 					setStatus(changed ? `${changed} case${changed === 1 ? "" : "s"} changed. Press u to undo.` : nothingPlaced);
 				}
@@ -2046,7 +2046,7 @@ export function SuiteScreen() {
 			wantsRead = !action.queued || reply.status !== "adopted";
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
-			optimistic.rollback();
+			optimistic.discard();
 			if (obsoleteProject(error)) {
 				undo.current = null;
 				setStatus(placementObsolete);
@@ -2166,12 +2166,12 @@ export function SuiteScreen() {
 					if (undo.current === action && changed) undo.current = null;
 					setStatus(changed ? "Undone. The inverse is recorded." : nothingPlaced);
 				} else {
-					optimistic.rollback();
+					optimistic.discard();
 					action.queued = false;
 					setStatus(waitingStatus("Undo proposed", reply.question ?? ""));
 				}
 			} catch (error) {
-				optimistic.rollback();
+				optimistic.discard();
 				action.queued = false;
 				if (obsoleteProject(error)) {
 					if (undo.current === action) undo.current = null;
