@@ -4,9 +4,7 @@ import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import { sql } from "../src/server/kernel/db.ts";
-import { OPS } from "../src/server/ops/index.ts";
-import { invoke } from "../src/server/ops/registry.ts";
-import { ciReport } from "./helpers.ts";
+import { seedPolicyChanges } from "./policy-fixture.ts";
 
 const CHANGE_RUNS = 6000;
 const LIMIT_MS = 750;
@@ -15,22 +13,7 @@ async function adoptWhilePolling(): Promise<number> {
 	return await withInstance(async ({ instance, client }) => {
 		await client.call("admin", { do: "project.create", key: "policy-latency", preset: "standard", unlinked: "ask" });
 		const project = client.with({ project: "policy-latency" });
-		for (let pr = 1; pr <= CHANGE_RUNS; pr++) {
-			const receipt = await invoke(instance.app, OPS, {
-				op: "report",
-				project: "policy-latency",
-				actor: async () => instance.owner,
-				input: ciReport({
-					commit: `policy-head-${pr}`,
-					pr,
-					branch: `feature/${pr}`,
-					base: "base",
-					n: 10,
-					fail: { 0: "checkout failed" },
-				}),
-			});
-			expect(receipt).toMatchObject({ ok: true, result: { fresh: true, counts: { total: 10, fail: 1 } } });
-		}
+		await seedPolicyChanges(instance, CHANGE_RUNS);
 		const proposal = await project.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
 		expect(proposal.status).toBe("open");
 		if (!proposal.question) throw new Error("policy proposal has no question");

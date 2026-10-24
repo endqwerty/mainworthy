@@ -792,10 +792,21 @@ test("P6 a refused 422 commit backs off and stops during one simulated day until
 	});
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
-		for (let minute = 0; minute <= 1440; minute++) {
-			await deliverCommitStatuses(fixture.app, fake.port);
-			fixture.advance(60_000);
+		for (let attempt = 0; attempt < 16; attempt++) {
+			if (attempt > 0) {
+				const { next_at } = await fixture.app.database.read((db) =>
+					db.one(sql<readonly [], { next_at: number }>("SELECT next_at FROM commit_statuses")),
+				);
+				expect(next_at).toBeGreaterThan(fixture.app.now());
+				fixture.advance(next_at - fixture.app.now() - 1);
+				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+				fixture.advance(1);
+			}
+			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(1);
 		}
+		expect(fixture.app.now() - start).toBeLessThan(86_400_000);
+		fixture.advance(start + 1441 * 60_000 - fixture.app.now());
+		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		console.info(`P6 posts for a 422 commit over one day: ${fake.requests.length}`);
 		expect(times.map((time) => time / 60_000)).toEqual([
 			0, 1, 3, 7, 15, 31, 63, 123, 183, 243, 303, 363, 423, 483, 543, 603,
@@ -995,6 +1006,7 @@ for (const failure of ["permission", "lost reply"]) {
 	test(`a lasting ${failure} stops after sixteen attempts and accepted delivery resets the back-off`, async () => {
 		const fixture = await setup();
 		await report(fixture);
+		const start = fixture.app.now();
 		let reject = true;
 		const fake = remote(() => {
 			if (!reject) return response();
@@ -1003,10 +1015,21 @@ for (const failure of ["permission", "lost reply"]) {
 		});
 		const log = spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			for (let minute = 0; minute <= 1440; minute++) {
-				await deliverCommitStatuses(fixture.app, fake.port);
-				fixture.advance(60_000);
+			for (let attempt = 0; attempt < 16; attempt++) {
+				if (attempt > 0) {
+					const { next_at } = await fixture.app.database.read((db) =>
+						db.one(sql<readonly [], { next_at: number }>("SELECT next_at FROM commit_statuses")),
+					);
+					expect(next_at).toBeGreaterThan(fixture.app.now());
+					fixture.advance(next_at - fixture.app.now() - 1);
+					expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+					fixture.advance(1);
+				}
+				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(1);
 			}
+			expect(fixture.app.now() - start).toBeLessThan(86_400_000);
+			fixture.advance(start + 1441 * 60_000 - fixture.app.now());
+			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 			expect(fake.requests).toHaveLength(16);
 			expect(
 				await fixture.app.database.read(

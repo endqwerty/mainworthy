@@ -18,6 +18,7 @@ import {
 	scopeOf,
 	setExcuse,
 	setResultExcuses,
+	targetsByIds,
 	testById,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
@@ -481,15 +482,19 @@ const failureHandler: Handler<"failure"> = {
 		// gate is never left blocked by a failure nobody is being asked about.
 		const covered = here?.until === "this-target" ? here.targets : null;
 		const [decidedOn] = covered ?? [];
-		const reask =
-			decidedOn === undefined
-				? []
-				: await filterAsync(
-						json<{ targets?: number[] }>(question.evidence).targets ?? [],
-						async (other) =>
-							other !== decidedOn &&
-							(await mustTarget(ctx.db, other)).what === (await mustTarget(ctx.db, decidedOn)).what,
-					);
+		let reask: number[] = [];
+		if (decidedOn !== undefined) {
+			const seen = json<{ targets?: number[] }>(question.evidence).targets ?? [];
+			const targets = new Map(
+				(await targetsByIds(ctx.db, [...new Set([decidedOn, ...seen])])).map((row) => [row.id, row]),
+			);
+			const where = (id: number) => {
+				const target = targets.get(id);
+				if (!target) throw new Error(`target ${id} is missing`);
+				return target.what;
+			};
+			reask = seen.filter((other) => other !== decidedOn && where(other) === where(decidedOn));
+		}
 		return {
 			class: klass,
 			signature: subject.signature,
@@ -690,12 +695,6 @@ export const HANDLERS: Record<Kind, AnyHandler> = TYPED as unknown as Record<Kin
 async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
 	const out: R[] = [];
 	for (const row of rows) out.push(await callback(row));
-	return out;
-}
-
-async function filterAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
-	const out: T[] = [];
-	for (const row of rows) if (await callback(row)) out.push(row);
 	return out;
 }
 

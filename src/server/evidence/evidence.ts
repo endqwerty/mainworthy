@@ -2224,7 +2224,10 @@ export async function proofOf(db: ReadDb, row: { id: number; head: number }): Pr
 export const receiptDetails = async (db: ReadDb, ids: readonly number[]) =>
 	ids.length ? await db.all(Q.receiptDetails, { ids }) : [];
 
-export const resultsByIds = async (db: ReadDb, ids: readonly number[]): Promise<ResultRow[]> =>
+export const resultsByIds = async (
+	db: ReadDb,
+	ids: readonly number[],
+): Promise<(ResultRow & { job: string; standing: boolean })[]> =>
 	ids.length ? await db.all(Q.resultsByIds, { ids }) : [];
 export async function unknownSignatureIds(db: ReadDb, ids: readonly (number | null)[]): Promise<Set<number>> {
 	const found = new Set<number>();

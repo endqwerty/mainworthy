@@ -313,6 +313,27 @@ const Q = {
 		`INSERT INTO versions (case_id, no, parent, body, hash, claim_hash, proposal, decision, author, reason, at, seq)
 		 VALUES ($id, $no, $parent, $body, $hash, $claim, $proposal, $decision, $author, $reason, $at, $seq)`,
 	),
+	editVersions: sql<{
+		rows: string;
+		proposal: number;
+		decision: number;
+		actor: number;
+		reason: string | null;
+		at: number;
+		seq: number;
+	}>(`
+ INSERT INTO versions (case_id,no,parent,body,hash,claim_hash,proposal,decision,author,reason,at,seq)
+ SELECT id,head,head-1,body,hash,claim,$proposal,$decision,$actor,$reason::text,$at,$seq
+ FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint,head bigint,body text,hash text,claim text)`),
+	editHeads: sql<{ rows: string; actor: number; at: number; seq: number }>(`
+ UPDATE cases c SET head=x.head,head_hash=x.hash,claim_hash=x.claim,title=x.title,methods=x.methods,
+ automate=x.automate,step_count=x.steps,updated_by=$actor,updated_at=$at,rev=$seq
+ FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint,head bigint,hash text,claim text,title text,methods text,automate text,steps bigint)
+ WHERE c.id=x.id`),
+	dropDocs: sql<{ ids: readonly number[] }>("DELETE FROM search_docs WHERE id=ANY($ids::bigint[])"),
+	editDocs: sql<{ rows: string; project: number }>(`
+ INSERT INTO search_docs (id,title,body,tags,project)
+ SELECT id,title,search,tags,$project FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint,title text,search text,tags text)`),
 	insertPlacement: sql<{
 		id: number;
 		before: string;
@@ -1544,6 +1565,7 @@ export async function* adoptSteps(
 
 	const covered = new Set<number>();
 	let work = 0;
+	let sequentialEditsUntil = 0;
 	for (let at = 0; at < edits.length; at++) {
 		const edit = edits[at];
 		if (!edit) continue;
@@ -1618,6 +1640,88 @@ export async function* adoptSteps(
 				at += batch.length - 1;
 				yield;
 				continue;
+			}
+		}
+
+		if (edit.op === "edit" && at >= sequentialEditsUntil) {
+			const batch: Extract<Resolved, { op: "edit" }>[] = [];
+			const seen = new Set<number>();
+			for (let next = at; next < edits.length && batch.length < SLICE; next++) {
+				const item = edits[next];
+				if (
+					item?.op !== "edit" ||
+					seen.has(item.caseId) ||
+					item.conflicts.length > 0 ||
+					item.body.steps.some((step) => step.use)
+				)
+					break;
+				seen.add(item.caseId);
+				batch.push(item);
+			}
+			if (batch.length > 1) {
+				const cases = new Map((await casesByIds(ctx.db, [...seen])).map((row) => [row.id, row]));
+				const independent = batch.every((item) => {
+					const row = cases.get(item.caseId);
+					return row?.kind === "case" && row.head === item.head;
+				});
+				if (!independent) sequentialEditsUntil = at + batch.length;
+				if (independent) {
+					const previous = new Map(
+						(
+							await versionsOf(
+								ctx.db,
+								batch.map((item) => ({ caseId: item.caseId, no: item.head })),
+							)
+						).map((row) => [row.case_id, row]),
+					);
+					const rows = [];
+					const stamps = [];
+					for (const item of batch) {
+						const row = cases.get(item.caseId);
+						const version = previous.get(item.caseId);
+						if (!row || !version) throw notFound(`version ${item.head}`);
+						const body = cleanBody(item.body, item.body);
+						const hash = versionHash(body);
+						const head = row.head + (hash !== row.head_hash ? 1 : 0);
+						stamps.push({ row, head, hash });
+						if (hash === row.head_hash) continue;
+						const before = json<CaseBody>(version.body);
+						validateFields(body, policy, before);
+						await validateFragments(ctx.db, ctx.project.id, body, row.kind, before);
+						rows.push({
+							id: row.id,
+							head,
+							hash,
+							claim: claimHash(body),
+							title: body.title,
+							methods: JSON.stringify(body.methods),
+							automate: body.automate,
+							steps: body.steps.length,
+							body: JSON.stringify(body),
+							search: await searchText(ctx.db, ctx.project.id, body),
+							tags: json<string[]>(row.tags).join(" "),
+						});
+					}
+					if (rows.length) {
+						const encoded = JSON.stringify(rows);
+						await ctx.db.run(Q.editVersions, {
+							rows: encoded,
+							proposal: proposal.id,
+							decision: decisionOf(witness, "adopt"),
+							actor: author,
+							reason: proposal.reason,
+							at: ctx.now,
+							seq: ctx.seq,
+						});
+						await ctx.db.run(Q.editHeads, { rows: encoded, actor: author, at: ctx.now, seq: ctx.seq });
+						await ctx.db.run(Q.dropDocs, { ids: rows.map((row) => row.id) });
+						await ctx.db.run(Q.editDocs, { rows: encoded, project: ctx.project.id });
+					}
+					for (const { row, head, hash } of stamps) stamp(row, head, hash);
+					at += batch.length - 1;
+					yield;
+					continue;
+				}
 			}
 		}
 

@@ -46,7 +46,7 @@ import {
 	testById,
 	testRef,
 } from "../evidence/evidence.ts";
-import { sameCodeEvidence } from "../evidence/flaky.ts";
+import { sameCodeEvidenceByTests } from "../evidence/flaky.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb } from "../kernel/db.ts";
@@ -102,6 +102,7 @@ import {
 	attributedQuestionsOn,
 	type DecisionRow,
 	decisionById,
+	decisionsByIds,
 	decisionsOf,
 	endPassedHolds,
 	everyQuestionOn,
@@ -309,9 +310,16 @@ export async function* raiseSteps(ctx: Ctx, r: Raise): AsyncGenerator<undefined,
 
 /** The decisions in force about a cause, newest question first. */
 async function standingOn(ctx: Ctx, fingerprint: string): Promise<{ question: QuestionRow; decision: DecisionRow }[]> {
-	return await flatMapAsync(await liveByFingerprint(ctx.db, ctx.project.id, fingerprint), async (question) => {
+	const questions = await liveByFingerprint(ctx.db, ctx.project.id, fingerprint);
+	const decisions = await decisionsByIds(
+		ctx.db,
+		questions.flatMap((question) =>
+			question.state === "decided" && question.decision !== null ? [question.decision] : [],
+		),
+	);
+	return questions.flatMap((question) => {
 		const decision =
-			question.state === "decided" && question.decision !== null ? await decisionById(ctx.db, question.decision) : null;
+			question.state === "decided" && question.decision !== null ? decisions.get(question.decision) : undefined;
 		return decision ? [{ question, decision }] : [];
 	});
 }
@@ -981,14 +989,18 @@ async function askAgain(
 	const others = (await liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint)).filter(
 		(other) => other.id !== question.id,
 	);
+	const decisions = await decisionsByIds(
+		ctx.db,
+		others.flatMap((other) => (other.state !== "open" && other.decision !== null ? [other.decision] : [])),
+	);
 	const covered = new Set<number>();
 	for (const other of others) {
 		if (other.state === "open") {
 			for (const target of json<{ targets?: number[] }>(other.evidence).targets ?? []) covered.add(target);
 			continue;
 		}
-		const decision = other.decision !== null ? await decisionById(ctx.db, other.decision) : null;
-		if (decision === null) continue;
+		const decision = other.decision !== null ? decisions.get(other.decision) : undefined;
+		if (!decision) continue;
 		const terms = json<HoldTerm[]>(decision.holds);
 		if (terms.some((term) => term.until === "results-named")) continue;
 		if (
@@ -1216,6 +1228,13 @@ export async function raiseFailure(
 	const listed = [...tests.values()];
 	const detectorSettings = (await currentPolicy(ctx.db, ctx.project.id)).settings.flakyDetection;
 	const cases = [...new Set(listed.flatMap((test) => (test.case ? [test.case] : [])))];
+	const sampled = listed.slice(0, 50);
+	const evidenceByTest = await sameCodeEvidenceByTests(ctx.db, {
+		project: ctx.project.id,
+		tests: sampled.map((test) => test.id),
+		now: ctx.now,
+		settings: detectorSettings,
+	});
 	return await raise(ctx, {
 		kind: "failure",
 		key,
@@ -1228,14 +1247,13 @@ export async function raiseFailure(
 			// An occurrence that brings no failing result of its own (a pass that makes the slot a dispute) leaves
 			// what the question already shows of the failure.
 			message: group.message ?? earlier.message ?? null,
-			tests: await mapAsync(listed.slice(0, 50), async (test) => {
-				const sameCode = await sameCodeEvidence(ctx.db, {
-					project: ctx.project.id,
-					test: test.id,
-					now: ctx.now,
-					settings: detectorSettings,
-				});
-				sameCode.signals = sameCode.signals.filter((signal) => signal.signature.id === group.signature.id);
+			tests: sampled.map((test) => {
+				const evidence = evidenceByTest.get(test.id);
+				if (!evidence) throw new Error(`failure evidence test ${test.id} was not requested`);
+				const sameCode = {
+					...evidence,
+					signals: evidence.signals.filter((signal) => signal.signature.id === group.signature.id),
+				};
 				return { ...test, ...(sameCode.signals.length > 0 ? { sameCode } : {}) };
 			}),
 			// The list is cut to fifty; the count is not taken from the cut list, so it never falls when a later
