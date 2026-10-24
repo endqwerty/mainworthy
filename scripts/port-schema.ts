@@ -1,11 +1,14 @@
 /** Historical SQLite audit only. Runtime code never imports bun:sqlite.
  * bun scripts/port-schema.ts > <scratch>/first.sql
  * MAINWORTHY_TEST_PG=postgres://... bun scripts/port-schema.ts --check
- * The pinned revision keeps this rerunnable after the SQLite chain is deleted.
- * A shallow clone first needs: git fetch origin 6f8bd211af19b732fcfa6ab7787969a51537c254
+ * The pinned revision keeps this rerunnable after the SQLite chain is deleted. Its final schema is committed in
+ * scripts/port-schema/sqlite-schema.json, so the audit also runs in a `git archive` export with no .git; the
+ * revision never changes, so neither does the file. Where git has the revision, regenerate and compare it with
+ * bun scripts/port-schema.ts --write-sqlite-snapshot (a shallow clone first needs
+ * git fetch origin 6f8bd211af19b732fcfa6ab7787969a51537c254).
  */
 import { Database as SQLite } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SQL } from "bun";
 
@@ -20,7 +23,15 @@ function git(...args: string[]): string {
 	return result.stdout.toString();
 }
 
+const SNAPSHOT = fileURLToPath(new URL("./port-schema/sqlite-schema.json", import.meta.url));
+
+/** The final SQLite schema: the committed snapshot of the pinned revision's 43 migrations. */
 export function sqliteSchema(): ObjectRow[] {
+	return JSON.parse(readFileSync(SNAPSHOT, "utf8")) as ObjectRow[];
+}
+
+/** The same schema replayed from git at the pinned revision; only --write-sqlite-snapshot needs git. */
+export function sqliteSchemaFromGit(): ObjectRow[] {
 	const files = git("ls-tree", "--name-only", `${SQLITE_REVISION}:${migrationPath.slice(0, -1)}`)
 		.trim()
 		.split("\n")
@@ -244,6 +255,8 @@ async function check(): Promise<void> {
 }
 
 if (import.meta.main) {
-	if (process.argv.includes("--check")) await check();
+	if (process.argv.includes("--write-sqlite-snapshot"))
+		writeFileSync(SNAPSHOT, `${JSON.stringify(sqliteSchemaFromGit(), null, "\t")}\n`);
+	else if (process.argv.includes("--check")) await check();
 	else process.stdout.write(firstTranslation());
 }
