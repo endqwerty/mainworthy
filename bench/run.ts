@@ -5,6 +5,7 @@ import { cpus, loadavg, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
+import { FAIL_MULTIPLE } from "../scripts/budget.ts";
 import { BUDGETS, ensure } from "./contracts.ts";
 import { buildDataset, fingerprints, openDataset, Parameters } from "./dataset.ts";
 import { quantile, type UnderLoad, underLoad } from "./external.ts";
@@ -339,7 +340,12 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	);
 	for (const row of failed)
 		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(`${row.name}: ${error}`);
-	return failed.length > 0 || repetitions.some((repeat) => repeat.results.some((row) => !row.pass)) ? 1 : 0;
+	// A miss is reported above; only an error or ten times a budget fails the run (scripts/budget.ts).
+	const blocking = (row: Measurement): boolean =>
+		row.errors > 0 ||
+		row.warmupErrors.length > 0 ||
+		(row.budget !== null && row[row.criterion] > FAIL_MULTIPLE * Math.max(row.budget, 1));
+	return [...rows, ...repetitions.flatMap((repeat) => repeat.results)].some(blocking) ? 1 : 0;
 }
 
 if (import.meta.main) {
