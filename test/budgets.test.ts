@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Workload } from "../bench/measure.ts";
 import { budget } from "../scripts/budget.ts";
+import { observeDatabase } from "../bench/profile.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
@@ -30,7 +31,7 @@ test("quarantined reports remain correct after 3000 earlier trunk commits", asyn
 test("a report that makes many failures go away recomputes each run once, not once per question", async () => {
 	const h = await harness();
 	try {
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const causes = 300;
 		// Letters the signature keeps apart: digits and anything that reads as an identifier are normalised away.
 		const word = (i: number) => [...String(i).padStart(3, "0")].map((digit) => "ghijklmnop"[Number(digit)]).join("");
@@ -49,16 +50,14 @@ test("a report that makes many failures go away recomputes each run once, not on
 		expect((await counts()).failure).toBe(causes);
 
 		let tallies = 0;
-		const db = h.app.db;
-		const all = db.all.bind(db);
-		db.all = ((statement: { text: string }, ...args: unknown[]) => {
+		const restore = observeDatabase(h.app.database, (text) => {
 			if (
-				statement.text ===
-				"SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run ORDER BY result"
+				/SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = \$\d+ ORDER BY result/.test(
+					text,
+				)
 			)
 				tallies++;
-			return (all as (...rest: unknown[]) => unknown[])(statement, ...args);
-		}) as typeof db.all;
+		});
 		try {
 			await h.call(
 				"report",
@@ -66,13 +65,13 @@ test("a report that makes many failures go away recomputes each run once, not on
 				ci,
 			);
 		} finally {
-			db.all = all;
+			restore();
 		}
 		expect((await counts()).failure ?? 0).toBe(0);
 		// Two commits' runs, each read a few times in one report: nowhere near once per question.
 		budget("run reads in one report", tallies, 11, "reads");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -81,7 +80,7 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 	const work = async (failures: number) => {
 		const h = await harness({ unlinked: "track" });
 		try {
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			await h.call(
 				"report",
 				ciReport({
@@ -92,21 +91,15 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 				ci,
 			);
 			const reads = { scans: 0, targets: 0 };
-			const db = h.app.db;
-			const all = db.all.bind(db);
-			const get = db.get.bind(db);
-			db.all = (statement, ...params) => {
+			const restore = observeDatabase(h.app.database, (text) => {
 				if (
-					statement.text ===
-					"SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run ORDER BY result"
+					/SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = \$\d+ ORDER BY result/.test(
+						text,
+					)
 				)
 					reads.scans++;
-				return all(statement, ...params);
-			};
-			db.get = (statement, ...params) => {
-				if (statement.text === "SELECT * FROM targets WHERE id = $id") reads.targets++;
-				return get(statement, ...params);
-			};
+				if (/^SELECT \* FROM targets WHERE id = \$\d+$/.test(text)) reads.targets++;
+			});
 			let receipt: ReportReceipt;
 			try {
 				receipt = await h.call<ReportReceipt>(
@@ -119,8 +112,7 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 					ci,
 				);
 			} finally {
-				db.all = all;
-				db.get = get;
+				restore();
 			}
 			expect(receipt).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
 			expect(await h.call<GateStatus>("gate", { commit: "reuse001", repo: "acme/web" })).toMatchObject({
@@ -130,7 +122,7 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 			expect((await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((q) => q.state)).toEqual(["open"]);
 			return reads;
 		} finally {
-			h.close();
+			await h.close();
 		}
 	};
 	const small = await work(3);
@@ -148,15 +140,13 @@ test("a 500-result trunk page batches landing reads beside 8000 changes", async 
 test("project removal preserves unrelated results and their constraints", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
-		removalFixture(app.db, 5_000, 20_000);
-		app.db.transaction(() => {
-			app.db.exec("PRAGMA defer_foreign_keys = ON");
-			removeProject(app.db, "removing", undefined, "deferred");
+		await app.database.write((db) => removalFixture(db, 5_000, 20_000));
+		await app.database.write((db) => db.transaction(() => db.checkedBulk(() => removeProject(db, "removing", undefined, "deferred"))));
+		await app.database.read(async (db) => {
+			expect(await db.allDynamic("SELECT project, count(*) AS n FROM results GROUP BY project")).toEqual([
+				{ project: 901, n: 20_000 },
+			]);
+			expect(await db.allDynamic("SELECT count(*) AS n FROM result_excuses")).toEqual([{ n: 20_000 }]);
 		});
-		expect(app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project").all()).toEqual([
-			{ project: 901, n: 20_000 },
-		]);
-		expect(app.db.raw.query("SELECT count(*) AS n FROM result_excuses").get()).toEqual({ n: 20_000 });
-		expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 	});
 });

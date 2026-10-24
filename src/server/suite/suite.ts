@@ -167,7 +167,9 @@ const Q = {
 		 JOIN versions v ON v.case_id = asked.id AND v.no = asked.no`,
 	),
 	version: sql<{ id: number; no: number }, VersionRow>("SELECT * FROM versions WHERE case_id = $id AND no = $no"),
-	folders: sql<{ project: number }, FolderRow>("SELECT * FROM folders WHERE project = $project ORDER BY parent, rank"),
+	folders: sql<{ project: number }, FolderRow>(
+		'SELECT * FROM folders WHERE project = $project ORDER BY parent NULLS FIRST, rank COLLATE "C", id',
+	),
 	folderById: sql<{ id: number }, FolderRow>("SELECT * FROM folders WHERE id = $id"),
 	folderCaseTags: sql<{ project: number; folder: number }, { tags: string }>(
 		"SELECT tags FROM cases WHERE project = $project AND folder = $folder",
@@ -217,6 +219,49 @@ const Q = {
 		`INSERT INTO cases (kind, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags,
 		                    aliases, created_by, created_at, updated_by, updated_at, rev)
 		 VALUES ($kind, $project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev) RETURNING id`,
+	),
+	placeBatch: sql<{
+		rows: string;
+		project: number;
+		actor: number;
+		at: number;
+		rev: number;
+		proposal: number;
+		decision: number;
+	}>(
+		"WITH asked AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint, folder bigint, rank text, tags text, state text, before text, after text)), " +
+			"moved AS (UPDATE cases c SET folder = x.folder, rank = x.rank, tags = x.tags, state = x.state, updated_by = $actor, updated_at = $at, rev = $rev FROM asked x WHERE c.id = x.id), " +
+			"recorded AS (INSERT INTO placements (case_id, before, after, proposal, decision, actor, at, seq) SELECT id, before, after, $proposal, $decision, $actor, $at, $rev FROM asked), " +
+			"dropped AS (DELETE FROM case_tags t USING asked x WHERE t.case_id = x.id AND NOT (x.tags::jsonb ? t.tag)), " +
+			"tagged AS (INSERT INTO case_tags (project, tag, case_id) SELECT $project, tag, x.id FROM asked x CROSS JOIN LATERAL jsonb_array_elements_text(x.tags::jsonb) tag ON CONFLICT DO NOTHING) " +
+			"UPDATE search_docs d SET tags = (SELECT coalesce(string_agg(tag, ' '), '') FROM jsonb_array_elements_text(x.tags::jsonb) tag) FROM asked x WHERE d.id = x.id AND d.tags IS DISTINCT FROM (SELECT coalesce(string_agg(tag, ' '), '') FROM jsonb_array_elements_text(x.tags::jsonb) tag)",
+	),
+	createBatch: sql<
+		{
+			rows: string;
+			project: number;
+			actor: number;
+			at: number;
+			rev: number;
+			proposal: number;
+			decision: number;
+			reason: string | null;
+		},
+		{ id: number; no: number }
+	>(
+		"WITH asked AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($rows::text::jsonb) AS x(no bigint, kind text, hash text, claim text, title text, methods text, automate text, steps bigint, folder bigint, rank text, tags text, aliases text, body text, search text)), " +
+			"added AS (INSERT INTO cases (kind, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags, aliases, created_by, created_at, updated_by, updated_at, rev) SELECT kind, $project, no, 1, hash, claim, title, methods, automate, steps, folder, rank, tags, aliases, $actor, $at, $actor, $at, $rev FROM asked ORDER BY no RETURNING id, no), " +
+			"versioned AS (INSERT INTO versions (case_id, no, parent, body, hash, claim_hash, proposal, decision, author, reason, at, seq) SELECT a.id, 1, NULL, x.body, x.hash, x.claim, $proposal, $decision, $actor, $reason::text, $at, $rev FROM added a JOIN asked x USING (no)), " +
+			"tagged AS (INSERT INTO case_tags (project, tag, case_id) SELECT $project, tag, a.id FROM added a JOIN asked x USING (no) CROSS JOIN LATERAL jsonb_array_elements_text(x.tags::jsonb) tag), " +
+			"aliased AS (INSERT INTO case_aliases (project, alias, case_id) SELECT $project, alias, a.id FROM added a JOIN asked x USING (no) CROSS JOIN LATERAL jsonb_array_elements_text(x.aliases::jsonb) alias), " +
+			"indexed AS (INSERT INTO search_docs (id, title, body, tags, project) SELECT a.id, x.title, x.search, (SELECT coalesce(string_agg(tag, ' '), '') FROM jsonb_array_elements_text(x.tags::jsonb) tag), $project FROM added a JOIN asked x USING (no)) " +
+			"SELECT id, no FROM added ORDER BY no",
+	),
+	aliasesIn: sql<{ project: number; aliases: readonly string[] }, { alias: string }>(
+		"SELECT alias FROM case_aliases WHERE project = $project AND alias = ANY($aliases::text[])",
+	),
+	insertTags: sql<{ project: number; id: number; tags: readonly string[] }>(
+		"INSERT INTO case_tags (project, tag, case_id) SELECT $project, tag, $id FROM unnest($tags::text[]) tag ON CONFLICT DO NOTHING",
 	),
 	insertAlias: sql<{ project: number; alias: string; id: number }>(
 		"INSERT INTO case_aliases (project, alias, case_id) VALUES ($project, $alias, $id)",
@@ -282,9 +327,7 @@ const Q = {
 		 VALUES ($id, $before, $after, $proposal, $decision, $actor, $at, $seq)`,
 	),
 	clearTags: sql<{ id: number }>("DELETE FROM case_tags WHERE case_id = $id"),
-	insertTag: sql<{ project: number; tag: string; id: number }>(
-		"INSERT INTO case_tags (project, tag, case_id) VALUES ($project, $tag, $id) ON CONFLICT DO NOTHING",
-	),
+
 	dropDoc: sql<{ id: number }>("DELETE FROM search_docs WHERE id = $id"),
 	insertDoc: sql<{ id: number; title: string; body: string; tags: string; project: number }>(
 		"INSERT INTO search_docs (id, title, body, tags, project) VALUES ($id, $title, $body, $tags, $project)",
@@ -606,10 +649,15 @@ function fromOutline(text: string): { body: PartialBody; tags: string[]; covers:
 	return { body: { title: outline.title ?? "", steps }, tags: outline.tags, covers: outline.covers };
 }
 
-export async function searchText(db: ReadDb, project: number, body: CaseBody): Promise<string> {
+export async function searchText(
+	db: ReadDb,
+	project: number,
+	body: CaseBody,
+	fragments?: FragmentCache,
+): Promise<string> {
 	return [
 		body.pre,
-		...(await expandSteps(db, project, body)).map((step) =>
+		...(await expandSteps(db, project, body, fragments)).map((step) =>
 			step.expected ? `${step.action}\n${step.expected}` : step.action,
 		),
 	].join("\n");
@@ -658,7 +706,33 @@ export async function* sealSteps(
 	const conflicts: Sealed["conflicts"] = [];
 	const cases = new Set<string>();
 	const aliases = new Set<string>();
-	const lookedUp = new Map<string, CaseRow>();
+	const occupiedAliases = new Set(
+		(
+			await ctx.db.all(Q.aliasesIn, {
+				project: ctx.project.id,
+				aliases: input.edits.flatMap((edit) => (edit.op === "create" ? (edit.aliases ?? []) : [])),
+			})
+		).map((row) => row.alias),
+	);
+	const references = input.edits.flatMap((edit) => {
+		switch (edit.op) {
+			case "edit":
+			case "restore":
+			case "cover":
+				return [edit.case];
+			case "place":
+				return [...edit.cases, ...(edit.after ? [edit.after] : [])];
+			case "state":
+				return edit.cases;
+			case "fragment":
+				return [edit.fragment, ...edit.cases.map((row) => row.case)];
+			case "create":
+				return edit.after ? [edit.after] : [];
+			default:
+				return [];
+		}
+	});
+	const lookedUp = await findCases(ctx.db, ctx.project.id, references);
 	const lookup = async (text: string): Promise<CaseRow> => {
 		const row = lookedUp.get(text) ?? (await mustCase(ctx.db, ctx.project.id, text));
 		lookedUp.set(text, row);
@@ -677,6 +751,11 @@ export async function* sealSteps(
 				if (edit.from === edit.to) throw invalid("choose a different fragment version");
 				await bodyOf(ctx.db, fragment.id, edit.from);
 				await bodyOf(ctx.db, fragment.id, edit.to);
+				const consumerRows = edit.cases.flatMap((consumer) => {
+					const row = lookedUp.get(consumer.case);
+					return row ? [{ caseId: row.id, no: row.head }] : [];
+				});
+				const bases = new Map((await versionsOf(ctx.db, consumerRows)).map((row) => [row.case_id, row]));
 				const selected = new Set<number>();
 				for (const consumer of edit.cases) {
 					if (++work % SLICE === 0) yield;
@@ -684,7 +763,9 @@ export async function* sealSteps(
 					if (selected.has(row.id)) throw invalid("a fragment batch names each case once");
 					selected.add(row.id);
 					if (row.head !== consumer.base) throw conflict(`${caseRef(row)} changed; redo the fragment batch`);
-					const base = await bodyOf(ctx.db, row.id, row.head);
+					const baseRow = bases.get(row.id);
+					if (!baseRow) throw notFound("version " + row.head + " of " + caseRef(row));
+					const base = json<CaseBody>(baseRow.body);
 					let changed = false;
 					const body = {
 						...base,
@@ -727,8 +808,7 @@ export async function* sealSteps(
 					),
 				];
 				for (const alias of keptAliases) {
-					if (aliases.has(alias) || (await ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias })))
-						throw conflict(`case alias ${alias} is already in use`);
+					if (aliases.has(alias) || occupiedAliases.has(alias)) throw conflict(`case alias ${alias} is already in use`);
 					aliases.add(alias);
 				}
 				let built: { body: PartialBody; tags: string[]; covers: string[] } = {
@@ -876,6 +956,7 @@ export async function* sealSteps(
 	if (resolved.length === 0) return null;
 	const policy =
 		resolved.findLast((edit) => edit.op === "policy")?.policy ?? (await currentPolicy(ctx.db, ctx.project.id));
+	const fragments: FragmentCache = new Map();
 	for (const edit of resolved) {
 		if (++work % SLICE === 0) yield;
 		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") {
@@ -886,6 +967,7 @@ export async function* sealSteps(
 				edit.body,
 				edit.op === "create" ? edit.kind : (row?.kind ?? "case"),
 				row ? await bodyOf(ctx.db, row.id, row.head) : undefined,
+				fragments,
 			);
 		}
 		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
@@ -1250,10 +1332,18 @@ export async function* scopeFactsSteps(
 	};
 	const referencedFolders = new Set<number>();
 	const referencedCases = new Set<number>();
+	const caseIds = edits.flatMap((edit) =>
+		edit.op === "place" || edit.op === "state"
+			? edit.caseIds
+			: edit.op === "edit" || edit.op === "restore" || edit.op === "cover"
+				? [edit.caseId]
+				: [],
+	);
+	const caseRows = new Map((await casesByIds(db, caseIds)).map((row) => [row.id, row]));
 	const existing = async (id: number) => {
 		if (referencedCases.has(id)) return;
 		referencedCases.add(id);
-		const row = await caseById(db, id);
+		const row = caseRows.get(id);
 		if (!row) throw notFound(`case ${id}`);
 		referencedFolders.add(row.folder);
 		folder(index.path(row.folder));
@@ -1380,8 +1470,8 @@ export async function* adoptSteps(
 ): AsyncGenerator<undefined, Adopted, void> {
 	decisionOf(witness, "adopt");
 	const out: Adopted = { cases: [], placements: [], created: [], policyVersion: null };
-	const recordPlacement = async (row: CaseRow, to: Placement): Promise<void> => {
-		for (const inverse of await place(ctx, witness, proposal, row, to)) {
+	const recordPlacement = async (row: CaseRow, to: Placement, batched = false): Promise<void> => {
+		for (const inverse of await place(ctx, witness, proposal, row, to, batched)) {
 			const previous = out.placements.at(-1);
 			if (previous && JSON.stringify({ ...previous, cases: [] }) === JSON.stringify({ ...inverse, cases: [] }))
 				previous.cases.push(...inverse.cases);
@@ -1439,6 +1529,79 @@ export async function* adoptSteps(
 		const edit = edits[at];
 		if (!edit) continue;
 		if (++work % SLICE === 0) yield;
+		if (edit.op === "create" && edit.after === null) {
+			const batch: Extract<Resolved, { op: "create" }>[] = [];
+			for (let next = at; next < edits.length && batch.length < SLICE; next++) {
+				const candidate = edits[next];
+				if (candidate?.op !== "create" || candidate.after !== null) break;
+				batch.push(candidate);
+			}
+			if (batch.length > 1) {
+				const lastNo = await ctx.nextNo("case", batch.length);
+				const fragments: FragmentCache = new Map();
+				const folders = new Map<string, number>();
+				const ranks = new Map<number, string>();
+				const rows = [];
+				for (const [offset, item] of batch.entries()) {
+					validateFields(item.body, policy);
+					await validateFragments(ctx.db, ctx.project.id, item.body, item.kind, undefined, fragments);
+					const key = JSON.stringify(item.folder);
+					let folder = folders.get(key);
+					if (folder === undefined) {
+						folder = await ensureFolder(ctx, item.folder);
+						folders.set(key, folder);
+					}
+					const previous = ranks.get(folder);
+					const rank = previous === undefined ? await rankAfter(ctx, folder, null) : generateKeyBetween(previous, null);
+					ranks.set(folder, rank);
+					rows.push({
+						no: lastNo - batch.length + offset + 1,
+						kind: item.kind,
+						hash: versionHash(item.body),
+						claim: claimHash(item.body),
+						title: item.body.title,
+						methods: JSON.stringify(item.body.methods),
+						automate: item.body.automate,
+						steps: (await expandSteps(ctx.db, ctx.project.id, item.body, fragments)).length,
+						folder,
+						rank,
+						tags: JSON.stringify(item.tags),
+						aliases: JSON.stringify(item.aliases),
+						body: JSON.stringify(item.body),
+						search: await searchText(ctx.db, ctx.project.id, item.body, fragments),
+					});
+				}
+				const aliases = batch.flatMap((item) => item.aliases);
+				const occupied = await ctx.db.all(Q.aliasesIn, { project: ctx.project.id, aliases });
+				if (occupied[0]) throw conflict("case alias " + occupied[0].alias + " is already in use");
+				const added = await ctx.db.all(Q.createBatch, {
+					rows: JSON.stringify(rows),
+					project: ctx.project.id,
+					actor: author,
+					at: ctx.now,
+					rev: ctx.seq,
+					proposal: proposal.id,
+					decision: decisionOf(witness, "adopt"),
+					reason: proposal.reason,
+				});
+				const covers: Parameters<typeof setCovers>[2][number][] = [];
+				for (const [offset, row] of added.entries()) {
+					const item = batch[offset];
+					const data = rows[offset];
+					if (!item || !data) throw new Error("created batch lost its input row");
+					const created = ref("case", row.no);
+					ctx.touched.add(created);
+					out.created.push(created);
+					out.cases.push({ ref: created, version: 1, hash: data.hash });
+					covers.push(...item.covers.map((key) => ({ caseId: row.id, key, title: null, on: true })));
+				}
+				await setCovers(ctx, witness, covers);
+				at += batch.length - 1;
+				yield;
+				continue;
+			}
+		}
+
 		switch (edit.op) {
 			case "create": {
 				for (const alias of edit.aliases ?? []) {
@@ -1499,6 +1662,49 @@ export async function* adoptSteps(
 			}
 			case "place": {
 				const folder = edit.folder ? await ensureFolder(ctx, edit.folder) : null;
+				if (folder !== null && edit.after == null && edit.rank === undefined && edit.caseIds.length > 1) {
+					const rows = await casesByIds(ctx.db, edit.caseIds);
+					const byId = new Map(rows.map((row) => [row.id, row]));
+					if (rows.length === edit.caseIds.length && rows.every((row) => row.folder !== folder)) {
+						const last = await ctx.db.get(Q.lastRank, { project: ctx.project.id, folder });
+						let rank = last?.rank ?? null;
+						const batch = [];
+						for (const id of edit.caseIds) {
+							const row = byId.get(id);
+							if (!row) throw notFound("case " + id);
+							rank = generateKeyBetween(rank, null);
+							const current = json<string[]>(row.tags);
+							const remove = new Set(edit.tags?.remove ?? []);
+							const tags = edit.tags
+								? cleanTags(edit.tags.set ?? [...current, ...edit.tags.add]).filter((tag) => !remove.has(tag))
+								: current;
+							const to = { folder, rank, tags, state: row.state };
+							batch.push({
+								id,
+								folder,
+								rank,
+								tags: JSON.stringify(tags),
+								state: row.state,
+								before: JSON.stringify({ folder: row.folder, rank: row.rank, tags: current, state: row.state }),
+								after: JSON.stringify(to),
+							});
+							await recordPlacement(row, to, true);
+						}
+						for (let start = 0; start < batch.length; start += SLICE) {
+							await ctx.db.run(Q.placeBatch, {
+								rows: JSON.stringify(batch.slice(start, start + SLICE)),
+								project: ctx.project.id,
+								actor: proposal.author,
+								at: ctx.now,
+								rev: ctx.seq,
+								proposal: proposal.id,
+								decision: decisionOf(witness, "adopt"),
+							});
+							yield;
+						}
+						break;
+					}
+				}
 				// A move to another folder or an explicit position re-ranks; a retag alone leaves the order alone.
 				let alreadyAtEnd = folder !== null && edit.after == null && edit.rank === undefined;
 				for (const [at, id] of edit.caseIds.entries()) {
@@ -1640,7 +1846,7 @@ async function indexCase(ctx: Ctx, id: number, body: CaseBody, tags: readonly st
 
 async function writeTags(ctx: Ctx, id: number, tags: readonly string[]): Promise<void> {
 	await ctx.db.run(Q.clearTags, { id });
-	for (const tag of tags) await ctx.db.run(Q.insertTag, { project: ctx.project.id, tag, id });
+	if (tags.length) await ctx.db.run(Q.insertTags, { project: ctx.project.id, tags, id });
 }
 
 async function place(
@@ -1649,33 +1855,37 @@ async function place(
 	proposal: ProposalRow,
 	row: CaseRow,
 	to: Placement,
+	batched = false,
 ): Promise<PlacementEdit[]> {
 	const before: Placement = { folder: row.folder, rank: row.rank, tags: json<string[]>(row.tags), state: row.state };
 	if (JSON.stringify(before) === JSON.stringify(to)) return [];
-	await ctx.db.run(Q.place, {
-		id: row.id,
-		folder: to.folder,
-		rank: to.rank,
-		tags: JSON.stringify(to.tags),
-		state: to.state,
-		actor: proposal.author,
-		at: ctx.now,
-		rev: ctx.seq,
-	});
-	await ctx.db.run(Q.insertPlacement, {
-		id: row.id,
-		before: JSON.stringify(before),
-		after: JSON.stringify(to),
-		proposal: proposal.id,
-		decision: decisionOf(witness, "adopt"),
-		actor: proposal.author,
-		at: ctx.now,
-		seq: ctx.seq,
-	});
-	if (before.tags.join(" ") !== to.tags.join(" ")) {
-		await writeTags(ctx, row.id, to.tags);
-		await indexCase(ctx, row.id, await bodyOf(ctx.db, row.id, row.head), to.tags);
+	if (!batched) {
+		await ctx.db.run(Q.place, {
+			id: row.id,
+			folder: to.folder,
+			rank: to.rank,
+			tags: JSON.stringify(to.tags),
+			state: to.state,
+			actor: proposal.author,
+			at: ctx.now,
+			rev: ctx.seq,
+		});
+		await ctx.db.run(Q.insertPlacement, {
+			id: row.id,
+			before: JSON.stringify(before),
+			after: JSON.stringify(to),
+			proposal: proposal.id,
+			decision: decisionOf(witness, "adopt"),
+			actor: proposal.author,
+			at: ctx.now,
+			seq: ctx.seq,
+		});
+		if (before.tags.join(" ") !== to.tags.join(" ")) {
+			await writeTags(ctx, row.id, to.tags);
+			await indexCase(ctx, row.id, await bodyOf(ctx.db, row.id, row.head), to.tags);
+		}
 	}
+
 	ctx.touched.add(caseRef(row));
 	const ref = caseRef(row);
 	const inverse: PlacementEdit[] = [];
@@ -1789,18 +1999,30 @@ function markdownKind(md: string): CaseKind {
 	return parsed.doc.kind ?? "case";
 }
 
+type FragmentCache = Map<string, { target: CaseRow; body: CaseBody }>;
+async function fragmentPin(db: ReadDb, project: number, pin: NonNullable<Step["use"]>, cache?: FragmentCache) {
+	const key = pin.fragment + ":" + pin.version;
+	const known = cache?.get(key);
+	if (known) return known;
+	const target = await mustCase(db, project, pin.fragment);
+	const found = { target, body: await bodyOf(db, target.id, pin.version) };
+	cache?.set(key, found);
+	return found;
+}
+
 async function validateFragments(
 	db: ReadDb,
 	project: number,
 	body: CaseBody,
 	kind: CaseKind,
 	previous?: CaseBody,
+	fragments?: FragmentCache,
 ): Promise<void> {
 	for (const step of body.steps) {
 		if (!step.use) continue;
 		const pin = step.use;
 		if (kind === "fragment") throw invalid("fragments cannot include fragments");
-		const target = await mustCase(db, project, pin.fragment);
+		const { target, body: pinned } = await fragmentPin(db, project, pin, fragments);
 		if (target.kind !== "fragment") throw invalid(`${pin.fragment} is not a fragment`);
 		if (
 			target.state === "archived" &&
@@ -1809,13 +2031,17 @@ async function validateFragments(
 			)
 		)
 			throw invalid(`${pin.fragment} is archived; restore it before adding a pin`);
-		const pinned = await bodyOf(db, target.id, pin.version);
 		if (pinned.steps.some((part) => part.use)) throw invalid("fragments cannot include fragments");
 	}
 }
 
 /** Concrete steps carry occurrence-qualified ids so two uses of one fragment stay distinct in results. */
-export async function expandSteps(db: ReadDb, project: number, body: CaseBody): Promise<ExpandedStep[]> {
+export async function expandSteps(
+	db: ReadDb,
+	project: number,
+	body: CaseBody,
+	fragments?: FragmentCache,
+): Promise<ExpandedStep[]> {
 	const out: ExpandedStep[] = [];
 	for (const step of body.steps) {
 		if (!step.use) {
@@ -1823,8 +2049,8 @@ export async function expandSteps(db: ReadDb, project: number, body: CaseBody): 
 			continue;
 		}
 		const pin = step.use;
-		const target = await mustCase(db, project, pin.fragment);
-		for (const part of (await bodyOf(db, target.id, pin.version)).steps)
+		const { body: pinned } = await fragmentPin(db, project, pin, fragments);
+		for (const part of pinned.steps)
 			out.push({
 				id: `${step.id}.${part.id}`,
 				action: part.action,

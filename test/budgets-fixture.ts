@@ -5,6 +5,7 @@ import { z } from "zod";
 import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import type { Workload } from "../bench/measure.ts";
+import { observeDatabase } from "../bench/profile.ts";
 import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
 import { budget } from "../scripts/budget.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
@@ -36,7 +37,7 @@ export async function withLinkProposal(
 		expect(timeline.entries.filter((entry) => entry.t === "version").map((entry) => entry.version)).toEqual([2, 1]);
 		expect(timeline.entries.filter((entry) => entry.t === "placement")).toEqual([]);
 	} finally {
-		h.close();
+		await h.close();
 	}
 }
 
@@ -57,7 +58,7 @@ export async function withDiskWorkloads(run: (workloads: Workload[]) => Promise<
 			}),
 			log: () => {},
 		});
-		const instance = openDataset(dataset, join(dir, "measurement"));
+		const instance = await openDataset(dataset, join(dir, "measurement"));
 		try {
 			await prepareRecentChanges(instance);
 			const workloads = (await readWorkloads(instance, 15)).filter((workload) => workload.budget !== null);
@@ -67,7 +68,7 @@ export async function withDiskWorkloads(run: (workloads: Workload[]) => Promise<
 			);
 			await run(workloads);
 		} finally {
-			instance.close();
+			await instance.close();
 		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -117,14 +118,14 @@ export async function withQuarantineWorkload(run: (workload: Workload) => Promis
 			},
 		});
 	} finally {
-		h.close();
+		await h.close();
 	}
 }
 
 export async function withLandingWorkload(run: (workload: Workload) => Promise<void>): Promise<void> {
 	const h = await harness({ unlinked: "track" });
 	try {
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 		const commit = "1234567890abcdef1234567890abcdef12345678";
 		await h.call(
 			"report",
@@ -143,16 +144,17 @@ export async function withLandingWorkload(run: (workload: Workload) => Promise<v
 			},
 			ci,
 		);
-		h.app.db.exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < 8000)
-			INSERT INTO changes (project, key, repo, head_sha, branch, title, rev)
-			SELECT project, 'old:' || i, repo, 'old-commit-' || i, 'feature', 'Old change', 1 FROM changes, n WHERE key = 'pr:8'`);
-		const db = h.app.db;
-		const all = db.all.bind(db);
+		await h.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec(
+					"INSERT INTO changes (project, key, repo, head_sha, branch, title, rev) SELECT project, 'old:' || i, repo, 'old-commit-' || i, 'feature', 'Old change', 1 FROM changes CROSS JOIN generate_series(1, 8000) i WHERE key = 'pr:8'",
+				),
+			),
+		);
 		let landingReads = 0;
-		db.all = (statement, ...params) => {
-			if (/JOIN change_ends/.test(statement.text)) landingReads++;
-			return all(statement, ...params);
-		};
+		const restore = observeDatabase(h.app.database, (text) => {
+			if (/JOIN change_ends/.test(text)) landingReads++;
+		});
 		try {
 			await run({
 				name: "500 trunk results beside 8000 changes",
@@ -181,9 +183,9 @@ export async function withLandingWorkload(run: (workload: Workload) => Promise<v
 				},
 			});
 		} finally {
-			db.all = all;
+			restore();
 		}
 	} finally {
-		h.close();
+		await h.close();
 	}
 }

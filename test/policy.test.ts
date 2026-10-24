@@ -2024,6 +2024,15 @@ describe("unlinked tests", () => {
 		expect((await queue()).counts.map).toBe(files);
 		expect(await setUnlinked("track")).toMatchObject({ effects: { ruled: files } });
 		expect((await queue()).counts.open).toBe(0);
+		const ledger = await h.app.database.read(
+			async (db) =>
+				await db.one(
+					sql<readonly [], { n: number; decisions: number }>(
+						"SELECT count(*) AS n, count(DISTINCT d.id) AS decisions FROM questions q JOIN decisions d ON d.id = q.decision JOIN actors a ON a.id = (d.signers::jsonb->0->>'by')::bigint WHERE q.kind = 'map' AND q.state = 'decided' AND (q.ask::jsonb)->>'who' = 'rule' AND d.kind = 'map' AND (d.answer::jsonb)->>'is' = 'track' AND d.basis = q.basis AND d.on_evidence = q.evidence_hash AND d.holds::jsonb = jsonb_build_array(jsonb_build_object('until', 'basis-changes', 'basis', q.basis)) AND d.expires_at IS NULL AND d.supersedes IS NULL AND d.effects::jsonb = '{}'::jsonb AND a.kind = 'rule'",
+					),
+				),
+		);
+		expect(ledger).toEqual({ n: files, decisions: files });
 	});
 
 	test("in the queue a test with no case comes after every question that wants a judgement, however new it is", async () => {

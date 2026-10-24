@@ -33,12 +33,14 @@ import {
 	ownChangeOf,
 	resultById,
 	resultLocation,
+	resultLocations,
 	scopeEnded,
 	scopeOf,
 	setChangeEnded,
 	setMergeReceipt,
 	signatureById,
 	type TargetRow,
+	targetsByIds,
 	testById,
 	testRef,
 } from "../evidence/evidence.ts";
@@ -78,6 +80,7 @@ import {
 	retally,
 	runById,
 	runRef,
+	runRefsByIds,
 	runsDependingOn,
 	runsShowing,
 	shownFailure,
@@ -99,12 +102,14 @@ import {
 	decisionsOf,
 	everyQuestionOn,
 	type FailureSubject,
+	freshMapQuestions,
 	type HoldTerm,
 	holdEndingById,
 	insertAnswer,
 	insertDecision,
 	insertMergeReceipt,
 	insertQuestion,
+	itemReads,
 	latestByFingerprint,
 	liveByFingerprint,
 	mergeReceiptById,
@@ -125,6 +130,7 @@ import {
 	setQuestionState,
 	storeMergeSnapshot,
 	storeReceiptResults,
+	trackFreshMapQuestions,
 } from "./questions.ts";
 
 export type Raise = QuestionSubjectInput & {
@@ -484,12 +490,43 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 	yield* refoldSteps(ctx, await inheritanceRuns(ctx.db, ctx.project.id), { dissolveStale: true });
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const kinds = new Set(policy.clauses.filter((clause) => clause.ask.who === "rule").map((clause) => clause.kind));
+	const ids = await flatMapAsync([...kinds], async (kind) => await openQuestionIds(ctx.db, ctx.project.id, kind));
+	if (ids.length > 1) {
+		const questions = await freshMapQuestions(ctx.db, ctx.project.id, ids);
+		const tracking: Parameters<typeof trackFreshMapQuestions>[1][number][] = [];
+		if (questions.length === ids.length) {
+			const rule = await ruleActor(ctx.db);
+			for (const question of questions) {
+				if (question.kind !== "map") break;
+				const facts = await factsNow(ctx.db, question);
+				const clause = clauseFor(policy, { kind: "map", facts });
+				const answer = ANSWERS.map.safeParse(clause.answer);
+				if (
+					clause.ask.who !== "rule" ||
+					!answer.success ||
+					answer.data.is !== "track" ||
+					answerApplicabilityProblem("map", facts, answer.data)
+				)
+					break;
+				tracking.push({
+					question,
+					ask: clause.ask,
+					signers: [{ by: rule.id, clause: clause.id, policy: policy.version, reason: null }],
+					holds: HANDLERS.map.holds({ question, answer: answer.data, now: ctx.now, policy }),
+				});
+			}
+		}
+		if (tracking.length === ids.length) {
+			for (let at = 0; at < tracking.length; at += 200) {
+				await trackFreshMapQuestions(ctx, tracking.slice(at, at + 200));
+				yield;
+			}
+			return tracking.length;
+		}
+	}
 	let taken = 0;
-	// Every one of them, by id: answering one changes the queue the loop would be reading.
-	for (const id of await flatMapAsync(
-		[...kinds],
-		async (kind) => await openQuestionIds(ctx.db, ctx.project.id, kind),
-	)) {
+	// Otherwise each decision can affect another question; reread it in the original order.
+	for (const id of ids) {
 		yield;
 		const question = await questionById(ctx.db, id);
 		if (question?.state !== "open") continue;
@@ -2126,9 +2163,17 @@ async function* factsNowSteps(db: ReadDb, question: QuestionRow): AsyncGenerator
  * Where the clause is a rule and a person is asked in its stead (its answer was withdrawn or overruled), a
  * member is.
  */
-async function askNow(db: ReadDb, question: QuestionRow, facts: ReadonlySet<string>): Promise<Ask> {
+async function askNow(
+	db: ReadDb,
+	question: QuestionRow,
+	facts: ReadonlySet<string>,
+	policy?: Awaited<ReturnType<typeof currentPolicy>>,
+): Promise<Ask> {
 	const stored = json<Ask>(question.ask);
-	const ask = clauseFor(await currentPolicy(db, question.project), { kind: question.kind, facts: new Set(facts) }).ask;
+	const ask = clauseFor(policy ?? (await currentPolicy(db, question.project)), {
+		kind: question.kind,
+		facts: new Set(facts),
+	}).ask;
 	return ask.who === "rule" && stored.who !== "rule" ? { ...ask, who: "member" } : ask;
 }
 
@@ -2142,21 +2187,60 @@ export async function toItem(db: ReadDb, row: QuestionRow): Promise<QuestionItem
  * A question as its reader sees it in the queue: the item, and what the reader's own answer would be worth. The
  * facts and who is asked are read once for both: a queue page reads them for every question it shows.
  */
+type ItemPage = {
+	policy: Awaited<ReturnType<typeof currentPolicy>>;
+	questions: Awaited<ReturnType<typeof itemReads>>;
+	runs: Map<number, string>;
+	targets: Map<number, TargetRow>;
+	location: Awaited<ReturnType<typeof resultLocations>>;
+};
+export async function toItemsFor(ctx: Ctx<ReadDb>, rows: readonly QuestionRow[]) {
+	if (!rows.length) return [];
+	const ids = [
+		...new Set(
+			rows.flatMap((row) => {
+				const stored = json<Record<string, unknown>>(row.evidence);
+				return row.kind === "failure" && typeof stored.targetId === "number" ? [stored.targetId] : [];
+			}),
+		),
+	];
+	const targets = await targetsByIds(ctx.db, ids);
+	const known: ItemPage = {
+		policy: await currentPolicy(ctx.db, ctx.project.id),
+		questions: await itemReads(
+			ctx.db,
+			rows.map((row) => row.id),
+		),
+		runs: await runRefsByIds(ctx.db, [...new Set(rows.flatMap((row) => json<number[]>(row.blocks)))]),
+		targets: new Map(targets.map((target) => [target.id, target])),
+		location: await resultLocations(ctx.db, targets),
+	};
+	return await Array.fromAsync(rows, (row) => toItemFor(ctx, row, known));
+}
 export async function toItemFor(
 	ctx: Ctx<ReadDb>,
 	row: QuestionRow,
+	known?: ItemPage,
 ): Promise<QuestionItem & { you: "counts" | "advice" | "forbidden" }> {
 	const facts = await factsNow(ctx.db, row);
-	const ask = await askNow(ctx.db, row, facts);
-	return { ...(await itemOf(ctx.db, row, facts, ask)), you: await standingFor(ctx, row, ask) };
+	const ask = await askNow(ctx.db, row, facts, known?.policy);
+	return { ...(await itemOf(ctx.db, row, facts, ask, known)), you: await standingFor(ctx, row, ask) };
 }
 
-async function itemOf(db: ReadDb, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask): Promise<QuestionItem> {
+async function itemOf(
+	db: ReadDb,
+	row: QuestionRow,
+	facts: ReadonlySet<string>,
+	ask: Ask,
+	known?: ItemPage,
+): Promise<QuestionItem> {
 	const stored = json<Record<string, unknown> & { hints?: string[]; tests?: { sameCode?: SameCodeEvidence }[] }>(
 		row.evidence,
 	);
-	if (row.kind === "failure" && typeof stored.targetId === "number")
-		stored.location = await resultLocation(db, await mustTarget(db, stored.targetId));
+	if (row.kind === "failure" && typeof stored.targetId === "number") {
+		const target = known?.targets.get(stored.targetId) ?? (await mustTarget(db, stored.targetId));
+		stored.location = known ? known.location(target) : await resultLocation(db, target);
+	}
 	if (row.kind === "failure") {
 		for (const test of stored.tests ?? []) {
 			for (const signal of test.sameCode?.signals ?? []) {
@@ -2175,7 +2259,7 @@ async function itemOf(db: ReadDb, row: QuestionRow, facts: ReadonlySet<string>, 
 		stored.finder = (await actorLabel(db, stored.finderId)).name;
 	const hints = (stored.hints ?? []).filter((hint) => hint !== "disputed");
 	if (facts.has("hint:disputed")) hints.unshift("disputed");
-	const answers = await answersOf(db, row.id);
+	const answers = known?.questions.get(row.id)?.answers ?? (await answersOf(db, row.id));
 	const decision = row.decision !== null ? await decisionById(db, row.decision) : null;
 	const supersedes =
 		decision && decision.supersedes !== null && (await holdEndingById(db, decision.id)) !== null
@@ -2199,10 +2283,14 @@ async function itemOf(db: ReadDb, row: QuestionRow, facts: ReadonlySet<string>, 
 		].join("; "),
 		answers: applicableAnswers(row.kind, facts),
 		blocks: await flatMapAsync(json<number[]>(row.blocks), async (id) => {
+			if (known) {
+				const ref = known.runs.get(id);
+				return ref ? [ref] : [];
+			}
 			const run = await runById(db, id);
 			return run ? [runRef(run)] : [];
 		}),
-		about: await refsOf(db, row.id),
+		about: known?.questions.get(row.id)?.refs ?? (await refsOf(db, row.id)),
 		openedAt: row.opened_at,
 		advice: await mapAsync(
 			answers.filter((a) => a.counts === 0 && a.on_evidence === row.evidence_hash),

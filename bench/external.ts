@@ -3,15 +3,16 @@
  * to back (or one creating and adopting bulk edits), one client saving a case. The load generator shares nothing with the server but the loopback socket,
  * so the numbers are the server's own. `run.ts` uses this for its under-load rows.
  *
- * usage: bun bench/external.ts <dataset directory> [seconds=20] [reader threads=default] [reports|bulk] [bulk cases=5000]
- * The dataset directory is one `bun bench/run.ts` leaves under `.mainworthy/bench/` (it holds `mainworthy.db`).
+ * usage: bun bench/external.ts <dataset directory> [seconds=20] [reports|bulk] [bulk cases=5000]
+ * The dataset directory is one `bun bench/run.ts` leaves under `.mainworthy/bench/` (it holds a closed PostgreSQL snapshot).
  */
-import { cpSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { cloneDataset } from "./dataset.ts";
 
 export type UnderLoad = {
-	readerThreads: number | null;
+	readPool: number;
 	seconds: number;
 	/** Readers alone for five seconds, after a warm-up. */
 	control: number[];
@@ -28,8 +29,6 @@ const Reply = z.object({ ok: z.boolean(), result: z.unknown().optional(), error:
 export async function underLoad(options: {
 	dataset: string;
 	seconds: number;
-	/** Reader threads; null leaves the server's default. */
-	readers: number | null;
 	/** Bulk creates, proposed edits and their acceptance, instead of reports. */
 	workload?: "reports" | "bulk";
 	bulkCases?: number;
@@ -46,15 +45,15 @@ export async function underLoad(options: {
 	)
 		throw new Error("seconds must be positive and bulk cases must be an integer from 1 to 5000");
 	const dir = mkdtempSync(join(dirname(realpathSync(options.dataset)), "external-"));
-	cpSync(join(options.dataset, "mainworthy.db"), join(dir, "mainworthy.db"));
+	const fixture = await cloneDataset(options.dataset, dir);
 	const server = Bun.spawn([process.execPath, "src/cli/main.ts", "serve"], {
 		env: {
 			...process.env,
 			MAINWORTHY_DATA: dir,
+			MAINWORTHY_DATABASE_URL: fixture.url,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_MODE: "local",
 			NODE_ENV: "production",
-			...(options.readers === null ? {} : { MAINWORTHY_READERS: String(options.readers) }),
 		},
 		stdout: "pipe",
 		stderr: "inherit",
@@ -296,7 +295,7 @@ export async function underLoad(options: {
 		}
 
 		return {
-			readerThreads: options.readers,
+			readPool: Number(process.env.MAINWORTHY_DB_POOL ?? 2),
 			seconds,
 			control: Object.values(control).flat(),
 			reads,
@@ -308,6 +307,7 @@ export async function underLoad(options: {
 	} finally {
 		server.kill("SIGTERM");
 		await server.exited;
+		await fixture.close();
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -318,17 +318,14 @@ export const quantile = (values: readonly number[], p: number): number => {
 };
 
 if (import.meta.main) {
-	const [source, secondsText = "20", readersText, workload = "reports", bulkCases = "5000"] = Bun.argv.slice(2);
+	const [source, secondsText = "20", workload = "reports", bulkCases = "5000"] = Bun.argv.slice(2);
 	if (!source)
-		throw new Error(
-			"usage: bun bench/external.ts <dataset directory> [seconds] [reader threads] [reports|bulk] [bulk cases]",
-		);
+		throw new Error("usage: bun bench/external.ts <dataset directory> [seconds] [reports|bulk] [bulk cases]");
 	const seconds = Number(secondsText);
 	if (workload !== "reports" && workload !== "bulk") throw new Error("workload must be reports or bulk");
 	const load = await underLoad({
 		dataset: source,
 		seconds,
-		readers: readersText === undefined ? null : Number(readersText),
 		workload,
 		bulkCases: Number(bulkCases),
 	});
@@ -336,7 +333,7 @@ if (import.meta.main) {
 	console.log(
 		JSON.stringify(
 			{
-				readerThreads: load.readerThreads ?? "default",
+				readPool: load.readPool,
 				workload,
 				readersOnly: {
 					p50: quantile(load.control, 0.5),

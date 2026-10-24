@@ -1,43 +1,10 @@
 # Mainworthy budgets
 
-For the upgrade copy, export the baseline with `git archive` into a directory made by
-`bun scripts/work.ts scratch new upgrade-before`, and link its `node_modules` to this checkout's.
-Make a second scratch directory, then run:
-
-```sh
-bun bench/upgrade-copy.ts /path/to/baseline/export /path/to/second/scratch 320
-```
-
-The generated database holds 320 MiB of BLOB payload plus the real pre-upgrade schema; no dataset is
-committed. Five runs per revision alternate for the durable copy and for startup through the first ready
-HTTP reply. Setup, source hashing and output checks are outside the timer. Both copy timers include
-file sync, rename and directory sync. Every output must pass SQLite integrity checking, retain the old
-schema version and match a hash over every payload byte. The startup timer includes migration, recovery,
-bootstrap, listener startup and its ready health response. Reader threads are disabled on both sides.
-The source is deliberately warm in the filesystem cache; this is not a cold-disk or production measurement.
-Use the scratch removal command after the run.
-
-The 2026-10-22 Mac run compares baseline `5f2ba0210cae1c094822f9dc462d01dd5ee7061d` with this patch.
-Its output is [results-upgrade-copy.log](results-upgrade-copy.log): Bun 1.4.3, SQLite 3.54.0,
-Apple M4, ten cores, and 347,000,832 source bytes. Other checks shared the machine; load averages were
-above its core count, so the revisions alternate. Verdict: no measurable difference. Durable-copy medians
-were 1,364 ms before and 1,289 ms after, with ranges of 966–1,792 ms and 928–2,091 ms. Startup medians
-were 1,228 ms before and 1,011 ms after, with ranges of 890–1,523 ms and 904–1,101 ms. Each series has
-five runs per side and zero failures. These independently sampled series are not additive.
-
-A separate macOS `sample` diagnostic caught `sqlite3RunVacuum` rebuilding B-tree pages and
-`pager_write_pagelist` calling `guarded_pwrite_np`; it did not show the long fsync waits reported on the
-production disk. The copy samples used about half a second of CPU; the rest includes writes and contention
-on this busy Mac. Disabling intermediate output syncs therefore has no demonstrated speedup here.
-The output is fully materialized and synced within each timer, and its size and throughput are plausible
-for an SSD. This result does not establish production disk speed. The startup availability tests establish
-that a slow migration can answer health without admitting application requests.
-
 For folder sealing, export a baseline revision into a directory made by
 `bun scripts/work.ts scratch new folder-seal-base`, link its `node_modules` to the
 current checkout's installed dependencies, and run
 `bun bench/folder-seal.ts /path/to/baseline/export`. It alternates five fresh
-in-memory registry calls per revision for creation and rename batches of 100, 1,000, and
+isolated registry calls per revision for creation and rename batches of 100, 1,000, and
 5,000. Each fixture starts with as many sibling folders as edits. Setup is outside
 the timer. Standard policy keeps the agent's proposal pending, so the timer covers
 sealing without adoption. Assertions check its status, stored edits, and unchanged
@@ -66,10 +33,12 @@ Numeric misses or correctness errors exit nonzero, including any repeat miss.
 | HTTP reads while reports and saves arrive (server in its own process) | p95 < 50 pooled |
 | Small check: fresh ingest of 5,000 results | every call < 1,000 |
 
-The seeded baseline lives on disk in `.mainworthy/bench`, with production WAL and
-pragmas. Memory filesystems are refused. Parameters, generator hash and migration
-hash must match for reuse. Every run clones the closed baseline and removes its
-writes afterward. About 500 folders have two levels. Cases have 3–9 steps, about
+The seeded baseline is a PostgreSQL custom-format snapshot in .mainworthy/bench.
+The testDatabase fixture supplies an isolated database with production durability defaults. PostgreSQL 18 client tools
+create and restore the snapshot outside the timers. Each restore runs ANALYZE before measurement, because
+PostgreSQL dumps do not contain planner statistics. Memory filesystems are refused for benchmark artifacts.
+Parameters, generator hash and baseline hash must match for reuse. Every run restores the closed snapshot
+into a disposable database and removes its writes afterward. About 500 folders have two levels. Cases have 3–9 steps, about
 60% expected results, tags and natural search terms; 20% have 1–5 history edits.
 Every case covers one of 100 requirements, assigned by its index without drawing
 from the case generator's random stream.
@@ -96,7 +65,7 @@ Random case reads warm five requests; repeated identical list/search queries are
 warm-cache measurements. Diagnostic cold calls are separate and never timing samples.
 
 The last three rows are measured under load with the server in its own process and
-its reader threads on, driven from the benchmark's process (see "Under load, from
+its normal connection pools, driven from the benchmark's process (see "Under load, from
 another process" below): sixteen readers, one client sending 10,000-result reports
 back to back and one saving a case, for 15 s after a warm-up and 5 s of readers
 alone. Default: three windows; quick: one. Reads have a budget (p95 under 50 ms) and
@@ -104,11 +73,11 @@ so does each report (under 2 s); a save under load is reported without a budget,
 because with one writer it waits behind the report in front of it (issue #60).
 SQL/CPU/I/O diagnostics identify the limiter and EXPLAIN plans. A miss needs a
 product fix and a repeat under comparable load; changing a budget hides the problem.
-## The last full run
+## Historical SQLite full run
 
 `bun bench/run.ts` on 2026-10-12 (snapshot `3cd05f8` on the branch `mvp/history`; a 16-thread desktop shared with
 other work, load 2.9 at the start): exit 0, no miss in the first run or in any repeat. The whole output is `bench/results-full.log`; `bench/results-quick.log` is the
-`--quick` run of the same commit.
+`--quick` PostgreSQL run on the current branch. The historical full run below does not describe PostgreSQL performance.
 
 | Workload | p50 ms | p95 ms | max ms | Budget |
 | --- | ---: | ---: | ---: | --- |
@@ -135,7 +104,7 @@ question (now once per run; `test/budgets.test.ts` counts it).
 
 ## Under load, from another process
 
-`bun bench/external.ts <dataset directory> [seconds] [reader threads]` starts the server as its own process and
+`bun bench/external.ts <dataset directory> [seconds] [reports|bulk] [bulk cases]` starts the server as its own process and
 drives it from this one: sixteen readers (a case, a folder page, a test's history, a gate, the queue, a search),
 one client sending 10,000-result reports back to back and one saving a case. This is the measurement to trust for
 reads under load: `run.ts` keeps its clients on the server's thread.
