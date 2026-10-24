@@ -9,6 +9,7 @@ import { ciPolicy } from "../scripts/work/ci.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { SameCodeEvidence } from "../src/core/flaky.ts";
+import { contentHash } from "../src/core/hash.ts";
 import { Policy } from "../src/core/kinds.ts";
 import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
@@ -719,20 +720,118 @@ describe("a red report", () => {
 		await h.call("propose", {
 			edits: Array.from({ length: 500 }, (_, i) => ({ op: "create", outline: `Reviewed case ${i}` })),
 		});
-		for (let offset = 0; offset < 500; offset += 100)
-			await h.call("claim", {
-				lens: "undo-limit",
-				findings: Array.from({ length: 100 }, (_, i) => ({
-					on: `C-${offset + i + 1}`,
-					category: "ambiguous",
-					note: "Name the expected result",
-				})),
-			});
+		const cases = await h.app.database.read(async (db) =>
+			db.all(sql<[], { id: number; no: number; head_hash: string }>("SELECT id, no, head_hash FROM cases ORDER BY no")),
+		);
+		const template = first(cases);
+		await h.call("claim", {
+			lens: "undo-limit",
+			findings: [{ on: `C-${template.no}`, category: "ambiguous", note: "Name the expected result" }],
+		});
+		// Build the history from one real review; the 500 conditional withdrawals below still use decide.
+		const copies = cases.slice(1).map((row) => {
+			const on = `C-${row.no}`;
+			const basis = contentHash({ on, category: "ambiguous", basis: row.head_hash });
+			return {
+				id: row.id,
+				fingerprint: contentHash({ kind: "finding", key: `${on}|ambiguous` }),
+				basis,
+				hash: contentHash({ basis, target: null }),
+			};
+		});
+		await h.app.database.write(async (db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<{
+						ids: number[];
+						fingerprints: string[];
+						bases: string[];
+						hashes: string[];
+					}>(`
+ WITH seeds AS (
+  SELECT c.*, u.fingerprint, u.basis, u.hash
+  FROM unnest($ids::bigint[], $fingerprints::text[], $bases::text[], $hashes::text[])
+   AS u(id,fingerprint,basis,hash) JOIN cases c ON c.id=u.id
+ ), template AS (
+  SELECT q.* FROM questions q JOIN findings f ON f.question=q.id WHERE f.lens='undo-limit'
+ ), made AS (
+  INSERT INTO questions
+   (project,no,kind,subject,fingerprint,epoch,prior,title,producer,evidence,evidence_hash,basis,
+    seen_count,seen_first,seen_last,carried,ask,blocks,owner,rank,state,decision,opened_at,rev)
+  SELECT q.project,q.no+c.no-1,q.kind,
+   (q.subject::jsonb || jsonb_build_object('on','C-'||c.no))::text,c.fingerprint,q.epoch,q.prior,q.title,q.producer,
+   (q.evidence::jsonb || jsonb_build_object('on','C-'||c.no,'case','C-'||c.no,'caseTitle',c.title))::text,
+   c.hash,c.basis,q.seen_count,q.seen_first,q.seen_last,q.carried,q.ask,q.blocks,q.owner,q.rank-c.no+1,
+   'open',NULL,q.opened_at,q.rev FROM template q CROSS JOIN seeds c RETURNING *
+ ), refs AS (
+  INSERT INTO question_refs(project,ref,question)
+  SELECT q.project,'C-'||c.no,q.id FROM made q JOIN seeds c ON c.fingerprint=q.fingerprint
+
+ )
+ INSERT INTO findings(project,actor,lens,locus,case_id,category,note,repro,suggest,basis,question,at,seq)
+ SELECT f.project,f.actor,f.lens,'C-'||c.no,c.id,f.category,f.note,f.repro,f.suggest,c.head_hash,q.id,f.at,f.seq
+ FROM findings f CROSS JOIN seeds c JOIN made q ON q.fingerprint=c.fingerprint WHERE f.lens='undo-limit'`),
+					{
+						ids: copies.map((row) => row.id),
+						fingerprints: copies.map((row) => row.fingerprint),
+						bases: copies.map((row) => row.basis),
+						hashes: copies.map((row) => row.hash),
+					},
+				);
+				await db.exec(`UPDATE counters SET value=(SELECT max(no) FROM questions WHERE project=counters.project)
+ WHERE name='question'`);
+			}),
+		);
 		const questions = (await h.call<InboxReply>("inbox", { limit: 500 })).items;
 		expect(questions).toHaveLength(500);
-		const receipts = await h.call<DecideReply[]>("decide", {
-			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "defer" } })),
-		});
+		const chosen = first(questions);
+		const receipt = first(
+			await h.call<DecideReply[]>("decide", {
+				q: chosen.q,
+				onEvidence: chosen.evidenceHash,
+				answer: { is: "defer" },
+			}),
+		);
+		// Defer has no standing effect. Copy its ledger and owner signature, rebasing every evidence hold.
+		const receipts = await h.app.database.write(async (db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<{ decision: number | null }>(`
+ WITH template AS (SELECT * FROM decisions WHERE id=$decision), copied AS (
+  INSERT INTO decisions(project,question,kind,answer,signers,basis,holds,expires_at,supersedes,effects,at,seq,on_evidence)
+  SELECT q.project,q.id,q.kind,d.answer,d.signers,q.basis,
+   jsonb_build_array(jsonb_build_object('until','basis-changes','basis',q.basis))::text,
+   d.expires_at,NULL,d.effects,d.at,d.seq,q.evidence_hash
+  FROM questions q CROSS JOIN template d WHERE q.kind='finding' AND q.state='open' RETURNING question
+ )
+ INSERT INTO answers(question,actor,answer,reason,on_evidence,counts,at,seq)
+ SELECT q.id,a.actor,a.answer,a.reason,q.evidence_hash,a.counts,a.at,a.seq
+ FROM copied c JOIN questions q ON q.id=c.question CROSS JOIN template d JOIN answers a ON a.question=d.question`),
+					{ decision: receipt.decision },
+				);
+				await db.exec(`UPDATE questions q SET state='decided',decision=d.id,rev=d.seq
+ FROM decisions d WHERE d.question=q.id AND q.kind='finding' AND q.state='open'`);
+				return await db.all(
+					sql<[], { q: string; decision: number }>(`
+ SELECT 'Q-'||q.no AS q,d.id AS decision FROM questions q JOIN decisions d ON d.id=q.decision AND d.question=q.id
+ WHERE q.kind='finding' AND q.state='decided' ORDER BY q.rank,q.id`),
+				);
+			}),
+		);
+		expect(
+			await h.app.database.read((db) =>
+				db.all(
+					sql<readonly [], { n: number }>(`
+ SELECT count(*) AS n FROM findings f JOIN cases c ON c.id=f.case_id JOIN questions q ON q.id=f.question
+ JOIN decisions d ON d.id=q.decision AND d.question=q.id JOIN answers a ON a.question=q.id
+ WHERE f.basis=c.head_hash AND f.locus='C-'||c.no AND d.basis=q.basis AND d.on_evidence=q.evidence_hash
+ AND a.on_evidence=q.evidence_hash AND q.state='decided'
+ AND d.holds::jsonb @> jsonb_build_array(jsonb_build_object('until','basis-changes','basis',q.basis))
+`),
+				),
+			),
+		).toEqual([{ n: 500 }]);
+
 		const undo = receipts.map((reply) => ({ q: reply.q, ifDecision: reply.decision }));
 		const before = await count("decisions");
 		for (const invalid of [[], [...undo, undo[0]], [{ q: questions[0]?.q }]]) {

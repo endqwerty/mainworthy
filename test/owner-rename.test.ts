@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
-import { identityDatabaseUrl, pgRows } from "./identity-db.ts";
+import { closeIdentityDatabases, identityDatabaseUrl, pgRows } from "./identity-db.ts";
 
 /** 36 characters: long enough that the start has nothing to say about it. */
 const TOKEN = "owner-secret-0123456789abcdef-012345";
@@ -20,6 +20,7 @@ const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 

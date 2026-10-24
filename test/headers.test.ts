@@ -25,7 +25,7 @@ import {
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { withHeadersOnEvery } from "../src/surfaces/with-headers.ts";
 import sourceUi from "../src/web/index.html";
-import { identityDatabaseUrl } from "./identity-db.ts";
+import { closeIdentityDatabases, identityDatabaseUrl } from "./identity-db.ts";
 
 const PAGE =
 	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -150,6 +150,7 @@ const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const scratch = (): string => {

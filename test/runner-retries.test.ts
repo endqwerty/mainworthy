@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { budget } from "../scripts/budget.ts";
 import { type GateStatus, type InboxReply, ReportInput, type ReportReceipt } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
+import { fileSignature, type SignatureRow } from "../src/server/evidence/signatures.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import type { WriteDb } from "../src/server/kernel/db.ts";
 import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
@@ -526,8 +527,117 @@ test.each(["rebuild", "archive"])(
 	"first recovery after %s of broad history uses bounded single-row reads",
 	async (maintenance) => {
 		const tests = Array.from({ length: 1200 }, (_, i) => ({ key: `history-${i}`, file: `history-${i}.test.ts` }));
-		const input = broadReport(tests);
-		await h.call("report", input, await h.actor("pipeline", "ci", ["read", "record"]));
+		const input = broadReport(tests.slice(0, 1));
+		const receipt = await h.call<ReportReceipt>("report", input, await h.actor("pipeline", "ci", ["read", "record"]));
+		if (!receipt.gate) throw new Error("history report did not create a gate");
+		const counts = { ...receipt.counts, total: tests.length, pass: tests.length };
+		const tally = { ...receipt.gate.tally, pass: tests.length };
+		const expanded: ReportReceipt = {
+			...receipt,
+			counts,
+			basis: { ...receipt.basis, unresolved: tests.length },
+			unlinked: tests.length,
+			flips: tests.length,
+			results: [],
+			gate: { ...receipt.gate, tally, reason: `passed: ${tests.length} results proven` },
+		};
+		const root = await h.app.database.read((db) =>
+			db.one(
+				sql<{ batch: number }, SignatureRow>(`
+ SELECT s.* FROM result_tries tr JOIN results r ON r.id=tr.result JOIN signatures s ON s.id=tr.signature WHERE r.batch=$batch`),
+				{ batch: receipt.batch },
+			),
+		);
+		const signatures = tests.map((test) => ({ file: test.file, ...fileSignature(root, test.file) }));
+		// Keep the authoritative file-specific causes; maintenance below reconstructs their derived observations.
+
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					await db.run(
+						sql<{ batch: number; total: number }>(`WITH seed AS (
+ SELECT * FROM results WHERE batch = $batch
+), added_tests AS (
+ INSERT INTO tests (project, no, kind, key, name, file, case_id, linked_by, first_seq, last_seq)
+ SELECT t.project, n.ord + 1, t.kind, 'history-' || n.ord, 'history-' || n.ord,
+ 'history-' || n.ord || '.test.ts', t.case_id, t.linked_by, t.first_seq, t.last_seq
+ FROM seed s JOIN tests t ON t.id = s.test CROSS JOIN generate_series(1, $total::bigint - 1) AS n(ord)
+ RETURNING id, no
+), added_results AS (
+ INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case,
+ basis_version, basis_claim, outcome, attempt, duration_ms, signature, message, detail, at_step,
+ trail, note, run, corrects, at, quarantine_decision, quarantine_exit)
+ SELECT s.project, t.id, s.seq, t.no - 1, s.batch, s.target, s.method, s.actor, s.model, s.basis,
+ s.basis_case, s.basis_version, s.basis_claim, s.outcome, s.attempt, s.duration_ms, s.signature,
+ s.message, s.detail, s.at_step, s.trail, s.note, s.run, s.corrects, s.at, s.quarantine_decision, s.quarantine_exit
+ FROM seed s CROSS JOIN added_tests t RETURNING id, test
+), added_tries AS (
+ INSERT INTO result_tries (project, result, try, outcome, duration_ms, signature, message, detail)
+ SELECT tr.project, r.id, tr.try, tr.outcome, tr.duration_ms, tr.signature, tr.message, tr.detail
+ FROM seed s JOIN result_tries tr ON tr.result = s.id CROSS JOIN added_results r
+ RETURNING id, result, try
+), added_flips AS (
+ INSERT INTO flips (project, test, target, first_result, second_result, seq, first_try, second_try)
+ SELECT f.project, r.test, f.target, r.id, r.id, f.seq, tr.id, f.second_try
+ FROM seed s JOIN flips f ON f.first_result = s.id AND f.second_result = s.id
+ JOIN result_tries original_try ON original_try.id = f.first_try
+ JOIN added_tries tr ON tr.try = original_try.try JOIN added_results r ON r.id = tr.result
+)
+ INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
+ SELECT rt.run, r.test, r.id, rt.outcome, rt.signature, rt.attempt, rt.flipped, rt.lane, rt.target
+ FROM seed s JOIN run_tests rt ON rt.result = s.id CROSS JOIN added_results r`),
+						{ batch: receipt.batch, total: tests.length },
+					);
+					await db.run(
+						sql<{ batch: number; hashes: string[]; texts: string[]; files: string[] }>(`
+ WITH asked AS (SELECT * FROM unnest($hashes::text[],$texts::text[],$files::text[]) u(hash,text,file)), added AS (
+ INSERT INTO signatures(project,hash,text,first_seq,class)
+ SELECT r.project,a.hash,a.text,r.seq,'assertion' FROM results r CROSS JOIN asked a WHERE r.batch=$batch AND r.ord=0
+ ON CONFLICT (project,hash) DO UPDATE SET text=excluded.text RETURNING id,hash
+ ) UPDATE result_tries tr SET signature=s.id FROM results r JOIN tests t ON t.id=r.test
+ JOIN asked a ON a.file=t.file JOIN added s ON s.hash=a.hash WHERE r.batch=$batch AND tr.result=r.id
+ `),
+						{
+							batch: receipt.batch,
+							hashes: signatures.map((s) => s.hash),
+							texts: signatures.map((s) => s.text),
+							files: signatures.map((s) => s.file),
+						},
+					);
+					expect(
+						await db.one(
+							sql<
+								{ batch: number },
+								{ tests: number; results: number; tries: number; flips: number; projections: number }
+							>(`
+ SELECT count(DISTINCT t.id) AS tests,count(DISTINCT r.id) AS results,count(DISTINCT tr.id) AS tries,
+ count(DISTINCT f.id) AS flips,count(DISTINCT m.test) AS projections FROM results r
+ JOIN tests t ON t.id=r.test JOIN result_tries tr ON tr.result=r.id JOIN signatures s ON s.id=tr.signature
+ JOIN flips f ON f.first_result=r.id AND f.first_try=tr.id JOIN run_tests m ON m.result=r.id
+ WHERE r.batch=$batch AND s.text='Split by file ('||t.file||'): assertion failed'
+ `),
+							{ batch: receipt.batch },
+						),
+					).toEqual({ tests: 1200, results: 1200, tries: 1200, flips: 1200, projections: 1200 });
+
+					await db.run(
+						sql<{ batch: number; total: number }>(`UPDATE counters c SET value = $total
+ FROM batches b WHERE b.id = $batch AND c.project = b.project AND c.name = 'test'`),
+						{ batch: receipt.batch, total: tests.length },
+					);
+					await db.run(
+						sql<{ batch: number; counts: string; receipt: string }>(
+							"UPDATE batches SET counts = $counts, receipt = $receipt WHERE id = $batch",
+						),
+						{ batch: receipt.batch, counts: JSON.stringify(counts), receipt: JSON.stringify(expanded) },
+					);
+					await db.run(
+						sql<{ batch: number; tally: string }>(`UPDATE runs SET tally = $tally WHERE id IN (
+ SELECT rt.run FROM run_tests rt JOIN results r ON r.id = rt.result WHERE r.batch = $batch)`),
+						{ batch: receipt.batch, tally: JSON.stringify(tally) },
+					);
+				}),
+		);
 		const pending = (
 			await inContext(
 				async (ctx) => await acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),

@@ -327,7 +327,7 @@ test("seed fills the project an instance starts with while nothing was written t
 		expect(await titlesOf(touched)).toEqual([]);
 	});
 	await withInstance(async ({ client }) => {
-		const seeded = await seed(client, { project: "scratch", cases: 3 });
+		const seeded = await seed(client, { project: "scratch", cases: 3, days: 0 });
 		expect(seeded.questions).toHaveLength(5);
 	});
 });

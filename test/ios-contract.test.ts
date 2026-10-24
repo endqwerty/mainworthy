@@ -61,7 +61,7 @@ beforeAll(async () => {
 	project = await made("standard");
 	strict = await made("strict");
 });
-afterAll(() => server.stop());
+afterAll(() => server?.stop());
 
 async function send(method: "GET" | "POST", path: string, body?: unknown, headers: Record<string, string> = {}) {
 	const response = await fetch(`${server.url}${path}`, {

@@ -296,11 +296,14 @@ export async function verifyReport(app: App, receipt: z.infer<typeof Receipt>, e
 }
 
 /** Builds the immutable baseline through invoke, or reuses a matching completed baseline. */
-export async function buildDataset(options: {
-	dir: string;
-	parameters: Parameters;
-	log?: (message: string) => void;
-}): Promise<Dataset> {
+export async function buildDataset(
+	options: {
+		dir: string;
+		parameters: Parameters;
+		log?: (message: string) => void;
+	},
+	use?: (instance: DatasetInstance) => Promise<void>,
+): Promise<Dataset> {
 	const dir = resolve(options.dir);
 	const parameters = Parameters.parse(options.parameters);
 	const revision = fingerprints();
@@ -308,7 +311,7 @@ export async function buildDataset(options: {
 	const log = (message: string) => output(publicLog(message));
 	requireDisk(dir);
 	const metadataPath = join(dir, "dataset.json");
-	if (existsSync(metadataPath) && existsSync(join(dir, "baseline.dump"))) {
+	if (!use && existsSync(metadataPath) && existsSync(join(dir, "baseline.dump"))) {
 		const saved = Metadata.safeParse(JSON.parse(readFileSync(metadataPath, "utf8")));
 		if (
 			saved.success &&
@@ -328,7 +331,8 @@ export async function buildDataset(options: {
 	const fixture = await testDatabase();
 	writeFileSync(join(dir, "database.url"), fixture.url, { mode: 0o600 });
 	const { app, owner } = await open(config(dir));
-	const ci = (await ciActor(app)).actor;
+	const producer = await ciActor(app);
+	const ci = producer.actor;
 	const phases: Metadata["phases"] = [];
 	const phase = async <T>(name: string, rowCount: number | (() => number), work: () => T | Promise<T>): Promise<T> => {
 		log(`Building ${name}…`);
@@ -685,6 +689,21 @@ export async function buildDataset(options: {
 			`Verified dataset: ${JSON.stringify(stored)}; queue ${metadata.queueLimited ? "time-limited" : "target reached"}`,
 		);
 		await app.database.write((db) => db.transaction(() => db.exec("ANALYZE")));
+		if (use) {
+			let closed = false;
+			const close = async () => {
+				if (closed) return;
+				closed = true;
+				await app.close();
+				await fixture.close();
+			};
+			try {
+				await use({ app, owner, ci, ciSecret: producer.secret, metadata, dir, close });
+			} finally {
+				await close();
+			}
+			return { dir, metadata, reused: false };
+		}
 		await app.close();
 		postgres("pg_dump", [
 			"--format=custom",

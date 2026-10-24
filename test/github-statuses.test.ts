@@ -896,8 +896,83 @@ for (const status of [403, 429]) {
 
 test("the rolling hour permits 240 status posts across jobs and resumes when the oldest posts expire", async () => {
 	const fixture = await setup();
-	for (let n = 1; n <= 241; n++)
-		await report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
+	await report(fixture, "pass", { commit: (1).toString(16).padStart(40, "0"), repo: github.repository, pr: 1 });
+	// Clone report history, including the gate projection refresh reads. Every post below is delivered normally.
+	await fixture.app.database.write(async (db) =>
+		db.transaction(async () => {
+			await db.exec(`
+ WITH seed AS (SELECT n,lpad(to_hex(n),40,'0') AS sha FROM generate_series(2,241) AS u(n)),
+ source AS (
+  SELECT t.id AS target,r.id AS run,b.id AS batch,z.id AS result,t.change
+  FROM targets t JOIN runs r ON r.accepts_what=t.what
+  JOIN batches b ON b.target=t.id JOIN results z ON z.batch=b.id
+  WHERE t.commit_sha=lpad('1',40,'0')
+ ), changes_made AS (
+  INSERT INTO changes(project,key,repo,base_sha,head_sha,branch,title,url,files,rev,head_observed_seq)
+  SELECT c.project,'pr:'||s.n,c.repo,c.base_sha,s.sha,c.branch,c.title,c.url,c.files,c.rev,c.head_observed_seq
+  FROM source x JOIN changes c ON c.id=x.change CROSS JOIN seed s RETURNING *
+ ), targets_made AS (
+  INSERT INTO targets(project,what,env,repo,commit_sha,branch,line,change,first_seq)
+  SELECT t.project,'code:'||t.repo||'@'||c.head_sha,t.env,t.repo,c.head_sha,t.branch,t.line,c.id,t.first_seq
+  FROM source x JOIN targets t ON t.id=x.target CROSS JOIN changes_made c RETURNING *
+ ), runs_made AS (
+  INSERT INTO runs(project,no,name,origin,accepts,accepts_what,scope,require,change,state,signoff,
+   accepted_seq,applied_seq,outstanding,next_expiry,tally,blocking,verdict,created_by,created_at,rev,quarantined)
+  SELECT r.project,r.no+s.n-1,left(s.sha,7)||' on '||c.key,r.origin,
+   (r.accepts::jsonb || jsonb_build_object('commit',s.sha))::text,t.what,'change:'||c.id,r.require,c.id,r.state,r.signoff,
+   r.accepted_seq,r.applied_seq,r.outstanding,r.next_expiry,r.tally,r.blocking,r.verdict,r.created_by,r.created_at,r.rev,r.quarantined
+  FROM source x JOIN runs r ON r.id=x.run CROSS JOIN seed s JOIN targets_made t ON t.commit_sha=s.sha
+  JOIN changes_made c ON c.id=t.change RETURNING *
+ ), batches_made AS (
+  INSERT INTO batches(project,key,target,job,attempt,method,actor,run,build_url,state,counts,staged,receipt,at,seq,
+   nothing_required,shard,shards,model)
+  SELECT b.project,b.key||':'||t.commit_sha,t.id,b.job,b.attempt,b.method,b.actor,b.run,b.build_url,b.state,b.counts,
+   b.staged,NULL,b.at,b.seq,b.nothing_required,b.shard,b.shards,b.model
+  FROM source x JOIN batches b ON b.id=x.batch CROSS JOIN targets_made t RETURNING *
+ ), results_made AS (
+  INSERT INTO results(project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,
+   outcome,attempt,duration_ms,signature,message,detail,at_step,trail,note,run,corrects,at,quarantine_decision,quarantine_exit,model)
+  SELECT z.project,z.test,z.seq,z.ord,b.id,b.target,z.method,z.actor,z.basis,z.basis_case,z.basis_version,z.basis_claim,
+   z.outcome,z.attempt,z.duration_ms,z.signature,z.message,z.detail,z.at_step,z.trail,z.note,z.run,z.corrects,z.at,
+   z.quarantine_decision,z.quarantine_exit,z.model
+  FROM source x JOIN results z ON z.id=x.result CROSS JOIN batches_made b RETURNING *
+ ), memberships AS (
+  INSERT INTO run_tests(run,test,result,outcome,signature,attempt,flipped,lane,target)
+  SELECT r.id,z.test,z.id,z.outcome,z.signature,z.attempt,rt.flipped,z.target||':'||b.job||':'||z.actor,z.target
+  FROM source x JOIN run_tests rt ON rt.run=x.run AND rt.result=x.result CROSS JOIN results_made z
+  JOIN batches_made b ON b.id=z.batch JOIN targets_made t ON t.id=z.target JOIN runs_made r ON r.accepts_what=t.what
+ )
+ INSERT INTO commit_statuses(project,repository,commit_sha,nonce,desired,sent,state,attempts,next_at,watch_until,error)
+ SELECT s.project,s.repository,t.commit_sha,gen_random_uuid()::text,
+  jsonb_set(s.desired::jsonb,'{url}',to_jsonb(regexp_replace(s.desired::jsonb->>'url','[^/]+$',replace(c.key,':','%3A'))))::text,
+  s.sent,s.state,s.attempts,s.next_at,s.watch_until,s.error
+ FROM source x JOIN targets original ON original.id=x.target JOIN commit_statuses s ON s.commit_sha=original.commit_sha
+  AND s.project=original.project AND s.repository=original.repo
+ CROSS JOIN targets_made t JOIN changes_made c ON c.id=t.change;
+ UPDATE batches b SET receipt=(original.receipt::jsonb || jsonb_build_object(
+  'batch',b.id,'results',jsonb_build_array(z.id),'gate',
+  original.receipt::jsonb->'gate' || jsonb_build_object('run','R-'||r.no)))::text
+ FROM batches original,targets t,results z,runs r
+ WHERE original.target=(SELECT id FROM targets WHERE commit_sha=lpad('1',40,'0'))
+  AND b.target=t.id AND z.batch=b.id AND r.accepts_what=t.what AND b.id<>original.id;
+ UPDATE counters SET value=(SELECT max(no) FROM runs WHERE project=counters.project) WHERE name='run';
+`);
+		}),
+	);
+	expect(
+		await fixture.app.database.read((db) =>
+			db.all(
+				sql<readonly [], { commits: number; results: number; runs: number; statuses: number }>(`
+ SELECT count(DISTINCT t.commit_sha) AS commits,count(DISTINCT z.id) AS results,count(DISTINCT r.id) AS runs,
+ count(DISTINCT s.commit_sha) AS statuses FROM targets t JOIN batches b ON b.target=t.id
+ JOIN results z ON z.batch=b.id AND z.target=t.id JOIN run_tests m ON m.result=z.id AND m.target=t.id
+ JOIN runs r ON r.id=m.run AND r.accepts_what=t.what AND r.verdict='passed'
+ JOIN commit_statuses s ON s.commit_sha=t.commit_sha AND s.project=t.project AND s.repository=t.repo
+`),
+			),
+		),
+	).toEqual([{ commits: 241, results: 241, runs: 241, statuses: 241 }]);
+
 	const fake = remote();
 	for (let minute = 0; minute < 12; minute++) {
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(20);
@@ -905,6 +980,7 @@ test("the rolling hour permits 240 status posts across jobs and resumes when the
 		fixture.advance(60_000);
 	}
 	expect(fake.requests).toHaveLength(240);
+	expect(fake.requests.every((request) => request.body.state === "success")).toBe(true);
 	fixture.advance(47 * 60_000);
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	fixture.advance(60_000);

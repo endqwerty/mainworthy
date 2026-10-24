@@ -21,7 +21,16 @@ import type { Config } from "../src/server/kernel/app.ts";
 import { Database, sql } from "../src/server/kernel/db.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { sessionOf } from "../src/surfaces/http.ts";
-import { holdWriter, identityDatabaseUrl, pgRow, pgRows, pgRun, watchQueries, withWrite } from "./identity-db.ts";
+import {
+	closeIdentityDatabases,
+	holdWriter,
+	identityDatabaseUrl,
+	pgRow,
+	pgRows,
+	pgRun,
+	watchQueries,
+	withWrite,
+} from "./identity-db.ts";
 
 /** 36 characters: long enough that the start has nothing to say about it. */
 const OWNER = "owner-secret-0123456789abcdef-012345";
@@ -51,6 +60,7 @@ const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 

@@ -15,7 +15,16 @@ import type { WriteDb } from "../src/server/kernel/db.ts";
 import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
-import { holdWriter, identityDatabaseUrl, pauseRead, pgRow, pgRows, pgRun, withWrite } from "./identity-db.ts";
+import {
+	closeIdentityDatabases,
+	holdWriter,
+	identityDatabaseUrl,
+	pauseRead,
+	pgRow,
+	pgRows,
+	pgRun,
+	withWrite,
+} from "./identity-db.ts";
 
 const TOKEN = "owner-secret-0123456789";
 const HOUR = 3_600_000;
@@ -33,9 +42,19 @@ const FIXTURES = join(import.meta.dir, "fixtures", "sessions");
 
 const dirs: string[] = [];
 const running: Instance[] = [];
-afterEach(async () => {
+async function cleanUp(): Promise<void> {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+}
+afterEach(cleanUp);
+
+test("identity fixtures survive a reopen within a test and retire at its cleanup boundary", async () => {
+	const key = scratch();
+	const first = await identityDatabaseUrl(key);
+	expect(await identityDatabaseUrl(key)).toBe(first);
+	await cleanUp();
+	expect(await identityDatabaseUrl(key)).not.toBe(first);
 });
 
 type Clock = { now: () => number; advance: (ms: number) => void; set: (at: number) => void };
