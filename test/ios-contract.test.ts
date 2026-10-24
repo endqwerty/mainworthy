@@ -129,7 +129,7 @@ test("the iPhone reads the bound authenticator step and its completed recovery-c
 		expect(must(completed)).toEqual({ signedIn: true });
 		expect(completed.cookie).toMatch(/^mainworthy_sid=[A-Za-z0-9_-]{43}$/);
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 
@@ -141,7 +141,7 @@ test("the iPhone reads a native passkey challenge from the configured instance",
 		if (!reply.body.ok) throw new Error(reply.text);
 		holds("POST /api/login/challenge", PasskeyChallenge, reply.body.result);
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 
@@ -154,7 +154,7 @@ test("the iPhone reads why native passkey sign-in is unavailable", async () => {
 		holds("POST /api/login/challenge refusal", Refusal, reply.body.error);
 		expect(reply.body.error).toMatchObject({ code: "invalid", details: { passkey: "native-unavailable" } });
 	} finally {
-		cleanUpPeople();
+		await cleanUpPeople();
 	}
 });
 

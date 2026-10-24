@@ -183,6 +183,13 @@ const Q = {
 	refsByIds: sql<{ ids: readonly number[] }, { id: number; no: number }>(
 		"SELECT id, no FROM runs WHERE id = ANY($ids::bigint[])",
 	),
+	holdEndingRuns: sql<
+		{ project: number; ids: readonly number[]; nos: readonly number[]; decisions: readonly number[] },
+		RunRow
+	>(
+		`SELECT * FROM runs WHERE project = $project AND (id = ANY($ids::bigint[]) OR no = ANY($nos::bigint[])
+		 OR id IN (SELECT run FROM depends_on WHERE decision = ANY($decisions::bigint[])))`,
+	),
 	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
 	changeRunsByWhat: sql<{ project: number; whats: readonly string[] }, RunRow>(
 		"SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = ANY($whats::text[])",
@@ -575,6 +582,12 @@ export async function passesAny(db: ReadDb, run: number, tests: readonly number[
 	const rows = await db.all(Q.passesAny, { run, tests });
 	return rows.length > 0;
 }
+/** Named runs and decision dependents, read together before independent cause holds end. */
+export const holdEndingRuns = async (
+	db: ReadDb,
+	input: { project: number; ids: readonly number[]; nos: readonly number[]; decisions: readonly number[] },
+): Promise<RunRow[]> => await db.all(Q.holdEndingRuns, input);
+
 export const runsDependingOn = async (db: ReadDb, decision: number): Promise<number[]> =>
 	(await db.all(Q.dependents, { decision })).map((r) => r.run);
 

@@ -417,6 +417,7 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call):
 	if (!op) return reply;
 	const rechecked = await app.database.read(async (db) => {
 		const project = op.scope === "project" && call.project ? await findProject(db, call.project) : null;
+		if (op.scope === "project" && !call.project) return fail("invalid", `${op.name} needs a project`);
 		if (op.scope === "project" && !project) {
 			const { code, message } = noProject(call.project);
 			return fail(code, message);

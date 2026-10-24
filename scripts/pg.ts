@@ -86,7 +86,9 @@ async function exclusive<T>(fn: () => Promise<T>): Promise<T> {
 				}
 			} catch {
 				// The owner writes its pid synchronously; an old empty lock was interrupted.
-				if (Date.now() - statSync(lockDir).mtimeMs > 2_000) rmSync(lockDir, { recursive: true, force: true });
+				const lock = statSync(lockDir, { throwIfNoEntry: false });
+				if (!lock) continue;
+				if (Date.now() - lock.mtimeMs > 2_000) rmSync(lockDir, { recursive: true, force: true });
 			}
 			if (Date.now() > deadline) throw new Error("timed out waiting for checkout PostgreSQL startup");
 			await Bun.sleep(25);

@@ -308,7 +308,7 @@ export function SuiteScreen() {
 	const readCase = useCallback(
 		(ref: string): Promise<{ rows: Api["get"]["reply"] } | { failure: string }> => {
 			const pending = owedReads.current.get(ref);
-			if (pending) return pending;
+			if (pending !== undefined) return pending;
 			const reading = (async () => {
 				try {
 					const rows = await call("get", { refs: [ref] }, { project, owner });
@@ -1198,7 +1198,7 @@ export function SuiteScreen() {
 		liveDrafts.current.set(snapshot.id, snapshot);
 		setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
 		const existing = pending.current.get(snapshot.id);
-		if (existing) {
+		if (existing !== undefined) {
 			await existing;
 			const latest = liveDrafts.current.get(adoptedRefs.current.get(snapshot.id) ?? snapshot.id);
 			if (sessionCurrent(owner) && latest?.dirty) await sealDraft({ keepalive, saved: latest });
@@ -1290,7 +1290,7 @@ export function SuiteScreen() {
 				if (after?.startsWith("draft:")) {
 					const predecessor = after;
 					const request = pending.current.get(predecessor);
-					if (request) await request;
+					if (request !== undefined) await request;
 					if (!sessionCurrent(owner)) return;
 					after = adoptedRefs.current.get(predecessor) ?? null;
 				}

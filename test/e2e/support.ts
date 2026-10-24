@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
 import { z } from "zod";
-import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint, testReaders } from "../../scripts/check-plan.ts";
+import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint } from "../../scripts/check-plan.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
@@ -123,7 +123,6 @@ export async function startServer({
 					MAINWORTHY_HANDOFF_PROJECT: handoff ? firstProject : "",
 					MAINWORTHY_HANDOFF_URL: handoff?.url ?? "",
 					MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
-					MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 				},
 				stdout: "pipe",
 				stderr: "pipe",

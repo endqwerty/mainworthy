@@ -12,6 +12,7 @@ import { z } from "zod";
 import { UpgradingHealth } from "../src/cli/health.ts";
 import { API_VERSION, API_VERSION_HEADER, ApiHealth } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
+import { drainDatabaseDrops, testDatabase } from "../test/db.ts";
 
 export type Choice =
 	/** Report to the deployed instance, to this project: the one named, or the only one the token may record on. */
@@ -212,21 +213,36 @@ export type Own = {
  */
 export function startOwn(cli: string): Own {
 	const data = mkdtempSync(join(tmpdir(), "mainworthy-ci-"));
-	const child = Bun.spawn([process.execPath, cli, "serve"], {
-		env: {
-			PATH: process.env.PATH ?? "",
-			HOME: data,
-			MAINWORTHY_DATA: data,
-			MAINWORTHY_PORT: "0",
-			MAINWORTHY_HOST: "127.0.0.1",
-			...(process.env.MAINWORTHY_READERS !== undefined ? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS } : {}),
-		},
-		stdout: "pipe",
-		stderr: "inherit",
-	});
+	const starting = (async () => {
+		const database = await testDatabase().catch((error: unknown) => {
+			rmSync(data, { recursive: true, force: true });
+			throw error;
+		});
+		try {
+			const child = Bun.spawn([process.execPath, cli, "serve"], {
+				env: {
+					PATH: process.env.PATH ?? "",
+					HOME: data,
+					MAINWORTHY_DATA: data,
+					MAINWORTHY_DATABASE_URL: database.url,
+					MAINWORTHY_PORT: "0",
+					MAINWORTHY_HOST: "127.0.0.1",
+				},
+				stdout: "pipe",
+				stderr: "inherit",
+			});
+			return { child, database };
+		} catch (error) {
+			await database.close();
+			await drainDatabaseDrops();
+			rmSync(data, { recursive: true, force: true });
+			throw error;
+		}
+	})();
 	let stopping: Promise<void> | undefined;
 	const stop = (): Promise<void> => {
 		stopping ??= (async () => {
+			const { child, database } = await starting;
 			child.kill("SIGKILL");
 			let timeout: ReturnType<typeof setTimeout> | undefined;
 			try {
@@ -243,11 +259,14 @@ export function startOwn(cli: string): Own {
 			} finally {
 				clearTimeout(timeout);
 			}
+			await database.close();
+			await drainDatabaseDrops();
 			rmSync(data, { recursive: true, force: true });
 		})();
 		return stopping;
 	};
 	const listening = async (): Promise<Environment> => {
+		const { child } = await starting;
 		// The server's first line ends with its address.
 		let printed = "";
 		const reader = child.stdout.getReader();

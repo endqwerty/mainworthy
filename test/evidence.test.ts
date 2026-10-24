@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { ciPolicy } from "../scripts/work/ci.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { SameCodeEvidence } from "../src/core/flaky.ts";
@@ -1348,6 +1349,78 @@ describe("holds", () => {
 			expect(await gate("old00001")).toMatchObject({ run: "R-1", verdict: "passed" });
 		},
 	);
+
+	test("passing many independent causes preserves each ending and its evidence across slices", async () => {
+		await ciPolicy(async (op, input) => await h.call(op, input), "scratch");
+		const n = 203;
+		await h.call(
+			"report",
+			ciReport({
+				commit: "manyfix1",
+				n,
+				fail: Object.fromEntries(Array.from({ length: n }, (_, i) => [i, `different cause ${i}`])),
+			}),
+		);
+		const decisions = () =>
+			h.app.database.read(
+				async (db) =>
+					await db.all(
+						sql<
+							readonly [],
+							{
+								id: number;
+								question: number;
+								basis: string;
+								on_evidence: string;
+								answer: string;
+								holds: string;
+								supersedes: number | null;
+								effects: string;
+								state: string;
+								signers: string;
+								expires_at: number | null;
+							}
+						>(
+							`SELECT d.*, q.state FROM questions q JOIN decisions d ON d.id = q.decision
+				 WHERE q.kind = 'failure' ORDER BY q.id`,
+						),
+					),
+			);
+		const before = await decisions();
+		const priorLedgerSize = await count("decisions");
+		expect(before).toHaveLength(n);
+		expect(await count("excuses")).toBe(n);
+		await h.call("report", ciReport({ commit: "manyfix2", n }));
+		const after = await decisions();
+		expect(after).toHaveLength(n);
+		for (const [i, row] of after.entries()) {
+			const prior = before[i];
+			expect(prior).toBeDefined();
+			expect(row).toMatchObject({
+				question: prior?.question,
+				basis: prior?.basis,
+				on_evidence: prior?.on_evidence,
+				supersedes: prior?.id,
+				state: "dissolved",
+				expires_at: null,
+				holds: "[]",
+				effects: "{}",
+			});
+			expect(JSON.parse(row.answer)).toEqual({ is: "outdated", fixed: true });
+			expect(JSON.parse(row.signers)).toMatchObject([
+				{
+					clause: "passed",
+					policy: 2,
+					reason: "Every test it named passed on manyfix2 where it had failed; the answer ended.",
+				},
+			]);
+		}
+		expect(await count("excuses")).toBe(0);
+		expect(await count("result_excuses")).toBe(0);
+		expect(await count("decisions")).toBe(priorLedgerSize + n);
+		expect(await gate("manyfix1")).toMatchObject({ verdict: "blocked", open: [] });
+		expect(await gate("manyfix2")).toMatchObject({ verdict: "passed", open: [] });
+	});
 
 	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", async () => {
 		const fail = { 0: "expected 90, got 100" };

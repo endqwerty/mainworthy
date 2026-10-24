@@ -100,7 +100,12 @@ for (const result of ["failed", "missing"] as const)
 				// Before the read starts, "Reading case…" is not shown yet either: wait for the answer itself (#890).
 				await page.locator("#detail").filter({ hasText: message }).waitFor();
 				await page.keyboard.press("e");
-				expect(await page.locator("#stat").textContent()).toBe(message);
+				expect(
+					await eventually(
+						() => page.locator("#stat").textContent(),
+						(text) => text === message,
+					),
+				).toBe(message);
 				expect(await page.locator("#detail").textContent()).toBe(message);
 				expect(await page.getByRole("textbox", { name: "Case title", exact: true }).count()).toBe(0);
 				if (result === "failed") {

@@ -12,6 +12,7 @@ import { jiraPort } from "../../src/server/trackers/jira.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
+import { testDatabase } from "../db.ts";
 import { ciReport } from "../helpers.ts";
 import {
 	answer,
@@ -1467,10 +1468,11 @@ check(
 		const request: typeof fetch = Object.assign(async () => new Response(jira.token, { status: 401 }), {
 			preconnect: fetch.preconnect,
 		});
+		const database = await testDatabase();
 		const instance = await start(
-			{ ...defaultConfig({}), owner: "robin", dataDir, port: 0, ownerToken: token, jira },
+			{ ...defaultConfig({}), databaseUrl: database.url, owner: "robin", dataDir, port: 0, ownerToken: token, jira },
 			() => ({ ui }),
-			{ readers: 0, trackerPort: jiraPort(jira, request) },
+			{ trackerPort: jiraPort(jira, request) },
 		);
 		const server: Server = {
 			url: instance.url,
@@ -1515,6 +1517,7 @@ check(
 			}
 		} finally {
 			await instance.stop();
+			await database.close();
 			await rm(dataDir, { recursive: true, force: true });
 		}
 	},

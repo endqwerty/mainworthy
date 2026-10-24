@@ -416,6 +416,24 @@ const Q = {
 		`INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
 		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash) RETURNING id`,
 	),
+	independentFailureDecisions: sql<{ project: number; ids: readonly number[] }, DecisionRow>(
+		`SELECT d.* FROM questions q JOIN decisions d ON d.id = q.decision
+		 WHERE q.project = $project AND q.id = ANY($ids::bigint[]) AND q.state = 'decided'
+		 AND NOT EXISTS (SELECT 1 FROM questions other WHERE other.project = q.project
+		   AND other.fingerprint = q.fingerprint AND other.id != q.id AND other.state IN ('open', 'decided'))`,
+	),
+	endPassedHolds: sql<{ rows: string; project: number; at: number; seq: number }, { no: number }>(
+		`WITH ending AS MATERIALIZED (
+		 SELECT * FROM jsonb_to_recordset($rows::text::jsonb)
+		 AS x(question bigint, decision bigint, answer text, signers text, ord bigint)
+		), made AS (
+		 INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
+		 SELECT $project, q.id, q.kind, x.answer, x.signers, q.basis, '[]', NULL, x.decision, $at, $seq, q.evidence_hash
+		 FROM ending x JOIN questions q ON q.id = x.question ORDER BY x.ord RETURNING id, question
+		)
+		 UPDATE questions q SET state = 'dissolved', decision = made.id, rev = $seq
+		 FROM made WHERE q.id = made.question RETURNING q.no`,
+	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
 	holdEndingById: sql<{ id: number }, DecisionRow>(`SELECT d.* FROM decisions d WHERE d.id = $id AND ${HOLD_ENDING}`),
@@ -763,6 +781,36 @@ export async function insertDecision(
 export const setDecisionEffects = async (ctx: Ctx, decision: number, effects: unknown): Promise<void> => {
 	await ctx.db.run(Q.setEffects, { id: decision, effects: JSON.stringify(effects) });
 };
+
+/** Decisions whose question has no other live occurrence of its cause. */
+export const independentFailureDecisions = async (
+	db: ReadDb,
+	project: number,
+	ids: readonly number[],
+): Promise<DecisionRow[]> => await db.all(Q.independentFailureDecisions, { project, ids });
+
+/** Each proven passing cause keeps its own immutable ending, in the same order as individual endings. */
+export async function endPassedHolds(
+	ctx: Ctx,
+	rows: readonly { question: QuestionRow; decision: DecisionRow; fixed: boolean; signer: Signer }[],
+): Promise<void> {
+	const updated = await ctx.db.all(Q.endPassedHolds, {
+		project: ctx.project.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		rows: JSON.stringify(
+			rows.map((row, ord) => ({
+				question: row.question.id,
+				decision: row.decision.id,
+				ord,
+				answer: JSON.stringify(row.fixed ? { is: "outdated", fixed: true } : { is: "outdated" }),
+				signers: JSON.stringify([row.signer]),
+			})),
+		),
+	});
+	if (updated.length !== rows.length) throw new Error("passing causes did not record every ending");
+	for (const row of rows) ctx.touched.add(questionRef(row.question));
+}
 
 export const decisionById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
 	await db.get(Q.decisionById, { id });

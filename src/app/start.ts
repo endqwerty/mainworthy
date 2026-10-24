@@ -181,12 +181,13 @@ async function startInstance(
 		stop() {
 			stopping ??= (async () => {
 				clearInterval(timer);
-				await minuteWork;
 				stopTrackerRequests(app);
 				stopHandoffs(app);
 				stopTrackerPolls(app);
 				stopCommitStatuses(app);
-				await server.stop();
+				const stoppedServer = server.stop();
+				await minuteWork;
+				await stoppedServer;
 				stopMail(app);
 				await waitMail(app);
 				await waitTrackerRequests(app);

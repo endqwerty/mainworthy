@@ -2,7 +2,7 @@
 //
 //   bun scripts/work.ts scratch new <name>            a directory under ~/.cache for this task's scratch files
 //   bun scripts/work.ts scratch rm <directory>        deletes a directory `scratch new` made, and nothing else
-//   bun scripts/work.ts stop-server                   stops the servers running from this checkout
+//   bun scripts/work.ts stop-server                   stops the servers and PostgreSQL running from this checkout
 //   bun scripts/work.ts board start|todo|done <n>     moves an issue's or a pull request's card on the board
 //   bun scripts/work.ts board check                   says which of the board's ids in the code no longer fit
 //   bun scripts/work.ts pr-body <n>                   checks a pull request's description, milestone and fragment PR references

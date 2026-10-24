@@ -115,6 +115,7 @@ async function gate(
 				const env = {
 					PATH: process.env.PATH ?? "",
 					HOME: root,
+					MAINWORTHY_TEST_PG: process.env.MAINWORTHY_TEST_PG ?? "",
 					// What the job leaves in the temporary directory is this test's to count.
 					TMPDIR: join(root, "tmp"),
 					MAINWORTHY_URL: instance.url,
@@ -848,6 +849,9 @@ writeFileSync(join(data, "last-write"), "finished");
 			);
 			const spawned = spyOn(Bun, "spawn");
 			const own = startOwn(cli);
+			const ready = own.ready.catch((error: unknown) => error);
+			const deadline = Date.now() + 4000;
+			while (spawned.mock.results.length === 0 && Date.now() < deadline) await Bun.sleep(1);
 			const result = spawned.mock.results[0];
 			spawned.mockRestore();
 			if (result?.type !== "return") throw new Error("the server was not spawned");
@@ -855,7 +859,6 @@ writeFileSync(join(data, "last-write"), "finished");
 			// Hold the requested kill until the real child completes an in-flight directory write.
 			const killing = Promise.withResolvers<void>();
 			const kill = spyOn(child, "kill").mockImplementation(() => killing.resolve());
-			const ready = own.ready.catch((error: unknown) => error);
 			try {
 				await Promise.race([ready, killing.promise]);
 				const data = await readFile(join(root, "data"), "utf8");

@@ -675,7 +675,7 @@ async function cases(server: Server, count: number) {
 			});
 			const history = view.page.getByRole("list", { name: "Runs of this change" });
 			const pushes = () => history.getByRole("link").allInnerTexts();
-			await eventually(pushes, (texts) => texts.length === 2);
+			await eventually(pushes, (texts) => texts.length === 2 && texts[0]?.split(/\s+/)[3] === "passed");
 			expect((await pushes()).map((text) => text.split(/\s+/).slice(0, 4))).toEqual([
 				["R-3", "pr:7", "feat0002feat", "passed"],
 				["R-2", "pr:7", "feat0001feat", "blocked"],
