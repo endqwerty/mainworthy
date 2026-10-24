@@ -10,11 +10,13 @@ import { inThisProcess } from "../src/cli/test-support.ts";
 import { ReportInput } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
+import { type TestDatabase, testDatabase } from "./db.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5RkAAAAASUVORK5CYII=";
@@ -33,9 +35,11 @@ const downloaded = z.object({ kind: z.literal("file"), attachment: metadata, dat
 const rigs: Harness[] = [];
 const dirs: string[] = [];
 const instances: Instance[] = [];
+const databases: TestDatabase[] = [];
 afterEach(async () => {
 	for (const instance of instances.splice(0)) await instance.stop();
-	for (const h of rigs.splice(0)) h.close();
+	for (const h of rigs.splice(0)) await h.close();
+	for (const database of databases.splice(0)) await database.close();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 async function rig() {
@@ -75,7 +79,7 @@ test("attach appends to the producer's result and requires read permission for d
 	const result = (await report(h, [])).results[0];
 	const attached = metadata.parse(await h.call("attach", { result, attachment: file, cmd: "attach-once" }));
 	expect(metadata.parse(await h.call("attach", { result, attachment: file, cmd: "attach-once" }))).toEqual(attached);
-	const other = h.actor("other", "human", ["record", "read"]);
+	const other = await h.actor("other", "human", ["record", "read"]);
 	expect(await h.raw("attach", { result, attachment: file }, other)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
@@ -89,7 +93,7 @@ test("attach appends to the producer's result and requires read permission for d
 			actor: async () => h.owner,
 		}),
 	).toMatchObject({ ok: false, error: { code: "not_found" } });
-	const recorder = h.actor("recorder", "ci", ["record"]);
+	const recorder = await h.actor("recorder", "ci", ["record"]);
 	expect(await h.raw("attachment", { result, id: attached.id }, recorder)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
@@ -175,16 +179,32 @@ test("one-project archives carry only that project's attachment metadata and byt
 	expect(other.ok).toBe(true);
 	for (const project of ["scratch", "another"]) {
 		const chunks: string[] = [];
-		const counts = exportArchive(h.app.db, (chunk) => chunks.push(chunk), { project, blobs: h.app.blobs });
+		const counts = await h.app.database.read(
+			async (db) => await exportArchive(db, (chunk) => chunks.push(chunk), { project, blobs: h.app.blobs }),
+		);
 		const archive = chunks.join("");
 		expect(counts.tables.attachments).toBe(1);
 		expect(archive).toContain(project === "scratch" ? PNG : privateData);
 		expect(archive).not.toContain(project === "scratch" ? privateData : PNG);
 		expect(archive).toContain(project === "scratch" ? "screenshot.png" : "private.txt");
 		const destination = await rig();
-		await destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-		await importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
-		expect(destination.app.db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: project }]);
+		await destination.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					await db.run(sql("DELETE FROM policies"));
+					await db.run(sql("DELETE FROM folders"));
+					await db.run(sql("DELETE FROM projects"));
+				}),
+		);
+		await destination.app.database.write(
+			async (db) =>
+				await db.transaction(async () => await importArchive(db, linesOf(archive), { blobs: destination.app.blobs })),
+		);
+		expect(
+			await destination.app.database.read(
+				async (db) => await db.all(sql<[], Record<string, unknown>>("SELECT key FROM projects")),
+			),
+		).toEqual([{ key: project }]);
 		if (project === "scratch") {
 			const item = listed.parse(await destination.call("attachment", { result })).items[0];
 			expect(downloaded.parse(await destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
@@ -196,14 +216,26 @@ test("archives carry attachment content and validate its hash before restoring",
 	const h = await rig();
 	const result = (await report(h)).results[0];
 	const chunks: string[] = [];
-	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { blobs: h.app.blobs });
+	await h.app.database.read(
+		async (db) => await exportArchive(db, (chunk) => chunks.push(chunk), { blobs: h.app.blobs }),
+	);
 	const archive = chunks.join("");
 	expect(archive).toContain(PNG);
 	const destination = await harness();
 	rigs.push(destination);
 	// An archive restores only into an empty instance.
-	await destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-	await importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
+	await destination.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				await db.run(sql("DELETE FROM policies"));
+				await db.run(sql("DELETE FROM folders"));
+				await db.run(sql("DELETE FROM projects"));
+			}),
+	);
+	await destination.app.database.write(
+		async (db) =>
+			await db.transaction(async () => await importArchive(db, linesOf(archive), { blobs: destination.app.blobs })),
+	);
 	expect(listed.parse(await destination.call("attachment", { result })).items).toHaveLength(1);
 	const item = listed.parse(await destination.call("attachment", { result })).items[0];
 	expect(downloaded.parse(await destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
@@ -215,26 +247,47 @@ test("archives carry attachment content and validate its hash before restoring",
 	attachment.blob = Buffer.from("changed").toString("base64");
 	const bad = await harness();
 	rigs.push(bad);
-	await bad.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-	expect(
-		async () =>
-			await importArchive(bad.app.db, linesOf(corrupt.map((entry) => JSON.stringify(entry)).join("\n")), {
-				blobs: bad.app.blobs,
+	await bad.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				await db.run(sql("DELETE FROM policies"));
+				await db.run(sql("DELETE FROM folders"));
+				await db.run(sql("DELETE FROM projects"));
 			}),
-	).toThrow(/attachment/);
+	);
+	await expect(
+		bad.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await importArchive(db, linesOf(corrupt.map((entry) => JSON.stringify(entry)).join("\n")), {
+							blobs: bad.app.blobs,
+						}),
+				),
+		),
+	).rejects.toThrow(/attachment/);
 	h.app.blobs.prune(new Set());
 	expect(await h.raw("attachment", { result, id: item?.id })).toMatchObject({
 		ok: false,
 		error: { code: "not_found" },
 	});
-	expect(() => exportArchive(h.app.db, () => {}, { blobs: h.app.blobs })).toThrow(/missing or damaged/);
+	await expect(
+		h.app.database.read(async (db) => await exportArchive(db, () => {}, { blobs: h.app.blobs })),
+	).rejects.toThrow(/missing or damaged/);
 });
 
 test("disk storage survives restart, deduplicates content, and real HTTP replies are JSON", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-attachments-"));
 	dirs.push(dir);
-	const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin", MAINWORTHY_PORT: "0" });
-	let instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
+	const database = await testDatabase();
+	databases.push(database);
+	const config = defaultConfig({
+		MAINWORTHY_DATA: dir,
+		MAINWORTHY_OWNER: "robin",
+		MAINWORTHY_PORT: "0",
+		MAINWORTHY_DATABASE_URL: database.url,
+	});
+	let instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {});
 	instances.push(instance);
 	const call = async (op: string, input: unknown) => {
 		const response = await fetch(`${instance.url}/api/p/scratch/${op}`, {
@@ -260,7 +313,7 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	expect(readFileSync(join(dir, "blobs", item.hash))).toEqual(Buffer.from(PNG, "base64"));
 	await instance.stop();
 	instances.pop();
-	instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
+	instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {});
 	instances.push(instance);
 	expect(downloaded.parse(await call("attachment", { result, id: item.id })).data).toBe(PNG);
 	writeFileSync(join(dir, "cli.png"), Buffer.from(PNG, "base64"));
@@ -329,10 +382,12 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	expect(archive).toContain(PNG);
 	const destination = mkdtempSync(join(tmpdir(), "mainworthy-attachment-import-"));
 	dirs.push(destination);
+	const importedDatabase = await testDatabase();
+	databases.push(importedDatabase);
 	const restored = await start(
-		{ ...config, dataDir: destination },
+		{ ...config, dataDir: destination, databaseUrl: importedDatabase.url },
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
-		{ readers: 1 },
+		{},
 	);
 	instances.push(restored);
 	const imported = await fetch(`${restored.url}/api/import`, { method: "POST", body: archive });
@@ -349,16 +404,23 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 test("startup prunes orphan bytes and recovers accepted attachment reports", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-attachment-recovery-"));
 	dirs.push(dir);
-	const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin", MAINWORTHY_PORT: "0" });
-	let instance = await start(config, () => ({ ui: null }), { readers: 0 });
+	const database = await testDatabase();
+	databases.push(database);
+	const config = defaultConfig({
+		MAINWORTHY_DATA: dir,
+		MAINWORTHY_OWNER: "robin",
+		MAINWORTHY_PORT: "0",
+		MAINWORTHY_DATABASE_URL: database.url,
+	});
+	let instance = await start(config, () => ({ ui: null }), {});
 	instances.push(instance);
-	const project = await findProject(instance.app.db, "scratch");
-	if (!project) throw new Error("No project");
 	const orphan = instance.app.blobs.put(Buffer.from("orphan"));
-	await instance.app.gate.run(
-		async () =>
-			await instance.app.db.transaction(async () => {
-				const ctx = makeCtx(instance.app, project, instance.owner, true);
+	await instance.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				if (!project) throw new Error("No project");
+				const ctx = makeCtx(instance.app, db, project, instance.owner, true);
 				await acceptReport(
 					ctx,
 					ReportInput.parse({
@@ -371,7 +433,7 @@ test("startup prunes orphan bytes and recovers accepted attachment reports", asy
 	);
 	await instance.stop();
 	instances.pop();
-	instance = await start(config, () => ({ ui: null }), { readers: 0 });
+	instance = await start(config, () => ({ ui: null }), {});
 	instances.push(instance);
 	expect(instance.app.blobs.get(orphan)).toBeNull();
 	expect(readdirSync(join(dir, "blobs"))).toHaveLength(1);

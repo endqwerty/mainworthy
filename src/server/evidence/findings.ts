@@ -68,8 +68,8 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT OR IGNORE INTO reviews (project, reviewer, lens, case_id, version, basis, about, at, seq)
-		 VALUES ($project, $reviewer, $lens, $caseId, $version, $basis, $about, $at, $seq)`,
+		`INSERT INTO reviews (project, reviewer, lens, case_id, version, basis, about, at, seq)
+		 VALUES ($project, $reviewer, $lens, $caseId, $version, $basis, $about, $at, $seq) ON CONFLICT DO NOTHING`,
 	),
 	reviewed: sql<{ caseId: number; basis: string; lens: string; reviewer: number }, { id: number }>(
 		"SELECT id FROM reviews WHERE case_id = $caseId AND basis = $basis AND lens = $lens AND reviewer = $reviewer",
@@ -80,13 +80,12 @@ const Q = {
 	reviewsAtVersion: sql<{ id: number; version: number }, ReviewRow>(
 		"SELECT * FROM reviews WHERE case_id = $id AND version = $version ORDER BY seq DESC",
 	),
-	reviewedCases: sql<{ actor: number; cases: string }, { id: number }>(
-		`SELECT json_extract(asked.value, '$.id') AS id FROM json_each($cases) asked WHERE EXISTS (
-		 SELECT 1 FROM reviews r WHERE r.case_id = json_extract(asked.value, '$.id')
-		 AND r.version = json_extract(asked.value, '$.version')
-		 AND r.basis = json_extract(asked.value, '$.basis') AND r.reviewer = $actor
-		)`,
-	),
+	reviewedCases: sql<
+		{ actor: number; ids: readonly number[]; versions: readonly number[]; bases: readonly string[] },
+		{ id: number }
+	>(`
+ SELECT asked.id FROM unnest($ids::bigint[],$versions::bigint[],$bases::text[]) AS asked(id,version,basis) WHERE EXISTS(
+ SELECT 1 FROM reviews r WHERE r.case_id=asked.id AND r.version=asked.version AND r.basis=asked.basis AND r.reviewer=$actor)`),
 };
 
 export async function insertFinding(
@@ -139,7 +138,7 @@ export const reviewedAt = async (
 	basis: string,
 	lens: string,
 	reviewer: number,
-): Promise<boolean> => db.get(Q.reviewed, { caseId, basis, lens, reviewer }) !== null;
+): Promise<boolean> => (await db.get(Q.reviewed, { caseId, basis, lens, reviewer })) !== null;
 export const findingsOfCase = async (db: ReadDb, caseId: number, limit: number): Promise<FindingRow[]> =>
 	await db.all(Q.findingsOfCase, { id: caseId, limit });
 export const reviewsOfCase = async (db: ReadDb, caseId: number, limit: number): Promise<ReviewRow[]> =>
@@ -151,4 +150,14 @@ export const reviewedCaseIds = async (
 	db: ReadDb,
 	actor: number,
 	cases: readonly { id: number; version: number; basis: string }[],
-) => new Set((await db.all(Q.reviewedCases, { actor, cases: JSON.stringify(cases) })).map((row) => row.id));
+) =>
+	new Set(
+		(
+			await db.all(Q.reviewedCases, {
+				actor,
+				ids: cases.map((row) => row.id),
+				versions: cases.map((row) => row.version),
+				bases: cases.map((row) => row.basis),
+			})
+		).map((row) => row.id),
+	);

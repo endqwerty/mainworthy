@@ -1,14 +1,46 @@
 // The broad-assertion rule reads distinct observations, never the payload of a commit's raw results or tries.
 import { signatureHash } from "../../core/signature.ts";
 import { allProjects, type Ctx } from "../kernel/ctx.ts";
-import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
-import { fileSignature, type SignatureRow, signatureByHash, signatureById, storeSignature } from "./signatures.ts";
+import {
+	fileSignature,
+	type SignatureRow,
+	signatureByHash,
+	signatureById,
+	signaturesByHashes,
+	storeSignature,
+	storeSignatures,
+} from "./signatures.ts";
 
 const PAGE = 200;
 const Q = {
+	sliceState: sql<
+		{ project: number; scope: string; roots: readonly number[] },
+		{ root: number; active: boolean; seen: string; files: string }
+	>(`
+ SELECT u.root,a.root IS NOT NULL AS active,
+ (SELECT coalesce(json_agg(json_build_array(t.test,t.file)),'[]')::text FROM (
+ SELECT test,file FROM assertion_seen WHERE project=$project AND scope=$scope AND root=u.root LIMIT 51) t) AS seen,
+ (SELECT coalesce(json_agg(f.file),'[]')::text FROM (
+ SELECT DISTINCT file FROM assertion_seen WHERE project=$project AND scope=$scope AND root=u.root ORDER BY file NULLS FIRST LIMIT 7) f) AS files
+ FROM unnest($roots::bigint[]) AS u(root) LEFT JOIN assertion_spreads a ON a.project=$project AND a.scope=$scope AND a.root=u.root`),
+
+	rememberRoots: sql<{ project: number; signatures: readonly number[]; roots: readonly number[] }>(`
+ INSERT INTO assertion_roots(project,signature,root) SELECT $project,u.signature,u.root FROM unnest($signatures::bigint[],$roots::bigint[]) AS u(signature,root) ON CONFLICT DO NOTHING`),
+	seeSlice: sql<{
+		project: number;
+		scope: string;
+		roots: readonly number[];
+		tests: readonly number[];
+		files: readonly (string | null)[];
+	}>(`
+ INSERT INTO assertion_seen(project,scope,root,test,file) SELECT $project,$scope,u.root,u.test,u.file FROM unnest($roots::bigint[],$tests::bigint[],$files::text[]) AS u(root,test,file) ON CONFLICT DO NOTHING`),
+	activateSlice: sql<{ project: number; scope: string; roots: readonly number[] }>(`
+ INSERT INTO assertion_spreads(project,scope,root) SELECT $project,$scope,root FROM unnest($roots::bigint[]) AS u(root) ON CONFLICT DO NOTHING`),
+
 	ready: sql<{ project: number }, { project: number }>("SELECT project FROM assertion_index WHERE project = $project"),
-	markReady: sql<{ project: number }>("INSERT OR IGNORE INTO assertion_index(project) VALUES ($project)"),
+	markReady: sql<{ project: number }>("INSERT INTO assertion_index(project) VALUES ($project) ON CONFLICT DO NOTHING"),
 	clearRoots: sql<{ project: number }>("DELETE FROM assertion_roots WHERE project = $project"),
 	clearSeen: sql<{ project: number }>("DELETE FROM assertion_seen WHERE project = $project"),
 	clearSpreads: sql<{ project: number }>("DELETE FROM assertion_spreads WHERE project = $project"),
@@ -17,29 +49,29 @@ const Q = {
 		"SELECT s.* FROM assertion_roots a JOIN signatures s ON s.id = a.root WHERE a.signature = $signature",
 	),
 	rememberRoot: sql<{ project: number; signature: number; root: number }>(
-		"INSERT OR IGNORE INTO assertion_roots(project, signature, root) VALUES ($project, $signature, $root)",
+		"INSERT INTO assertion_roots(project, signature, root) VALUES ($project, $signature, $root) ON CONFLICT DO NOTHING",
 	),
 	see: sql<{ project: number; scope: string; root: number; test: number; file: string | null }>(
-		"INSERT OR IGNORE INTO assertion_seen(project, scope, root, test, file) VALUES ($project, $scope, $root, $test, $file)",
+		"INSERT INTO assertion_seen(project, scope, root, test, file) VALUES ($project, $scope, $root, $test, $file) ON CONFLICT DO NOTHING",
 	),
 	active: sql<{ project: number; scope: string; root: number }, { root: number }>(
 		"SELECT root FROM assertion_spreads WHERE project = $project AND scope = $scope AND root = $root",
 	),
 	activate: sql<{ project: number; scope: string; root: number }>(
-		"INSERT OR IGNORE INTO assertion_spreads(project, scope, root) VALUES ($project, $scope, $root)",
+		"INSERT INTO assertion_spreads(project, scope, root) VALUES ($project, $scope, $root) ON CONFLICT DO NOTHING",
 	),
 	tests: sql<{ project: number; scope: string; root: number }, { n: number }>(
 		"SELECT count(*) AS n FROM (SELECT test FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root LIMIT 51)",
 	),
 	firstFile: sql<{ project: number; scope: string; root: number }, { file: string | null }>(
-		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root ORDER BY file LIMIT 1",
+		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root ORDER BY file NULLS FIRST LIMIT 1",
 	),
 	nextFile: sql<{ project: number; scope: string; root: number; after: string }, { file: string }>(
-		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root AND file > $after ORDER BY file LIMIT 1",
+		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root AND file > $after ORDER BY file NULLS FIRST LIMIT 1",
 	),
 	// NULL is the first index entry; the empty string, if present in an imported test, is a distinct reported file.
 	firstReported: sql<{ project: number; scope: string; root: number }, { file: string }>(
-		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root AND file IS NOT NULL ORDER BY file LIMIT 1",
+		"SELECT file FROM assertion_seen WHERE project = $project AND scope = $scope AND root = $root AND file IS NOT NULL ORDER BY file NULLS FIRST LIMIT 1",
 	),
 	clearSessionSeen: sql<{ project: number; scope: string }>(
 		"DELETE FROM assertion_seen WHERE project = $project AND scope = $scope",
@@ -101,7 +133,7 @@ async function child(ctx: Ctx, root: SignatureRow, file: string | null): Promise
 
 /** At most six covering-index successor seeks, regardless of repeated tests in one file. */
 async function broad(db: ReadDb, key: { project: number; scope: string; root: number }): Promise<boolean> {
-	if ((db.get(Q.tests, key)?.n ?? 0) < 51) return false;
+	if (((await db.get(Q.tests, key))?.n ?? 0) < 51) return false;
 	let file = (await db.get(Q.firstReported, key))?.file;
 	for (let n = 1; file !== undefined; n++) {
 		if (n === 6) return true;
@@ -115,9 +147,9 @@ async function recordObservation(
 	key: { project: number; scope: string; root: number },
 	test: { id: number; file: string | null },
 ): Promise<"narrow" | "activated" | "active"> {
-	if (db.get(Q.active, key)) return "active";
+	if (await db.get(Q.active, key)) return "active";
 	await db.run(Q.see, { ...key, test: test.id, file: test.file });
-	if (!broad(db, key)) return "narrow";
+	if (!(await broad(db, key))) return "narrow";
 	await db.run(Q.activate, key);
 	return "activated";
 }
@@ -155,7 +187,7 @@ export async function finishAssertionScope(ctx: Ctx, scope: string): Promise<voi
 
 /** One-time derived reconstruction. The caller's transaction includes the completion marker. No evidence is rewritten. */
 export async function* ensureAssertionIndex(db: WriteDb, project: number): AsyncGenerator<undefined, void, void> {
-	if (db.get(Q.ready, { project })) return;
+	if (await db.get(Q.ready, { project })) return;
 	await db.run(Q.clearRoots, { project });
 	await db.run(Q.clearSeen, { project });
 	await db.run(Q.clearSpreads, { project });
@@ -211,4 +243,101 @@ export async function rebuildAssertionIndexes(
 			}
 		}
 	});
+}
+
+/** Plan the old observation order in memory, then store a slice's roots and file children together. */
+export async function observeFailureSlice(
+	ctx: Ctx,
+	scope: string,
+	observations: readonly {
+		signature: Pick<SignatureRow, "hash" | "class" | "text">;
+		test: { id: number; file: string | null };
+	}[],
+): Promise<Map<string, SignatureRow>> {
+	if (!observations.length) return new Map();
+	const assertions = observations.filter((o) => o.signature.class === "assertion");
+	if (!assertions.length)
+		return await storeSignatures(
+			ctx,
+			observations.map((o) => o.signature),
+		);
+	const roots = new Map(assertions.map((o) => [o.signature.hash, o.signature]));
+	const known = await signaturesByHashes(ctx.db, ctx.project.id, [...roots.keys()]);
+	const hashes = new Map(known.map((row) => [row.id, row.hash]));
+	const states = new Map(
+		[...roots.keys()].map((hash) => [
+			hash,
+			{ active: false, seen: new Map<number, string | null>(), files: new Set<string | null>() },
+		]),
+	);
+	for (let start = 0; start < known.length; start += 200) {
+		for (const row of await ctx.db.all(Q.sliceState, {
+			project: ctx.project.id,
+			scope,
+			roots: known.slice(start, start + 200).map((root) => root.id),
+		})) {
+			const hash = hashes.get(row.root),
+				state = hash === undefined ? undefined : states.get(hash);
+			if (!state) throw new Error("assertion state missing from slice");
+			state.active = row.active;
+			for (const [test, file] of json<[number, string | null][]>(row.seen)) state.seen.set(test, file);
+			for (const file of json<(string | null)[]>(row.files)) state.files.add(file);
+		}
+	}
+	const additions: typeof assertions = [];
+	const activated = new Set<string>();
+	const candidates: Pick<SignatureRow, "hash" | "class" | "text">[] = [];
+	const children: { root: string; hash: string }[] = [];
+	const child = (root: Pick<SignatureRow, "hash" | "class" | "text">, file: string | null) => {
+		const signature = fileSignature(root, file);
+		candidates.push(signature);
+		children.push({ root: root.hash, hash: signature.hash });
+	};
+	for (const observation of observations) {
+		const root = observation.signature;
+		candidates.push(root);
+		if (root.class !== "assertion") continue;
+		const state = states.get(root.hash);
+		if (!state) throw new Error("assertion state missing from slice");
+		if (state.active) {
+			child(root, observation.test.file);
+			continue;
+		}
+		if (!state.seen.has(observation.test.id)) {
+			state.seen.set(observation.test.id, observation.test.file);
+			state.files.add(observation.test.file);
+			additions.push(observation);
+		}
+		if (state.seen.size < 51 || [...state.files].filter((file) => file !== null).length < 6) continue;
+		state.active = true;
+		activated.add(root.hash);
+		for (const file of [...state.files].sort((a, b) =>
+			a === null ? -1 : b === null ? 1 : Buffer.compare(Buffer.from(a), Buffer.from(b)),
+		))
+			child(root, file);
+	}
+	const stored = await storeSignatures(ctx, candidates);
+	const idOf = (hash: string) => {
+		const row = stored.get(hash);
+		if (!row) throw new Error("signature was not stored");
+		return row.id;
+	};
+	const relations = new Map<string, string>([...roots.keys()].map((hash) => [hash, hash]));
+	for (const child of children) relations.set(child.hash, child.root);
+	await ctx.db.run(Q.rememberRoots, {
+		project: ctx.project.id,
+		signatures: [...relations.keys()].map(idOf),
+		roots: [...relations.values()].map(idOf),
+	});
+	if (additions.length)
+		await ctx.db.run(Q.seeSlice, {
+			project: ctx.project.id,
+			scope,
+			roots: additions.map((o) => idOf(o.signature.hash)),
+			tests: additions.map((o) => o.test.id),
+			files: additions.map((o) => o.test.file),
+		});
+	if (activated.size)
+		await ctx.db.run(Q.activateSlice, { project: ctx.project.id, scope, roots: [...activated].map(idOf) });
+	return stored;
 }

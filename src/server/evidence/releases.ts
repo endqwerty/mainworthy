@@ -1,6 +1,6 @@
 import type { AnnounceInput, AnnounceReply } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type ReadDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 
 type Artifact = {
@@ -38,9 +38,9 @@ const Q = {
 	insertBuild: sql<{ project: number; label: string; artifact: number; seq: number }>(
 		"INSERT INTO builds (project, label, artifact, seq) VALUES ($project, $label, $artifact, $seq)",
 	),
-	deploy: sql<{ project: number; build: number; env: string; actor: number; at: number; seq: number }>(
+	deploy: sql<{ project: number; build: number; env: string; actor: number; at: number; seq: number }, { id: number }>(
 		`INSERT INTO deployments (project, build, env, actor, at, seq)
-		 VALUES ($project, $build, $env, $actor, $at, $seq)`,
+		 VALUES ($project, $build, $env, $actor, $at, $seq) RETURNING id`,
 	),
 	environments: sql<{ project: number; build: number }, { env: string }>(
 		"SELECT DISTINCT env FROM deployments WHERE project = $project AND build = $build ORDER BY env",
@@ -110,7 +110,7 @@ export async function announce(ctx: Ctx, input: AnnounceInput): Promise<Announce
 		await ctx.db.run(Q.insertBuild, { project, label: input.deploy, artifact: artifact.id, seq: ctx.seq });
 		build = await mustBuild(ctx.db, project, input.deploy);
 	}
-	const { lastId } = await ctx.db.run(Q.deploy, {
+	const { id: lastId } = await ctx.db.one(Q.deploy, {
 		project,
 		build: build.build_id,
 		env: input.env,

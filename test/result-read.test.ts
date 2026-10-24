@@ -48,7 +48,7 @@ test("get reads an exact old result with diagnostics only in its project and wit
 				actor: async () => h.owner,
 			}),
 		).toMatchObject({ ok: false, error: { code: "not_found" } });
-		const recorder = h.actor("recorder", "ci", ["record"]);
+		const recorder = await h.actor("recorder", "ci", ["record"]);
 		expect(await h.raw("get", { refs: [`result:${id}`] }, recorder)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
@@ -59,6 +59,6 @@ test("get reads an exact old result with diagnostics only in its project and wit
 				error: { code: "not_found", message: `${ref} not found` },
 			});
 	} finally {
-		h.close();
+		await h.close();
 	}
 });

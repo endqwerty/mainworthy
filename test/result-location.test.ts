@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { type Harness, harness } from "./helpers.ts";
@@ -8,7 +9,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h.close());
 
 test("failure evidence, test history and runs name only the recorded change for the exact landed commit", async () => {
 	const commit = "1234567890abcdef1234567890abcdef12345678";
@@ -40,7 +41,7 @@ test("failure evidence, test history and runs name only the recorded change for 
 	expect(await h.call("find", { in: "results", run: trunk.gate?.run })).toMatchObject({
 		items: [{ location: expected }],
 	});
-	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+	const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
 	for (const [attempt, outcome] of [
 		[1, "fail"],
 		[2, "pass"],
@@ -83,9 +84,19 @@ test("failure evidence, test history and runs name only the recorded change for 
 		pipeline,
 	);
 	// An existing question written before location metadata was added keeps only its original samples.
-	h.app.db.raw.run(`UPDATE questions SET evidence = json_remove(evidence,
-		'$.tests[0].sameCode.signals[0].samples[0].location',
-		'$.tests[0].sameCode.signals[0].samples[1].location') WHERE kind = 'failure'`);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<
+							[],
+							Record<string, unknown>
+						>(`UPDATE questions SET evidence = (evidence::jsonb #- '{tests,0,sameCode,signals,0,samples,0,location}'
+		#- '{tests,0,sameCode,signals,0,samples,1,location}')::text WHERE kind = 'failure'`),
+					),
+			),
+	);
 	expect(await h.call("get", { refs: [again.questions[0]?.q] })).toMatchObject([
 		{
 			evidence: { tests: [{ sameCode: { signals: [{ samples: [{ location: expected }, { location: expected }] }] } }] },

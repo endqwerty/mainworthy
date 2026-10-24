@@ -4,17 +4,17 @@ import type { Quarantine } from "../src/core/flaky.ts";
 import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { AuditReply } from "../src/core/replies.ts";
 import { effectiveQuarantine, quarantineEntries, quarantineLookup } from "../src/server/evidence/quarantine.ts";
-import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { Database } from "../src/server/kernel/db.ts";
 import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(() => h.close());
+afterEach(async () => await h.close());
 const report = async (commit: string, fail = true, branch = "main", attempt = 1) =>
 	await h.call<ReportReceipt>(
 		"report",
@@ -82,7 +82,8 @@ describe("quarantine covers observations when reported", () => {
 			...input,
 			results: [pass, { ...pass, outcome: "fail", failure: { message: "later in the same report" } }],
 		});
-		const covered = await quarantineLookup(h.app.db, 1);
+		const covered = async (result: number) =>
+			await h.app.database.read(async (db) => await (await quarantineLookup(db, 1))(result));
 		expect(await covered(receipt.results?.[0] ?? 0)).toMatchObject({ decision: entry?.decision, quarantined: true });
 		expect(await covered(receipt.results?.[1] ?? 0)).toBe(null);
 		expect(await gate("aaaa0002")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
@@ -107,13 +108,22 @@ describe("quarantine covers observations when reported", () => {
 		const entry = await quarantine({ kind: "person" });
 		if (!entry) throw new Error("missing quarantine decision");
 		await report("aaaa0002");
-		const db = h.app.db;
-		const run = db.run.bind(db);
+		const database = h.app.database;
+		const write = database.write.bind(database);
 		let folds = 0;
-		db.run = (statement, ...params) => {
-			if (statement.text.startsWith("UPDATE runs SET tally")) folds++;
-			return run(statement, ...params);
-		};
+		database.write = async (fn, options) =>
+			await write(async (db) => {
+				const run = db.run.bind(db);
+				db.run = async (statement, ...params) => {
+					if (statement.text.startsWith("UPDATE runs SET tally")) folds++;
+					return await run(statement, ...params);
+				};
+				try {
+					return await fn(db);
+				} finally {
+					db.run = run;
+				}
+			}, options);
 		try {
 			await report("aaaa0003");
 			expect(folds).toBe(1);
@@ -121,7 +131,7 @@ describe("quarantine covers observations when reported", () => {
 			await quarantine(null, entry.decision);
 			expect(folds).toBe(0);
 		} finally {
-			db.run = run;
+			database.write = write;
 		}
 		expect(await gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
 		expect(await gate("aaaa0003")).toMatchObject({ verdict: "passed", quarantined: 1 });
@@ -137,7 +147,8 @@ describe("quarantine covers observations when reported", () => {
 		const second = await quarantine({ kind: "person" }, exit.decision);
 		const newer = (await report("aaaa0004")).results?.[0];
 		if (!second || !newer) throw new Error("missing replacement entry or result");
-		const covered = await quarantineLookup(h.app.db, 1);
+		const covered = async (result: number) =>
+			await h.app.database.read(async (db) => await (await quarantineLookup(db, 1))(result));
 		expect(await covered(older)).toMatchObject({ decision: first.decision });
 		expect(await covered(newer)).toMatchObject({ decision: second.decision });
 		expect(await gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
@@ -147,31 +158,6 @@ describe("quarantine covers observations when reported", () => {
 });
 
 describe("quarantine", () => {
-	test("the history plan finds a commit's targets before looking up their test results", () => {
-		const statement = declaredSql().find((text) => text.includes("FROM targets initial"));
-		if (!statement) throw new Error("missing quarantine history statement");
-		const plan = h.app.db.raw
-			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
-			.all()
-			.map((row) => row.detail);
-		expect(plan[0]).toBe("SEARCH r USING INDEX results_test (project=? AND test=? AND seq>?)");
-		const initial = plan.indexOf("SEARCH initial USING COVERING INDEX targets_commit (project=? AND commit_sha=?)");
-		const first = plan.indexOf("SEARCH first USING INDEX results_target (target=? AND test=?)");
-		expect(initial).toBeGreaterThanOrEqual(0);
-		expect(first).toBeGreaterThan(initial);
-	});
-	test("the pass-exit plan looks up the recorded decision without scanning result history", () => {
-		const statement = declaredSql().find((text) =>
-			text.startsWith("SELECT id,seq,ord FROM results WHERE quarantine_exit="),
-		);
-		if (!statement) throw new Error("missing quarantine exit statement");
-		const plan = h.app.db.raw
-			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
-			.all()
-			.map((row) => row.detail);
-		expect(plan).toEqual(["SEARCH results USING INDEX results_quarantine_exit (quarantine_exit=?)"]);
-	});
-
 	test("a person's decision excuses one test and makes quarantined failures explicit", async () => {
 		await report("aaaa0001");
 		expect((await gate("aaaa0001")).verdict).toBe("blocked");
@@ -271,7 +257,7 @@ describe("quarantine", () => {
 describe("quarantine boundaries", () => {
 	test("agents propose and advise but never decide, even with answer and admin grants", async () => {
 		await report("aaaa0001");
-		const agent = h.actor("reviewer", "agent", ["read", "produce", "answer", "admin"]);
+		const agent = await h.actor("reviewer", "agent", ["read", "produce", "answer", "admin"]);
 		const proposed = await h.call<ProposeReply>(
 			"propose",
 			{
@@ -422,7 +408,7 @@ describe("quarantine boundaries", () => {
 		await quarantine({ kind: "passes", count: 1 });
 		await report("aaaa0001", true, "main", 2);
 		expect((await h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] }))[0]?.quarantine.active).toBe(true);
-		const agent = h.actor("reporting-agent", "agent", ["read", "produce"]);
+		const agent = await h.actor("reporting-agent", "agent", ["read", "produce"]);
 		await h.call("report", ciReport({ commit: "aaaa0002", n: 1 }), agent);
 		expect((await h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] }))[0]?.quarantine.active).toBe(true);
 		expect((await gate("aaaa0001")).verdict).toBe("passed");
@@ -460,7 +446,7 @@ describe("quarantine boundaries", () => {
 			await other.call("report", ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "expected green" } }));
 			expect((await other.call<GateStatus>("gate", { commit: "aaaa0001" })).verdict).toBe("blocked");
 		} finally {
-			other.close();
+			await other.close();
 		}
 	});
 	test("planned runs keep observation-time coverage at expiry, including a run planned afterward", async () => {
@@ -513,32 +499,38 @@ test("archives retain quarantine decisions, exit rules and observations", async 
 	const failure = detail?.last.find((result) => result.outcome === "fail");
 	if (!failure) throw new Error("missing quarantined failure");
 	let archive = "";
-	exportArchive(
-		h.app.db,
-		(chunk) => {
-			archive += chunk;
-		},
-		{ now: 1_800_000_000_500 },
+	await h.app.database.read(
+		async (db) =>
+			await exportArchive(
+				db,
+				(chunk) => {
+					archive += chunk;
+				},
+				{ now: 1_800_000_000_500 },
+			),
 	);
 	expect(archive).toContain('"quarantines"');
-	const imported = new Db(":memory:");
+	const importedFixture = await testDatabase();
+	const imported = await Database.open({ url: importedFixture.url });
 	try {
-		await migrate(imported, ":memory:");
-		await importArchive(imported, archive.trimEnd().split("\n"));
-		const entry = (await quarantineEntries(imported, 1))[0];
+		await imported.write(
+			async (db) => await db.transaction(async () => await importArchive(db, archive.trimEnd().split("\n"))),
+		);
+		const entry = (await imported.read(async (db) => await quarantineEntries(db, 1)))[0];
 		if (!entry) throw new Error("quarantine did not survive archive import");
 		expect(entry).toMatchObject({
 			actor: h.owner.id,
 			reason: "Keep failures visible while repairing the test",
 			exit_rule: '{"kind":"passes","count":2}',
 		});
-		expect(await effectiveQuarantine(imported, entry, h.app.now())).toBe(false);
-		expect(await (await quarantineLookup(imported, 1))(failure.id)).toMatchObject({
+		expect(await imported.read(async (db) => await effectiveQuarantine(db, entry, h.app.now()))).toBe(false);
+		expect(await imported.read(async (db) => await (await quarantineLookup(db, 1))(failure.id))).toMatchObject({
 			decision: entry.decision,
 			quarantined: true,
 		});
 	} finally {
-		imported.close();
+		await imported.close();
+		await importedFixture.close();
 	}
 	expect(await gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1 });
 });
@@ -585,7 +577,7 @@ for (const mixed of [false, true]) {
 		});
 		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 		if (mixed) {
-			const tester = h.actor("tester", "human", ["read", "produce"]);
+			const tester = await h.actor("tester", "human", ["read", "produce"]);
 			await h.call(
 				"report",
 				{
