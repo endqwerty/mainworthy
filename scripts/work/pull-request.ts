@@ -38,118 +38,6 @@ export function closing(body: string): { closes: number[]; stray: string[] } {
 
 export const partOf = (body: string): number[] => [...prose(body).matchAll(PART_OF)].map((match) => Number(match[1]));
 
-/**
- * The principles index of the `principles` skill (endstack, skills/principles/SKILL.md). The build skill's design step
- * ends its note with `Principles: <name> (<the choice it changed>); ...` or `Principles: n/a: <reason>`, and the note
- * goes into "why this approach". Of 169 pull requests opened 2026-10-16 to 10-21, 3 named a principle.
- */
-const PRINCIPLES = [
-	"Laziness Protocol",
-	"Foundational Thinking",
-	"Redesign From First Principles",
-	"Attack the Premise",
-	"Subtract Before You Add",
-	"Minimize Reader Load",
-	"Outcome-Oriented Execution",
-	"Experience First",
-	"Exhaust the Design Space",
-	"Build the Lever",
-	"Model the Domain",
-	"Boundary Discipline",
-	"Type System Discipline",
-	"Make Operations Idempotent",
-	"Migrate Callers Then Delete Legacy APIs",
-	"Separate Before Serializing Shared State",
-	"Fix Root Causes",
-	"Sequence work into verifiable units",
-	"Sequence verifiable units", // the name of its reference file, sequence-verifiable-units.md
-	"Test Behavior, Not Implementation",
-	"Explain the Number",
-	"Guard the Context Window",
-	"Never Block on the Human",
-	"Encode Lessons in Structure",
-];
-const words = (text: string): string =>
-	text
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, " ")
-		.trim();
-const NAMES = PRINCIPLES.map(words);
-const LINE = /^ {0,3}(?:[-*+] +)?(?:\*\*|__)?Principles(?:\*\*|__)?:(?:\*\*|__)?[ \t]*(.*)$/gim;
-const FORMAT = "`Principles: <name> (<the choice it changed>); ...` or `Principles: n/a: <reason>`";
-
-/**
- * The entries of a `Principles:` line: split at each ";" outside parentheses, each without its "(<choice>)". A "("
- * left open would hide every name after it, so it is reported instead.
- */
-function entries(line: string): { names: string[]; unclosed: boolean } {
-	const names: string[] = [];
-	let depth = 0;
-	let name = "";
-	for (const char of `${line};`) {
-		if (char === "(") depth++;
-		else if (char === ")") depth = Math.max(0, depth - 1);
-		else if (char === ";" && depth === 0) {
-			names.push(name.replace(/[*_`]/g, "").trim());
-			name = "";
-		} else if (depth === 0) name += char;
-	}
-	return { names: names.filter((entry) => entry !== ""), unclosed: depth > 0 };
-}
-
-const INLINE_CODE = /`[^`\n]*`/y;
-
-/**
- * The text without HTML comments, which are not shown. Outside a comment, "<!--" inside inline code opens none; inside
- * one, only "-->" ends it, backticks or not. A comment left open runs to the end.
- */
-function withoutComments(text: string): string {
-	let shown = "";
-	let at = 0;
-	while (at < text.length) {
-		INLINE_CODE.lastIndex = at;
-		const code = INLINE_CODE.exec(text);
-		if (code) {
-			shown += code[0];
-			at += code[0].length;
-		} else if (text.startsWith("<!--", at)) {
-			const end = text.indexOf("-->", at + 4);
-			if (end === -1) break;
-			at = end + 3;
-		} else {
-			shown += text[at];
-			at++;
-		}
-	}
-	return shown;
-}
-
-/** What is wrong with the description's `Principles:` lines; empty when each names principles or says why none. */
-export function principles(body: string): string[] {
-	const lines = [...withoutComments(unfenced(body)).matchAll(LINE)].map((match) => (match[1] ?? "").trim());
-	if (lines.length === 0)
-		return [
-			`The description has no \`Principles:\` line. End "why this approach" with ${FORMAT} (the build skill's design note).`,
-		];
-	return lines.flatMap((line) => {
-		const notApplicable = /^n\/a\b[\s:.-]*(.*)$/i.exec(line);
-		if (notApplicable)
-			return words(notApplicable[1] ?? "") === ""
-				? ["`Principles: n/a` needs a reason: `Principles: n/a: <why no principle changed a choice>`."]
-				: [];
-		const { names: items, unclosed } = entries(line);
-		if (unclosed)
-			return ['The `Principles:` line leaves a "(" open. Close each choice: `<name> (<the choice it changed>)`.'];
-		if (items.length === 0) return [`The \`Principles:\` line is empty. Write ${FORMAT}.`];
-		return items
-			.filter((item) => !NAMES.includes(words(item)))
-			.map(
-				(item) =>
-					`"${item}" in the \`Principles:\` line is not in the principles index. Name one, such as Model the Domain, or write \`n/a: <reason>\`.`,
-			);
-	});
-}
-
 export type Facts = {
 	pull: { url: string; draft: boolean };
 	addedFragments: readonly { file: string; text: string }[];
@@ -184,7 +72,6 @@ export function problems(facts: Facts): string[] {
 		found.push(
 			`The pull request has ${facts.milestone ? `milestone "${facts.milestone}"` : "no milestone"}; its issue has ${milestones.map((m) => `"${m}"`).join(" or ")}.`,
 		);
-	found.push(...principles(facts.body));
 	for (const { file, text } of facts.addedFragments) {
 		// The description job installs no dependencies. Full fragment validation stays with the docs checks.
 		const header = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text)?.[1] ?? "";
