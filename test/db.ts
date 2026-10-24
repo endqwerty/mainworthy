@@ -2,6 +2,7 @@
 import { afterAll } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { cluster } from "../scripts/pg.ts";
+import { databaseCreated, databaseDropped, recordDatabase } from "../scripts/work/test-databases.ts";
 import { Database, type DatabaseAdmin, databaseAdmin } from "../src/server/kernel/db.ts";
 
 export type TestDatabase = {
@@ -12,6 +13,8 @@ export type TestDatabase = {
 };
 const fixtures = new Set<TestDatabase>();
 const pendingDrops = new Set<Promise<void>>();
+const deferredDrops = new Set<() => Promise<void>>();
+const managed = process.env.MAINWORTHY_TEST_DATABASES;
 const dropErrors: unknown[] = [];
 const identifier = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 const databaseUrl = (adminUrl: string, name: string): string => {
@@ -50,14 +53,16 @@ async function ensureTemplate(admin: DatabaseAdmin, adminUrl: string, schema: "b
 	}
 }
 export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}): Promise<TestDatabase> {
-	const { adminUrl } = await cluster();
+	const { adminUrl, owned } = await cluster();
 	const name = `mw_test_${process.pid}_${randomUUID().replaceAll("-", "")}`;
+	const record = recordDatabase(managed, { adminUrl, owned, name });
 	const cloneMs = await databaseAdmin(adminUrl, async (admin) => {
 		const template = await ensureTemplate(admin, adminUrl, input.schema ?? "baseline");
 		const start = performance.now();
 		await admin.exec(`CREATE DATABASE ${identifier(name)} TEMPLATE ${identifier(template)}`);
 		return performance.now() - start;
 	});
+	databaseCreated(record);
 	const timings = { cloneMs, dropMs: null as number | null };
 	let closed = false;
 	const fixture: TestDatabase = {
@@ -67,27 +72,41 @@ export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}
 			if (closed) return;
 			closed = true;
 			fixtures.delete(fixture);
-			const dropping = databaseAdmin(adminUrl, async (admin) => {
-				const start = performance.now();
-				await admin.exec(`DROP DATABASE IF EXISTS ${identifier(name)} WITH (FORCE)`);
-				timings.dropMs = performance.now() - start;
-			});
-			pendingDrops.add(dropping);
-			void dropping
-				.catch((error: unknown) => {
-					dropErrors.push(error);
-				})
-				.finally(() => pendingDrops.delete(dropping));
+			const drop = async () => {
+				await databaseAdmin(adminUrl, async (admin) => {
+					const start = performance.now();
+					await admin.exec(`DROP DATABASE IF EXISTS ${identifier(name)} WITH (FORCE)`);
+					timings.dropMs = performance.now() - start;
+				});
+				databaseDropped(record);
+			};
+			if (managed) deferredDrops.add(drop);
+			else scheduleDrop(drop);
 		},
 	};
 	fixtures.add(fixture);
 	return fixture;
 }
+function scheduleDrop(drop: () => Promise<void>): void {
+	const dropping = drop();
+	pendingDrops.add(dropping);
+	void dropping
+		.catch((error: unknown) => {
+			dropErrors.push(error);
+		})
+		.finally(() => pendingDrops.delete(dropping));
+}
 export async function drainDatabaseDrops(): Promise<void> {
+	for (const drop of deferredDrops) {
+		deferredDrops.delete(drop);
+		scheduleDrop(drop);
+	}
 	await Promise.allSettled([...pendingDrops]);
 	if (dropErrors.length) throw new AggregateError(dropErrors.splice(0), "test database cleanup failed");
 }
-afterAll(async () => {
-	await Promise.all([...fixtures].map((fixture) => fixture.close()));
-	await drainDatabaseDrops();
-});
+try {
+	afterAll(async () => {
+		await Promise.all([...fixtures].map((fixture) => fixture.close()));
+		if (!managed) await drainDatabaseDrops();
+	});
+} catch {}

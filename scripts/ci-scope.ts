@@ -35,11 +35,21 @@ export const CI: Paths = {
 };
 
 /**
- * What the type-check and the lint read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
+ * What the type-check, lint and async-port guard read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
  * `vcs.useIgnoreFile`), and the packages with what installs them.
  */
 export const STATIC: Paths = {
-	include: ["src/**", "test/**", "bench/**", "scripts/**", "*.json", ".gitignore", "bun.lock", "bunfig.toml"],
+	include: [
+		"src/**",
+		"test/**",
+		"bench/**",
+		"scripts/**",
+		"*.json",
+		"**/*.{ts,tsx}",
+		".gitignore",
+		"bun.lock",
+		"bunfig.toml",
+	],
 };
 
 /** What the image is built from: the Dockerfile's COPY lines, and the two files that decide what they copy. */
@@ -75,6 +85,12 @@ export const IOS: Paths = {
 		"scripts/ios.ts",
 		"scripts/ios/**",
 		"test/oidc-support.ts",
+		"test/db.ts",
+		"scripts/pg.ts",
+		"scripts/work/scratch.ts",
+		"scripts/work/processes.ts",
+		"scripts/work/run.ts",
+		"scripts/work/test-databases.ts",
 		"src/**",
 		"package.json",
 		"bun.lock",

@@ -676,7 +676,7 @@ function ProjectRunCockpit({
 	function startFail(): void {
 		if (!current || !canRecord) return;
 		if (uncertain.has(current.id)) {
-			record("fail");
+			void record("fail");
 			return;
 		}
 		setNoting(current);
@@ -709,7 +709,7 @@ function ProjectRunCockpit({
 			hidden: !noting,
 			applies: () => !!noting,
 			handler: () => {
-				if (noting) record("fail", noting, notes[noting.id] ?? "", true, true);
+				if (noting) void record("fail", noting, notes[noting.id] ?? "", true, true);
 			},
 		},
 		{
@@ -763,7 +763,7 @@ function ProjectRunCockpit({
 			hidden: !canRecord || !!noting,
 			handler: () => {
 				if (outcome === "fail") startFail();
-				else record(outcome);
+				else void record(outcome);
 			},
 			applies: () => active() && canRecord,
 		})),
@@ -1010,7 +1010,7 @@ function ProjectRunCockpit({
 							}
 							if (event.key === "Enter" && noting) {
 								event.preventDefault();
-								record("fail", noting, event.currentTarget.value, true, true);
+								void record("fail", noting, event.currentTarget.value, true, true);
 							}
 							if (event.key === "Escape") {
 								event.preventDefault();

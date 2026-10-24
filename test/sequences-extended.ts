@@ -37,7 +37,7 @@ import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
 import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
-import { auditExcuses } from "./sequences.ts";
+import { auditExcuses, seedPlan } from "./sequences.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
@@ -632,6 +632,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		});
 		await answerOpen("adopt");
 		expect(await rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		expect(await command("plan", seedPlan)).not.toBeNull();
 		const commits = ["random01", "random02", "random03"];
 		const changeCommits = ["change01", "change02"];
 		const causes = ["cause a", "cause b", "cause c"];
@@ -648,7 +649,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		const correctionFor = async (as: Actor, key: string, commit: string, env: string, run: number | null) => {
 			const earlier = await rows<{ id: number }>(
 				`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
-				 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NOT DISTINCT FROM ?`,
+				 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NOT DISTINCT FROM ? ORDER BY r.id`,
 				as.id,
 				key,
 				commit,
@@ -745,7 +746,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else if (action < 60) {
 				// A person records a result by hand in an open run, sometimes correcting an earlier one of theirs.
 				const planned = await rows<{ id: number; no: number }>(
-					"SELECT id, no FROM runs WHERE origin = 'planned' AND state = 'open'",
+					"SELECT id, no FROM runs WHERE origin = 'planned' AND state = 'open' ORDER BY id",
 				);
 				if (planned.length > 0) {
 					const run = pick(planned);
@@ -759,7 +760,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					};
 					if (rand(4) === 0) {
 						const earlier = await rows<{ id: number }>(
-							"SELECT r.id FROM results r JOIN tests t ON t.id = r.test WHERE r.actor = ? AND t.key = ? AND r.run = ?",
+							"SELECT r.id FROM results r JOIN tests t ON t.id = r.test WHERE r.actor = ? AND t.key = ? AND r.run = ? ORDER BY r.id",
 							as.id,
 							`case:${caseNo}`,
 							run.id,
@@ -783,7 +784,9 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					state: string;
 					evidence_hash: string;
 					evidence: string;
-				}>("SELECT no, kind, state, evidence_hash, evidence FROM questions WHERE state IN ('open', 'decided')");
+				}>(
+					"SELECT no, kind, state, evidence_hash, evidence FROM questions WHERE state IN ('open', 'decided') ORDER BY id",
+				);
 				if (questions.length > 0) {
 					const question = pick(questions);
 					const as = rand(6) === 0 && agents.length > 0 ? pick(agents) : pick(people);
@@ -812,7 +815,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else if (action < 82) {
 				// A closed run is reopened by withdrawing its sign-off.
 				const closed = await rows<{ no: number }>(
-					`SELECT q.no FROM questions q JOIN runs r ON r.signoff = q.decision WHERE r.state = 'closed' AND q.kind = 'signoff'`,
+					`SELECT q.no FROM questions q JOIN runs r ON r.signoff = q.decision WHERE r.state = 'closed' AND q.kind = 'signoff' ORDER BY q.id`,
 				);
 				if (closed.length > 0)
 					await command("decide", { undo: `Q-${pick(closed).no}`, reason: "reopen" }, pick(people));

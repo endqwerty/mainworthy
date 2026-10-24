@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { z } from "zod";
 import { registerOwnedChild } from "../../scripts/work/processes.ts";
 
+import { drainDatabaseDrops, testDatabase } from "../db.ts";
+
+const database = await testDatabase();
 const config = z
 	.object({ command: z.array(z.string()).min(1), data: z.string() })
 	.parse(JSON.parse(process.argv[2] ?? "null"));
@@ -13,7 +16,7 @@ const unregister = await registerOwnedChild(process.pid);
 const child = spawn(config.command[0] ?? "", config.command.slice(1), {
 	detached: true,
 	stdio: ["pipe", "pipe", "inherit"],
-	env: { ...process.env, MAINWORTHY_TEST_LIFETIME: crypto.randomUUID() },
+	env: { ...process.env, MAINWORTHY_DATABASE_URL: database.url, MAINWORTHY_TEST_LIFETIME: crypto.randomUUID() },
 });
 child.stdout?.pipe(process.stdout);
 const exited = new Promise<number>((resolve) => {
@@ -45,6 +48,8 @@ const shutdown = () =>
 		// The leader can exit before its descendants. Kill only its private group before releasing resources.
 		signal("SIGKILL");
 		await unregisterFixture();
+		await database.close();
+		await drainDatabaseDrops();
 		await rm(config.data, { recursive: true, force: true });
 		await unregister();
 		process.exit(0);

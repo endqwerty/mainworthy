@@ -26,9 +26,11 @@ import {
 	batchById,
 	type ChangeRow,
 	changeById,
+	dropCauseExcuses,
 	excuseFor,
 	excuseForResult,
 	failedIn,
+	failedWithCauses,
 	mustTarget,
 	ownChangeOf,
 	resultById,
@@ -65,6 +67,7 @@ import {
 	failsOnBase,
 	failsWith,
 	gateRun,
+	holdEndingRuns,
 	inheritanceAffected,
 	inheritanceRuns,
 	inheritedEvidenceOf,
@@ -100,11 +103,13 @@ import {
 	type DecisionRow,
 	decisionById,
 	decisionsOf,
+	endPassedHolds,
 	everyQuestionOn,
 	type FailureSubject,
 	freshMapQuestions,
 	type HoldTerm,
 	holdEndingById,
+	independentFailureDecisions,
 	insertAnswer,
 	insertDecision,
 	insertMergeReceipt,
@@ -1892,12 +1897,163 @@ async function dissolveStale(ctx: Ctx, { run, failing }: Pick<Retallied, "run" |
 async function endPassed(ctx: Ctx, run: RunRow): Promise<void> {
 	if (run.origin !== "change" || run.scope === null) return;
 	if ((await newestInScope(ctx.db, ctx.project.id, run.scope))?.id !== run.id) return;
-	for (const question of await attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`)) {
+	const questions = await attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`);
+	if (await endIndependentPassed(ctx, run, questions)) return;
+	for (const question of questions) {
 		if (question.kind !== "failure" || question.subject.scope !== run.scope || question.decision === null) continue;
 		const decision = await decisionById(ctx.db, question.decision);
 		const passed = decision ? await passedIn(ctx, question, run) : null;
 		if (decision && passed) await endHold(ctx, decision, { is: "outdated", clause: "passed", ...passed });
 	}
+}
+
+/**
+ * Independent cause answers can end together: none shares live history, waits on a planned run, or blocks a
+ * named run. Their report evidence is immutable during the fold. Other endings keep the individual path below.
+ */
+async function endIndependentPassed(ctx: Ctx, run: RunRow, questions: readonly QuestionRow[]): Promise<boolean> {
+	if (questions.length === 0) return true;
+	if (!ctx.folding || run.scope === null) return false;
+	const targets = new Map<number, TargetRow>();
+	const loadTargets = async (ids: readonly number[]) => {
+		const missing = [...new Set(ids)].filter((id) => !targets.has(id));
+		for (let start = 0; start < missing.length; start += 200)
+			for (const target of await targetsByIds(ctx.db, missing.slice(start, start + 200)))
+				targets.set(target.id, target);
+	};
+	const counted = await countedTestsOf(ctx.db, run.id);
+	const failing = new Set(
+		counted.flatMap((row) => (row.outcome === "fail" || row.outcome === "error" ? [row.signature] : [])),
+	);
+	const passing = counted.filter((row) => row.outcome === "pass");
+	const passedTests = new Set(passing.map((row) => row.test));
+	const candidates: { question: QuestionRow & { kind: "failure" }; tests: Set<number> }[] = [];
+	for (const question of questions) {
+		if (
+			question.kind !== "failure" ||
+			question.subject.kind !== "cause" ||
+			question.subject.scope !== run.scope ||
+			question.decision === null
+		)
+			return false;
+		const evidence = json<{ tests?: { id: number; counted?: boolean }[]; count?: number }>(question.evidence);
+		const tests = new Set((evidence.tests ?? []).map((test) => test.id));
+		if (
+			!tests.size ||
+			(evidence.count ?? 0) > tests.size ||
+			failing.has(question.subject.signature) ||
+			![...tests].some((id) => passedTests.has(id))
+		)
+			continue;
+		// Closing the reopened question also needs a pass the commit gate counted.
+		if (!evidence.tests?.some((test) => test.counted && passedTests.has(test.id))) return false;
+		candidates.push({ question, tests });
+	}
+	if (!candidates.length || (await stillArriving(ctx.db, run))) return true;
+	await loadTargets(passing.map((row) => row.target));
+	const where = (test: number, env: string) => JSON.stringify([test, env]);
+	const passed = new Set(
+		passing.map((row) => {
+			const target = targets.get(row.target);
+			if (!target) throw new Error(`target ${row.target} is missing`);
+			return where(row.test, target.env);
+		}),
+	);
+	const endings: Parameters<typeof endPassedHolds>[1][number][] = [];
+	const recompute = new Set<number>();
+	const rule = await ruleActor(ctx.db);
+	const policy = await currentPolicy(ctx.db, ctx.project.id);
+	for (let start = 0; start < candidates.length; start += 200) {
+		const slice = candidates.slice(start, start + 200);
+		const ids = slice.map(({ question }) => question.id);
+		const decisions = new Map(
+			(await independentFailureDecisions(ctx.db, ctx.project.id, ids)).map((row) => [row.question, row]),
+		);
+		if (
+			decisions.size !== slice.length ||
+			[...decisions.values()].some((row) => json<{ corrected?: unknown }>(row.effects).corrected !== undefined)
+		)
+			return false;
+		const reads = await itemReads(ctx.db, ids);
+		const blocks = slice.flatMap(({ question }) => json<number[]>(question.blocks));
+		const refs = slice
+			.flatMap(({ question }) => reads.get(question.id)?.refs ?? [])
+			.filter((ref) => /^R-\d+$/.test(ref));
+		const runs = await holdEndingRuns(ctx.db, {
+			project: ctx.project.id,
+			ids: blocks,
+			nos: refs.map((ref) => Number(ref.slice(2))),
+			decisions: [...decisions.values()].map((row) => row.id),
+		});
+		const byNo = new Map(runs.map((row) => [row.no, row]));
+		const byId = new Map(runs.map((row) => [row.id, row]));
+		for (const { question } of slice) {
+			const named = new Set(json<number[]>(question.blocks));
+			for (const ref of reads.get(question.id)?.refs ?? []) {
+				const row = /^R-\d+$/.test(ref) ? byNo.get(Number(ref.slice(2))) : undefined;
+				if (row) named.add(row.id);
+			}
+			for (const id of named) {
+				const row = byId.get(id);
+				if (
+					row &&
+					((row.origin === "planned" && row.state === "open") ||
+						json<string[]>(row.blocking).includes(questionRef(question)))
+				)
+					return false;
+			}
+		}
+		const history = await failedWithCauses(ctx.db, {
+			project: ctx.project.id,
+			signatures: slice.map(({ question }) => question.subject.signature),
+			tests: [...new Set(slice.flatMap(({ tests }) => [...tests]))],
+		});
+		await loadTargets(history.map((row) => row.target));
+		for (const { question, tests } of slice) {
+			const failed = history.flatMap((row) => {
+				if (row.signature !== question.subject.signature || !tests.has(row.test)) return [];
+				const target = targets.get(row.target);
+				if (!target) throw new Error(`target ${row.target} is missing`);
+				return scopeOf(target, null) === run.scope
+					? [{ test: row.test, env: target.env, commit: target.commit_sha }]
+					: [];
+			});
+			if (!failed.length || failed.some((row) => !passed.has(where(row.test, row.env)))) return false;
+			const commit = json<{ commit?: string }>(run.accepts).commit;
+			const same = (a: string, b: string) =>
+				a.toLowerCase().startsWith(b.toLowerCase()) || b.toLowerCase().startsWith(a.toLowerCase());
+			const fixed = commit !== undefined && !failed.some((row) => row.commit !== null && same(row.commit, commit));
+			const decision = decisions.get(question.id);
+			if (!decision) throw new Error("passing cause decision is missing");
+			endings.push({
+				question,
+				decision,
+				fixed,
+				signer: {
+					by: rule.id,
+					clause: "passed",
+					policy: policy.version,
+					reason: `Every test it named passed on ${commit?.slice(0, 12) ?? runRef(run)} where it had failed; the answer ended.`,
+				},
+			});
+		}
+		for (const row of runs) recompute.add(row.id);
+	}
+	// Validate every candidate before changing standing: a fallback must see the original state and ledger order.
+	for (let start = 0; start < endings.length; start += 200) {
+		const slice = endings.slice(start, start + 200);
+		await dropCauseExcuses(
+			ctx,
+			slice.flatMap(({ question, decision }) =>
+				json<{ class?: string }>(decision.effects).class && question.kind === "failure"
+					? [{ signature: question.subject.signature, scope: question.subject.scope, decision: decision.id }]
+					: [],
+			),
+		);
+		await endPassedHolds(ctx, slice);
+	}
+	if (endings.length) for (const id of recompute) ctx.recompute.add(id);
+	return true;
 }
 
 /**

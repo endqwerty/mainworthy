@@ -596,11 +596,14 @@ export async function importArchive(
 			}
 			await rebuildAssertionIndexes(db, true);
 			await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
-			for (const table of metadata)
+			for (const table of await discoverTables(db, false))
 				for (const column of table.identities) {
-					await db.runDynamic(
-						`SELECT setval(pg_get_serial_sequence($1, $2), coalesce((SELECT max(${identifier(column)}) FROM ${identifier(table.name)}), 0) + 1, false)`,
-						[table.name, column],
+					const [row] = await db.allDynamic<{ next: number }>(
+						`SELECT coalesce(max(${identifier(column)}), 0) + 1 AS next FROM ${identifier(table.name)}`,
+					);
+					if (!row) throw new Error("identity allocation has no next value");
+					await db.exec(
+						`ALTER TABLE ${identifier(table.name)} ALTER COLUMN ${identifier(column)} RESTART WITH ${row.next}`,
 					);
 				}
 			return { rows, tables: Object.fromEntries(counts) };

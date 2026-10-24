@@ -1640,6 +1640,28 @@ describe("Mainworthy instance archives", () => {
 		});
 	});
 
+	test("rolling back an imported archive also restores discarded credential identity allocation", async () => {
+		const db = await target();
+		const text = await archive(await source());
+		await db.transaction(async () => {
+			await db.exec("ALTER TABLE tokens ALTER COLUMN id RESTART WITH 1000");
+		});
+		await expect(
+			db.transaction(async () => {
+				await importArchive(db, linesOf(text));
+				throw new Error("the caller rolled back its import");
+			}),
+		).rejects.toThrow("the caller rolled back its import");
+		const rows = await db.transaction(
+			async () =>
+				await db.allDynamic<{ id: number }>(
+					"INSERT INTO tokens (actor,hash,label,created_at) VALUES (1,'after-rollback','after rollback',1) RETURNING id",
+					[],
+				),
+		);
+		expect(rows).toEqual([{ id: 1000 }]);
+	});
+
 	test("malformed numeric archive values are invalid operations and restore the target", async () => {
 		const db = await target();
 		const before = await allRows(db);

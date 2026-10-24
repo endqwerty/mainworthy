@@ -8,6 +8,7 @@ import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { securityHeaders } from "../../src/surfaces/headers.ts";
+import { testDatabase } from "../db.ts";
 import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
 type Violation = { directive: string; blocked: string };
@@ -132,4 +133,69 @@ test.skipIf(!browserAvailable)(
 			writeFileSync(join(directory, "page.js"), `document.getElementById("text").textContent = "${text}";\n`);
 		write("as first written");
 		const imported = z.object({ default: z.unknown() }).parse(await import(join(directory, "index.html")));
+		const database = await testDatabase();
 		const instance = await start(
+			{
+				databaseUrl: database.url,
+				dataDir: join(directory, "data"),
+				host: "127.0.0.1",
+				port: 0,
+				mode: "local",
+				owner: "robin",
+				ownerToken: null,
+				commit: null,
+				proxy: null,
+				...SESSION_LIFETIMES,
+			},
+			() => ({ ui: imported.default }),
+		);
+		const other = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () =>
+				new Response("<!doctype html><title>another origin</title>", { headers: { "content-type": "text/html" } }),
+		});
+		const browser = await launchBrowser();
+		try {
+			const page = await browser.newPage();
+			const errors: string[] = [];
+			page.on("pageerror", (error) => errors.push(error.message));
+			page.on("console", (message) => {
+				if (message.type() === "error") errors.push(message.text());
+			});
+			const reload = `${instance.url.replace("http", "ws")}/_bun/hmr`;
+			const frames = { sent: 0, received: 0 };
+			page.on("websocket", (socket) => {
+				if (socket.url() !== reload) return;
+				socket.on("framesent", () => frames.sent++);
+				socket.on("framereceived", () => frames.received++);
+			});
+			const reply = await page.goto(instance.url);
+			expect(reply?.headers()["content-security-policy"]).toContain("script-src 'self' blob: 'sha256-");
+			await page.getByText("as first written").waitFor();
+			// The page tells the bundler which files it shows, and the bundler answers; a change made before that
+			// is sent to nobody. Both directions of the relay have carried something by then.
+			await eventually(
+				async () => frames,
+				(seen) => seen.sent > 0 && seen.received > 1,
+			);
+			write("as changed on disk");
+			await page.getByText("as changed on disk").waitFor({ timeout: 10_000 });
+			expect(errors).toEqual([]);
+
+			// The same address from a page on another origin: this machine too, another port. Bun's own check lets
+			// that Origin in; the server's rule for its own page does not.
+			const foreign = await browser.newPage();
+			await foreign.goto(other.url.href);
+			expect(await foreign.evaluate(opens, reload)).toBe(false);
+			expect(await page.evaluate(opens, reload)).toBe(true);
+		} finally {
+			await browser.close();
+			await other.stop(true);
+			await instance.stop();
+			await database.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	},
+	30_000,
+);

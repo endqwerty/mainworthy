@@ -1012,7 +1012,7 @@ describe("an upgrade and an archive", () => {
 		}
 	});
 
-	test("a local read dispatched before an import resolves the configured owner on its reader thread", async () => {
+	test("a local read dispatched before an import resolves the configured owner in its snapshot", async () => {
 		const source = await boot({ mode: "local", owner: "alice" });
 		await post(source, "/api/p/scratch/propose", {
 			edits: [{ op: "create", outline: "# Read after import\nAn action > Expected" }],
@@ -1020,7 +1020,7 @@ describe("an upgrade and an archive", () => {
 		const archive = await (await fetch(`${source.url}/api/export`)).text();
 		const instance = await boot({ mode: "local" });
 
-		const pause = pauseRead(instance.app, "after");
+		const pause = pauseRead(instance.app, "before");
 		const reading = post(instance, "/api/p/scratch/find", {});
 		try {
 			await pause.reached;

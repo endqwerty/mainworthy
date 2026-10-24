@@ -12,3 +12,7 @@ try {
 	console.error(`bun test: ${error instanceof Error ? error.message : String(error)}`);
 	process.exit(4);
 }
+
+import { registerOwnedChild } from "../scripts/work/processes.ts";
+
+await registerOwnedChild(process.pid);

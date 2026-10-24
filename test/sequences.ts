@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { Api } from "../src/core/api.ts";
 import type { SlotFill, Tally } from "../src/core/runs.ts";
 import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
@@ -46,6 +47,13 @@ import { failingSlotResults, invalidInherited, slotSettlement } from "./inherite
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = 80;
+
+export const seedPlan = {
+	name: "Seed run",
+	select: { cases: ["C-1"] },
+	accepts: { self: true },
+	require: [{ id: "exercise", kind: "exercise", methods: ["human"], basis: "exact-or-assumed", minActors: 1 }],
+} satisfies Api["plan"]["input"];
 
 type AuditExcuse = { class: string; decision: number };
 
@@ -482,7 +490,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		});
 		// Under a policy where a person adopts new cases, the owner does, with the reason it asks for.
 		for (const waiting of await rows<{ no: number; evidence_hash: string }>(
-			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open'",
+			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open' ORDER BY id",
 		))
 			await command("decide", {
 				q: `Q-${waiting.no}`,
@@ -491,6 +499,8 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				reason: "seed",
 			});
 		expect(await rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		// Every sequence starts with slots for its random reports and decisions to exercise.
+		expect(await command("plan", seedPlan)).not.toBeNull();
 		const commits = ["random01", "random02", "random03"];
 		for (let step = 0; step < STEPS; step++) {
 			const action = rand(100);
@@ -518,7 +528,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				if (rand(5) === 0) {
 					const earlier = await rows<{ id: number }>(
 						`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
-						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL`,
+						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL ORDER BY r.id`,
 						as.id,
 						`test-${index}`,
 						target.commit,
@@ -597,7 +607,9 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				});
 			} else if (action < 72) {
 				// A person records a result by hand in an open run: two people on one case can dispute.
-				const planned = await rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
+				const planned = await rows<{ no: number }>(
+					"SELECT no FROM runs WHERE origin = 'planned' AND state = 'open' ORDER BY id",
+				);
 				if (planned.length > 0) {
 					const outcome = pick(["fail", "pass", "pass", "skip"]);
 					await command(
@@ -618,7 +630,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				}
 			} else if (action < 94) {
 				const questions = await rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
-					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided')",
+					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided') ORDER BY id",
 				);
 				if (questions.length > 0) {
 					const question = pick(questions);

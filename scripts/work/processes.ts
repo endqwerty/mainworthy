@@ -1,10 +1,12 @@
 // The processes an agent starts and waits for. `pkill -f` and `pgrep -f` match a process's whole command line,
 // and the shell that runs them has the pattern in its own; they also match another agent's. These read the process
 // table, leave the caller and its parents out, and stop only a server that runs from this checkout.
-import { existsSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { readdir, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { stopCluster } from "../pg.ts";
 import { read, run } from "./run.ts";
+import { processStamp } from "./test-databases.ts";
 
 export type Proc = { pid: number; ppid: number; command: string };
 
@@ -20,25 +22,44 @@ export async function processTable(): Promise<Proc[]> {
 }
 
 /** A private directory supplied by check.ts, never a process-name match across other runs. */
-export async function registerOwnedChild(pid: number): Promise<() => Promise<void>> {
-	const directory = process.env.MAINWORTHY_TEST_CHILDREN;
+export async function registerOwnedChild(
+	pid: number,
+	directory = process.env.MAINWORTHY_TEST_CHILDREN,
+): Promise<() => Promise<void>> {
 	if (!directory) return async () => {};
 	// The PID is in the atomically created name, so a snapshot never reads a half-written record.
 	const path = join(directory, `${pid}-${crypto.randomUUID()}.child`);
-	await writeFile(path, "");
+	const stamp = processStamp(pid);
+	if (!stamp) {
+		try {
+			process.kill(pid, 0);
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ESRCH") return async () => {};
+			throw error;
+		}
+		throw new Error(`cannot identify owned child ${pid}`);
+	}
+	await writeFile(path, stamp);
 	return () => rm(path, { force: true });
 }
 
 export async function ownedChildren(directory: string): Promise<number[]> {
 	const pids = new Set<number>();
+	const stamps = new Map<number, string | null>();
 	for (const name of await readdir(directory)) {
 		const pid = Number(/^(\d+)-[\da-f-]+\.child$/.exec(name)?.[1]);
 		if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`invalid owned child record: ${name}`);
 		try {
+			const stamp = await Bun.file(join(directory, name)).text();
+			if (pids.has(pid)) continue;
+			if (stamp) {
+				if (!stamps.has(pid)) stamps.set(pid, processStamp(pid));
+				if (stamps.get(pid) !== stamp) continue;
+			}
 			process.kill(pid, 0);
 			pids.add(pid);
 		} catch (error) {
-			if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+			if (!(error instanceof Error && "code" in error && ["ESRCH", "ENOENT"].includes(String(error.code)))) throw error;
 		}
 	}
 	return [...pids];
@@ -116,6 +137,10 @@ export async function stopServers(root: string, self = process.pid): Promise<num
 		.filter((proc) => isServer(proc.command) && within(where.get(proc.pid) ?? "", root))
 		.map((proc) => proc.pid);
 	for (const pid of mine) process.kill(pid, "SIGTERM");
+	if (realpathSync(root) === realpathSync(resolve(import.meta.dir, "../.."))) {
+		await (await import("./test-databases.ts")).recoverTestDatabases(root);
+		await stopCluster();
+	}
 	return mine;
 }
 

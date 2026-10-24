@@ -145,6 +145,22 @@ test("the image job runs for every file the Dockerfile copies", () => {
 		expect(covers(IMAGE, source) || covers(IMAGE, `${source}/a-file`), `${source} in IMAGE`).toBe(true);
 });
 
+test("every TypeScript change selects the static job that runs the async port guard", () => {
+	for (const file of [
+		"src/web/new.tsx",
+		"test/new.test.ts",
+		"scripts/new.ts",
+		"bench/new.ts",
+		"docs/example.ts",
+		"new.ts",
+	])
+		expect(plan([file], tests).jobs.static, file).toBe(true);
+	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
+	expect(workflow).toMatchObject({
+		jobs: { static: { steps: expect.arrayContaining([{ run: "bun scripts/async-port.ts --check" }]) } },
+	});
+});
+
 test("the static job runs for every file the type-check and the lint read", () => {
 	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { include: string[] };
 	for (const directory of tsconfig.include) expect(covers(STATIC, `${directory}/a.ts`), directory).toBe(true);
@@ -197,12 +213,7 @@ test("the browser fixture compiles in its output directory so build files cannot
 			join(root, "test/e2e/serve.ts"),
 			'import { directory } from "./build-directory.ts" with { type: "macro" }; console.log(directory());',
 		);
-		for (const file of [
-			"src/server/ops/read-worker.ts",
-			"src/server/kernel/checkpoint-worker.ts",
-			"src/app/start-worker.ts",
-		])
-			writeFileSync(join(root, file), "export {};");
+
 		const executable = join(output, "fixture");
 		const build = Bun.spawnSync([process.execPath, ...fixtureBuildArgs(executable, root)], {
 			cwd: root,
@@ -251,9 +262,9 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 		return [...names, chosen.tests === "all" ? "tests" : "named tests"].join(" ");
 	};
 	expect(Object.fromEntries(entries.sort().map((entry) => [entry, jobs(entry)]))).toEqual({
-		".changes": "named tests",
+		".changes": "static named tests",
 		".dockerignore": "image tests",
-		".github": "named tests",
+		".github": "static named tests",
 		".gitignore": "static tests",
 		"AGENTS.md": "named tests",
 		"CHANGELOG.md": "named tests",
@@ -268,12 +279,12 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 		"bunfig.toml": "static ios tests",
 		"compose.coolify.yaml": "tests",
 		"compose.yaml": "tests",
-		docs: "named tests",
-		ios: "ios named tests",
-		licences: "tests",
+		docs: "static named tests",
+		ios: "static ios named tests",
+		licences: "static tests",
 		"package.json": "static image ios tests",
 		scripts: "static tests",
-		skill: "image tests",
+		skill: "static image tests",
 		src: "static image ios tests",
 		"t3.json": "static tests",
 		test: "static tests",

@@ -88,6 +88,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
+      - run: bun scripts/async-port.ts --check
 
   image:
     needs: scope

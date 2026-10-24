@@ -653,6 +653,27 @@ const Q = {
 		 WHERE project = $project AND signature = $signature
 		   AND outcome IN ('fail', 'error') AND method != 'agent'`,
 	),
+	failedWithCauses: sql<
+		{ project: number; signatures: readonly number[]; tests: readonly number[] },
+		{ signature: number; test: number; target: number }
+	>(
+		`SELECT DISTINCT signature, test, target FROM results WHERE project = $project
+		 AND signature = ANY($signatures::bigint[]) AND test = ANY($tests::bigint[])
+		 AND outcome IN ('fail', 'error') AND method != 'agent'`,
+	),
+	dropCauseExcuses: sql<{
+		project: number;
+		signatures: readonly number[];
+		scopes: readonly string[];
+		decisions: readonly number[];
+	}>(
+		`DELETE FROM excuses e USING unnest($signatures::bigint[], $scopes::text[], $decisions::bigint[])
+		 AS ending(signature, scope, decision) WHERE e.project = $project AND e.signature = ending.signature
+		 AND e.scope = ending.scope AND e.decision = ending.decision`,
+	),
+	dropCauseResultExcuses: sql<{ decisions: readonly number[] }>(
+		"DELETE FROM result_excuses WHERE decision = ANY($decisions::bigint[])",
+	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
 		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope AND decision = $decision",
 	),
@@ -2219,6 +2240,27 @@ export async function failedIn(
 		if (scopeOf(target, null) === input.scope) out.push({ test: row.test, env: target.env, commit: target.commit_sha });
 	}
 	return out;
+}
+
+/** Reported failure history for several causes; the caller resolves targets once for the whole reconciliation. */
+export const failedWithCauses = async (
+	db: ReadDb,
+	input: { project: number; signatures: readonly number[]; tests: readonly number[] },
+): Promise<{ signature: number; test: number; target: number }[]> => await db.all(Q.failedWithCauses, input);
+
+/** Reverts independent cause decisions, leaving any other decision's excuses intact. */
+export async function dropCauseExcuses(
+	ctx: Ctx,
+	rows: readonly { signature: number; scope: string; decision: number }[],
+): Promise<void> {
+	const decisions = rows.map((row) => row.decision);
+	await ctx.db.run(Q.dropCauseExcuses, {
+		project: ctx.project.id,
+		decisions,
+		signatures: rows.map((row) => row.signature),
+		scopes: rows.map((row) => row.scope),
+	});
+	await ctx.db.run(Q.dropCauseResultExcuses, { decisions });
 }
 
 /**

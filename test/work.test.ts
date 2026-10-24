@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { binaries } from "../scripts/pg.ts";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
 import { checkSeconds, compare, judge, sameTree } from "../scripts/work/check-time.ts";
 import { type Call, ciPolicy, readCi } from "../scripts/work/ci.ts";
@@ -622,6 +623,123 @@ test("a revision with the tree that was verified needs no timing; two that diffe
 	);
 });
 
+test("a PostgreSQL startup lock disappearing while it is inspected is retried", async () => {
+	const root = directory();
+	mkdirSync(join(root, "scripts/work"), { recursive: true });
+	for (const file of ["pg.ts", "work/scratch.ts"]) cpSync(join("scripts", file), join(root, "scripts", file));
+	const script = join(root, "race.test.ts");
+	writeFileSync(
+		script,
+		`
+ import {expect,mock,test} from "bun:test";
+ import * as fs from "node:fs";
+ const actual = {...fs};
+ let first = true;
+ mock.module("node:fs",()=>({...actual,mkdirSync(path,...options) {
+  if (String(path).endsWith(".lock") && first) {
+   first = false;
+   throw Object.assign(new Error("another process held the lock, then released it"),{code:"EEXIST"});
+  }
+  return actual.mkdirSync(path,...options);
+ }}));
+ const {stopCluster} = await import("./scripts/pg.ts");
+ test("retry the released lock",async()=>expect(await stopCluster()).toBe("checkout PostgreSQL is stopped"));
+ `,
+	);
+	const answer = await run([process.execPath, "test", script], { cwd: root });
+	expect(answer.status, answer.err + answer.out).toBe(0);
+	expect(answer.err).toContain("1 pass");
+});
+
+test("stop-server stops only its checkout cluster, and release deletes it before installed packages", async () => {
+	const root = directory();
+	mkdirSync(join(root, "scripts/work"), { recursive: true });
+	for (const file of [
+		"pg.ts",
+		"work/processes.ts",
+		"work/release.ts",
+		"work/run.ts",
+		"work/scratch.ts",
+		"work/test-databases.ts",
+	])
+		cpSync(join("scripts", file), join(root, "scripts", file));
+	mkdirSync(join(root, "src/server/kernel"), { recursive: true });
+	cpSync("src/server/kernel/db.ts", join(root, "src/server/kernel/db.ts"));
+	mkdirSync(join(root, "node_modules"));
+	const script = join(root, "probe.ts");
+	writeFileSync(
+		script,
+		`
+ import { existsSync,writeFileSync } from "node:fs";
+ import {databaseAdmin} from "./src/server/kernel/db.ts";
+ import {beginDatabaseRun,recordDatabase,databaseCreated} from "./scripts/work/test-databases.ts";
+ import { cluster, clusterStatus, removeCluster } from "./scripts/pg.ts";
+ import { stopServers } from "./scripts/work/processes.ts";
+ import { release } from "./scripts/work/release.ts";
+ const root = ${JSON.stringify(root)};
+ const started = await cluster();
+ const leftover = async () => {
+  const current = await cluster();
+  const name = "mw_test_"+process.pid+"_"+crypto.randomUUID().replaceAll("-", "");
+  const run = beginDatabaseRun(root);
+  const record = recordDatabase(run.directory,{name,adminUrl:current.adminUrl,owned:current.owned});
+  await databaseAdmin(current.adminUrl,async admin => await admin.exec('CREATE DATABASE "'+name+'" TEMPLATE template0'));
+  databaseCreated(record);
+  writeFileSync(run.directory+"/owner.json",JSON.stringify({pid:process.pid,stamp:"an earlier process with this pid"}));
+  return {name,directory:run.directory};
+ };
+ const beforeStop = await leftover();
+ try {
+  if (!started.owned) {
+   await stopServers(root);
+   if (existsSync(beforeStop.directory)) throw new Error("stop-server left an ended manifest");
+   const beforeRelease = await leftover();
+   await release(root);
+   if (existsSync(beforeRelease.directory)) throw new Error("release left an ended manifest");
+   if ((await clusterStatus())?.adminUrl !== started.adminUrl) throw new Error("external PostgreSQL changed");
+   const sql = new Bun.SQL(started.adminUrl);
+   try { await sql.unsafe("SELECT 1"); } finally { await sql.close(); }
+   if (existsSync(root + "/node_modules")) throw new Error("release left installed packages");
+   console.log("external PostgreSQL left running while packages were removed");
+  } else {
+  if (!started.directory) throw new Error("owned cluster has no directory");
+  await stopServers(root);
+  if (await clusterStatus() !== null) throw new Error("stop-server left PostgreSQL running");
+  if (existsSync(beforeStop.directory)) throw new Error("stop-server left an ended manifest");
+  if (!existsSync(root + "/node_modules")) throw new Error("stop-server removed installed packages");
+  const restarted = await cluster();
+  if (restarted.directory !== started.directory) throw new Error("restart changed cluster");
+  const remaining = await databaseAdmin(restarted.adminUrl, async admin => await admin.all("SELECT datname FROM pg_database WHERE datname = $1::text",[beforeStop.name]));
+  if (remaining.length) throw new Error("stop-server left the recorded database");
+  const beforeRelease = await leftover();
+  await release(root);
+  if (existsSync(beforeRelease.directory)) throw new Error("release left an ended manifest");
+  if (await clusterStatus() !== null || existsSync(started.directory)) throw new Error("release left cluster data");
+  if (existsSync(root + "/node_modules")) throw new Error("release left installed packages");
+  console.log("checkout cluster stopped, restarted, then removed with packages");
+ }
+ } finally { await removeCluster(); }
+ `,
+	);
+	const child = Bun.spawn([process.execPath, script], {
+		cwd: root,
+		env: { ...process.env, MAINWORTHY_TEST_PG: binaries() ? "" : process.env.MAINWORTHY_TEST_PG },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [out, err, rc] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	expect({ rc, err }).toEqual({ rc: 0, err: "" });
+	expect(out).toContain(
+		binaries()
+			? "checkout cluster stopped, restarted, then removed with packages"
+			: "external PostgreSQL left running while packages were removed",
+	);
+});
+
 test("release gives the disk back, and refuses while a server or a test run works from the checkout", async () => {
 	const root = directory();
 	for (const name of RELEASED) mkdirSync(join(root, name, "inner"), { recursive: true });
@@ -845,7 +963,7 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 		expect(old.text).toContain("Nobody is asked: a later commit passed these tests");
 		expect(old.text).not.toContain("ci-policy");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -865,7 +983,7 @@ test("ci waits for a pending gate and says when a person is asked", async () => 
 		expect(blocked.text).toContain("not explained yet (1):");
 		expect(blocked.text).toContain("bun scripts/work.ts ci-policy");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 

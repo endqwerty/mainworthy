@@ -32,10 +32,10 @@ import {
 	phaseReport,
 	playwrightChromium,
 	readOutcome,
+	STATIC_CHECKS,
 	sharedBrowserEndpoint,
 	slowest,
 	testArgs,
-	testReaders,
 } from "../scripts/check-plan.ts";
 import {
 	ChromiumDiagnosticOutput,
@@ -48,6 +48,206 @@ import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
 import { make, remove } from "../scripts/work/scratch.ts";
 import type { ResultIn } from "../src/core/ops.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+
+for (const managed of [false, true])
+	test(`database cleanup preserves ${managed ? "runner ownership" : "direct-file behavior"}`, async () => {
+		const root = make("database-cleanup-test");
+		const records = join(root, "records");
+		mkdirSync(records);
+		const probe = join(root, "probe.test.ts");
+		writeFileSync(
+			probe,
+			`
+ import {test} from "bun:test";
+ import {testDatabase} from ${JSON.stringify(join(process.cwd(), "test/db.ts"))};
+ test("close schedules runner cleanup", async () => {
+  const database = await testDatabase();
+  await Bun.write(${JSON.stringify(join(root, "database.url"))},database.url);
+ await database.close();
+ });
+ `,
+		);
+		try {
+			const child = Bun.spawn([process.execPath, "test", probe], {
+				env: { ...process.env, MAINWORTHY_TEST_DATABASES: managed ? records : "" },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [out, err, rc] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect(rc, out + err).toBe(0);
+			expect(readdirSync(records).filter((name) => name.endsWith(".database.json"))).toHaveLength(managed ? 1 : 0);
+			const { drainRecordedDatabases } = await import("../scripts/work/test-databases.ts");
+			expect(await drainRecordedDatabases(records)).toBe(managed ? 1 : 0);
+			const url = new URL(readFileSync(join(root, "database.url"), "utf8"));
+			const name = url.pathname.slice(1);
+			url.pathname = "/postgres";
+			const { databaseAdmin } = await import("../src/server/kernel/db.ts");
+			expect(
+				await databaseAdmin(
+					url.toString(),
+					async (admin) => await admin.all("SELECT datname FROM pg_database WHERE datname = $1::text", [name]),
+				),
+			).toEqual([]);
+			expect(readdirSync(records).filter((name) => name.endsWith(".database.json"))).toEqual([]);
+		} finally {
+			remove(root);
+		}
+	});
+
+test("a killed runner's exact manifest is recovered while a live runner and an unrelated database stay intact", async () => {
+	const root = make("database-run-recovery");
+	const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
+	const { testDatabase, drainDatabaseDrops } = await import("./db.ts");
+	const { Database, sql, databaseAdmin } = await import("../src/server/kernel/db.ts");
+	const unrelated = await testDatabase();
+	const producer = Bun.spawn(
+		[
+			process.execPath,
+			"-e",
+			`
+ import {beginDatabaseRun} from ${JSON.stringify(join(process.cwd(), "scripts/work/test-databases.ts"))};
+ const run = beginDatabaseRun(${JSON.stringify(root)});
+ process.env.MAINWORTHY_TEST_DATABASES = run.directory;
+ const {testDatabase} = await import(${JSON.stringify(join(process.cwd(), "test/db.ts"))});
+ const database = await testDatabase();
+ await database.close();
+ console.log(JSON.stringify({directory:run.directory,url:database.url}));
+ process.stdin.resume();
+ `,
+		],
+		{ env: { ...process.env, MAINWORTHY_TEST_CHILDREN: "" }, stdin: "pipe", stdout: "pipe", stderr: "inherit" },
+	);
+	try {
+		const reader = producer.stdout.getReader();
+		let text = "";
+		while (!text.includes("\n")) {
+			const part = await reader.read();
+			if (part.done) throw new Error("runner ended before recording its database");
+			text += new TextDecoder().decode(part.value);
+		}
+		reader.releaseLock();
+		const ready = z.object({ directory: z.string(), url: z.string() }).parse(JSON.parse(text));
+		expect(await recoverTestDatabases(root)).toBe(0);
+		expect(existsSync(ready.directory)).toBe(true);
+		const { registerOwnedChild } = await import("../scripts/work/processes.ts");
+		const unregister = await registerOwnedChild(process.pid, join(ready.directory, "children"));
+		producer.kill("SIGKILL");
+		await producer.exited;
+		const recovering = recoverTestDatabases(root);
+		try {
+			expect(await Promise.race([recovering.then(() => "dropped"), Bun.sleep(40).then(() => "waiting")])).toBe(
+				"waiting",
+			);
+			expect(existsSync(ready.directory)).toBe(true);
+		} finally {
+			await unregister();
+		}
+		expect(await recovering).toBe(1);
+		expect(existsSync(ready.directory)).toBe(false);
+		const alive = await Database.open({ url: unrelated.url });
+		try {
+			expect(
+				await alive.read(async (db) => await db.one(sql<readonly [], { n: number }>("SELECT 1::bigint AS n"))),
+			).toEqual({ n: 1 });
+		} finally {
+			await alive.close();
+		}
+		const adminUrl = new URL(ready.url);
+		const name = adminUrl.pathname.slice(1);
+		adminUrl.pathname = "/postgres";
+		expect(
+			await databaseAdmin(
+				adminUrl.toString(),
+				async (admin) => await admin.all("SELECT datname FROM pg_database WHERE datname = $1::text", [name]),
+			),
+		).toEqual([]);
+	} finally {
+		producer.kill("SIGKILL");
+		await producer.exited;
+		await recoverTestDatabases(root);
+		await unrelated.close();
+		await drainDatabaseDrops();
+		remove(root);
+	}
+});
+
+for (const ending of ["success", "failure", "SIGINT", "SIGTERM", "SIGKILL"] as const)
+	test(`the check cleans up recorded databases after ${ending}`, async () => {
+		const root = make("database-runner-exit");
+		const readyFile = join(root, "ready.json");
+		mkdirSync(join(root, "test"));
+		writeFileSync(
+			join(root, "bunfig.toml"),
+			`[test]\npreload = [${JSON.stringify(join(process.cwd(), "test/preflight.ts"))}]\n`,
+		);
+		writeFileSync(
+			join(root, "test/probe.test.ts"),
+			`
+   import {test} from "bun:test";
+   import {testDatabase} from ${JSON.stringify(join(process.cwd(), "test/db.ts"))};
+   test("a managed fixture",async()=> {
+    const database = await testDatabase();
+    await database.close();
+    await Bun.write(${JSON.stringify(readyFile)},JSON.stringify({directory:process.env.MAINWORTHY_TEST_DATABASES}));
+    ${ending === "failure" ? 'throw new Error("expected probe failure");' : ending.startsWith("SIG") ? "await new Promise(() => {});" : ""}
+   });
+  `,
+		);
+		const args = [
+			process.execPath,
+			join(process.cwd(), "scripts/check.ts"),
+			"test",
+			"--only=parallel",
+			"--workers=1",
+			"test/probe.test.ts",
+		];
+		const child = Bun.spawn(args, { cwd: root, stdout: "pipe", stderr: "pipe" });
+		const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+		const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
+		try {
+			const deadline = Date.now() + 8000;
+			while (!existsSync(readyFile) && child.exitCode === null && Date.now() < deadline) await Bun.sleep(10);
+			expect(existsSync(readyFile)).toBe(true);
+			const ready = z.object({ directory: z.string() }).parse(JSON.parse(readFileSync(readyFile, "utf8")));
+			if (ending !== "success" && ending !== "failure") child.kill(ending);
+			const rc = await child.exited;
+			const [out, err] = await output;
+			if (ending === "SIGKILL") {
+				expect(existsSync(ready.directory)).toBe(true);
+				writeFileSync(join(root, "test/probe.test.ts"), 'import {test} from "bun:test"; test("next run",()=>{});');
+				const next = Bun.spawn(args, { cwd: root, stdout: "pipe", stderr: "pipe" });
+				const [nextOut, nextErr, nextRc] = await Promise.all([
+					new Response(next.stdout).text(),
+					new Response(next.stderr).text(),
+					next.exited,
+				]);
+				expect(nextRc, nextOut + nextErr).toBe(0);
+			} else {
+				expect(rc, out + err).toBe(ending === "success" ? 0 : ending === "failure" ? 1 : 130);
+				expect(out).toContain("1 test databases removed; peak live 1");
+			}
+			expect(existsSync(ready.directory)).toBe(false);
+		} finally {
+			child.kill("SIGKILL");
+			await child.exited;
+			await output;
+			await recoverTestDatabases(root);
+			remove(root);
+		}
+	}, 20000);
+
+test("the local static plan includes async-port and each stage runs in CI", () => {
+	expect(STATIC_CHECKS.map((check) => check.name)).toEqual(["typecheck", "lint", "async-port"]);
+	const workflow = z
+		.object({ jobs: z.object({ static: z.object({ steps: z.array(z.object({ run: z.string().optional() })) }) }) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const commands = workflow.jobs.static.steps.map((step) => step.run);
+	for (const stage of STATIC_CHECKS) expect(commands).toContain(`bun ${stage.args.join(" ")}`);
+});
 
 test("Chromium stderr tails retain at most 200 lines and 64 KiB, including partial and Unicode lines", () => {
 	const tail = new StderrTail();
@@ -519,7 +719,7 @@ test("the page is ready before teardown", async () => {
 	60_000,
 );
 
-test("the browser fixture uses the production compiler flags and worker layout", () => {
+test("the browser fixture uses the production compiler flags and source root", () => {
 	const args = fixtureBuildArgs("/scratch/fixture", "/repo");
 	const production = z
 		.object({ scripts: z.object({ build: z.string() }) })
@@ -559,13 +759,15 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			"check-plan.ts",
 			"chromium-diagnostics.ts",
 			"preflight.ts",
+			"pg.ts",
+			"work/scratch.ts",
+			"work/test-databases.ts",
 			"work/processes.ts",
 			"work/run.ts",
 		])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
-		for (const worker of ["src/server/ops/read-worker.ts"]) writeFileSync(join(root, worker), "export {};");
 		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
 		const child = Bun.spawn(
 			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/broken.test.ts"],
@@ -697,7 +899,6 @@ test("the workers fit the machine: the performance phase is alone on a small one
 	expect(parallelWorkers(2)).toBeGreaterThanOrEqual(1);
 	expect(testArgs("performance", { timings: "t.json", workers: 8 })).toContain("--parallel=1");
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
-	expect(testReaders()).toBe("1");
 });
 
 test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
@@ -828,7 +1029,15 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 		"publish",
 	]);
 	expect(
-		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
+		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]
+			.filter((env) => env !== undefined)
+			.map((env) => {
+				const entries = z.record(z.string(), z.string()).parse(env);
+				if (entries.MAINWORTHY_TEST_PG !== undefined)
+					expect(entries.MAINWORTHY_TEST_PG).toBe("postgres://postgres@127.0.0.1:5432/postgres");
+				return Object.fromEntries(Object.entries(entries).filter(([key]) => key !== "MAINWORTHY_TEST_PG"));
+			})
+			.filter((env) => Object.keys(env).length > 0),
 	).toEqual([]);
 	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not. The
 	// description job reads the pull request and its issues, and writes nothing.
@@ -1185,12 +1394,23 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 			"node:path",
 		].sort(),
 	);
-	expect(loaded("scripts/work/processes.ts").sort()).toEqual(["./run.ts", "node:fs", "node:fs/promises", "node:path"]);
+	expect(loaded("scripts/work/processes.ts").sort()).toEqual([
+		"../pg.ts",
+		"./run.ts",
+		"./test-databases.ts",
+		"node:fs",
+		"node:fs/promises",
+		"node:path",
+	]);
 	expect(loaded("scripts/work/run.ts")).toEqual([]);
 	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
 	expect(loaded("scripts/chromium-diagnostics.ts").sort()).toEqual(["node:fs", "node:path"]);
-	expect(loaded("scripts/preflight.ts").sort()).toEqual(["node:fs", "node:path"]);
-	expect(loaded("test/preflight.ts")).toEqual(["../scripts/preflight.ts"]);
+	expect(loaded("scripts/preflight.ts").sort()).toEqual(["./pg.ts", "node:fs", "node:path"]);
+	expect(loaded("test/preflight.ts").sort()).toEqual([
+		"../scripts/pg.ts",
+		"../scripts/preflight.ts",
+		"../scripts/work/processes.ts",
+	]);
 	const check = readFileSync("scripts/check.ts", "utf8");
 	expect(check.indexOf('requireReady("check")')).toBeGreaterThan(0);
 	expect(check.indexOf('requireReady("check")')).toBeLessThan(check.indexOf("await import("));

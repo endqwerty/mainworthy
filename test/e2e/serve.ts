@@ -13,6 +13,7 @@ const Advance = z.object({ advanceMs: z.number().int().min(0) });
 
 const instance = await start(
 	{
+		databaseUrl: defaultConfig(process.env).databaseUrl,
 		dataDir: process.env.MAINWORTHY_DATA ?? "/tmp/mainworthy-ui",
 		host: "127.0.0.1",
 		port: Number(process.env.MAINWORTHY_PORT ?? 0),
