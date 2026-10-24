@@ -88,6 +88,11 @@ Any test file can import `budget` from `scripts/budget.ts` and call
 A value above the baseline records a warning; it never fails an assertion. Invalid measurements and workload
 errors still fail.
 
+Input an attacker controls is the one exception: `hostileInputBudget` warns above its baseline like `budget`, and
+fails above ten times it (`HOSTILE_INPUT_MULTIPLE`). A parser that blows up on a crafted report would stall the
+thread that answers reads, which is a safety question, not a speed one. The hostile-input files are
+`src/core/signature-performance.test.ts` and `src/surfaces/formats/junit-performance.test.ts`.
+
 The check collects warnings from every phase into its end summary and appends them to `GITHUB_STEP_SUMMARY`
 in CI. Each run has its own report directory, and each process writes its own file. A standalone `bun test`
 prints the warning immediately. Keep correctness assertions separate from baseline comparisons.

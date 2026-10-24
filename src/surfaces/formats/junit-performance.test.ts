@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { budget } from "../../../scripts/budget.ts";
+import { hostileInputBudget } from "../../../scripts/budget.ts";
 import { ResultIn } from "../../core/ops.ts";
 import { parseJUnit } from "./junit.ts";
 
@@ -18,7 +18,7 @@ describe("JUnit parsing performance", () => {
 		const xml = `<testsuite><system-out>${"x".repeat(2_000_000)}</system-out>${'<testcase name="one" time=""/>'.repeat(5000)}</testsuite>`;
 		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		budget("JUnit 2 MB log and 5000 warning cases: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget("JUnit 2 MB log and 5000 warning cases: parse elapsed", performance.now() - start, 500, "ms");
 		expect(parsed.results).toHaveLength(5000);
 		expect(parsed.warnings).toHaveLength(1001);
 		expect(parsed.warnings.at(-1)).toContain("4000 additional warnings omitted");
@@ -29,7 +29,12 @@ describe("JUnit parsing performance", () => {
 		const parsed = parseJUnit(
 			`<testsuite><testcase name="${" ".repeat(80_000)}x"/><testcase name="works (retry 1) [retry #2]"/></testsuite>`,
 		);
-		budget("JUnit 80000-space name and stacked retry markers: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget(
+			"JUnit 80000-space name and stacked retry markers: parse elapsed",
+			performance.now() - start,
+			500,
+			"ms",
+		);
 		expect(parsed.results[1]).toEqual(result("works", "works (retry 1) [retry #2]"));
 	});
 
@@ -38,7 +43,12 @@ describe("JUnit parsing performance", () => {
 		const parsed = parseJUnit(
 			`<testsuite><testcase name="t (retry${" ".repeat(80_000)}x"/><testcase name="works${" (retry 1)".repeat(10_000)}"/></testsuite>`,
 		);
-		budget("JUnit malformed and 10000 repeated retry markers: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget(
+			"JUnit malformed and 10000 repeated retry markers: parse elapsed",
+			performance.now() - start,
+			500,
+			"ms",
+		);
 		expect(parsed.results[1]?.test).toEqual({
 			key: "works",
 			name: `works${" (retry 1)".repeat(10_000)}`.slice(0, 500),
@@ -48,7 +58,7 @@ describe("JUnit parsing performance", () => {
 	test("unmatched closing tags do not repeatedly scan the element stack", () => {
 		const start = performance.now();
 		const parsed = parseJUnit("<a>".repeat(20_000) + "</b>".repeat(20_000));
-		budget("JUnit 20000 unmatched closing tags: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget("JUnit 20000 unmatched closing tags: parse elapsed", performance.now() - start, 500, "ms");
 		expect(parsed.results).toEqual([]);
 		expect(parsed.warnings.length).toBeLessThanOrEqual(1001);
 	});
@@ -57,7 +67,7 @@ describe("JUnit parsing performance", () => {
 		const xml = `${"<testsuite><error/>".repeat(12_000)}${'<testcase name="one"/>'.repeat(12_000)}${"</testsuite>".repeat(12_000)}`;
 		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		budget(
+		hostileInputBudget(
 			"JUnit 12000 nested suite errors and recovered results: parse elapsed",
 			performance.now() - start,
 			500,
@@ -71,7 +81,12 @@ describe("JUnit parsing performance", () => {
 		const xml = `${Array.from({ length: 4000 }, (_, index) => `<testsuite name="${"s".repeat(500)}"><testcase name="case ${index}"/>`).join("")}${"</testsuite>".repeat(4000)}`;
 		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		budget("JUnit 4000 deep paths with 500-character suite names: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget(
+			"JUnit 4000 deep paths with 500-character suite names: parse elapsed",
+			performance.now() - start,
+			500,
+			"ms",
+		);
 		expect(parsed.results).toHaveLength(4000);
 		expect(parsed.results.every((item) => ResultIn.safeParse(item).success)).toBe(true);
 		expect(new Set(parsed.results.map((item) => ("key" in item.test ? item.test.key : ""))).size).toBe(4000);
@@ -83,7 +98,7 @@ describe("JUnit parsing performance", () => {
 		const xml = `<testsuite file="${file}">${cases}</testsuite>`;
 		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		budget("JUnit 4000 cases inheriting a 2 MB file: parse elapsed", performance.now() - start, 500, "ms");
+		hostileInputBudget("JUnit 4000 cases inheriting a 2 MB file: parse elapsed", performance.now() - start, 500, "ms");
 		expect(parsed.results).toHaveLength(4000);
 		expect(parsed.results[0]).toMatchObject({
 			test: { name: "case 0", file: "f".repeat(500) },
@@ -119,6 +134,6 @@ describe("JUnit parsing performance", () => {
 		console.log(
 			`JUnit benchmark: ${xml.length} bytes, median ${median.toFixed(2)} ms of 10 runs, range ${times[0]?.toFixed(2)}–${times[9]?.toFixed(2)} ms`,
 		);
-		budget("JUnit 10000 cases and 200 failures: parse median of 10 runs", median, 300, "ms");
+		hostileInputBudget("JUnit 10000 cases and 200 failures: parse median of 10 runs", median, 300, "ms");
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, test } from "bun:test";
-import { budget } from "../../scripts/budget.ts";
+import { hostileInputBudget } from "../../scripts/budget.ts";
 import { normaliseFailure } from "./signature.ts";
 
 describe("untrusted failure text", () => {
@@ -19,7 +19,7 @@ describe("untrusted failure text", () => {
 			normaliseFailure(input); // warm
 			const started = performance.now();
 			for (let i = 0; i < 20; i++) normaliseFailure(input);
-			budget(`failure normalization ${name}: mean of 20 runs`, (performance.now() - started) / 20, 5, "ms");
+			hostileInputBudget(`failure normalization ${name}: mean of 20 runs`, (performance.now() - started) / 20, 5, "ms");
 		});
 	}
 });
@@ -27,5 +27,10 @@ describe("untrusted failure text", () => {
 test("records normalization time for a very long unbroken failure line", () => {
 	const start = performance.now();
 	normaliseFailure({ message: `expected <div>${"x".repeat(100_000)}</div>` });
-	budget("failure normalization 100000-character unbroken line: elapsed", performance.now() - start, 100, "ms");
+	hostileInputBudget(
+		"failure normalization 100000-character unbroken line: elapsed",
+		performance.now() - start,
+		100,
+		"ms",
+	);
 });
