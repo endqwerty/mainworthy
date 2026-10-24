@@ -40,7 +40,9 @@ The check runs these steps:
 At the end the check prints the wall time and exit of each part, the log of each part that failed, each failed
 test with its file and reason, whether the browser tests ran, and the five slowest files. When the tests take more
 than 130 seconds in total, the check warns. Elapsed time alone fails nothing (decision 0097). The product's latency budgets in
-`test/budgets.test.ts` do fail when exceeded, and their numbers are never raised.
+`test/budgets.test.ts` still fail when exceeded. A budget is a measured baseline, not a ceiling: only a hard limit,
+a cost a user would feel measured on a representative workload and accepted by the owner, should fail, and the rest
+should warn (AGENTS.md). Which of these stay hard is #906.
 
 ## Know the kinds of tests
 
