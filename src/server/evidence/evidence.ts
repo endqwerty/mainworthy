@@ -491,6 +491,10 @@ const Q = {
 	linkTest: sql<{ id: number; caseId: number | null; by: number | null }>(
 		"UPDATE tests SET case_id = $caseId, linked_by = $by WHERE id = $id",
 	),
+	linkTests: sql<{ ids: readonly number[]; cases: readonly number[]; by: number }>(
+		`UPDATE tests SET case_id = asked.case_id, linked_by = $by
+		 FROM unnest($ids::bigint[], $cases::bigint[]) AS asked(id, case_id) WHERE tests.id = asked.id`,
+	),
 	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
 	),
@@ -2256,6 +2260,22 @@ export const testsByIds = async (db: ReadDb, ids: readonly number[]): Promise<Te
 export async function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: number | null): Promise<void> {
 	await ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness, "map") });
 	ctx.touched.add(testRef(test));
+}
+
+/** Links a slice of distinct tests under one map decision. */
+export async function linkTests(
+	ctx: Ctx,
+	witness: Witness,
+	links: readonly { test: TestRow; caseId: number }[],
+): Promise<void> {
+	const by = decisionOf(witness, "map");
+	if (links.length === 0) return;
+	await ctx.db.run(Q.linkTests, {
+		ids: links.map(({ test }) => test.id),
+		cases: links.map(({ caseId }) => caseId),
+		by,
+	});
+	for (const { test } of links) ctx.touched.add(testRef(test));
 }
 
 /**

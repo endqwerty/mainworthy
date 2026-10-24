@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { observeDatabase } from "../bench/profile.ts";
 import { binaries } from "../scripts/pg.ts";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
 import { checkSeconds, compare, judge, sameTree } from "../scripts/work/check-time.ts";
@@ -37,6 +38,7 @@ import { syncBranch } from "../scripts/work/sync-branch.ts";
 import { timingsFromReports } from "../scripts/work/timings-from-ci.ts";
 import type { Policy } from "../src/core/kinds.ts";
 import type { GateStatus, InboxReply } from "../src/core/ops.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { ciReport, harness } from "./helpers.ts";
 
 const made: string[] = [];
@@ -954,7 +956,27 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 
 		// A failure on main is the same, and every failing test is listed, past a page of them.
 		const many = Object.fromEntries(Array.from({ length: 503 }, (_, i) => [i, `boom ${i}`]));
-		await h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));
+		let individualCaseReads = 0;
+		const restore = observeDatabase(h.app.database, (text) => {
+			if (text === "SELECT * FROM cases WHERE project = $1 AND no = $2") individualCaseReads++;
+		});
+		try {
+			await h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));
+		} finally {
+			restore();
+		}
+		expect(individualCaseReads).toBe(0);
+		const links = await h.app.database.read((db) =>
+			db.one(
+				sql<readonly [], { tests: number; cases: number; linked: number; decisions: number }>(`
+				SELECT count(*) AS tests, count(DISTINCT t.case_id) AS cases,
+				       count(*) FILTER (WHERE d.kind = 'map' AND d.answer::jsonb->>'is' = 'create') AS linked,
+				       count(DISTINCT d.id) AS decisions
+				FROM tests t LEFT JOIN decisions d ON d.id = t.linked_by
+			`),
+			),
+		);
+		expect(links).toEqual({ tests: 503, cases: 502, linked: 502, decisions: 2 });
 		expect(await gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
 		expect(await open()).toEqual([]);
 		const all = await readCi(call, { commit: "main0002" });

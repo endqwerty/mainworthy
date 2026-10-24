@@ -439,11 +439,13 @@ test("valid invitation reloads reuse their challenge and untrusted headers do no
 	const first = must(
 		await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
 	);
-	for (let count = 0; count < 10_000; count++) {
-		const next = must(
-			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
+	for (let count = 0; count < 10_000; count += 32) {
+		const replies = await Promise.all(
+			Array.from({ length: Math.min(32, 10_000 - count) }, () =>
+				w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
+			),
 		);
-		expect(next.passkey.challenge).toBe(first.passkey.challenge);
+		for (const reply of replies) expect(must(reply).passkey.challenge).toBe(first.passkey.challenge);
 	}
 	expect(said(await w.post("/api/login/challenge", { invitation: code }, other))).toBe("200");
 	const direct = await world();

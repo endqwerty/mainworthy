@@ -17,7 +17,7 @@ export type Profile = {
 };
 
 /** Observes leased handles, including handles obtained by subsequent operation scopes. */
-export function observeDatabase(database: Database, observe: (text: string) => void): () => void {
+export function observeDatabase(database: Database, observe: (text: string, params: Params) => void): () => void {
 	const read = database.read.bind(database);
 	const write = database.write.bind(database);
 	const observed = new WeakSet<ReadDb>();
@@ -26,7 +26,7 @@ export function observeDatabase(database: Database, observe: (text: string) => v
 		observed.add(db);
 		const all = db.all.bind(db);
 		db.all = <P extends Params, R>(statement: Statement<P, R>, ...args: Args<P>) => {
-			observe(statement.text);
+			observe(statement.text, args[0] ?? []);
 			return all(statement, ...args);
 		};
 

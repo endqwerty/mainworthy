@@ -47,7 +47,7 @@ import {
 	testRef,
 } from "../evidence/evidence.ts";
 import { sameCodeEvidenceByTests } from "../evidence/flaky.ts";
-import { actorLabel, ruleActor } from "../identity/identity.ts";
+import { actorLabel, ruleActorId } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
@@ -370,7 +370,7 @@ async function lapse(ctx: Ctx, question: QuestionRow, decision: DecisionRow, now
 		answer: { is: timedOut ? "expired" : "outdated" },
 		signers: [
 			{
-				by: (await ruleActor(ctx.db)).id,
+				by: await ruleActorId(ctx.db),
 				clause: timedOut ? "hold-expired" : "hold-ended",
 				policy: (await currentPolicy(ctx.db, ctx.project.id)).version,
 				reason: null,
@@ -403,7 +403,7 @@ async function heldOpen(ctx: Ctx, question: QuestionRow, hash: string): Promise<
  * The policy in force now does not: a clause can be renamed, or keep its name and become a rule.
  */
 async function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown): Promise<boolean> {
-	const rule = (await ruleActor(ctx.db)).id;
+	const rule = await ruleActorId(ctx.db);
 	const wanted = (ruleAnswer as { is?: string } | undefined)?.is;
 	const overRule = async (signer: Signer): Promise<boolean> =>
 		signer.by !== rule &&
@@ -472,7 +472,7 @@ async function* settleByRuleSteps(
 		return { s: "open", question };
 	}
 	const policy = (await currentPolicy(ctx.db, ctx.project.id)).version;
-	const signer: Signer = { by: (await ruleActor(ctx.db)).id, clause, policy, reason: null };
+	const signer: Signer = { by: await ruleActorId(ctx.db), clause, policy, reason: null };
 	try {
 		const settled = yield* ctx.db.savepointSteps(() => settleSteps(ctx, question, [signer], parsed.data as AnyAnswer));
 		return {
@@ -502,7 +502,7 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 		const questions = await freshMapQuestions(ctx.db, ctx.project.id, ids);
 		const tracking: Parameters<typeof trackFreshMapQuestions>[1][number][] = [];
 		if (questions.length === ids.length) {
-			const rule = await ruleActor(ctx.db);
+			const rule = await ruleActorId(ctx.db);
 			for (const question of questions) {
 				if (question.kind !== "map") break;
 				const facts = await factsNow(ctx.db, question);
@@ -518,7 +518,7 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 				tracking.push({
 					question,
 					ask: clause.ask,
-					signers: [{ by: rule.id, clause: clause.id, policy: policy.version, reason: null }],
+					signers: [{ by: rule, clause: clause.id, policy: policy.version, reason: null }],
 					holds: HANDLERS.map.holds({ question, answer: answer.data, now: ctx.now, policy }),
 				});
 			}
@@ -808,8 +808,8 @@ async function* settleSteps(
 	}
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
-	const rule = await ruleActor(ctx.db);
-	const byRule = signers.every((signer) => signer.by === rule.id);
+	const rule = await ruleActorId(ctx.db);
+	const byRule = signers.every((signer) => signer.by === rule);
 	const rested = await endReplaced(ctx, question, holds, byRule);
 	const decision = await insertDecision(ctx, { question, answer: given, signers, holds, supersedes });
 	await setQuestionState(ctx, question, "decided", decision.id);
@@ -1984,7 +1984,7 @@ async function endIndependentPassed(ctx: Ctx, run: RunRow, questions: readonly Q
 	);
 	const endings: Parameters<typeof endPassedHolds>[1][number][] = [];
 	const recompute = new Set<number>();
-	const rule = await ruleActor(ctx.db);
+	const rule = await ruleActorId(ctx.db);
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	for (let start = 0; start < candidates.length; start += 200) {
 		const slice = candidates.slice(start, start + 200);
@@ -2053,7 +2053,7 @@ async function endIndependentPassed(ctx: Ctx, run: RunRow, questions: readonly Q
 				decision,
 				fixed,
 				signer: {
-					by: rule.id,
+					by: rule,
 					clause: "passed",
 					policy: policy.version,
 					reason: `Every test it named passed on ${commit?.slice(0, 12) ?? runRef(run)} where it had failed; the answer ended.`,
@@ -2287,7 +2287,7 @@ async function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): Promise
 		answer: ending.clause === "passed" && ending.fixed ? { is: ending.is, fixed: true } : { is: ending.is },
 		signers: [
 			{
-				by: (await ruleActor(ctx.db)).id,
+				by: await ruleActorId(ctx.db),
 				clause: ending.clause,
 				policy: (await currentPolicy(ctx.db, ctx.project.id)).version,
 				reason: ending.reason,

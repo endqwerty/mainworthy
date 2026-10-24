@@ -143,6 +143,9 @@ const Q = {
 	insertOrg: sql<{ name: string; at: number }>("INSERT INTO orgs (name, created_at) VALUES ($name, $at)"),
 	actorByName: sql<{ org: number; name: string }, ActorRow>("SELECT * FROM actors WHERE org = $org AND name = $name"),
 	actorById: sql<{ id: number }, ActorRow>("SELECT * FROM actors WHERE id = $id"),
+	ruleActorId: sql<{ name: string }, { id: number }>(
+		"SELECT id FROM actors WHERE org = (SELECT id FROM orgs ORDER BY id LIMIT 1) AND name = $name",
+	),
 	insertActor: sql<{ org: number; kind: string; name: string; behalf: number | null; at: number }, { id: number }>(
 		"INSERT INTO actors (org, kind, name, on_behalf_of, created_at) VALUES ($org, $kind, $name, $behalf, $at) RETURNING id",
 	),
@@ -965,6 +968,13 @@ export async function ruleActor(db: ReadDb): Promise<Actor> {
 	const actor = await actorByName(db, RULE_ACTOR, 0);
 	if (!actor) throw new Error("the rule actor is missing; the instance was not bootstrapped");
 	return actor;
+}
+
+/** The rule's recorded signer, when no caller capabilities are needed. */
+export async function ruleActorId(db: ReadDb): Promise<number> {
+	const actor = await db.get(Q.ruleActorId, { name: RULE_ACTOR });
+	if (!actor) throw new Error("the rule actor is missing; the instance was not bootstrapped");
+	return actor.id;
 }
 
 // Names are kept per connection, and a server has more than one (it writes on one and reads on another). The

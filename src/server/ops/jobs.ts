@@ -3,7 +3,7 @@
 import { recoverDisputes as reconcileDisputes, sweepExpired } from "../decisions/decisions.ts";
 import { expiredDecisions } from "../decisions/questions.ts";
 import { acceptedBatches, batchById } from "../evidence/evidence.ts";
-import { actorById, ruleActor } from "../identity/identity.ts";
+import { actorById, ruleActorId } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import { allProjects, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { applyAccepted } from "./writes.ts";
@@ -55,7 +55,7 @@ export async function recoverDisputes(app: App): Promise<number> {
 			db.transaction(async () => {
 				const project = await projectById(db, id);
 				if (!project) return 0;
-				const ctx = makeCtx(app, db, project, await actorById(db, (await ruleActor(db)).id, id), true);
+				const ctx = makeCtx(app, db, project, await actorById(db, await ruleActorId(db), id), true);
 				const n = await reconcileDisputes(ctx);
 				if (n > 0) await stampSeq(ctx);
 				return n;
@@ -75,7 +75,7 @@ export async function sweep(app: App, as?: number): Promise<number> {
 				if (expired.length === 0) return null;
 				const project = await projectById(db, id);
 				if (!project) return null;
-				const ctx = makeCtx(app, db, project, await actorById(db, as ?? (await ruleActor(db)).id, project.id), true);
+				const ctx = makeCtx(app, db, project, await actorById(db, as ?? (await ruleActorId(db)), project.id), true);
 				const n = await sweepExpired(ctx, expired);
 				if (n === 0) return null;
 				await stampSeq(ctx);

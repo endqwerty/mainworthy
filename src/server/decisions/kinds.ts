@@ -12,6 +12,7 @@ import {
 	dropResultExcuses,
 	findTest,
 	linkTest,
+	linkTests,
 	mustTarget,
 	producedCause,
 	restoreLink,
@@ -47,6 +48,7 @@ import {
 	caseById,
 	caseRef,
 	cleanBody,
+	findCases,
 	mustCase,
 	proposalById,
 	resolvedOf,
@@ -348,15 +350,23 @@ const mapHandler: Handler<"map"> = {
 				const created = raised.effects.created;
 				if (!Array.isArray(created) || created.length !== tests.length)
 					throw invalid("the adoption rule did not create every requested case; no tests were linked");
-				const linked: Relinked[] = [];
-				for (const [i, test] of tests.entries()) {
-					const ref = created[i];
+				const refs = created.map((ref) => {
 					if (typeof ref !== "string")
 						throw invalid("the adoption rule did not create every requested case; no tests were linked");
-					const row = await mustCase(ctx.db, ctx.project.id, ref);
-					linked.push([test.id, null, null]);
-					await linkTest(ctx, witness, test, row.id);
-					if ((i + 1) % 200 === 0) yield;
+					return ref;
+				});
+				const cases = await findCases(ctx.db, ctx.project.id, refs);
+				const linked: Relinked[] = [];
+				for (let at = 0; at < tests.length; at += 200) {
+					const links = tests.slice(at, at + 200).map((test, offset) => {
+						const ref = refs[at + offset];
+						const row = ref === undefined ? null : cases.get(ref);
+						if (!row) throw notFound(`case ${ref}`);
+						linked.push([test.id, null, null]);
+						return { test, caseId: row.id };
+					});
+					await linkTests(ctx, witness, links);
+					if (links.length === 200) yield;
 				}
 				return { linked, created };
 			}

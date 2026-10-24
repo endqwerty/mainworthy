@@ -14,7 +14,7 @@
 // `test/ci-scope.test.ts`.
 import { appendFileSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
-import { CI_SHARDS, PERFORMANCE } from "./check-plan.ts";
+import { CI_SHARDS, CI_TEST_WORKERS, PERFORMANCE } from "./check-plan.ts";
 
 /** Patterns, and patterns a file must not match. */
 type Paths = { include: readonly string[]; exclude?: readonly string[] };
@@ -186,7 +186,7 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 		return [
 			...Array.from({ length: CI_SHARDS }, (_, i) => ({
 				name: `tests-${i + 1}`,
-				phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`,
+				phase: `--only=parallel --workers=${CI_TEST_WORKERS} --shard=${i + 1}/${CI_SHARDS}`,
 				files: "",
 			})),
 			{ name: "performance", phase: "--only=performance", files: "" },
@@ -194,7 +194,9 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 	const performance = tests.filter((file) => PERFORMANCE.includes(file));
 	const parallel = tests.filter((file) => !PERFORMANCE.includes(file));
 	return [
-		...(parallel.length > 0 ? [{ name: "tests", phase: "--only=parallel", files: parallel.join(" ") }] : []),
+		...(parallel.length > 0
+			? [{ name: "tests", phase: `--only=parallel --workers=${CI_TEST_WORKERS}`, files: parallel.join(" ") }]
+			: []),
 		...(performance.length > 0
 			? [{ name: "performance", phase: "--only=performance", files: performance.join(" ") }]
 			: []),
