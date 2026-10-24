@@ -1,6 +1,6 @@
 // The plan of the check (`scripts/check-plan.ts`) and what the workflow says about it. The check's own wall time
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole.
-import { expect, test } from "bun:test";
+import { expect, onTestFinished, test } from "bun:test";
 import {
 	copyFileSync,
 	existsSync,
@@ -131,6 +131,94 @@ test("a browser supervisor leaves its database cleanup to the managed runner", a
 	} finally {
 		await drainRecordedDatabases(records);
 		remove(root);
+	}
+});
+
+test("the runner reaps a released database while an open fixture and its worker remain alive", async () => {
+	const root = make("database-runner-reaping");
+	const readyFile = join(root, "ready.json");
+	const proceed = join(root, "proceed");
+	mkdirSync(join(root, "test"));
+	writeFileSync(
+		join(root, "bunfig.toml"),
+		`[test]\npreload = [${JSON.stringify(join(process.cwd(), "test/preflight.ts"))}]\n`,
+	);
+	writeFileSync(
+		join(root, "test/probe.test.ts"),
+		`
+ import {test} from "bun:test";
+ import {existsSync} from "node:fs";
+ import {testDatabase,drainDatabaseDrops} from ${JSON.stringify(join(process.cwd(), "test/db.ts"))};
+ test("release only the closed fixture",async()=>{
+  const closed=await testDatabase(), open=await testDatabase();
+  await closed.close();
+  await Bun.write(${JSON.stringify(readyFile)},JSON.stringify({directory:process.env.MAINWORTHY_TEST_DATABASES,closed:closed.url,open:open.url}));
+  while(!existsSync(${JSON.stringify(proceed)})) await Bun.sleep(10);
+  await drainDatabaseDrops();
+  if(!Number.isFinite(closed.timings.dropMs) || !(closed.timings.dropMs > 0)) throw new Error("explicit drain lost the completed drop timing");
+ });
+ `,
+	);
+	const child = Bun.spawn(
+		[
+			process.execPath,
+			join(process.cwd(), "scripts/check.ts"),
+			"test",
+			"--only=parallel",
+			"--workers=1",
+			"test/probe.test.ts",
+		],
+		{ cwd: root, stdout: "pipe", stderr: "pipe" },
+	);
+	const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+	const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
+	const abort = new AbortController();
+	let cleaning: Promise<void> | undefined;
+	const cleanup = () =>
+		(cleaning ??= (async () => {
+			abort.abort();
+			writeFileSync(proceed, "");
+			child.kill("SIGTERM");
+			await child.exited;
+			await output;
+			await recoverTestDatabases(root);
+			remove(root);
+		})());
+	onTestFinished(cleanup);
+	try {
+		while (!existsSync(readyFile) && child.exitCode === null) {
+			abort.signal.throwIfAborted();
+			await Bun.sleep(10);
+		}
+		expect(existsSync(readyFile)).toBe(true);
+		const ready = z
+			.object({ directory: z.string(), closed: z.string(), open: z.string() })
+			.parse(JSON.parse(readFileSync(readyFile, "utf8")));
+		const closedName = new URL(ready.closed).pathname.slice(1),
+			openName = new URL(ready.open).pathname.slice(1);
+		const manifest = join(ready.directory, `${closedName}.database.json`);
+		while (existsSync(manifest) && child.exitCode === null) {
+			abort.signal.throwIfAborted();
+			await Bun.sleep(10);
+		}
+		expect(existsSync(manifest)).toBe(false);
+		expect(child.exitCode).toBeNull();
+		const { databaseAdmin } = await import("../src/server/kernel/db.ts");
+		const url = new URL(ready.open);
+		url.pathname = "/postgres";
+		expect(
+			await databaseAdmin(url.toString(), (admin) =>
+				admin.all("SELECT datname FROM pg_database WHERE datname = ANY($1::text[])", [[closedName, openName]]),
+			),
+		).toEqual([{ datname: openName }]);
+		writeFileSync(proceed, "");
+		const rc = await child.exited;
+		const [out, err] = await output;
+		expect(rc, out + err).toBe(0);
+		expect(out).toContain("2 test databases removed; peak live 2");
+		expect(existsSync(ready.directory)).toBe(false);
+	} finally {
+		await cleanup();
 	}
 });
 
