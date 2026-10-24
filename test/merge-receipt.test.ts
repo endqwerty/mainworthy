@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { verifyAudit } from "../src/core/audit.ts";
 import { MergeReceipt, receiptNodeHash, receiptSnapshotHash } from "../src/core/changes.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
@@ -181,7 +182,7 @@ test("a large report shares its frozen evidence across repeated reopen and merge
 		await h.call("change", { change: "pr:726", state: "open" });
 		await end();
 	}
-	expect(h.app.db.raw.serialize().byteLength - before).toBeLessThan(65536);
+	budget("database growth of six reopened changes", h.app.db.raw.serialize().byteLength - before, 65535, "bytes");
 });
 
 test("reading a change with a large receipt returns a bounded manifest and pages its frozen results", async () => {
@@ -197,7 +198,7 @@ test("reading a change with a large receipt returns a bounded manifest and pages
 	await end();
 	type Impact = { change: { mergeReceipt: { id: number; count: number } }; cases: unknown[]; next: string | null };
 	const impact = await h.call<Impact>("impact", { change: "pr:726" });
-	expect(JSON.stringify(impact.change.mergeReceipt).length).toBeLessThan(4096);
+	budget("a large merge receipt's manifest", JSON.stringify(impact.change.mergeReceipt).length, 4095, "characters");
 	expect(impact.change.mergeReceipt.count).toBe(3000);
 	expect(impact.cases).toHaveLength(200);
 	expect(typeof impact.next).toBe("string");
@@ -301,7 +302,7 @@ test("a receipt summarizes large shard waits and pages their complete frozen evi
 	await end();
 	const kept = await receipt();
 	expect(kept).toMatchObject({ gate: { verdict: "pending" }, waitingCount: 1 });
-	expect(JSON.stringify(kept).length).toBeLessThan(4096);
+	budget("a kept receipt", JSON.stringify(kept).length, 4095, "characters");
 	const audit = AuditReply.parse(await h.call("audit", { receipt: kept?.id }));
 	expect(audit.ndjson).toContain('"collection\\":\\"waiting');
 	expect(verifyAudit(audit.ndjson).records).toBe(kept?.evidenceCount ?? 0);
@@ -340,8 +341,8 @@ for (const mutation of ["questions", "one result"] as const)
 					growthBytes: h.app.db.raw.serialize().byteLength - before,
 				}),
 			);
-		expect(members() - initial).toBeLessThan(1500);
-		expect(h.app.db.raw.serialize().byteLength - before).toBeLessThan(262144);
+		budget(`receipt members added changing ${mutation}`, members() - initial, 1499, "rows");
+		budget(`database growth changing ${mutation}`, h.app.db.raw.serialize().byteLength - before, 262143, "bytes");
 	});
 
 test("a clean result tree performs no result-page reads on reopen and merge", async () => {
@@ -351,11 +352,14 @@ test("a clean result tree performs no result-page reads on reopen and merge", as
 	const reads = spyOn(h.app.db, "all");
 	try {
 		await end();
-		expect(
+		budget(
+			"result-page reads of a clean reopen and merge",
 			reads.mock.calls.filter(
 				([statement]) => statement.text.includes("FROM run_tests") && statement.text.includes("result/32"),
-			),
-		).toHaveLength(0);
+			).length,
+			0,
+			"reads",
+		);
 	} finally {
 		reads.mockRestore();
 	}

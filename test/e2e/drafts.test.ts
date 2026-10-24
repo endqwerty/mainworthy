@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { browserAvailable, eventually, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -617,7 +618,7 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("abcdefgh");
 			expect(await field.inputValue()).toBe("abcdefghStep 0");
 			const reads = z.array(z.string()).parse(await page.evaluate(() => Reflect.get(window, "textareaHeightReads")));
-			expect(reads.length).toBeLessThanOrEqual(8);
+			budget("textarea height reads while typing eight keys", reads.length, 8, "reads");
 			expect(reads.every((label) => label === "Step 1")).toBe(true);
 			expect(
 				await field.evaluate((element) => {
