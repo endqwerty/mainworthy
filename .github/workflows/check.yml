@@ -204,7 +204,7 @@ jobs:
     strategy:
       # Every shard runs to its end: the gate reads all of them.
       fail-fast: false
-      # The CI_SHARDS shards of scripts/check-plan.ts and the performance tests, or the files the change needs, in one
+      # Seven functional shards (CI_SHARDS in scripts/check-plan.ts) and the performance tests, or the files the change needs, in one
       # runner for each phase (`matrix` in scripts/ci-scope.ts). The gate job is given the same names.
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     services:

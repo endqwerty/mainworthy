@@ -938,6 +938,7 @@ test("the workers fit the machine: the performance phase is alone on a small one
 });
 
 test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
+	expect(CI_SHARDS).toBe(7);
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
 	expect(matrix("all")).toEqual([

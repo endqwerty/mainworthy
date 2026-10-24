@@ -89,6 +89,35 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
 
+test("report recovery fixtures start with unfilled pinned cases and recover one submitted result", async () => {
+	const { project: key, run } = z
+		.object({ project: z.string(), run: z.string() })
+		.parse(await result("POST", "/test/project", { kind: "run" }));
+	const slots = z
+		.object({ items: z.array(z.object({ case: z.string(), version: z.number(), fills: z.array(z.unknown()) })) })
+		.parse(await op(key, "find", { in: "slots", run }));
+	expect(slots.items).toHaveLength(6);
+	expect(slots.items.every((slot) => slot.fills.length === 0)).toBe(true);
+	const slot = slots.items[0];
+	if (!slot) throw new Error("the recovery fixture has no slot");
+	const input = {
+		cmd: crypto.randomUUID(),
+		run,
+		results: [
+			{ test: { case: slot.case }, outcome: "fail", note: "Original note", steps: [{ step: "s1", outcome: "fail" }] },
+		],
+	};
+	const receipt = await op(key, "report", input);
+	expect(await op(key, "report", input)).toEqual(receipt);
+	expect(await op(key, "command", { cmd: input.cmd })).toMatchObject({ state: "done", reply: receipt });
+	const timeline = z
+		.object({ entries: z.array(z.object({ t: z.string(), note: z.string().nullish() })) })
+		.parse(await op(key, "timeline", { ref: slot.case }));
+	expect(timeline.entries.filter((entry) => entry.t === "result")).toEqual([
+		expect.objectContaining({ note: "Original note" }),
+	]);
+});
+
 test("the iPhone reads the bound authenticator step and its completed recovery-code sign-in", async () => {
 	const instance = await world();
 	try {

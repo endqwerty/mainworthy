@@ -67,11 +67,19 @@ package enum Live {
 	/// A project nobody else reads, filled with one of everything the app shows (`scripts/ios/scenario.ts`).
 	/// `strict` is a project that holds one run which has passed and waits to be closed.
 	package static func project(strict: Bool = false) async throws -> String {
+		try await project(kind: strict ? "strict" : "standard")
+	}
+
+	package static func recoveryProject() async throws -> String {
+		try await project(kind: "run")
+	}
+
+	private static func project(kind: String) async throws -> String {
 		var request = URLRequest(url: instance.url.appending(path: "/test/project"))
 		request.httpMethod = "POST"
 		request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-		request.httpBody = Data(#"{"kind":"\#(strict ? "strict" : "standard")"}"#.utf8)
+		request.httpBody = Data(#"{"kind":"\#(kind)"}"#.utf8)
 		let (data, _) = try await URLSession.shared.data(for: request)
 		struct Reply: Decodable {
 			struct Made: Decodable { var project: String }
