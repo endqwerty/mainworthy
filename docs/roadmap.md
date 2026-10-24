@@ -19,7 +19,7 @@ keeps the current work order and the per-issue lists. Update both when the plan 
 - Phase 0 was not done as planned: no hands-on audit (decision 0009, answer 13: no
   trial accounts) and no measured baselines against the incumbents. That gap is the
   reason the MVP is a preview and not a first usable version (#39).
-- The Server layer runs from the same build as a container on SQLite. The Cloud
+- The instance runs from the same build as a container backed by PostgreSQL 18. The Cloud
   layer and PostgreSQL are deferred (#57).
 
 Scope is software QA across the process spectrum, loose to regulated, with
@@ -100,9 +100,8 @@ views and status automation are not verified here. Use issue #64 for the work or
 This replaces phases 3 and 4 below. Their contents went to M3 and M5 (runs, ingest,
 traceability, gates, importers, reports) and M2 (deployment, backup and restore). One
 of the earlier conditions for the first usable version moved: the Server layer on a
-server database. Decision 0010 serves the Server layer from SQLite, so PostgreSQL
-(#57) is in M6 as a decision for the owner. Move it back to phase 2 if the first
-usable version should wait for it.
+server database. PostgreSQL 18 now replaces the SQLite choice in decision 0010. The Local product layer
+has ended. `compose.yaml` runs the app and database; running elsewhere is possible but not yet supported.
 
 ## Phase 0: UX research and design (now)
 

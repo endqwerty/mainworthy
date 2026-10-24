@@ -4,8 +4,8 @@
 		"page": "83a943a47d9cec712e20c652e7407d0ece51ee36b97deda91b1c8256c5bb3f40"
 	},
 	"architecture": {
-		"candidate": "701ac9a1e8ac58eb91ca0b083bd9961b79996e27d9f338c32cb829099c85127f",
-		"page": "104544b63791119b217ce41a81acfa898a69de966e6a659cb5a1d108b0cf4af9"
+		"candidate": "23ea3335857051f22440c0068afaf46707a8c3a05fe7fa1763f767562fd008ea",
+		"page": "f79007886b3d725177c396047789e18c5143241d4749d07a62effb93b7088433"
 	},
 	"case-lifecycle": {
 		"candidate": "95fcf9f83a206aecfb8c60a5b8b89df3be6c2e1aa66be6b043d43ef8a13812a2",
@@ -36,7 +36,7 @@
 		"page": "c835ac60a1d6a4069bcb8a242bc178e7c56832ac40e5dcfc713cbfcd5992c394"
 	},
 	"red-build": {
-		"candidate": "0faf56afc77382825e894534a9a66ee6b80708f26b38b8bf1a73f0d2ab9ccc6b",
-		"page": "ed7568ee0b3f7abc962181d324f43dbc14da61f4f681f1c3a1bc62dc48c02fe8"
+		"candidate": "65b8a592bd8d4a3f5245e8441a968a52a576e3badcf214f5c342b5edfe586efe",
+		"page": "d76181b9e53fbd6c39e2f74409d036fc2e0973c995bca8ead08aab6e4949dee5"
 	}
 }

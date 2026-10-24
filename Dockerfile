@@ -1,5 +1,5 @@
 # Mainworthy as one container: the server, the web UI, the CLI and the MCP endpoint in a single executable.
-# The data (one SQLite file) lives on the volume at /data. Nothing else is needed: no database container.
+# PostgreSQL holds structured records; /data holds attachments and archive staging files.
 
 # The exact Bun: the executable carries it, and THIRD-PARTY-NOTICES.md lists the libraries of this release
 # (`licences/README.md`). `test/licences.test.ts` holds the version here, in CI and in the notices to one another.

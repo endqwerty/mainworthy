@@ -5,6 +5,10 @@ including browser tests.
 CI runs those tests in shards and elapsed-time budgets on a dedicated runner. This page explains what
 the check does, how the tests are arranged and what keeps them from interfering with each other.
 
+Tests need PostgreSQL 18. The fixture starts one checkout cluster on demand and clones a database for each
+harness or server. Set `MAINWORTHY_TEST_PG` to use an existing PostgreSQL admin URL instead, as CI does.
+Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fallback remains.
+
 ## Run the tests
 
 | Command | What it runs |

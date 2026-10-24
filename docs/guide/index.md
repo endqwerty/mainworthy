@@ -55,7 +55,7 @@ claim of WCAG conformance.
 - [API and agent tools](./api.md). This page lists every Mainworthy operation, with its address, required capability, and input. The web UI, command line, and agent tools call these operations. The command line and HTTP API reach every operation. MCP exposes ten of them as agent tools.
 - [Glossary](./glossary.md). These definitions explain the words you see in Mainworthy and its command output, with links to the pages that describe them.
 - [Troubleshooting](./troubleshooting.md). Find your message or symptom, then follow the steps to resolve it. Each section links to more detail where needed.
-- [How it is built](./architecture.md). Mainworthy runs as one server process with a SQLite database. This page explains how its operations record evidence and decisions, and which rules the tests hold the design to.
+- [How it is built](./architecture.md). Mainworthy runs as one server process connected to PostgreSQL 18. This page explains how its operations record evidence and decisions, and which rules the tests hold the design to.
 - [Licence](./licence.md). Mainworthy is open source under the Apache License 2.0. This page describes its terms and the licences of the software Mainworthy bundles.
 
 <!-- /generated -->

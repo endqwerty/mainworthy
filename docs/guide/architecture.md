@@ -1,14 +1,14 @@
 # How it is built
 
-Mainworthy runs as one server process with a SQLite database. This page explains how its operations record evidence and decisions, and which rules the tests hold the design to.
+Mainworthy runs as one server process connected to PostgreSQL 18. This page explains how its operations record evidence and decisions, and which rules the tests hold the design to.
 
 [Diagram: the surfaces, the operations and the record](../diagrams/architecture.html)
 
-## One process, one file
+## One app process and PostgreSQL
 
-An instance runs as one process. It keeps its records in one SQLite database and attachment bytes in a `blobs` directory beside it. The executable includes the server, the web UI, the command line, the documentation and the MCP endpoint. It needs no separate database server.
+An instance needs PostgreSQL 18 for structured records. The app keeps attachment bytes in `blobs/` under its data directory. The executable includes the server, web UI, command line, documentation and MCP endpoint. `compose.yaml` starts the app and its database. Running elsewhere is possible but not yet supported.
 
-The database has one writer. Writes wait their turn in a queue. By default, reads use separate threads with read-only connections so they can continue during a long write. [Configuration](./configuration.md) says how many reader threads a server starts.
+Writes wait in a queue and hold an instance-wide PostgreSQL advisory lock for the whole operation. Reads use separate connections and repeatable-read, read-only transactions. The registry rechecks authority in a fresh snapshot before sending a read reply. See [configuration](./configuration.md).
 
 ## One list of operations
 
