@@ -565,6 +565,8 @@ A page's operation requests and signed-in account changes carry the actor id the
 
 For HTTP clients that send `X-Mainworthy-As`, its value is the exact decimal `actorId` from `/api/session`, such as `3`. Names, percent-encoded values and other number formats such as `03` are refused. Clients that omit the header continue to act as their credentials identify them.
 
+An expired session returns HTTP `401 unauthenticated`, including when it expires while an account read or live-update connection request is being authorized. Sign in again to continue.
+
 To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. Ending this browser's session in Settings, **Your sessions**, opens the same dialog. It offers three choices:
 
 - **Sign out and keep drafts** starts with the focus. It keeps your browser data so your drafts are there when you sign in again.

@@ -498,6 +498,107 @@ describe("what ends a session", () => {
 		expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).status).toBe(401);
 	});
 
+	for (const project of ["scratch", "private-other", "no-such-project"]) {
+		test(`an event request for ${project} whose session expires after admission returns 401`, async () => {
+			const clock = clockAt();
+			const instance = await boot({ clock });
+			await admin(instance, { do: "project.create", key: "private-other" });
+			const sam = await person(instance, "sam");
+			const { cookie } = await signIn(instance, sam.token);
+			const pause = pauseRead(instance.app, "after", 2);
+			const opening = fetch(`${instance.url}/api/p/${project}/events`, { headers: { cookie } });
+			try {
+				await pause.reached;
+				clock.advance(MAX);
+				pause.release();
+				const response = await opening;
+				expect(response.status).toBe(401);
+				expect(response.headers.get("content-type")).toStartWith("application/json");
+				const text = await response.text();
+				expect(JSON.parse(text)).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
+				expect(text).not.toContain(project);
+				expect(text).not.toContain("retry:");
+				expect(text).not.toContain("data:");
+			} finally {
+				pause.restore();
+				const response = await opening;
+				if (!response.bodyUsed) await response.body?.cancel();
+			}
+		});
+	}
+
+	for (const boundary of ["first project snapshot", "project recheck", "after project recheck"] as const) {
+		test(`an account request whose session expires at the ${boundary} returns 401`, async () => {
+			const clock = clockAt();
+			const instance = await boot({ clock });
+			const { cookie } = await signIn(instance);
+			// Admission, actor, session id, credentials, project snapshot, project recheck.
+			const pause = pauseRead(
+				instance.app,
+				boundary === "after project recheck" ? "after" : "before",
+				boundary === "first project snapshot" ? 5 : 6,
+			);
+			const reading = fetch(`${instance.url}/api/session`, { headers: { cookie } });
+			try {
+				await pause.reached;
+				clock.advance(MAX);
+				pause.release();
+				const response = await reading;
+				expect(response.status).toBe(401);
+				const body = await response.json();
+				expect(body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
+				expect(body).not.toHaveProperty("result");
+			} finally {
+				pause.restore();
+				const response = await reading;
+				if (!response.bodyUsed) await response.body?.cancel();
+			}
+		});
+	}
+
+	test("an event request with a live session retains project privacy and capability errors", async () => {
+		const instance = await boot();
+		await admin(instance, { do: "project.create", key: "private-other" });
+		const sam = await person(instance, "sam");
+		const { cookie } = await signIn(instance, sam.token);
+		const missing = [];
+		for (const project of ["private-other", "no-such-project"]) {
+			const response = await fetch(`${instance.url}/api/p/${project}/events`, { headers: { cookie } });
+			expect(response.status).toBe(404);
+			const text = await response.text();
+			expect(JSON.parse(text)).toMatchObject({ ok: false, error: { code: "not_found" } });
+			missing.push(text.replaceAll(project, "<project>"));
+		}
+		expect(missing[0]).toBe(missing[1]);
+		await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["produce"] });
+		const forbidden = await fetch(`${instance.url}/api/p/scratch/events`, { headers: { cookie } });
+		expect(forbidden.status).toBe(403);
+		expect(await forbidden.json()).toMatchObject({ ok: false, error: { code: "forbidden" } });
+		await admin(instance, { do: "grant.remove", actor: "sam", project: "scratch" });
+		const account = await fetch(`${instance.url}/api/session`, { headers: { cookie } });
+		expect(account.status).toBe(200);
+		expect(await account.json()).toMatchObject({ ok: true, result: { projects: [] } });
+	});
+
+	test("an established change stream closes without sending data after its session expires", async () => {
+		const clock = clockAt();
+		const instance = await boot({ clock });
+		const { cookie } = await signIn(instance);
+		const stream = await fetch(`${instance.url}/api/p/scratch/events`, { headers: { cookie } });
+		expect(stream.status).toBe(200);
+		const reader = stream.body?.getReader();
+		if (!reader) throw new Error("no stream");
+		try {
+			const decoder = new TextDecoder();
+			expect(decoder.decode((await reader.read()).value)).toBe("retry: 2000\n\n");
+			clock.advance(MAX);
+			await create(instance, "Not for an expired session");
+			expect(await reader.read()).toEqual({ value: undefined, done: true });
+		} finally {
+			await reader.cancel();
+		}
+	});
+
 	test("revoking the token that opened a session ends it, forgetting the actor ends it, and its change stream stops", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });

@@ -545,7 +545,7 @@ export async function grantedProjects(app: App, session: Session) {
 async function sessionInfo(app: App, session: Session): Promise<Response> {
 	const actor = await session.actor(0);
 	if (!actor) return unauthenticated();
-	return jsonResponse({
+	const body = {
 		ok: true,
 		result: {
 			actor: actor.name,
@@ -565,18 +565,21 @@ async function sessionInfo(app: App, session: Session): Promise<Response> {
 			version: VERSION,
 			projects: await grantedProjects(app, session),
 		},
-	});
+	};
+	if (!(await session.actor(0))) return unauthenticated();
+	return jsonResponse(body);
 }
 
 /**
  * Whether this session may read a project: the same rules an operation that needs `read` applies. A project the
  * caller holds no grant on is `missing`, like one that does not exist (see `execute` in the registry).
  */
-async function mayRead(app: App, session: Session, key: string): Promise<"yes" | "no" | "missing"> {
+async function mayRead(app: App, session: Session, key: string): Promise<"yes" | "no" | "missing" | "unauthenticated"> {
 	const project = await app.database.read(async (readDb) => await findProject(readDb, key));
-	const can = project ? ((await session.actor(project.id))?.can ?? []) : [];
-	if (can.length === 0) return "missing";
-	return can.includes("read") ? "yes" : "no";
+	const actor = await session.actor(project?.id ?? 0);
+	if (!actor) return "unauthenticated";
+	if (!project || actor.can.length === 0) return "missing";
+	return actor.can.includes("read") ? "yes" : "no";
 }
 
 /**
@@ -664,6 +667,7 @@ async function events(
 	closing: AbortSignal,
 ): Promise<Response> {
 	const allowed = await mayRead(app, session, project);
+	if (allowed === "unauthenticated") return unauthenticated();
 	if (allowed === "missing") {
 		const { code, message } = noProject(project);
 		return jsonResponse({ ok: false, error: { code, message } }, HTTP_STATUS[code]);

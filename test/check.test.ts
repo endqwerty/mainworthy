@@ -1171,20 +1171,121 @@ test("CI installs PostgreSQL snapshot tools before running the test matrix", () 
 	expect(tools).toBeLessThan(steps.findIndex((step) => step.name === "Tests"));
 });
 
-test("every PostgreSQL service declares shared memory for concurrent fixture databases", () => {
+test("CI functional PostgreSQL skips durability while the performance job keeps it", async () => {
+	const Step = z.object({
+		name: z.string().optional(),
+		run: z.string().optional(),
+		env: z.record(z.string(), z.string()).optional(),
+	});
+	const Job = z.object({ services: z.unknown().optional(), steps: z.array(Step) });
 	const workflow = z
-		.object({
-			jobs: z.record(
-				z.string(),
-				z.object({
-					services: z.object({ postgres: z.object({ options: z.string() }) }).optional(),
-				}),
-			),
-		})
+		.object({ jobs: z.object({ tests: Job, gate: Job }) })
 		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
-	const services = Object.entries(workflow.jobs).filter(([, job]) => job.services);
-	expect(services.map(([name]) => name)).toEqual(["tests", "gate"]);
-	for (const [name, job] of services) expect(job.services?.postgres.options, name).toContain("--shm-size=256m");
+	const starts = [workflow.jobs.tests, workflow.jobs.gate].map((job) => {
+		const step = job.steps.find((one) => one.run?.includes("bash scripts/ci-postgres.sh"));
+		expect(step, "the throwaway database starts with the selected CI durability mode").toBeDefined();
+		return step;
+	});
+	const expression = (name: string): string => `$\{{ ${name} }}`;
+	expect(starts[0]?.env).toEqual({ TEST_PHASE: expression("matrix.phase") });
+	expect(starts[1]?.env).toEqual({ TEST_PHASE: "--only=parallel" });
+	const root = make("ci-postgres-args");
+	const argsFile = join(root, "args");
+	writeFileSync(
+		join(root, "docker"),
+		`#!/bin/sh
+printf '%s\n' "$@" >> "$DOCKER_ARGS"
+if [ "$1" = exec ] && [ "$3" = psql ]; then
+ mode=$(sed -n 's/^fsync=//p' "$DOCKER_ARGS")
+ if [ -n "$DOCKER_SETTINGS" ]; then
+ printf '%s\\n' "$DOCKER_SETTINGS"
+ else
+ printf '%s,%s,%s\n' "$mode" "$mode" "$mode"
+ fi
+fi
+`,
+		{ mode: 0o755 },
+	);
+	try {
+		const entries = [...matrix("all"), ...matrix(["test/check.test.ts"])];
+		for (const [index, job] of [workflow.jobs.tests, workflow.jobs.gate].entries()) {
+			expect(job.services).toBeUndefined();
+			const step = starts[index];
+			if (!step?.run) throw new Error("missing PostgreSQL startup");
+			expect(job.steps.indexOf(step)).toBeLessThan(
+				job.steps.findIndex(
+					(one) => one.name === (index === 0 ? "Tests" : "Report every shard to Mainworthy, then the gate"),
+				),
+			);
+			for (const entry of index === 0 ? entries : [{ phase: "--only=parallel", name: "gate" }]) {
+				writeFileSync(argsFile, "");
+				const child = Bun.spawn(["bash", "-e", "-c", step.run], {
+					env: {
+						...process.env,
+						PATH: `${root}:${process.env.PATH}`,
+						TEST_PHASE: entry.phase,
+						DOCKER_ARGS: argsFile,
+						DOCKER_SETTINGS: "",
+					},
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const [out, err, rc] = await Promise.all([
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+					child.exited,
+				]);
+				expect(rc, out + err).toBe(0);
+				const args = readFileSync(argsFile, "utf8").trim().split("\n");
+				const mode = entry.name === "performance" ? "on" : "off";
+				for (const key of ["fsync", "synchronous_commit", "full_page_writes"])
+					expect(args, entry.name).toContain(`${key}=${mode}`);
+				expect(args).toContain("--shm-size=256m");
+				expect(args).toContain("127.0.0.1:5432:5432");
+				for (const command of ["pg_isready", "psql"])
+					for (const [position, arg] of args.entries())
+						if (arg === command) expect(args.slice(position + 1, position + 3)).toEqual(["-h", "127.0.0.1"]);
+				expect(args).toContain("postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6");
+				const image = args.indexOf(
+					"postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6",
+				);
+				expect(args.slice(image + 1, image + 8)).toEqual([
+					"postgres",
+					"-c",
+					`fsync=${mode}`,
+					"-c",
+					`synchronous_commit=${mode}`,
+					"-c",
+					`full_page_writes=${mode}`,
+				]);
+			}
+		}
+		const functional = starts[0]?.run;
+		if (!functional) throw new Error("missing functional PostgreSQL startup");
+		for (const settings of ["on,off,off", "off,on,off", "off,off,on"]) {
+			writeFileSync(argsFile, "");
+			const child = Bun.spawn(["bash", "-e", "-c", functional], {
+				env: {
+					...process.env,
+					PATH: `${root}:${process.env.PATH}`,
+					TEST_PHASE: "--only=parallel",
+					DOCKER_ARGS: argsFile,
+					DOCKER_SETTINGS: settings,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [out, err, rc] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect(out + err).toContain(`PostgreSQL durability: ${settings}`);
+			expect(rc, "a server that ignored any setting must stop the job before tests").not.toBe(0);
+		}
+	} finally {
+		remove(root);
+	}
 });
 
 test("the deployment pins every base and Compose image by digest", () => {
