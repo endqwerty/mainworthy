@@ -50,8 +50,9 @@ export function writeTimings(path: string, durations: Readonly<Record<string, nu
 	writeFileSync(path, `${JSON.stringify({ version: TIMINGS_VERSION, files }, null, 2)}\n`);
 }
 
-/** Elapsed-time assertions run serially on a dedicated CI runner or explicitly on an idle local machine. */
+/** Elapsed-time assertions and database process cleanup checks run serially on a dedicated CI runner. */
 export const PERFORMANCE = [
+	"test/check-process.test.ts",
 	"test/demo-removal-budget.test.ts",
 	"test/archive-latency.test.ts",
 	"test/report-latency.test.ts",

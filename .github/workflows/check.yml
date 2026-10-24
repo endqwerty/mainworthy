@@ -1,9 +1,9 @@
 # The check, and Mainworthy testing itself: the test results of this repository are reported to Mainworthy with the
 # two pipeline lines a user would add (`mainworthy report`, `mainworthy gate`), and the result is Mainworthy's gate.
 #
-# The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. The tests that measure
-# time (scripts/check-plan.ts, PERFORMANCE) have a runner to themselves. Budget misses warn in its job summary (ten times a baseline fails);
-# workload errors still fail. Every shard uploads its JUnit file; the `gate`
+# The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. Elapsed-time measurements
+# and database process cleanup checks (scripts/check-plan.ts, PERFORMANCE) have a runner to themselves.
+# Budget misses warn in its job summary (ten times a baseline fails); workload errors still fail. Every shard uploads its JUnit file; the `gate`
 # job reports them all to one Mainworthy, each under its shard's name, and runs the gate. A shard that left no
 # report fails the gate job: a missing report is not a pass (scripts/ci-gate.ts).
 #

@@ -1,6 +1,6 @@
 import type { FlakyDetectionSettings, SameCodeEvidence } from "../../core/flaky.ts";
 import { type ReadDb, sql } from "../kernel/db.ts";
-import { mustTarget, resultLocation, uncorrectedResults } from "./evidence.ts";
+import { mustTarget, resultLocations, targetsByIds, uncorrectedResults } from "./evidence.ts";
 
 type Flip = {
 	signature: number;
@@ -75,6 +75,9 @@ export async function sameCodeEvidence(
 		test: input.test,
 		since: input.now - input.settings.windowDays * 86_400_000,
 	});
+	const targets = await targetsByIds(db, [...new Set(rows.map((row) => row.target))]);
+	const byId = new Map(targets.map((target) => [target.id, target]));
+	const location = await resultLocations(db, targets);
 	for (const row of rows) {
 		let signal = evidence.signals.find((entry) => entry.signature.id === row.signature);
 		if (!signal) {
@@ -89,7 +92,7 @@ export async function sameCodeEvidence(
 		}
 		signal.samples.push({
 			commit: row.commit_sha,
-			location: await resultLocation(db, await mustTarget(db, row.target)),
+			location: location(byId.get(row.target) ?? (await mustTarget(db, row.target))),
 			env: row.env,
 			job: row.job,
 			actor: row.actor,
