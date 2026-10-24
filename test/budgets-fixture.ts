@@ -6,6 +6,7 @@ import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import type { Workload } from "../bench/measure.ts";
 import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
+import { budget } from "../scripts/budget.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
 import type { Edit, GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { TimelineReply } from "../src/core/replies.ts";
@@ -176,7 +177,7 @@ export async function withLandingWorkload(run: (workload: Workload) => Promise<v
 					expect(page).toHaveLength(500);
 					for (const item of page)
 						expect(item.location).toEqual({ label: "main · pr:8 Keep coupons", commit, change: "pr:8" });
-					expect(landingReads).toBe(1);
+					budget("landing reads of a 500-result trunk page", landingReads, 1, "reads");
 				},
 			});
 		} finally {

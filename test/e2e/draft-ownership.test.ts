@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -438,8 +439,8 @@ check(
 			console.log(`Draft storage operations for 10 accepted keys: ${JSON.stringify(counts)}`);
 			expect((await stored(a)).body.title).toBe("Coupon case warm0123456789");
 			expect(counts.copyWrites).toBe(0);
-			expect(counts.copyReads).toBe(0);
-			expect(counts.keys).toBe(0);
+			budget("draft copy reads for 10 accepted keys", counts.copyReads, 0, "reads");
+			budget("draft key enumerations for 10 accepted keys", counts.keys, 0, "enumerations");
 		} finally {
 			await w.close();
 		}
