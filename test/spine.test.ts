@@ -6,6 +6,7 @@ import { sql } from "../src/server/kernel/db.ts";
 import { OpError } from "../src/server/kernel/errors.ts";
 import { runArchive } from "../src/server/ops/archives.ts";
 import { COMMIT, defineInstanceOp, defineOp, invoke } from "../src/server/ops/registry.ts";
+import { reportOp } from "../src/server/ops/writes.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
 import { grantedProjects, serve } from "../src/surfaces/http.ts";
 import { harness } from "./helpers.ts";
@@ -30,6 +31,97 @@ function barrier() {
 	});
 	return { promise, release };
 }
+
+test("HTTP report replay waits for its pending command and recovers the identical receipt", async () => {
+	if (!("steps" in reportOp)) throw new Error("report must be a sliced operation");
+	const h = await harness();
+	const held = barrier();
+	const release = barrier();
+	const queued = barrier();
+	await h.call("propose", { edits: [{ op: "create", outline: "Recover this report" }] });
+	await h.call("plan", { name: "Recovery", select: { cases: ["C-1"] } });
+	const server = serve(h.app, h.owner);
+	const origin = `http://127.0.0.1:${server.port}`;
+	let cookie = "";
+	const steps = reportOp.steps;
+	const report = spyOn(reportOp, "steps").mockImplementation(async function* (ctx, input) {
+		const iterator = steps(ctx, input);
+		for (let step = await iterator.next(); ; step = await iterator.next()) {
+			if (step.done) return step.value;
+			yield step.value;
+			if (step.value === COMMIT) {
+				held.release();
+				await release.promise;
+			}
+		}
+	});
+	const send = async (op: string, input: unknown) => {
+		const response = await fetch(`${origin}/api/p/scratch/${op}`, {
+			method: "POST",
+			headers: { "content-type": "application/json", origin, cookie, [API_VERSION_HEADER]: String(API_VERSION) },
+			body: JSON.stringify(input),
+		});
+		return response.json();
+	};
+	let writes: ReturnType<typeof spyOn> | undefined;
+	let first: Promise<unknown> | undefined;
+	let replay: Promise<unknown> | undefined;
+	try {
+		const { secret } = await createToken(h.app, {
+			actor: "phone",
+			kind: "human",
+			can: ["read", "record"],
+			project: 0,
+			label: "phone",
+		});
+		const opening = await signInWithToken(h.app, secret, { userAgent: null, address: null });
+		if (opening.kind !== "opening") throw new Error("no session");
+		const signedIn = await opening.signedIn;
+		if (!signedIn) throw new Error("no cookie");
+		cookie = `mainworthy_sid=${signedIn.cookie}`;
+		const input = {
+			cmd: "pending-http-report",
+			run: "R-1",
+			results: [{ test: { case: "C-1" }, outcome: "fail", note: "Original note" }],
+		};
+		first = send("report", input);
+		await Promise.race([
+			held.promise,
+			first.then((reply) => {
+				throw new Error(`report answered before its first commit: ${JSON.stringify(reply)}`);
+			}),
+		]);
+		const write = h.app.database.write.bind(h.app.database);
+		writes = spyOn(h.app.database, "write").mockImplementation((fn, options) => {
+			queued.release();
+			return write(fn, options);
+		});
+		let answered = false;
+		replay = send("report", input).then((reply) => {
+			answered = true;
+			return reply;
+		});
+		await queued.promise;
+		expect(await send("command", { cmd: input.cmd })).toMatchObject({ ok: true, result: { state: "begun" } });
+		expect(answered).toBe(false);
+		release.release();
+		const receipt = await first;
+		expect(receipt).toMatchObject({ ok: true });
+		expect(await replay).toEqual(receipt);
+		expect(await send("command", { cmd: input.cmd })).toMatchObject({ ok: true, result: { state: "done" } });
+		const timeline = await h.call<{ entries: { t: string; note?: string }[] }>("timeline", { ref: "C-1" });
+		expect(timeline.entries.filter((entry) => entry.t === "result")).toEqual([
+			expect.objectContaining({ note: "Original note" }),
+		]);
+	} finally {
+		release.release();
+		await Promise.allSettled([first, replay]);
+		writes?.mockRestore();
+		report.mockRestore();
+		await server.stop(true);
+		await h.close();
+	}
+});
 
 for (const change of ["credential", "capability", "project identity"] as const) {
 	test(`a read rechecks ${change} after its snapshot closes`, async () => {

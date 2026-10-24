@@ -16,7 +16,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import { testDatabase } from "../../test/db.ts";
 import { type Provider, provider } from "../../test/oidc-support.ts";
-import { passedRun, scenario } from "./scenario.ts";
+import { passedRun, recoveryRun, scenario } from "./scenario.ts";
 
 export const OWNER = "robin";
 export const TOKEN = "ios-test-owner-0123456789abcdef";
@@ -31,7 +31,7 @@ export type TestInstance = {
 	stop: () => Promise<void>;
 };
 
-const Ask = z.object({ kind: z.enum(["standard", "strict", "demo"]).default("standard") });
+const Ask = z.object({ kind: z.enum(["standard", "strict", "demo", "run"]).default("standard") });
 const Invited = z.object({ ok: z.literal(true), result: z.object({ code: z.string() }) });
 const Issued = z.object({ ok: z.literal(true), result: z.object({ token: z.string() }) });
 
@@ -126,7 +126,9 @@ export async function testInstance(): Promise<TestInstance> {
 												days: 0,
 											})),
 										}
-									: await scenario(made.url, token, key);
+									: asked.data.kind === "run"
+										? await recoveryRun(made.url, token, key)
+										: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
 					},
 					"/test/replace-project": async (req) => {

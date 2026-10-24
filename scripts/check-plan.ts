@@ -78,8 +78,8 @@ export const parallelWorkers = (cores = availableParallelism(), load = loadavg()
 /** Whole-suite durations only warn, by the owner's decision 0097; issue #77 tracks a future timing gate. */
 export const CHECK_WARNING_SECONDS = 130;
 
-/** The shards the workflow splits the parallel phase into; `.github/workflows/check.yml` lists as many. */
-export const CI_SHARDS = 6;
+/** The shards the scope matrix gives `.github/workflows/check.yml` for the parallel phase. */
+export const CI_SHARDS = 7;
 
 /** The existing CI warning threshold. Elapsed time does not change the gate's verdict (decision 0097). */
 export const CI_SHARD_WARNING_SECONDS = 180;
