@@ -5,9 +5,9 @@ import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
 import { API_VERSION, API_VERSION_HEADER, AT_HEADER, VERSION } from "../core/version.ts";
 import {
 	admit,
+	callerProjectCapabilities,
 	credentialSummary,
 	type Facts,
-	resolveCaller,
 	type Session,
 	type SignedIn,
 	signInWithToken,
@@ -16,7 +16,7 @@ import {
 } from "../server/identity/identity.ts";
 import { headerAddress } from "../server/kernel/address.ts";
 import type { App, ChangeEvent, Config } from "../server/kernel/app.ts";
-import { type Actor, findProject } from "../server/kernel/ctx.ts";
+import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
@@ -485,17 +485,21 @@ export async function handleOp(
  */
 export async function grantedProjects(app: App, session: Session) {
 	const projects = await app.database.read(async (db) => {
+		const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
+		const reference = session.reference?.();
+		const capabilities = reference
+			? await callerProjectCapabilities(
+					app,
+					db,
+					reference,
+					[...rows.values()].map((row) => row.id),
+				)
+			: null;
 		const granted = [];
 		for (const project of await listProjects(db)) {
-			const id = (await findProject(db, project.key))?.id;
-			const reference = session.reference?.();
-			const actor =
-				id === undefined
-					? null
-					: reference
-						? (await resolveCaller(app, db, reference, id))?.actor
-						: await session.actor(id);
-			const can = actor?.can ?? [];
+			const row = rows.get(project.key);
+			if (!row) continue;
+			const can = capabilities?.get(row.id) ?? (reference ? [] : ((await session.actor(row.id))?.can ?? []));
 			if (can.length)
 				granted.push({
 					...project,
@@ -508,15 +512,21 @@ export async function grantedProjects(app: App, session: Session) {
 	});
 	// A fresh scope checks identity and authority after the snapshot closes.
 	return app.database.read(async (db) => {
+		const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
+		const reference = session.reference?.();
+		const capabilities = reference
+			? await callerProjectCapabilities(
+					app,
+					db,
+					reference,
+					[...rows.values()].map((row) => row.id),
+				)
+			: null;
 		const granted = [];
 		for (const project of projects) {
-			const current = await findProject(db, project.key);
+			const current = rows.get(project.key);
 			if (!current || current.identity !== project.identity) continue;
-			const reference = session.reference?.();
-			const actor = reference
-				? (await resolveCaller(app, db, reference, current.id))?.actor
-				: await session.actor(current.id);
-			const can = actor?.can ?? [];
+			const can = capabilities?.get(current.id) ?? (reference ? [] : ((await session.actor(current.id))?.can ?? []));
 			if (can.length)
 				granted.push({
 					...project,

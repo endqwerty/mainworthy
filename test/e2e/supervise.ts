@@ -49,7 +49,7 @@ const shutdown = () =>
 		signal("SIGKILL");
 		await unregisterFixture();
 		await database.close();
-		await drainDatabaseDrops();
+		if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
 		await rm(config.data, { recursive: true, force: true });
 		await unregister();
 		process.exit(0);

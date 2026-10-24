@@ -31,6 +31,7 @@ import {
 	changeById,
 	changeByKey,
 	changesBasedOn,
+	changesByIds,
 	codeWhat,
 	excuseForDisputedSlot,
 	excuseForResult,
@@ -164,10 +165,16 @@ const Q = {
 	),
 	emptyChangeRuns: sql<{ project: number }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
-		 AND ((tally::jsonb)->>'pass')::bigint + ((tally::jsonb)->>'excused')::bigint = 0`,
+		 AND NOT EXISTS (SELECT 1 FROM jsonb_each_text(tally::jsonb) WHERE value::bigint <> 0)`,
 	),
-	inheritanceRuns: sql<{ project: number }, { id: number }>(
-		"SELECT id FROM runs WHERE project = $project AND origin = 'change' AND scope LIKE 'change:%'",
+	inheritanceRuns: sql<
+		{ project: number },
+		Pick<RunRow, "id" | "no" | "change" | "accepts_what"> & { planned: boolean }
+	>(
+		`SELECT r.id, r.no, r.change, r.accepts_what,
+		 EXISTS (SELECT 1 FROM runs p WHERE p.project = r.project AND p.origin = 'planned'
+		 AND (p.accepts::jsonb)->>'commit' = (r.accepts::jsonb)->>'commit') AS planned
+		 FROM runs r WHERE r.project = $project AND r.origin = 'change' AND r.scope LIKE 'change:%'`,
 	),
 	changeRuns: sql<{ change: number }, { id: number }>(
 		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
@@ -1326,9 +1333,31 @@ export async function failsOnBase(db: ReadDb, id: number): Promise<boolean> {
 		return support !== null && (await comparisonLane(db, support)) === lane;
 	});
 }
-/** Every change-scope commit, including those whose inherited questions were retired or never raised. */
-export const inheritanceRuns = async (db: ReadDb, project: number): Promise<number[]> =>
-	(await db.all(Q.inheritanceRuns, { project })).map((row) => row.id);
+/** Potential base comparisons, prior inheritance and commits accepted by planned runs need reconciliation. */
+export async function inheritanceRuns(db: ReadDb, project: number, prior: ReadonlySet<string>): Promise<number[]> {
+	const runs = await db.all(Q.inheritanceRuns, { project });
+	const changes = new Map(
+		(await changesByIds(db, [...new Set(runs.flatMap((run) => (run.change === null ? [] : [run.change])))])).map(
+			(change) => [change.id, change],
+		),
+	);
+	const bases = new Map(
+		[...changes.values()].flatMap((change) =>
+			change.base_sha ? [[change.id, codeWhat(change.repo, change.base_sha)] as const] : [],
+		),
+	);
+	const recorded = new Set(
+		(await db.all(Q.changeRunsByWhat, { project, whats: [...new Set(bases.values())] })).map((run) => run.accepts_what),
+	);
+	return runs
+		.filter((run) => {
+			const base = run.change === null ? undefined : bases.get(run.change);
+			return (
+				run.planned || prior.has(runRef(run)) || (base !== undefined && base !== run.accepts_what && recorded.has(base))
+			);
+		})
+		.map((run) => run.id);
+}
 export const changeRunsOf = async (db: ReadDb, change: number): Promise<number[]> =>
 	(await db.all(Q.changeRuns, { change })).map((row) => row.id);
 export const countedTestsOf = async (db: ReadDb, run: number) => await db.all(Q.allRunTests, { run });

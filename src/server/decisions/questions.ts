@@ -319,6 +319,9 @@ const Q = {
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id`,
 	),
+	inheritedRunRefs: sql<{ project: number }, { ref: string }>(
+		"SELECT DISTINCT ref FROM question_refs WHERE project = $project AND ref LIKE 'inherited:R-%'",
+	),
 	// A cause answer that says the target needs a fix and still stands: it ends when its cause passes.
 	attributedOnRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
 		"WITH answered AS MATERIALIZED (SELECT q.* FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.project = $project AND q.kind = 'failure' AND q.state = 'decided' AND (q.subject::jsonb)->>'slot' IS NULL AND (q.subject::jsonb)->>'perResult' IS NULL AND (d.answer::jsonb)->>'is' IN (" +
@@ -605,6 +608,8 @@ export const setQuestionFacts = async (
 
 export const refsOf = async (db: ReadDb, question: number): Promise<string[]> =>
 	(await db.all(Q.refsOf, { question })).map((r) => r.ref);
+export const inheritedRunRefs = async (db: ReadDb, project: number): Promise<Set<string>> =>
+	new Set((await db.all(Q.inheritedRunRefs, { project })).map((row) => row.ref.slice("inherited:".length)));
 export const refsOfQuestions = async (db: ReadDb, questions: readonly number[]): Promise<string[]> =>
 	questions.length ? (await db.all(Q.refsOfQuestions, { questions })).map((row) => row.ref) : [];
 /** Open summaries among each ref's latest 200 questions, matching questionsOn's bound and order. */

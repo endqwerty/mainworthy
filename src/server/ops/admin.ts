@@ -22,7 +22,7 @@ import {
 import {
 	type Actor,
 	allProjects,
-	demoSince,
+	demoProjects,
 	findProject,
 	insertProject,
 	makeCtx,
@@ -32,7 +32,7 @@ import {
 } from "../kernel/ctx.ts";
 import type { ReadDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
-import { currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
+import { currentPolicies, currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
@@ -49,15 +49,25 @@ export async function listProjects(db: ReadDb): Promise<
 		demo: boolean;
 	}[]
 > {
-	return await Array.fromAsync(await allProjects(db), async (row) => ({
-		key: row.key,
-		identity: row.identity,
-		name: row.name,
-		seq: row.seq,
-		createdAt: row.created_at,
-		...policySummary(await currentPolicy(db, row.id)),
-		demo: (await demoSince(db, row.id)) !== null,
-	}));
+	const projects = await allProjects(db);
+	const policies = await currentPolicies(
+		db,
+		projects.map((row) => row.id),
+	);
+	const demos = await demoProjects(db);
+	return projects.map((row) => {
+		const policy = policies.get(row.id);
+		if (!policy) throw new Error(`project ${row.id} has no policy`);
+		return {
+			key: row.key,
+			identity: row.identity,
+			name: row.name,
+			seq: row.seq,
+			createdAt: row.created_at,
+			...policySummary(policy),
+			demo: demos.has(row.id),
+		};
+	});
 }
 
 /** Creates a project with its first policy. Used by the admin operation and by first start. */

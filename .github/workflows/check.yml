@@ -228,6 +228,15 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: PostgreSQL 18 tools for snapshots and isolated cluster checks
+        run: |
+          sudo apt-get install --yes postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-18
+          echo 'MAINWORTHY_PG_BIN=/usr/lib/postgresql/18/bin' >> "$GITHUB_ENV"
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/pg_restore --version
       - name: A changed changelog is canonical
         if: ${{ matrix.name == 'tests' || matrix.name == 'tests-1' }}
         env:

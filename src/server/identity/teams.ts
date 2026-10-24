@@ -77,6 +77,13 @@ export async function teamCapabilities(db: ReadDb, actor: number, project: numbe
 	return (await db.all(Q.effective, { actor, project })).flatMap((grant) => json<Capability[]>(grant.can));
 }
 
+export async function teamProjectCapabilities(db: ReadDb, actor: number) {
+	return (await db.all(Q.effective, { actor, project: null })).map((grant) => ({
+		project: grant.project,
+		can: json<Capability[]>(grant.can),
+	}));
+}
+
 export async function teamsOf(db: ReadDb, actor: number) {
 	const listed = [];
 	for (const team of await db.all(Q.sources, { actor }))

@@ -110,6 +110,7 @@ import {
 	type HoldTerm,
 	holdEndingById,
 	independentFailureDecisions,
+	inheritedRunRefs,
 	insertAnswer,
 	insertDecision,
 	insertMergeReceipt,
@@ -492,7 +493,11 @@ async function* settleByRuleSteps(
 
 /** Reconcile inherited standing and let the new policy answer every eligible open question by rule. */
 async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, number, void> {
-	yield* refoldSteps(ctx, await inheritanceRuns(ctx.db, ctx.project.id), { dissolveStale: true });
+	yield* refoldSteps(
+		ctx,
+		await inheritanceRuns(ctx.db, ctx.project.id, await inheritedRunRefs(ctx.db, ctx.project.id)),
+		{ dissolveStale: true },
+	);
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const kinds = new Set(policy.clauses.filter((clause) => clause.ask.who === "rule").map((clause) => clause.kind));
 	const ids = await flatMapAsync([...kinds], async (kind) => await openQuestionIds(ctx.db, ctx.project.id, kind));

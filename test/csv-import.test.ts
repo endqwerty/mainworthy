@@ -155,8 +155,10 @@ test("CSV maps project fields and execution intent and imports 2,000 cases and e
 				(_, i) => `OLD${i + 1},Imported ${i + 1},High,${i % 2 ? "automated" : "to-be-automated"}`,
 			).join("\n");
 		const mapped = { id: "ID", title: "Title", execution: "Execution", fields: { priority: "Priority" } };
+		h.app.database.resetStatementCount();
 		const preview = Preview.parse(await h.call("import-csv", { csv: source, mapping: mapped }));
 		expect(preview).toMatchObject({ create: 2000, refused: 0 });
+		expect(h.app.database.statementCount, "CSV preview must resolve aliases as a batch").toBeLessThan(30);
 		const result = Preview.parse(
 			await h.call("import-csv", { csv: source, mapping: mapped, confirm: preview.confirmation }),
 		);
