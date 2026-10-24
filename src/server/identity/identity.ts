@@ -49,7 +49,7 @@ import {
 	sessionOwner,
 	sweepSessions,
 } from "./sessions.ts";
-import { dropTeamMemberships, moveTeamProjectGrants, teamCapabilities, teamsOf } from "./teams.ts";
+import { dropTeamMemberships, moveTeamProjectGrants, teamCapabilities, teamProjectCapabilities, teamsOf } from "./teams.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
 export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
@@ -678,6 +678,35 @@ export async function resolveCaller(
 				: null;
 		}
 	}
+}
+
+/** Resolve the credential once in this snapshot, then combine its grants for every listed project. */
+export async function callerProjectCapabilities(
+	app: App,
+	db: ReadDb,
+	reference: CallerReference,
+	projects: readonly number[],
+): Promise<Map<number, Capability[]>> {
+	const caller = await resolveCaller(app, db, reference, 0);
+	if (!caller) return new Map();
+	const { actor } = caller;
+	const grants = (await db.all(Q.grants, { actor: actor.id })).map((grant) => ({
+		project: grant.project,
+		can: json<Capability[]>(grant.can),
+	}));
+	if (actor.kind === "human") grants.push(...(await teamProjectCapabilities(db, actor.id)));
+	const byProject = new Map<number, Capability[]>();
+	for (const grant of grants) {
+		const can = byProject.get(grant.project) ?? [];
+		can.push(...grant.can);
+		byProject.set(grant.project, can);
+	}
+	return new Map(
+		projects.map((project) => [
+			project,
+			heldCapabilities(actor.kind, [...(byProject.get(0) ?? []), ...(byProject.get(project) ?? [])]),
+		]),
+	);
 }
 
 /** Browser proof from the admitted reference. Recheck under the gate after asynchronous work. */

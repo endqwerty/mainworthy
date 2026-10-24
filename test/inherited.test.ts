@@ -26,6 +26,45 @@ const base = async (fail: Record<number, string> = { 0: "same cause" }, attempt 
 const change = async (fail: Record<number, string>, commit = "change01", attempt = 1) =>
 	await h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "base0001", n: 2, fail, attempt }));
 
+test("policy adoption batches changes whose base has never been reported, then inherits later base proof", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	for (let pr = 1; pr <= 30; pr++)
+		await h.call(
+			"report",
+			ciReport({
+				commit: `future-change-${pr}`,
+				pr,
+				branch: `feature-${pr}`,
+				base: "future-base",
+				n: 1,
+				fail: { 0: "same cause" },
+			}),
+		);
+	await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
+	const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+	if (!adoption) throw new Error("missing policy adoption");
+	h.app.database.resetStatementCount();
+	expect(
+		await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject([{ status: "decided" }]);
+	expect(
+		h.app.database.statementCount,
+		"missing bases cannot require one reconciliation per historical run",
+	).toBeLessThan(120);
+	for (let pr = 1; pr <= 30; pr++)
+		expect(await gate(`future-change-${pr}`)).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 1, excused: 0 },
+		});
+	await h.call("report", ciReport({ commit: "future-base", n: 1, fail: { 0: "same cause" } }));
+	for (let pr = 1; pr <= 30; pr++)
+		expect(await gate(`future-change-${pr}`)).toMatchObject({
+			verdict: "passed",
+			tally: { unexplained: 0, excused: 1 },
+		});
+});
+
 for (const answer of ["inherited", "mistaken"]) {
 	for (const existing of [false, true]) {
 		test(`a rule's ${answer} answer cannot excuse a ${existing ? "pre-existing" : "new"} trunk failure`, async () => {

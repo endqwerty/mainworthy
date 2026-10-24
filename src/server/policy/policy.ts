@@ -13,6 +13,9 @@ const Q = {
 	current: sql<{ project: number }, PolicyRow>(
 		"SELECT project, version, preset, clauses, settings FROM policies WHERE project = $project ORDER BY version DESC LIMIT 1",
 	),
+	currentMany: sql<{ projects: readonly number[] }, PolicyRow>(
+		"SELECT DISTINCT ON (project) project, version, preset, clauses, settings FROM policies WHERE project = ANY($projects::bigint[]) ORDER BY project, version DESC",
+	),
 	at: sql<{ project: number; version: number }, PolicyRow>(
 		"SELECT project, version, preset, clauses, settings FROM policies WHERE project = $project AND version = $version",
 	),
@@ -40,6 +43,12 @@ export async function currentPolicy(db: ReadDb, project: number): Promise<Curren
 	const row = await db.get(Q.current, { project });
 	if (!row) throw new Error(`project ${project} has no policy`);
 	return read(row);
+}
+
+export async function currentPolicies(db: ReadDb, projects: readonly number[]): Promise<Map<number, CurrentPolicy>> {
+	const policies = new Map((await db.all(Q.currentMany, { projects })).map((row) => [row.project, read(row)]));
+	for (const project of projects) if (!policies.has(project)) throw new Error(`project ${project} has no policy`);
+	return policies;
 }
 
 /** The policy as it was at one version, or null: what a decision's signature says it was given under. */

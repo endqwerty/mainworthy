@@ -29,8 +29,9 @@ import { invoke } from "../src/server/ops/registry.ts";
 import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
+import { removeProject } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
-import { openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { grantedProjects, openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { type TestDatabase, testDatabase } from "./db.ts";
 import { fakeSmtp } from "./mail-support.ts";
@@ -1054,6 +1055,96 @@ describe("reads on other cores through HTTP", () => {
 });
 
 describe("local mode", () => {
+	for (const change of ["team membership", "token", "project identity"] as const)
+		test(`account batches recheck ${change} after closing their first snapshot`, async () => {
+			await using instance = await boot("local");
+			const client = new Client({ url: instance.url, token: undefined, project: "scratch" });
+			await client.call("admin", { do: "project.create", key: "other" });
+			const viewer = z
+				.object({ id: z.number(), token: z.string() })
+				.parse(await client.call("admin", { do: "token.create", actor: "viewer", kind: "human", can: ["read"] }));
+			await client.call("admin", { do: "team.create", name: "Quality" });
+			await client.call("admin", { do: "team.grant.set", team: "Quality", project: "scratch", can: ["produce"] });
+			await client.call("admin", { do: "team.member.add", team: "Quality", person: "viewer" });
+			const session = await sessionOf(
+				instance.app,
+				new Request(`${instance.url}/api/session`, {
+					headers: { authorization: `Bearer ${viewer.token}` },
+				}),
+				instance.owner,
+			);
+			if (!session) throw new Error("no viewer session");
+			expect((await grantedProjects(instance.app, session)).map(({ key, can }) => ({ key, can }))).toEqual([
+				{ key: "scratch", can: ["read", "record", "produce"] },
+				{ key: "other", can: ["read"] },
+			]);
+			const read = instance.app.database.read.bind(instance.app.database);
+			let changed = false;
+			instance.app.database.read = async (fn, options) => {
+				const value = await read(fn, options);
+				if (!changed) {
+					changed = true;
+					if (change === "team membership")
+						await client.call("admin", { do: "team.member.remove", team: "Quality", person: "viewer" });
+					else if (change === "token") await client.call("admin", { do: "token.revoke", id: viewer.id });
+					else {
+						await instance.app.database.write((db) => db.transaction(() => removeProject(db, "scratch")));
+						await client.call("admin", { do: "project.create", key: "scratch" });
+					}
+				}
+				return value;
+			};
+			try {
+				const projects = (await grantedProjects(instance.app, session)).map(({ key, can }) => ({ key, can }));
+				expect(projects).toEqual(
+					change === "token"
+						? []
+						: change === "project identity"
+							? [{ key: "other", can: ["read"] }]
+							: [
+									{ key: "scratch", can: ["read"] },
+									{ key: "other", can: ["read"] },
+								],
+				);
+			} finally {
+				instance.app.database.read = read;
+			}
+		});
+
+	test("account reads batch project metadata and credential grants", async () => {
+		await using instance = await boot("local");
+		const client = new Client({ url: instance.url, token: undefined, project: "scratch" });
+		for (let n = 0; n < 30; n++)
+			await client.call("admin", { do: "project.create", key: `account-${n}`, preset: "standard" });
+		instance.app.database.resetStatementCount();
+		const reply = await fetch(`${instance.url}/api/session`);
+		const account = z
+			.object({
+				ok: z.literal(true),
+				result: z.object({
+					projects: z.array(
+						z.object({
+							key: z.string(),
+							identity: z.string(),
+							policy: z.string(),
+							demo: z.boolean(),
+							can: z.array(z.string()),
+						}),
+					),
+				}),
+			})
+			.parse(await reply.json());
+		expect(account.result.projects).toHaveLength(31);
+		expect(account.result.projects.filter((project) => project.key.startsWith("account-"))).toHaveLength(30);
+		for (const project of account.result.projects) {
+			expect(project.identity).not.toBe("");
+			expect(project.can).toContain("admin");
+			expect(project.demo).toBe(false);
+			if (project.key !== "scratch") expect(project.policy).toBe("standard");
+		}
+		expect(instance.app.database.statementCount, "account reads must not query once per project").toBeLessThan(40);
+	});
+
 	test("the browser on this machine is the owner with no step, and a first project exists", async () => {
 		await using instance = await boot("local");
 		const session = (await (await fetch(`${instance.url}/api/session`)).json()) as Envelope<SessionInfo>;

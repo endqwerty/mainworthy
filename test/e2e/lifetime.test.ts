@@ -56,6 +56,7 @@ async function worker(executable?: string) {
 			stderr: "inherit",
 			env: {
 				...process.env,
+				MAINWORTHY_TEST_DATABASES: "",
 				BUN_FEATURE_FLAG_NO_ORPHANS: "1",
 				...(executable ? { MAINWORTHY_E2E_SERVER: executable } : {}),
 			},

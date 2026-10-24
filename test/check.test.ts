@@ -98,6 +98,42 @@ for (const managed of [false, true])
 		}
 	});
 
+test("a browser supervisor leaves its database cleanup to the managed runner", async () => {
+	const root = make("browser-database-cleanup");
+	const records = join(root, "records");
+	mkdirSync(records);
+	const { drainRecordedDatabases } = await import("../scripts/work/test-databases.ts");
+	try {
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`
+ import {startServer} from "./test/e2e/support.ts";
+ const server = await startServer({source:true});
+ await server.stop();
+ `,
+			],
+			{
+				env: { ...process.env, MAINWORTHY_TEST_DATABASES: records },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		const [out, err, rc] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		expect(rc, out + err).toBe(0);
+		expect(readdirSync(records).filter((name) => name.endsWith(".database.json"))).toHaveLength(1);
+		expect(await drainRecordedDatabases(records)).toBe(1);
+	} finally {
+		await drainRecordedDatabases(records);
+		remove(root);
+	}
+});
+
 test("a killed runner's exact manifest is recovered while a live runner and an unrelated database stay intact", async () => {
 	const root = make("database-run-recovery");
 	const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
@@ -1330,6 +1366,29 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("CI installs PostgreSQL snapshot tools before running the test matrix", () => {
+	const workflow = z
+		.object({
+			jobs: z.object({
+				tests: z.object({
+					steps: z.array(
+						z.object({
+							run: z.string().optional(),
+							name: z.string().optional(),
+						}),
+					),
+				}),
+			}),
+		})
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const steps = workflow.jobs.tests.steps;
+	const tools = steps.findIndex(
+		(step) => step.run?.includes("pg_dump --version") && step.run.includes("pg_restore --version"),
+	);
+	expect(tools, "a service container does not install snapshot clients on the runner").toBeGreaterThanOrEqual(0);
+	expect(tools).toBeLessThan(steps.findIndex((step) => step.name === "Tests"));
 });
 
 test("the deployment pins every base and Compose image by digest", () => {

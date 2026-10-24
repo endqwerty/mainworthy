@@ -106,6 +106,9 @@ export function inThisProcess(label: string, body: () => Promise<number>, given:
 		try {
 			for (const key of Object.keys(process.env)) delete process.env[key];
 			Object.assign(process.env, given.environment);
+			for (const key of ["MAINWORTHY_TEST_PG", "MAINWORTHY_TEST_DATABASES", "MAINWORTHY_TEST_CHILDREN"]) {
+				if (saved.env[key] !== undefined) process.env[key] = saved.env[key];
+			}
 			process.chdir(given.cwd);
 			process.stdout.write = sink(out);
 			process.stderr.write = sink(err);

@@ -83,6 +83,7 @@ const Q = {
 		"INSERT INTO projects (org, key, identity, name, created_at) VALUES ($org, $key, $identity, $name, $at)",
 	),
 	demoSince: sql<{ project: number }, { since: number }>("SELECT since FROM demo_projects WHERE project = $project"),
+	demos: sql<readonly [], { project: number }>("SELECT project FROM demo_projects"),
 	markDemo: sql<{ project: number; since: number }>(
 		"INSERT INTO demo_projects (project, since) VALUES ($project, $since)",
 	),
@@ -121,6 +122,8 @@ export const findProject = async (db: ReadDb, key: string): Promise<ProjectRow |
 export const projectById = async (db: ReadDb, id: number): Promise<ProjectRow | null> =>
 	await db.get(Q.projectById, { id });
 export const allProjects = async (db: ReadDb): Promise<ProjectRow[]> => await db.all(Q.projects);
+export const demoProjects = async (db: ReadDb): Promise<Set<number>> =>
+	new Set((await db.all(Q.demos)).map((row) => row.project));
 
 export async function insertProject(
 	db: WriteDb,

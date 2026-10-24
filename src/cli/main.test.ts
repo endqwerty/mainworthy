@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import { testDatabase } from "../../test/db.ts";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
 import { Policy } from "../core/kinds.ts";
@@ -1290,6 +1291,32 @@ test("a command that writes after it ended, or outlives its time, fails where it
 	).rejects.toThrow();
 	untouched();
 	expect(await quiet()).toEqual({ stdout: "", stderr: "", code: 0 });
+});
+
+test("an in-process CLI command preserves the test database service for concurrent fixtures", async () => {
+	const previous = process.env.MAINWORTHY_TEST_PG;
+	if (!previous) throw new Error("test preflight did not configure PostgreSQL");
+	const service = new URL(previous);
+	service.searchParams.set("application_name", "fixture-during-cli");
+	process.env.MAINWORTHY_TEST_PG = service.toString();
+	try {
+		const result = await inThisProcess(
+			"fixture during command",
+			async () => {
+				const fixture = await testDatabase();
+				try {
+					process.stdout.write(new URL(fixture.url).searchParams.get("application_name") ?? "missing service");
+				} finally {
+					await fixture.close();
+				}
+				return 0;
+			},
+			{ environment: { PATH: process.env.PATH ?? "" }, cwd: process.cwd(), input: "" },
+		);
+		expect(result).toEqual({ code: 0, stdout: "fixture-during-cli", stderr: "" });
+	} finally {
+		process.env.MAINWORTHY_TEST_PG = previous;
+	}
 });
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
