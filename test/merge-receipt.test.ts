@@ -19,7 +19,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 const receipt = async () => {
 	const found = await h.call<{ change: unknown }>("impact", { change: "pr:726" });
 	return z.object({ mergeReceipt: MergeReceipt.nullable() }).parse(found.change).mergeReceipt;
@@ -187,7 +187,9 @@ test("OpenAPI declares merge receipts and landing gates in the impact output sch
 
 test("a large report shares its frozen evidence across repeated reopen and merge observations", async () => {
 	await h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 }));
+	const beforeFreeze = h.app.database.statementCount;
 	await end();
+	expect(h.app.database.statementCount - beforeFreeze).toBeLessThan(1000);
 	const before = await receiptBytes();
 	for (let i = 0; i < 6; i++) {
 		await h.call("change", { change: "pr:726", state: "open" });

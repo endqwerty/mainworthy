@@ -19,7 +19,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
 const base = async (fail: Record<number, string> = { 0: "same cause" }, attempt = 1) =>
 	await h.call("report", ciReport({ commit: "base0001", n: 2, fail, attempt }));

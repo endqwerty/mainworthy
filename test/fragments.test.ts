@@ -21,7 +21,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(() => h?.close());
 const createFragment = async () =>
 	await h.call("propose", {
 		edits: [

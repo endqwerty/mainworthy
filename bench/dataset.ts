@@ -14,6 +14,8 @@ import { baselineSchema } from "../src/server/kernel/migrate.ts";
 import { testDatabase } from "../test/db.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
+import { publicLog } from "./log.ts";
+
 const GENERATOR = 2;
 export const Parameters = z
 	.object({
@@ -302,7 +304,8 @@ export async function buildDataset(options: {
 	const dir = resolve(options.dir);
 	const parameters = Parameters.parse(options.parameters);
 	const revision = fingerprints();
-	const log = options.log ?? console.log;
+	const output = options.log ?? console.log;
+	const log = (message: string) => output(publicLog(message));
 	requireDisk(dir);
 	const metadataPath = join(dir, "dataset.json");
 	if (existsSync(metadataPath) && existsSync(join(dir, "baseline.dump"))) {

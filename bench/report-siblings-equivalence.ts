@@ -4,7 +4,7 @@ import type { Harness } from "../test/helpers.ts";
 import { ciReport, harness } from "../test/helpers.ts";
 
 /** Full public gates and questions at each step, for comparison across revisions. */
-export async function snapshots() {
+export async function snapshots(finalStorageOnly = false) {
 	const out: { preset: string; stages: unknown[] }[] = [];
 	for (const preset of ["loose", "standard"]) {
 		const h = await harness({ preset });
@@ -54,12 +54,80 @@ export async function snapshots() {
 					"report",
 					{
 						...input,
-						results: input.results.map((result) => ({ ...result, annotation: { case: "C-1", version: 1 } })),
+						results: input.results.map((result, index) => ({
+							...result,
+							annotation: { case: "C-1", version: 1 },
+							note: `Result ${index} for ${commit}`,
+							...(result.failure
+								? { failure: { ...result.failure, detail: "Expected receipt at checkout", at: "buy" } }
+								: {}),
+							steps: [
+								{
+									step: "buy",
+									outcome: result.outcome,
+									durationMs: 31 + index,
+									actions: [{ text: "Click buy", outcome: result.outcome, durationMs: 7 }],
+									attachment: 0,
+								},
+							],
+							tries: [
+								{
+									outcome: "fail",
+									durationMs: 123 + index,
+									failure: { message: "retry assertion", detail: "first try" },
+								},
+								{ outcome: "pass", durationMs: 0 },
+							],
+							attachments: [
+								{
+									name: "receipt.png",
+									data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5RkAAAAASUVORK5CYII=",
+									at: "buy",
+								},
+							],
+						})),
 						...extra,
 					},
 					ci,
 				);
 			};
+			const agent = await h.actor("explorer", "agent", ["read", "produce"]);
+			await h.call(
+				"report",
+				{
+					target: { session: "agent-checkout" },
+					model: "gpt-6.1-sol",
+					results: [
+						{
+							test: { case: "C-1" },
+							outcome: "fail",
+							durationMs: 456,
+							failure: { message: "Agent receipt missing", detail: "No receipt after buy", at: "buy" },
+							note: "Agent observed no receipt",
+							steps: [{ step: "buy", outcome: "fail", durationMs: 456 }],
+							tries: [{ outcome: "error", durationMs: 81, failure: { message: "agent retry", detail: "network" } }],
+							attachments: [{ name: "agent.txt", data: btoa("Agent evidence"), at: "buy" }],
+						},
+					],
+				},
+				agent,
+			);
+			await h.call(
+				"claim",
+				{
+					lens: "review",
+					findings: [
+						{
+							on: "C-1",
+							category: "ambiguous",
+							note: "Receipt wording",
+							repro: "Buy once",
+							suggest: { expected: "Receipt" },
+						},
+					],
+				},
+				agent,
+			);
 			const initial = await report("base0001");
 			await report("otherbase", undefined, 1, {});
 			await report("change01", 1);
@@ -116,7 +184,37 @@ export async function snapshots() {
 				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
 				await capture(`adopted ${next}`);
 			}
-			out.push({ preset, stages });
+			// Activate assertion spreading across batches, including retry-only causes.
+			for (const [start, count] of [
+				[0, 26],
+				[26, 25],
+			]) {
+				await h.call(
+					"report",
+					{
+						target: { commit: "spread01", repo: "acme/web", branch: "main" },
+						job: `spread-${start}`,
+						results: Array.from({ length: count ?? 0 }, (_, offset) => {
+							const index = (start ?? 0) + offset;
+							return {
+								test: { key: `file-${index % 6}.test.ts::spread ${index}`, file: `file-${index % 6}.test.ts` },
+								outcome: "pass",
+								durationMs: index,
+								tries: [
+									{
+										outcome: "fail",
+										durationMs: 200 + index,
+										failure: { message: "assertion failed", detail: "spread retry" },
+									},
+								],
+								note: `Spread ${index}`,
+							};
+						}),
+					},
+					ci,
+				);
+			}
+			out.push({ preset, stages: finalStorageOnly ? [await storedEvidence(h)] : stages });
 		} finally {
 			await h.close();
 		}
@@ -154,6 +252,12 @@ export async function storedEvidence(h: Harness) {
 			const rows = await db.all(statement);
 			if (table === "batches")
 				for (const row of rows) if (typeof row.receipt === "string") row.receipt = JSON.parse(row.receipt);
+			// PostgreSQL consumes identity values on a conflicting insert; SQLite does not.
+			// This surrogate has no references. Preserve row order and every other stored value.
+			if (table === "result_excuses")
+				rows.forEach((row, index) => {
+					row.id = index + 1;
+				});
 			out[table] = rows;
 		}
 		return out;

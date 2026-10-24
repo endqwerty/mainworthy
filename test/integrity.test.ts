@@ -33,7 +33,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 type Item = InboxReply["items"][number];
 type CaseView = { ref: string; version: number; title: string; pre: string; tags: string[]; state: string };

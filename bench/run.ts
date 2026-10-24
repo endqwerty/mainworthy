@@ -9,6 +9,7 @@ import { FAIL_MULTIPLE } from "../scripts/budget.ts";
 import { BUDGETS, ensure } from "./contracts.ts";
 import { buildDataset, fingerprints, openDataset, Parameters } from "./dataset.ts";
 import { quantile, type UnderLoad, underLoad } from "./external.ts";
+import { publicLog } from "./log.ts";
 import { type Measurement, measure, percentile, type Sample, summarise, table, type Workload } from "./measure.ts";
 import { profile } from "./profile.ts";
 import {
@@ -61,7 +62,7 @@ export function machine(dir: string) {
 	const cores = cpus();
 	const command = (file: string, args: string[]) => {
 		try {
-			return execFileSync(file, args, { encoding: "utf8" }).trim();
+			return publicLog(execFileSync(file, args, { encoding: "utf8" }).trim());
 		} catch {
 			return "unavailable";
 		}
@@ -334,7 +335,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	if (cli.json) {
 		mkdirSync(dirname(resolve(cli.json)), { recursive: true });
 		writeFileSync(cli.json, JSON.stringify(report, null, 2));
-		console.log(`Report: ${resolve(cli.json)}`);
+		console.log(publicLog(`Report: ${resolve(cli.json)}`));
 	}
 	console.log(
 		`Elapsed: ${durationSeconds.toFixed(2)} s; load at end ${loadavg()
@@ -344,7 +345,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			)}; ${failed.length} primary misses and ${repeatFailures} repeat misses; ${near.length} workloads at or above half their budget.`,
 	);
 	for (const row of failed)
-		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(`${row.name}: ${error}`);
+		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(publicLog(`${row.name}: ${error}`));
 	// A miss is reported above; only an error or ten times a budget fails the run (scripts/budget.ts).
 	const blocking = (row: Measurement): boolean =>
 		row.errors > 0 ||
@@ -357,7 +358,7 @@ if (import.meta.main) {
 	try {
 		process.exitCode = await runBenchmark();
 	} catch (error) {
-		console.error(error instanceof Error ? error.stack : error);
+		console.error(publicLog(error instanceof Error ? (error.stack ?? error.message) : String(error)));
 		process.exitCode = 1;
 	}
 }

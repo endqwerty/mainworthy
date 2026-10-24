@@ -14,7 +14,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 const report = async (commit: string, fail = true, branch = "main", attempt = 1) =>
 	await h.call<ReportReceipt>(
 		"report",

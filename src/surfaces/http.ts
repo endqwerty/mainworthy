@@ -20,7 +20,7 @@ import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
-import { invoke, type Reply } from "../server/ops/registry.ts";
+import { invoke, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { type Relay, uiSurface } from "./ui.ts";
@@ -460,8 +460,6 @@ export async function handleOp(
 		if (error instanceof BodyTooLarge) return tooLarge(OP_BODY_LIMIT);
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
-	const sessionId = (await session.id?.()) ?? null;
-	const context = (await session.context?.()) ?? null;
 	return replyResponse(
 		await invoke(app, OPS, {
 			op,
@@ -470,9 +468,9 @@ export async function handleOp(
 			actor: session.actor,
 			...(session.reference ? { reference: session.reference() } : {}),
 			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
-			...(session.id ? { session: () => sessionId } : {}),
+			...(session.id ? { session: session.id } : {}),
 			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).
-			...(session.context ? { context: () => context } : {}),
+			...(session.context ? { context: session.context } : {}),
 			...(at === undefined ? {} : { at }),
 		}),
 	);
@@ -484,58 +482,63 @@ export async function handleOp(
  * `handoff` says whether a failure there can be handed to an agent (`MAINWORTHY_HANDOFF_*`).
  */
 export async function grantedProjects(app: App, session: Session) {
-	const projects = await app.database.read(async (db) => {
-		const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
-		const reference = session.reference?.();
-		const capabilities = reference
-			? await callerProjectCapabilities(
-					app,
-					db,
-					reference,
-					[...rows.values()].map((row) => row.id),
-				)
-			: null;
-		const granted = [];
-		for (const project of await listProjects(db)) {
-			const row = rows.get(project.key);
-			if (!row) continue;
-			const can = capabilities?.get(row.id) ?? (reference ? [] : ((await session.actor(row.id))?.can ?? []));
-			if (can.length)
-				granted.push({
-					...project,
-					fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
-					can,
-					handoff: app.config.handoff?.project === project.key,
-				});
-		}
-		return granted;
-	});
-	// A fresh scope checks identity and authority after the snapshot closes.
-	return app.database.read(async (db) => {
-		const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
-		const reference = session.reference?.();
-		const capabilities = reference
-			? await callerProjectCapabilities(
-					app,
-					db,
-					reference,
-					[...rows.values()].map((row) => row.id),
-				)
-			: null;
-		const granted = [];
-		for (const project of projects) {
-			const current = rows.get(project.key);
-			if (!current || current.identity !== project.identity) continue;
-			const can = capabilities?.get(current.id) ?? (reference ? [] : ((await session.actor(current.id))?.can ?? []));
-			if (can.length)
-				granted.push({
-					...project,
-					can,
-					fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
-				});
-		}
-		return granted;
-	});
+	for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
+		const projects = await app.database.read(async (db) => {
+			const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
+			const reference = session.reference?.();
+			const capabilities = reference
+				? await callerProjectCapabilities(
+						app,
+						db,
+						reference,
+						[...rows.values()].map((row) => row.id),
+					)
+				: null;
+			const granted = [];
+			for (const project of await listProjects(db)) {
+				const row = rows.get(project.key);
+				if (!row) continue;
+				const can = capabilities?.get(row.id) ?? (reference ? [] : ((await session.actor(row.id))?.can ?? []));
+				if (can.length)
+					granted.push({
+						...project,
+						fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
+						can,
+						handoff: app.config.handoff?.project === project.key,
+					});
+			}
+			return granted;
+		});
+		// A fresh scope checks identity and authority after the snapshot closes.
+		const rechecked = await app.database.read(async (db) => {
+			const rows = new Map((await allProjects(db)).map((row) => [row.key, row]));
+			const reference = session.reference?.();
+			const capabilities = reference
+				? await callerProjectCapabilities(
+						app,
+						db,
+						reference,
+						[...rows.values()].map((row) => row.id),
+					)
+				: null;
+			const granted = [];
+			for (const project of projects) {
+				const current = rows.get(project.key);
+				if (!current) continue;
+				if (current.identity !== project.identity) return null;
+				const can = capabilities?.get(current.id) ?? (reference ? [] : ((await session.actor(current.id))?.can ?? []));
+				if (can.length)
+					granted.push({
+						...project,
+						can,
+						fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
+					});
+			}
+			return granted;
+		});
+		if (rechecked !== null) return rechecked;
+	}
+	throw new Error("projects changed during all read attempts");
 }
 
 /** Who the caller is and which projects it may read. */

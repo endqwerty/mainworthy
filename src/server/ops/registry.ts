@@ -140,9 +140,9 @@ export type Call = {
 	 * The caller's browser session as it stands when it is asked, or null (see `InstanceCtx`). Asked where the
 	 * operation runs, after its wait for the write lock, as `actor` is: an id is given to another row after an import.
 	 */
-	session?: () => number | null;
+	session?: () => number | null | Promise<number | null>;
 	/** Where the caller is signed in, as it stands when it is asked, or null (see `InstanceCtx`). */
-	context?: () => string | null;
+	context?: () => string | null | Promise<string | null>;
 	/**
 	 * When the caller says this happened, in milliseconds. Only a write to a demo project takes it (decision
 	 * 0100); anywhere else it is refused, not ignored, so nobody believes a real project recorded the time it
@@ -273,8 +273,8 @@ async function executeInSnapshot(
 				db,
 				actor,
 				now: app.now(),
-				session: call.reference ? (caller?.session ?? null) : (call.session?.() ?? null),
-				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
+				session: call.reference ? (caller?.session ?? null) : ((await call.session?.()) ?? null),
+				context: call.reference ? (caller?.context ?? null) : ((await call.context?.()) ?? null),
 			};
 			if (op.effect === "read") return { ok: true, result: present(await op.run(env, input)), seq: null };
 			if (!("begin" in db)) throw new Error("a write needs an exclusive lease");
@@ -401,8 +401,10 @@ function failure(op: string, error: unknown): Reply {
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
+export const READ_ATTEMPTS = 3;
+
 /** Every read closes its snapshot before checking current authority in a fresh scope. */
-async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, attempt = 0): Promise<Reply> {
 	const op = ops[call.op];
 	let identity: string | undefined;
 	let reply: Reply;
@@ -433,7 +435,12 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call):
 		if (project?.identity !== identity) return null;
 		return reply;
 	});
-	return rechecked ?? (await read(app, ops, call));
+	return (
+		rechecked ??
+		(attempt + 1 < READ_ATTEMPTS
+			? await read(app, ops, call, attempt + 1)
+			: fail("conflict", "project changed during all read attempts"))
+	);
 }
 
 /** Runs writes exclusively on one lease, and reads in repeatable snapshots. */

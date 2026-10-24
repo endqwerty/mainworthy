@@ -151,7 +151,10 @@ export async function cluster(): Promise<Cluster> {
 				"--locale=C",
 			]);
 		}
-		writeFileSync(join(data, "postgresql.auto.conf"), "listen_addresses = '127.0.0.1'\nmax_connections = 300\n");
+		writeFileSync(
+			join(data, "postgresql.auto.conf"),
+			"listen_addresses = '127.0.0.1'\nunix_socket_directories = ''\nmax_connections = 300\n",
+		);
 		state.port = await freePort();
 		state.bin = bin;
 		writeFileSync(stateFile, JSON.stringify(state));

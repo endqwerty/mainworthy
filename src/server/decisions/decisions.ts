@@ -23,7 +23,6 @@ import {
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
 import {
-	batchById,
 	type ChangeRow,
 	changeById,
 	dropCauseExcuses,
@@ -33,6 +32,7 @@ import {
 	failedWithCauses,
 	mustTarget,
 	ownChangeOf,
+	receiptDetails,
 	resultById,
 	resultLocation,
 	resultLocations,
@@ -120,6 +120,7 @@ import {
 	liveByFingerprint,
 	mergeReceiptById,
 	mustQuestion,
+	nearestJudgment,
 	noteCarried,
 	openQuestionIds,
 	openQuestionsOn,
@@ -402,23 +403,11 @@ async function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unk
 			(clause) => clause.id === signer.clause && clause.ask.who === "rule",
 		) ??
 			false);
-	const walked = new Set<number>();
-	for (
-		let at = question;
-		at && !walked.has(at.id);
-		at = at.prior !== null ? await questionById(ctx.db, at.prior) : null
-	) {
-		walked.add(at.id);
-		const given = (await decisionsOf(ctx.db, at.id)).filter(
-			(decision) => !["expired", "outdated", "withdrawn"].includes(json<{ is?: string }>(decision.answer).is ?? ""),
+	const last = question ? await nearestJudgment(ctx.db, question.id) : null;
+	if (last)
+		return (
+			(await someAsync(json<Signer[]>(last.signers), overRule)) && json<{ is?: string }>(last.answer).is !== wanted
 		);
-		const last = given.at(-1);
-		if (last) {
-			return (
-				(await someAsync(json<Signer[]>(last.signers), overRule)) && json<{ is?: string }>(last.answer).is !== wanted
-			);
-		}
-	}
 	return false;
 }
 
@@ -2521,23 +2510,30 @@ export async function recordMergeReceipt(ctx: Ctx, change: ChangeRow): Promise<C
 	const observed = run ? await receiptGateOf(ctx, run) : { gate: emptyGate, openCount: 0, waitingCount: 0 };
 	async function* contents(bucket: number): AsyncGenerator<{ key: number; body: string }> {
 		if (!run) return;
-		for (const row of await countedReceiptBucket(ctx.db, run, bucket)) {
-			const test = await testById(ctx.db, row.test);
-			const result = await resultById(ctx.db, row.result);
-			const batch = result ? await batchById(ctx.db, result.batch) : null;
-			if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
+		const rows = await countedReceiptBucket(ctx.db, run, bucket);
+		const details = new Map(
+			(
+				await receiptDetails(
+					ctx.db,
+					rows.map((row) => row.result),
+				)
+			).map((row) => [row.id, row]),
+		);
+		for (const row of rows) {
+			const detail = details.get(row.result);
+			if (!detail) throw new Error(`counted result ${row.result} is missing`);
 			yield {
 				key: row.result,
 				body: JSON.stringify({
 					result: row.result,
-					test: testRef(test),
-					name: test.name,
-					file: test.file,
+					test: testRef(detail),
+					name: detail.name,
+					file: detail.file,
 					target: row.target,
 					outcome: row.outcome,
-					method: result.method,
-					job: batch.job,
-					env: (await mustTarget(ctx.db, row.target)).env,
+					method: detail.method,
+					job: detail.job,
+					env: detail.env,
 					standing: row.standing,
 					scope: row.scope,
 					flipped: row.flipped,

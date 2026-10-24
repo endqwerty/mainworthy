@@ -408,3 +408,18 @@ test("search vector budgets retain UTF-8 prefixes and cannot overflow on oversiz
 		await db.unsafe("ROLLBACK");
 	}
 });
+
+test("the schema port --check accounts for every reviewed hand edit", async () => {
+	const child = Bun.spawn([process.execPath, "scripts/port-schema.ts", "--check"], {
+		env: { ...process.env },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [rc, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	expect({ rc, stderr }).toEqual({ rc: 0, stderr: "" });
+	expect(stdout).toContain("11 justified hand edits only.");
+});

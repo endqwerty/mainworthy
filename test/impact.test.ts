@@ -9,7 +9,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "ask" });
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 type Impact = {
 	counts: { cases: number; unreviewed: number; failing: number; uncovered: number };

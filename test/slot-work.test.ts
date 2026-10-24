@@ -19,7 +19,7 @@ beforeEach(async () => {
 		require: [{ id: "exercise", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
 	});
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 type Work = { kind: "free" } | { kind: "held"; actor: string; since: number; until: number };
 type Taken = { run: string; slot: number | null; case: string | null; work: Work };
 const take = async (input: Record<string, unknown> = {}, actor = h.owner) =>

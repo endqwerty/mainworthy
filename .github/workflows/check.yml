@@ -228,6 +228,10 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Source for the SQLite schema parity audit
+        run: |
+          revision=$(bun -e 'import { SQLITE_REVISION } from "./scripts/port-schema.ts"; process.stdout.write(SQLITE_REVISION)')
+          git cat-file -e "${revision}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$revision"
       - name: PostgreSQL 18 tools for snapshots and isolated cluster checks
         run: |
           sudo apt-get install --yes postgresql-common

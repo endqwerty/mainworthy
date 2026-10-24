@@ -37,7 +37,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 const COMMIT = "c0ffee0000000000000000000000000000000001";
 const target = { commit: COMMIT, repo: "acme/web", branch: "feature", pr: 7 };
@@ -453,4 +453,21 @@ test("a correction can name an earlier result of the same report", async () => {
 		{ id: guessed, corrects: null },
 		{ id: guessed + 1, corrects: guessed },
 	]);
+});
+
+test("test text search preserves literal backslashes in keys, names and files", async () => {
+	const tests = [
+		{ key: String.raw`win\path\key`, name: "key match" },
+		{ key: "name", name: String.raw`win\path\name` },
+		{ key: "file", file: String.raw`win\path\check.spec.ts` },
+	];
+	await h.call("report", {
+		target: { commit: "backslash" },
+		results: tests.map((test) => ({ test, outcome: "pass" })),
+	});
+	for (const text of [String.raw`win\path`, "win\\", "WIN%path", "win_path"]) {
+		const found = await h.call<{ items: unknown[] }>("find", { in: "tests", text });
+
+		expect(found.items).toHaveLength(3);
+	}
 });

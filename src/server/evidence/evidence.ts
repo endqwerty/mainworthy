@@ -573,6 +573,15 @@ const Q = {
 	proofsForCases: sql<{ ids: readonly number[] }, ResultRow>(
 		"SELECT r.* FROM unnest($ids::bigint[]) asked(id) CROSS JOIN unnest(ARRAY['human','auto','agent']) methods(method) JOIN LATERAL (SELECT * FROM results WHERE basis_case = asked.id AND method = methods.method ORDER BY seq DESC, ord DESC LIMIT 1) r ON true",
 	),
+	receiptDetails: sql<
+		{ ids: readonly number[] },
+		Pick<TestRow, "no" | "name" | "file"> &
+			Pick<ResultRow, "id" | "method"> &
+			Pick<BatchRow, "job"> &
+			Pick<TargetRow, "env">
+	>(
+		"SELECT r.id,t.no,t.name,t.file,r.method,b.job,g.env FROM results r JOIN tests t ON t.id=r.test JOIN batches b ON b.id=r.batch JOIN targets g ON g.id=r.target WHERE r.id=ANY($ids::bigint[])",
+	),
 	targetsByIds: sql<{ ids: readonly number[] }, TargetRow>("SELECT * FROM targets WHERE id = ANY($ids::bigint[])"),
 	batchesByIds: sql<{ ids: readonly number[] }, BatchRow>("SELECT * FROM batches WHERE id = ANY($ids::bigint[])"),
 	testsByIds: sql<{ ids: readonly number[] }, TestRow>("SELECT * FROM tests WHERE id = ANY($ids::bigint[])"),
@@ -2148,7 +2157,7 @@ export async function listTests(
 	const params: SqlValue[] = [input.project];
 	if (input.unlinked) where.push("case_id IS NULL");
 	if (input.text) {
-		where.push("(key ILIKE $2 OR name ILIKE $2 OR file ILIKE $2)");
+		where.push("(key ILIKE $2 ESCAPE '' OR name ILIKE $2 ESCAPE '' OR file ILIKE $2 ESCAPE '')");
 		params.push(`%${input.text}%`);
 	}
 	if (input.before !== null) {
@@ -2183,6 +2192,9 @@ export async function proofsOf(
 export async function proofOf(db: ReadDb, row: { id: number; head: number }): Promise<Record<MethodKind, Proof>> {
 	return (await proofsOf(db, [row])).get(row.id) ?? { human: null, auto: null, agent: null };
 }
+export const receiptDetails = async (db: ReadDb, ids: readonly number[]) =>
+	ids.length ? await db.all(Q.receiptDetails, { ids }) : [];
+
 export const resultsByIds = async (db: ReadDb, ids: readonly number[]): Promise<ResultRow[]> =>
 	ids.length ? await db.all(Q.resultsByIds, { ids }) : [];
 export const targetsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TargetRow[]> =>

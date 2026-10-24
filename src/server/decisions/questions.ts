@@ -149,17 +149,22 @@ const Q = {
 	members: sql<{ node: number }, ReceiptMember>(
 		`SELECT m.slot,m.child,m.payload,coalesce(n.hash,p.hash) AS hash,coalesce(n.count,1) AS count FROM merge_receipt_members m LEFT JOIN merge_receipt_nodes n ON n.id=m.child LEFT JOIN merge_receipt_payloads p ON p.id=m.payload WHERE m.node=$node ORDER BY m.slot`,
 	),
-	insertMember: sql<{ node: number; slot: number; child: number | null; payload: number | null }>(
-		"INSERT INTO merge_receipt_members(node,slot,child,payload) VALUES ($node,$slot,$child,$payload)",
+	insertMembers: sql<{
+		node: number;
+		slots: readonly number[];
+		children: readonly (number | null)[];
+		payloads: readonly (number | null)[];
+	}>(
+		"INSERT INTO merge_receipt_members(node,slot,child,payload) SELECT $node,u.slot,u.child,u.payload FROM unnest($slots::bigint[],$children::bigint[],$payloads::bigint[]) AS u(slot,child,payload)",
 	),
 	payload: sql<{ id: number }, { hash: string; body: string }>(
 		"SELECT hash,body FROM merge_receipt_payloads WHERE id=$id",
 	),
-	insertPayload: sql<{ project: number; hash: string; body: string }>(
-		"INSERT INTO merge_receipt_payloads(project,hash,body) VALUES ($project,$hash,$body) ON CONFLICT(project,hash) DO NOTHING",
+	insertPayloads: sql<{ project: number; hashes: readonly string[]; bodies: readonly string[] }>(
+		"INSERT INTO merge_receipt_payloads(project,hash,body) SELECT $project,u.hash,u.body FROM unnest($hashes::text[],$bodies::text[]) WITH ORDINALITY AS u(hash,body,position) ORDER BY u.position ON CONFLICT(project,hash) DO NOTHING",
 	),
-	payloadByHash: sql<{ project: number; hash: string }, { id: number }>(
-		"SELECT id FROM merge_receipt_payloads WHERE project=$project AND hash=$hash",
+	payloadsByHashes: sql<{ project: number; hashes: readonly string[] }, { id: number; hash: string }>(
+		"SELECT id,hash FROM merge_receipt_payloads WHERE project=$project AND hash=ANY($hashes::text[])",
 	),
 	cache: sql<{ run: number; project: number }, { root: number | null }>(
 		"SELECT root FROM merge_receipt_heads WHERE run=$run AND project=$project",
@@ -440,6 +445,13 @@ const Q = {
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
 	holdEndingById: sql<{ id: number }, DecisionRow>(`SELECT d.* FROM decisions d WHERE d.id = $id AND ${HOLD_ENDING}`),
+	nearestJudgment: sql<{ question: number }, DecisionRow>(`
+ WITH RECURSIVE history AS (
+  SELECT id,prior,ARRAY[id] AS path,0 AS depth FROM questions WHERE id=$question
+  UNION ALL SELECT q.id,q.prior,h.path||q.id,h.depth+1 FROM questions q JOIN history h ON q.id=h.prior WHERE NOT q.id=ANY(h.path)
+ ) SELECT d.* FROM history h JOIN decisions d ON d.question=h.id
+ WHERE coalesce((d.answer::jsonb)->>'is','') NOT IN ('expired','outdated','withdrawn')
+ ORDER BY h.depth,d.id DESC LIMIT 1`),
 	decisionsOf: sql<{ question: number }, DecisionRow>("SELECT * FROM decisions WHERE question = $question ORDER BY id"),
 	expired: sql<{ project: number; now: number }, DecisionRow>(
 		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
@@ -821,6 +833,9 @@ export const decisionById = async (db: ReadDb, id: number): Promise<DecisionRow 
 	await db.get(Q.decisionById, { id });
 export const holdEndingById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
 	await db.get(Q.holdEndingById, { id });
+export const nearestJudgment = async (db: ReadDb, question: number): Promise<DecisionRow | null> =>
+	await db.get(Q.nearestJudgment, { question });
+
 export const decisionsOf = async (db: ReadDb, question: number): Promise<DecisionRow[]> =>
 	await db.all(Q.decisionsOf, { question });
 export const expiredDecisions = async (db: ReadDb, project: number, now: number): Promise<DecisionRow[]> =>
@@ -864,14 +879,19 @@ const digest = (body: string) => new Bun.CryptoHasher("sha256").update(body).dig
 const rootOf = async (db: ReadDb, id: number | null): Promise<ReceiptRoot | null> =>
 	id === null ? null : await db.get(Q.node, { id });
 
-async function payloadOf(ctx: Ctx, body: string): Promise<ReceiptRoot> {
-	if (Buffer.byteLength(body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
-	const hash = digest(body);
+async function payloadsOf(ctx: Ctx, bodies: readonly string[]): Promise<ReceiptRoot[]> {
+	if (bodies.some((body) => Buffer.byteLength(body) > 32768))
+		throw invalid("merge receipt evidence item exceeds 32 KiB");
+	if (!bodies.length) return [];
+	const hashes = bodies.map(digest);
 	const project = ctx.project.id;
-	await ctx.db.run(Q.insertPayload, { project, hash, body });
-	const row = await ctx.db.get(Q.payloadByHash, { project, hash });
-	if (!row) throw new Error("receipt payload was not stored");
-	return { ...row, hash, count: 1 };
+	await ctx.db.run(Q.insertPayloads, { project, hashes, bodies });
+	const stored = new Map((await ctx.db.all(Q.payloadsByHashes, { project, hashes })).map((row) => [row.hash, row]));
+	return hashes.map((hash) => {
+		const row = stored.get(hash);
+		if (!row) throw new Error("receipt payload was not stored");
+		return { ...row, count: 1 };
+	});
 }
 async function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): Promise<ReceiptRoot | null> {
 	if (!members.length) return null;
@@ -884,8 +904,12 @@ async function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): Promis
 	if (found) return found;
 	const count = members.reduce((sum, row) => sum + row.count, 0);
 	const id = (await ctx.db.one(Q.insertNode, { project, hash, level, count })).id;
-	for (const row of members)
-		await ctx.db.run(Q.insertMember, { node: id, slot: row.slot, child: row.child, payload: row.payload });
+	await ctx.db.run(Q.insertMembers, {
+		node: id,
+		slots: members.map((row) => row.slot),
+		children: members.map((row) => row.child),
+		payloads: members.map((row) => row.payload),
+	});
 	return { id, hash, count };
 }
 
@@ -902,10 +926,19 @@ async function updateTree(
 	async function update(old: ReceiptRoot | null, level: number, base: number): Promise<ReceiptRoot | null> {
 		if (level === 0) {
 			const members: ReceiptMember[] = [];
+			const rows: { key: number; body: string }[] = [];
 			for await (const row of load(base)) {
 				if (!Number.isSafeInteger(row.key) || row.key < 0)
 					throw invalid("receipt key must be a nonnegative safe integer");
-				const payload = await payloadOf(ctx, row.body);
+				rows.push(row);
+			}
+			const payloads = await payloadsOf(
+				ctx,
+				rows.map((row) => row.body),
+			);
+			for (const [index, row] of rows.entries()) {
+				const payload = payloads[index];
+				if (!payload) throw new Error("receipt payload was not stored");
 				members.push({ slot: row.key % 32, child: null, payload: payload.id, hash: payload.hash, count: 1 });
 			}
 			next = await iterator.next();

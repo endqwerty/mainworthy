@@ -1,8 +1,8 @@
 Machine: Apple M4; 10 logical cores; 16.0 GiB; Bun 1.4.3
 Filesystem: Filesystem   512-blocks      Used  Available Capacity  Mounted on
-/dev/disk5s1 3906619488 321584152 3584449712     9%    /Volumes/SSD
+/dev/disk5s1 3906619488 321584152 3584449712     9%    <local-path>
 Load at start: 2.24 / 2.38 / 4.49
-Reusing dataset: /Volumes/SSD/Worktrees/mainworthy/pg-engine/.mainworthy/bench/dataset-5000-2000-50000-639-2000-de7a8c8e3c9b-ec9ade57ffe2 (5000 cases, 52124 results, 2000 open questions)
+Reusing dataset: .mainworthy/bench/dataset-5000-2000-50000-639-2000-de7a8c8e3c9b-ec9ade57ffe2 (5000 cases, 52124 results, 2000 open questions)
 Measuring case read: 25 iterations in five blocks…
 Measuring folder page (50): 25 iterations in five blocks…
 Measuring search/common: 25 iterations in five blocks…
@@ -85,5 +85,5 @@ Diagnostic case save: 4.5 CPU ms / 10.0 wall ms, 0 file inputs, 0 major faults; 
 Diagnostic bulk move (1000): 218.6 CPU ms / 430.9 wall ms, 0 file inputs, 0 major faults; top SQL 72.8 ms in 1000 calls; no SELECT plan
 Diagnostic ingest (10000): 227.7 CPU ms / 971.2 wall ms, 0 file inputs, 0 major faults; top SQL 258.7 ms in 5 calls; no SELECT plan
 Diagnostic execute run: 1.8 CPU ms / 5.0 wall ms, 0 file inputs, 0 major faults; top SQL 0.5 ms in 1 calls; Seq Scan on slots  (cost=0.00..16.25 rows=500 width=16);   Filter: (run = 60)
-Report: /Volumes/SSD/Worktrees/mainworthy/pg-engine/bench/results-quick.json
+Report: bench/results-quick.json
 Elapsed: 53.69 s; load at end 2.50 / 2.44 / 4.39; 0 primary misses and 0 repeat misses; 3 workloads at or above half their budget.

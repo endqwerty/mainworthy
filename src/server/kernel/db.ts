@@ -491,6 +491,7 @@ function poolSize(value: number | string | undefined, fallback: number): number 
 	return count;
 }
 export type OpenOptions = { url: string; readPool?: number; writePool?: number; acquireTimeoutMs?: number };
+let migration: <T>(database: Database, fn: (db: WriteDb) => T | Promise<T>) => Promise<T>;
 export class Database {
 	private readonly readers: SQL;
 	private readonly writers: SQL;
@@ -506,6 +507,16 @@ export class Database {
 			bigint: true,
 			max: poolSize(options.writePool ?? process.env.MAINWORTHY_DB_WRITE_POOL, 1),
 		});
+	}
+	static {
+		migration = async (database, fn) => {
+			const dedicated = new SQL(database.options.url, { bigint: true, max: 1 });
+			try {
+				return await database.locked(dedicated, MIGRATION_LOCK, fn, database.shutdown.signal);
+			} finally {
+				await dedicated.close();
+			}
+		};
 	}
 	static async open(input: OpenOptions): Promise<Database> {
 		if (!input.url) throw new Error("MAINWORTHY_DATABASE_URL is required; see compose.yaml");
@@ -590,15 +601,6 @@ export class Database {
 			void previous.then(release);
 		}
 	}
-	/** Only migrationLock calls this; its pool is never shared with application leases. */
-	async migration<T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
-		const dedicated = new SQL(this.options.url, { bigint: true, max: 1 });
-		try {
-			return await this.locked(dedicated, MIGRATION_LOCK, fn, this.shutdown.signal);
-		} finally {
-			await dedicated.close();
-		}
-	}
 	private async locked<T>(
 		pool: SQL,
 		key: bigint,
@@ -660,7 +662,7 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	});
 }
 export async function migrationLock<T>(database: Database, fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
-	return database.migration(fn);
+	return migration(database, fn);
 }
 
 /** Fixture administration outside a transaction, still keeping the driver private to the kernel. */

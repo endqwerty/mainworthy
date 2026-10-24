@@ -13,7 +13,7 @@ import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const DAY = 86_400_000;
 let h: Harness;
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 const stats = async <K extends StatsKind>(input: { of: K } & Record<string, unknown>) =>
 	await h.call<StatsOf<K>>("stats", input);
@@ -665,17 +665,21 @@ describe("automation and its backlog", () => {
 				body: { title, methods: ["human"], automate: "wanted" },
 			})),
 		});
-		for (let i = 0; i < 1025; i++)
-			await h.call("report", {
-				target: { session: `manual-${i}` },
-				results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 1 }],
-			});
+		await h.call("report", {
+			target: { session: "manual-history" },
+			results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 1 }],
+		});
 		// Historical and restored rows are not restricted by today's report input limit.
 		await h.app.database.write(
 			async (db) =>
 				await db.transaction(
 					async () =>
-						await db.run(sql<[], Record<string, unknown>>("UPDATE results SET duration_ms = 9000000000000000")),
+						await db.exec(`
+ UPDATE results SET duration_ms = 9000000000000000;
+ INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at)
+ SELECT r.project,r.test,r.seq,r.ord+u.n,r.batch,r.target,r.method,r.actor,r.basis,r.basis_case,r.basis_version,r.basis_claim,r.outcome,r.attempt+u.n,r.duration_ms,r.at
+ FROM results r CROSS JOIN generate_series(1,1024) AS u(n);
+`),
 				),
 		);
 		await h.call("report", {
