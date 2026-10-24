@@ -15,7 +15,7 @@ services:
     environment:
       POSTGRES_USER: mainworthy
       POSTGRES_DB: mainworthy
-      POSTGRES_PASSWORD: ${MAINWORTHY_POSTGRES_PASSWORD:?Set a URL-safe database password}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
       POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mainworthy -d mainworthy"]
@@ -40,7 +40,7 @@ services:
       MAINWORTHY_LOCKDOWN: "1"
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:?Set the application network peer range}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:?Set the dedicated client header}
-      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${MAINWORTHY_POSTGRES_PASSWORD:?Set a URL-safe database password}@postgres:5432/mainworthy
+      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}

@@ -29,7 +29,7 @@ source = (
 )
 env = {
     **os.environ,
-    "MAINWORTHY_POSTGRES_PASSWORD": "synthetic-database-password",
+    "SERVICE_PASSWORD_POSTGRES": "synthetic0database0password",
     "MAINWORTHY_TRUSTED_PROXY": "172.30.231.0/24",
     "MAINWORTHY_CLIENT_ADDRESS_HEADER": "x-mainworthy-client",
 }
