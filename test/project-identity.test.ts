@@ -5,6 +5,7 @@ import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
 import { harness } from "./helpers.ts";
+import { holdWriter } from "./identity-db.ts";
 
 function one<T>(rows: T[]): T {
 	const row = rows[0];
@@ -103,13 +104,7 @@ test("a command waiting at the write gate checks the replacement identity when i
 	const h = await harness();
 	try {
 		const identity = one(await h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
-		const release = Promise.withResolvers<void>();
-		const entered = Promise.withResolvers<void>();
-		const blocking = h.app.database.write(() => {
-			entered.resolve();
-			return release.promise;
-		});
-		await entered.promise;
+		const held = holdWriter(h.app);
 		const removed = h.app.database.write((db) => removeProject(db, "scratch"));
 		const replaced = h.call("admin", { do: "project.create", key: "scratch" });
 		const pending = invoke(h.app, OPS, {
@@ -122,10 +117,9 @@ test("a command waiting at the write gate checks the replacement identity when i
 				edits: [{ op: "create", outline: "Must not appear\n  Check > Pass" }],
 			},
 		});
-		release.resolve();
+		await held.release();
 		await removed;
 		await replaced;
-		await blocking;
 		expect(await pending).toMatchObject({
 			ok: false,
 			error: { code: "conflict", details: { projectIdentity: "obsolete" } },

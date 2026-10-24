@@ -84,7 +84,8 @@ Some facts about this path matter when you change it:
 - A command id names one request. Sent again with the same content, it gets the first reply and writes nothing.
   Sent again with other content, it is refused. A client whose reply was lost asks `command` what became of it.
 - A `report` commits twice. The first transaction accepts the results, and the second applies them in slices of
-  200, while retaining the same write lease and advisory lock across both transactions.
+  200, while retaining the connection. Each phase takes fresh actor and project locks. Application checks the
+  exact admitting credential and current authority again; refusal cancels the batch and clears its pending marks.
 - The web UI listens on the change stream and refetches only what an event says was touched (`changed` in
   `src/web/lib/data.ts`).
 

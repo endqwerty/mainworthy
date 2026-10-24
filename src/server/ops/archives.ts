@@ -2,8 +2,9 @@ import { closeSync, openSync } from "node:fs";
 import { z } from "zod";
 import { ERROR_CODES } from "../../core/api.ts";
 import { ActorKind, Capability, Role } from "../../core/kinds.ts";
-import { bootstrap } from "../identity/identity.ts";
+import { bootstrap, lockAllActors, lockIdentityRoster } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
+import { lockAllProjects, lockProjectRoster } from "../kernel/ctx.ts";
 import type { WriteDb } from "../kernel/db.ts";
 import { fileLines, writeBytes } from "../transfer/spool.ts";
 import { exportArchive, importArchive, removeBootstrap } from "../transfer/transfer.ts";
@@ -76,6 +77,11 @@ export async function runArchive(
 	}
 	const restored = await app.database.write(async (db) =>
 		db.transaction(async () => {
+			// Import replaces the instance. Table locks also exclude a concurrent insertion into an empty roster.
+			await lockIdentityRoster(db);
+			await lockAllActors(db);
+			await lockProjectRoster(db);
+			await lockAllProjects(db);
 			await authorize?.(db);
 			await removeBootstrap(db);
 			const counts = await importArchive(db, fileLines(task.path), { blobs: app.blobs });

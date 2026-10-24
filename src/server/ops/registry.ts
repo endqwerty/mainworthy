@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import type { z } from "zod";
 import { mayRun, type Need, needs } from "../../core/kinds.ts";
 import { malformedText } from "../../core/text.ts";
-import { resolveCaller } from "../identity/identity.ts";
+import { actorById, lockCallActors, resolveCaller } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
 import {
@@ -16,14 +16,18 @@ import {
 	findCommand,
 	findProject,
 	finishCommand,
+	lockAllProjects,
+	lockCommand,
+	lockNamedProject,
+	lockProject,
 	makeCtx,
 	recordCommand,
 	recordInstanceCommand,
 	stampSeq,
 	UNFINISHED,
 } from "../kernel/ctx.ts";
-import { json, type ReadDb, type WriteDb } from "../kernel/db.ts";
-import { type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
+import { Busy, isBusy, json, type ReadDb, type WriteDb } from "../kernel/db.ts";
+import { AcceptedRefusal, type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
 
 type Base<I, O> = {
 	name: string;
@@ -51,7 +55,7 @@ export const COMMIT: unique symbol = Symbol("commit");
 export type Pause = typeof COMMIT | undefined;
 
 type ProjectBase<I, O> = Base<I, O> & { scope: "project" };
-/** Project reads receive only a snapshot; writes receive the exclusive lease. */
+/** Project reads receive a snapshot; writes receive a reserved connection and transaction locks. */
 export type ProjectOp<I, O> = ProjectBase<I, O> &
 	(
 		| { effect: "read"; run: (ctx: Ctx<ReadDb>, input: I) => O | Promise<O> }
@@ -196,6 +200,35 @@ function admitCaller(
 async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	await db.begin();
 	try {
+		const initial = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
+		if (initial) await lockCallActors(db, initial, call.op, call.input);
+		const current = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
+		if (current && current.id !== initial?.id) throw new Busy();
+		if (ops[call.op]?.scope === "project" && call.project) {
+			await lockNamedProject(db, call.project);
+		}
+		if (
+			ops[call.op]?.scope === "instance" &&
+			typeof call.input === "object" &&
+			call.input !== null &&
+			"project" in call.input &&
+			typeof call.input.project === "string"
+		) {
+			await lockNamedProject(db, call.input.project);
+		}
+		if (call.op === "admin" && typeof call.input === "object" && call.input !== null && "do" in call.input) {
+			if (call.input.do === "actor.forget") await lockAllProjects(db);
+			else if (call.input.do === "project.demo" && "key" in call.input && typeof call.input.key === "string") {
+				await lockNamedProject(db, call.input.key);
+			}
+		}
+		if (
+			typeof call.input === "object" &&
+			call.input !== null &&
+			"cmd" in call.input &&
+			typeof call.input.cmd === "string"
+		)
+			await lockCommand(db, call.input.cmd);
 		const reply = await executeInSnapshot(app, db, ops, call);
 		if (db.inTransaction) {
 			if (reply.ok) await db.commit();
@@ -277,7 +310,7 @@ async function executeInSnapshot(
 				context: call.reference ? (caller?.context ?? null) : ((await call.context?.()) ?? null),
 			};
 			if (op.effect === "read") return { ok: true, result: present(await op.run(env, input)), seq: null };
-			if (!("begin" in db)) throw new Error("a write needs an exclusive lease");
+			if (!("begin" in db)) throw new Error("a write needs a reserved lease");
 			const prior = cmd ? await findCommand(db, cmd) : null;
 			if (prior) {
 				if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
@@ -318,7 +351,7 @@ async function executeInSnapshot(
 			return { ok: true, result: present(await op.run(makeCtx(app, db, found, actor, false), input)), seq: found.seq };
 		}
 
-		if (!("begin" in db)) throw new Error("a write needs an exclusive lease");
+		if (!("begin" in db)) throw new Error("a write needs a reserved lease");
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
 			// transaction and never finished (the server stopped), or by this one when it commits its own.
@@ -332,7 +365,7 @@ async function executeInSnapshot(
 					if (prior.request !== request) throw changed();
 					if (prior.outcome !== UNFINISHED) {
 						await db.commit();
-						return { ok: true, result: present(json<unknown>(prior.outcome)), seq: prior.seq };
+						return projectReplay(op, actor, prior);
 					}
 					// Begun and never answered: the operation runs again, finds what it already stored (a report finds
 					// its batch) and does the rest.
@@ -350,8 +383,15 @@ async function executeInSnapshot(
 				if (call.at > app.now()) throw new OpError("invalid", "the time is in the future");
 			}
 			const ctx = makeCtx(app, db, project, actor, true, call.at);
+			if (call.reference) ctx.reference = call.reference;
 			const publish = () => {
-				app.publish({ project: found.key, seq: ctx.seq, op: op.name, actor: actor.name, touched: [...ctx.touched] });
+				app.publish({
+					project: found.key,
+					seq: ctx.seq,
+					op: op.name,
+					actor: ctx.actor.name,
+					touched: [...ctx.touched],
+				});
 				ctx.touched.clear();
 			};
 			let result: unknown;
@@ -370,8 +410,29 @@ async function executeInSnapshot(
 						await stampSeq(ctx);
 						await db.commit();
 						publish();
+						await nextTick();
 						await db.begin();
-						ctx.seq += 1;
+						await lockCallActors(db, actor, op.name, input);
+						const refreshed = await lockProject(db, found.id);
+						if (!refreshed || refreshed.identity !== found.identity)
+							throw new OpError("conflict", "the project changed while the report was accepted");
+						ctx.project = refreshed;
+						ctx.actor = await actorById(db, actor.id, refreshed.id);
+						ctx.seq = refreshed.seq + 1;
+						const completed = cmd ? await findCommand(db, cmd) : null;
+						if (completed && completed.outcome !== UNFINISHED) {
+							await steps.return(undefined);
+							const caller = call.reference
+								? ((await resolveCaller(app, db, call.reference, refreshed.id))?.actor ?? null)
+								: await call.actor(refreshed.id);
+							const admitted = admitCaller(call, op, caller, refreshed.key);
+							if ("reply" in admitted) {
+								await db.rollback();
+								return admitted.reply;
+							}
+							await db.commit();
+							return projectReplay(op, admitted.actor, completed);
+						}
 					}
 					await nextTick();
 				}
@@ -383,6 +444,10 @@ async function executeInSnapshot(
 			publish();
 			return { ok: true, result: present(result), seq: ctx.seq };
 		} catch (error) {
+			if (error instanceof AcceptedRefusal) {
+				await db.commit();
+				return failure(op.name, error);
+			}
 			await db.rollback();
 			throw error;
 		}
@@ -394,9 +459,17 @@ async function executeInSnapshot(
 }
 
 function failure(op: string, error: unknown): Reply {
+	if (isBusy(error)) return fail("busy", "the writer is busy; retry the same request with the same command id");
 	if (error instanceof OpError) return fail(error.code, error.message, error.details);
 	console.error(`[mainworthy] ${op} failed:`, error);
 	return fail("internal", INTERNAL_ERROR);
+}
+
+function projectReplay(op: AnyOp, actor: Actor, prior: NonNullable<Awaited<ReturnType<typeof findCommand>>>): Reply {
+	const kept = json<unknown>(prior.outcome);
+	if (typeof kept === "object" && kept !== null && "refused" in kept && kept.refused === "report")
+		return failure(op.name, new AcceptedRefusal());
+	return { ok: true, result: op.present ? op.present(actor, op.output.parse(kept)) : kept, seq: prior.seq };
 }
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -443,10 +516,14 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, 
 	);
 }
 
-/** Runs writes exclusively on one lease, and reads in repeatable snapshots. */
+/** Runs writes with actor and project transaction locks, and reads in repeatable snapshots. */
 export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const misplaced = misplacedTime(ops[call.op], call);
 	if (misplaced) return misplaced;
 	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
-	return await app.database.write(async (db) => await execute(app, db, ops, call));
+	try {
+		return await app.database.write(async (db) => await execute(app, db, ops, call));
+	} catch (error) {
+		return failure(call.op, error);
+	}
 }

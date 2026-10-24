@@ -170,15 +170,13 @@ test("a failure the policy answered by rule, as this repository's CI policy does
 test("a hand-off the server was sending when it stopped is failed at start, not sent again", async () => {
 	const { url, received } = agent();
 	const { h, q } = await failing(url);
-	const queued = h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
-	const interrupted = h.app.database.write(
+	await h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
+	await h.app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
 				await db.run(sql<readonly SqlValue[], Record<string, unknown>>("UPDATE handoffs SET state = 'sending'"), []);
 			}),
 	);
-	await queued;
-	await interrupted;
 	await recoverHandoffs(h.app);
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(0);

@@ -2,9 +2,9 @@ import { z } from "zod";
 import { TrackerItem } from "../../core/tracker.ts";
 import { endDefectHold } from "../decisions/decisions.ts";
 import { liveDefectDecisions, questionById, questionRef, refsOf } from "../decisions/questions.ts";
-import { ruleActor } from "../identity/identity.ts";
+import { lockActors, ruleActor } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
-import { allProjects, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { allProjects, lockProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { configuredTrackers } from "../trackers/config.ts";
 import { finishTrackerPoll, trackerPoll, trackerPollError } from "../trackers/polls.ts";
@@ -33,35 +33,39 @@ export async function waitTrackerPolls(app: App): Promise<void> {
 
 async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 	const failedIssues = new Map<string, Set<number>>();
-	const candidates = await app.database.write(async (db) =>
-		db.transaction(async () => {
-			if (stopping.has(app)) return [];
-			const candidates = [];
-			for (const project of await allProjects(db)) {
-				const trackers = configuredTrackers(app.config, project.key);
-				if (trackers.length === 0) continue;
-				for (const decision of await liveDefectDecisions(db, project.id)) {
-					const answer = Defect.safeParse(json<unknown>(decision.answer));
-					if (!answer.success) continue;
-					for (const tracker of trackers) {
-						const key = tracker.keyOf(answer.data.ref);
-						if (!key) continue;
-						const schedule = await trackerPoll(db, decision.id);
-						const identity = JSON.stringify([project.id, tracker.destination, key]);
-						const failures = failedIssues.get(identity) ?? new Set<number>();
-						if (schedule.diagnosed) failures.add(decision.id);
-						failedIssues.set(identity, failures);
-						candidates.push({ decision, ref: answer.data.ref, project, tracker, key, schedule, failures });
-						break;
+	const candidates = (
+		await Array.fromAsync(await app.database.read((db) => allProjects(db)), async (project) =>
+			app.database.write((db) =>
+				db.transaction(async () => {
+					await lockProject(db, project.id);
+					if (stopping.has(app)) return [];
+					const candidates = [];
+					const trackers = configuredTrackers(app.config, project.key);
+					if (trackers.length === 0) return [];
+					for (const decision of await liveDefectDecisions(db, project.id)) {
+						const answer = Defect.safeParse(json<unknown>(decision.answer));
+						if (!answer.success) continue;
+						for (const tracker of trackers) {
+							const key = tracker.keyOf(answer.data.ref);
+							if (!key) continue;
+							const schedule = await trackerPoll(db, decision.id);
+							const identity = JSON.stringify([project.id, tracker.destination, key]);
+							const failures = failedIssues.get(identity) ?? new Set<number>();
+							if (schedule.diagnosed) failures.add(decision.id);
+							failedIssues.set(identity, failures);
+							candidates.push({ decision, ref: answer.data.ref, project, tracker, key, schedule, failures });
+							break;
+						}
 					}
-				}
-			}
-			return candidates
-				.filter((candidate) => candidate.schedule.next_at <= app.now())
-				.sort((a, b) => a.schedule.next_at - b.schedule.next_at || a.decision.id - b.decision.id)
-				.slice(0, 20);
-		}),
-	);
+					return candidates;
+				}),
+			),
+		)
+	)
+		.flat()
+		.filter((candidate) => candidate.schedule.next_at <= app.now())
+		.sort((a, b) => a.schedule.next_at - b.schedule.next_at || a.decision.id - b.decision.id)
+		.slice(0, 20);
 	let ended = 0;
 	for (const candidate of candidates) {
 		const { decision, ref, project, tracker, key, schedule, failures } = candidate;
@@ -88,7 +92,8 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 		const completion = await app.database.write(
 			async (db) =>
 				await db.transaction(async () => {
-					const currentProject = await projectById(db, project.id);
+					await lockActors(db, [(await ruleActor(db)).id]);
+					const currentProject = await lockProject(db, project.id);
 					if (!currentProject || currentProject.key !== project.key) return null;
 					if (!configuredTrackers(app.config, project.key).some((row) => row.destination === tracker.destination))
 						return null;

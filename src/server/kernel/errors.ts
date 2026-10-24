@@ -37,3 +37,10 @@ export const forbidden = (message: string, details?: Record<string, unknown>) =>
 	new OpError("forbidden", message, details);
 export const conflict = (message: string, details?: Record<string, unknown>) =>
 	new OpError("conflict", message, details);
+
+/** Cancellation of already accepted work must commit even though the operation is refused. */
+export class AcceptedRefusal extends OpError {
+	constructor() {
+		super("forbidden", "the accepted report was refused because its credential or authority no longer allows it");
+	}
+}

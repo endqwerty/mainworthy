@@ -10,10 +10,11 @@
 import { randomBytes } from "@noble/hashes/utils.js";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
-import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
+import { lockActors, lockSessionHash, lockTokenHash } from "./locks.ts";
 import { lastAddress, notedUse } from "./uses.ts";
 
 /**
@@ -244,6 +245,7 @@ export async function openSession(
 	db: WriteDb,
 	input: { tokenHash: string; sessionHash: string; userAgent: string | null; address: string | null },
 ): Promise<{ id: number; expiresAt: number } | null> {
+	await lockTokenHash(db, input.tokenHash);
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
 	const made = await db.get(Q.insert, {
@@ -277,6 +279,7 @@ export async function openSessionOnCredential(
 		address: string | null;
 	},
 ): Promise<{ id: number; expiresAt: number } | null> {
+	await lockActors(db, [input.credential.actor]);
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
 	const made = await db.get(Q.insertOnCredential, {
@@ -320,6 +323,7 @@ export async function hasUnendedSession(db: ReadDb, hash: string): Promise<boole
 
 /** Ends the session a cookie names. Under the gate. False when there is none, or it had ended: the first end stands. */
 export async function endSession(app: App, db: WriteDb, hash: string, why: EndedWhy): Promise<boolean> {
+	await lockSessionHash(db, hash);
 	return (await db.run(Q.end, { hash, at: app.now(), why })).changes > 0;
 }
 
@@ -333,6 +337,7 @@ export async function endSessionsOf(
 	at: number,
 	why: "forgotten" | "ended" = "forgotten",
 ): Promise<number> {
+	await lockActors(db, [actor], true);
 	return (await db.run(Q.endOf, { actor, at, why })).changes;
 }
 
@@ -364,6 +369,8 @@ export const sessionOwner = async (db: ReadDb, id: number): Promise<number | nul
 
 /** Ends one session by its id, as a person does from a list. Under the gate. False when it had ended or is none. */
 export async function endSessionById(db: WriteDb, id: number, at: number): Promise<boolean> {
+	const actor = await sessionOwner(db, id);
+	if (actor !== null) await lockActors(db, [actor], true);
 	return (await db.run(Q.endById, { id, at, why: "ended" })).changes > 0;
 }
 
@@ -402,12 +409,28 @@ export async function sweepSessions(app: App): Promise<{ expired: number; delete
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				const candidates = [
+					...(await db.all(Q.retiredTokens, { now })),
+					...(await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })),
+				];
+				const actors: number[] = [];
+				for (const candidate of candidates) {
+					const actor = await sessionOwner(db, candidate.id);
+					if (actor !== null) actors.push(actor);
+				}
+				await lockActors(db, actors, true);
+				const retired = await db.all(Q.retiredTokens, { now });
+				const overdue = await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs });
+				for (const candidate of [...retired, ...overdue]) {
+					const actor = await sessionOwner(db, candidate.id);
+					if (actor !== null && !actors.includes(actor)) throw new Busy();
+				}
 				let expired = 0;
-				for (const row of await db.all(Q.retiredTokens, { now })) {
+				for (const row of retired) {
 					const ended = (await db.run(Q.endById, row)).changes;
 					if (row.why === "expired") expired += ended;
 				}
-				for (const row of await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
+				for (const row of overdue) {
 					// The row says idle, and a use noted since the last flush says otherwise.
 					if (inLifetime(app, row, now)) continue;
 					expired += (await db.run(Q.endById, { id: row.id, at: now, why: "expired" })).changes;
@@ -418,6 +441,7 @@ export async function sweepSessions(app: App): Promise<{ expired: number; delete
 }
 
 export async function endOtherSessions(db: WriteDb, actor: number, keep: number | null, at: number): Promise<number> {
+	await lockActors(db, [actor], true);
 	return (await db.run(Q.endOthers, { actor, keep: keep ?? 0, at })).changes;
 }
 
@@ -432,5 +456,6 @@ export async function endSessionsWithoutFactor(
 	at: number,
 	providerVouches: boolean,
 ): Promise<number> {
+	await lockActors(db, [actor], true);
 	return (await db.run(Q.endWithoutFactorOf, { actor, at, vouched: providerVouches ? 1 : 0 })).changes;
 }

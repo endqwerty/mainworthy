@@ -94,6 +94,7 @@ const Q = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
+	"batch_admissions",
 	"assertion_seen",
 	"assertion_spreads",
 	"assertion_roots",
@@ -150,7 +151,12 @@ async function discoverTables(db: ReadDb, exported = true): Promise<Table[]> {
 		if (exported && (UNEXPORTED.includes(table.name) || table.name === "search_docs")) continue;
 		tables.set(table.name, {
 			name: table.name,
-			columns: table.columns.filter((column) => column.generated !== "stored").map((column) => column.name),
+			columns: table.columns
+				.filter(
+					(column) =>
+						column.generated !== "stored" && !(exported && table.name === "actors" && column.name === "auth_version"),
+				)
+				.map((column) => column.name),
 			nullable: new Set(table.columns.filter((column) => column.nullable).map((column) => column.name)),
 			primary: [...table.primary],
 			parents: [...new Set(table.foreignKeys.map((key) => key.parent))].sort(),
@@ -175,6 +181,7 @@ async function discoverTables(db: ReadDb, exported = true): Promise<Table[]> {
 
 /** Tables whose project is held by a parent rather than their own row. Unknown unscoped tables fail closed. */
 const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>> = {
+	batch_admissions: { column: "batch", table: "batches" },
 	merge_receipt_members: { column: "node", table: "merge_receipt_nodes" },
 	merge_receipt_dirty: { column: "run", table: "runs" },
 	// Drop live capture roots before source rows so invalidation triggers cannot refill the dirty set.
@@ -826,8 +833,8 @@ function sliceIdentity(table: SliceTable, alias = "", first = 2): string {
 }
 
 /**
- * Removes at most `limit` owned rows, including incoming FK dependants, in its own enforced transaction.
- * Call under the application's gate and yield between calls. No persistent cursor or whole-instance audit is
+ * Removes at most `limit` owned rows, including incoming FK dependants, in an enforced transaction.
+ * A caller may supply its transaction to hold authority and project locks. Commit and yield between slices. No persistent cursor or whole-instance audit is
  * needed. Leaf rows go first, so cascades cannot turn a small slice into a large deletion. A bounded incoming
  * closure handles cycles; a larger cycle or a reference from retained data refuses the slice unchanged.
  * The last transaction deletes the demo mark and project together (at most two rows, even for limit=1).
@@ -840,7 +847,6 @@ export async function removeProjectSlice(
 ): Promise<{ done: boolean; table: string | null; rows: number }> {
 	if (!Number.isSafeInteger(limit) || limit < 1)
 		throw invalid("project removal slice limit must be a positive safe integer");
-	if (db.inTransaction) throw new Error("project removal slice needs its own transaction");
 	return db.transaction(() =>
 		db.checkedBulk(async () => {
 			const project = (

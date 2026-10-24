@@ -34,7 +34,12 @@ async function ensureTemplate(admin: DatabaseAdmin, adminUrl: string, schema: "b
 		schema === "baseline"
 			? (await import("../src/server/kernel/migrate.ts")).baselineSchema()
 			: { sql: "", hash: createHash("sha256").update("empty-v1").digest("hex") };
-	const name = `mainworthy_template_${baseline.hash.slice(0, 20)}`;
+	const name = `mainworthy_template_${createHash("sha256")
+		.update(
+			baseline.hash + (schema === "baseline" ? (await import("../src/server/kernel/migrate.ts")).migrationHash : ""),
+		)
+		.digest("hex")
+		.slice(0, 20)}`;
 	await admin.all("SELECT pg_advisory_lock(hashtextextended($1::text, 0))", [name]);
 	try {
 		const existing = await admin.all<{ ready: boolean }>(

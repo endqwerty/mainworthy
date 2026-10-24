@@ -4,7 +4,7 @@ import { failureBrief, type HandoffInput, type HandoffReceipt } from "../../core
 import { mustQuestion, questionRef } from "../decisions/questions.ts";
 import { batchById, resultById } from "../evidence/evidence.ts";
 import type { App, Config } from "../kernel/app.ts";
-import { type Ctx, projectById } from "../kernel/ctx.ts";
+import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 
@@ -37,7 +37,12 @@ const Q = {
 	finish: sql<{ id: string; nonce: string; state: string; error: string | null }>(
 		"UPDATE handoffs SET state = $state, error = $error WHERE id = $id AND nonce = $nonce AND state = 'sending'",
 	),
-	interrupted: sql<{ error: string }>("UPDATE handoffs SET state = 'failed', error = $error WHERE state = 'sending'"),
+	interruptedProjects: sql<readonly [], { project: number }>(
+		"SELECT DISTINCT project FROM handoffs WHERE state = 'sending' ORDER BY project",
+	),
+	interrupted: sql<{ project: number; error: string }>(
+		"UPDATE handoffs SET state = 'failed', error = $error WHERE state = 'sending' AND project = $project",
+	),
 };
 
 /** The failure evidence a hand-off reads; `decisions.ts` writes it when it raises a failure question. */
@@ -161,14 +166,18 @@ export async function waitHandoffs(app: App): Promise<void> {
  * would start a second agent on the same failure.
  */
 export async function recoverHandoffs(app: App): Promise<void> {
-	await app.database.write(async (db) =>
-		db.transaction(async () =>
-			db.run(Q.interrupted, {
-				error:
-					"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
+	for (const { project } of await app.database.read((db) => db.all(Q.interruptedProjects))) {
+		await app.database.write((db) =>
+			db.transaction(async () => {
+				await lockProject(db, project);
+				await db.run(Q.interrupted, {
+					project,
+					error:
+						"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
+				});
 			}),
-		),
-	);
+		);
+	}
 }
 
 async function deliver(app: App): Promise<number> {
@@ -177,7 +186,10 @@ async function deliver(app: App): Promise<number> {
 		const claimed = await app.database.write(async (db) =>
 			db.transaction(async () => {
 				if (stopping.has(app)) return null;
+				const hint = await db.get(Q.next);
+				if (hint) await lockProject(db, hint.project);
 				const next = await db.get(Q.next);
+				if (next && next.project !== hint?.project) return null;
 				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
 				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
 			}),
@@ -186,9 +198,10 @@ async function deliver(app: App): Promise<number> {
 		const { row, project } = claimed;
 		const error = await send(app.config, project, row);
 		await app.database.write(async (db) =>
-			db.transaction(
-				async () => await db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error }),
-			),
+			db.transaction(async () => {
+				await lockProject(db, row.project);
+				return await db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error });
+			}),
 		);
 		delivered++;
 	}

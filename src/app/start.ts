@@ -4,6 +4,7 @@ import { deliverHandoffs, recoverHandoffs, stopHandoffs, waitHandoffs } from "..
 import {
 	bootstrap,
 	flushUses,
+	lockActors,
 	stopMail,
 	sweepSessions,
 	sweepSignInRecords,
@@ -11,7 +12,7 @@ import {
 	waitMail,
 } from "../server/identity/identity.ts";
 import { type App, type Config, openApp } from "../server/kernel/app.ts";
-import { type Actor, allProjects } from "../server/kernel/ctx.ts";
+import { type Actor, allProjects, lockProjectKey } from "../server/kernel/ctx.ts";
 import { createProject } from "../server/ops/admin.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "../server/ops/jobs.ts";
 import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../server/ops/tracker-holds.ts";
@@ -53,9 +54,11 @@ export async function open(
 		const { owner, generatedToken, warnings } = await bootstrap(app);
 		const project = await app.database.write((db) =>
 			db.transaction(async () => {
+				await lockActors(db, [owner.id]);
+				const key = options.firstProject ?? "scratch";
+				await lockProjectKey(db, key);
 				const existing = (await allProjects(db))[0]?.key;
 				if (existing) return existing;
-				const key = options.firstProject ?? "scratch";
 				await createProject(
 					{ app, db, actor: owner, now: app.now(), session: null, context: null },
 					{ key, preset: "loose" },

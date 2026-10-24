@@ -3,6 +3,7 @@ import { cluster } from "../../../scripts/pg.ts";
 import { drainDatabaseDrops, type TestDatabase, testDatabase } from "../../../test/db.ts";
 import { defaultConfig, openApp } from "./app.ts";
 import {
+	Busy,
 	ConnectionLost,
 	Database,
 	databaseAdmin,
@@ -10,12 +11,12 @@ import {
 	isConstraintViolation,
 	isForeignKeyViolation,
 	isUniqueViolation,
+	MIGRATION_LOCK,
 	migrationLock,
 	type ReadDb,
 	rewriteNamed,
 	sql,
 	TransactionAborted,
-	WRITE_LOCK,
 	type WriteDb,
 } from "./db.ts";
 
@@ -33,7 +34,7 @@ const Q = {
 beforeAll(async () => {
 	adminUrl = (await cluster()).adminUrl;
 	fixture = await testDatabase({ schema: "empty" });
-	database = await Database.open({ url: fixture.url, readPool: 1 });
+	database = await Database.open({ url: fixture.url, readPool: 1, writePool: 1 });
 	await database.write((db) =>
 		db.transaction(() =>
 			db.exec(`
@@ -67,7 +68,7 @@ async function cleanWriter(): Promise<void> {
 		const [state] = await db.allDynamic<{ locks: number; xid: string | null }>(`
 			SELECT (SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory') AS locks,
 			pg_current_xact_id_if_assigned()::text AS xid`);
-		expect(state).toEqual({ locks: 1, xid: null });
+		expect(state).toEqual({ locks: 0, xid: null });
 		await db.transaction(async () => {
 			expect(db.inTransaction).toBe(true);
 			await db.one(Q.count);
@@ -165,9 +166,9 @@ test("throw between two transactions preserves the first commit and unlocks", as
 test("false unlock destroys its backend; the pool never inherits the session lock", async () => {
 	let pid = 0;
 	await expect(
-		database.write(async (db) => {
+		migrationLock(database, async (db) => {
 			pid = (await db.one(Q.pid)).pid;
-			await db.allDynamic("SELECT pg_advisory_unlock($1::bigint)", [WRITE_LOCK]);
+			await db.allDynamic("SELECT pg_advisory_unlock($1::bigint)", [MIGRATION_LOCK]);
 		}),
 	).rejects.toThrow("not held at release");
 	await backendGone(pid);
@@ -177,7 +178,7 @@ test("false unlock destroys its backend; the pool never inherits the session loc
 test("a failed unlock destroys a backend that still holds the lock", async () => {
 	let pid = 0;
 	await expect(
-		database.write(async (db) => {
+		migrationLock(database, async (db) => {
 			pid = (await db.one(Q.pid)).pid;
 			await db.transaction(() =>
 				db.exec(`
@@ -241,7 +242,7 @@ test("a swallowed connection error still fails the lease, and failed rollback de
 	await cleanWriter();
 });
 
-test("FIFO writer waits through the gap between transactions, and cancellation does not skip the holder", async () => {
+test("a one-connection writer pool bounds concurrency and cancellation does not skip its holder", async () => {
 	const entered = barrier();
 	const finish = barrier();
 	const order: string[] = [];
@@ -273,18 +274,18 @@ test("FIFO writer waits through the gap between transactions, and cancellation d
 	await cleanWriter();
 });
 
-test("a writer on another Database also waits for the advisory lock", async () => {
+test("migration writers on different Database instances share the migration lock", async () => {
 	const other = await Database.open({ url: fixture.url });
 	const entered = barrier();
 	const finish = barrier();
 	let secondEntered = false;
 	try {
-		const first = database.write(async () => {
+		const first = migrationLock(database, async () => {
 			entered.release();
 			await finish.promise;
 		});
 		await entered.promise;
-		const second = other.write(() => {
+		const second = migrationLock(other, () => {
 			secondEntered = true;
 		});
 		await Bun.sleep(20);
@@ -548,7 +549,7 @@ test("openApp migrates its URL asynchronously and owns only Database", async () 
 		expect("db" in app || "reader" in app || "gate" in app || "readers" in app).toBe(false);
 		expect(
 			await app.database.read((reader) => reader.allDynamic("SELECT value FROM meta WHERE key = 'schema_version'")),
-		).toEqual([{ value: "1" }]);
+		).toEqual([{ value: "2" }]);
 	} finally {
 		await app.close();
 		await empty.close();
@@ -558,8 +559,8 @@ test("openApp migrates its URL asynchronously and owns only Database", async () 
 	);
 });
 
-test("a queued write can wait longer than the pool acquire timeout", async () => {
-	const queued = await Database.open({ url: fixture.url, acquireTimeoutMs: 100 });
+test("a queued write returns Busy when acquiring a connection exceeds its bound", async () => {
+	const queued = await Database.open({ url: fixture.url, acquireTimeoutMs: 100, writePool: 1 });
 	const entered = barrier();
 	const finish = barrier();
 	const first = queued.write(async () => {
@@ -582,7 +583,12 @@ test("a queued write can wait longer than the pool acquire timeout", async () =>
 		finish.release();
 		await first;
 		await second;
-		expect(failure).toBeUndefined();
+		expect(failure).toBeInstanceOf(Busy);
+		expect(ran).toBe(false);
+		await queued.write(async (db) => {
+			await db.one(Q.count);
+			ran = true;
+		});
 		expect(ran).toBe(true);
 	} finally {
 		finish.release();

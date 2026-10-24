@@ -611,7 +611,8 @@ function ProjectRunCockpit({
 				receipt = await call("report", input, { project, owner });
 			} catch (error) {
 				assertReportOwner();
-				if (error instanceof ApiError && error.status !== null && error.code !== "internal") throw error;
+				if (error instanceof ApiError && error.status !== null && error.code !== "internal" && error.code !== "busy")
+					throw error;
 				const reason = error instanceof Error ? error.message : "The reply could not be read.";
 				const message = `${slot.case}'s outcome is unknown. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Its note is kept. Press a result key on this slot to check the same request before recording another result.`;
 				let checking: Promise<RecordedResult> | null = null;
@@ -624,11 +625,26 @@ function ProjectRunCockpit({
 						if (fate.state !== "done")
 							return complete(
 								await call("report", input, { project, owner }).catch((error: unknown) => {
-									if (error instanceof ApiError && error.status !== null && error.code !== "internal")
+									if (
+										error instanceof ApiError &&
+										error.status !== null &&
+										error.code !== "internal" &&
+										error.code !== "busy"
+									)
 										uncertain.delete(slot.id);
 									throw error;
 								}),
 							);
+						if (
+							fate.op === "report" &&
+							typeof fate.reply === "object" &&
+							fate.reply !== null &&
+							"refused" in fate.reply &&
+							fate.reply.refused === "report"
+						) {
+							uncertain.delete(slot.id);
+							throw new ApiError("forbidden", "The accepted report was refused before application. Your note is kept.");
+						}
 						const parsed = REPLIES.report.safeParse(fate.reply);
 						if (fate.op !== "report" || !parsed.success) throw new UnreadableReply();
 						return complete(parsed.data);

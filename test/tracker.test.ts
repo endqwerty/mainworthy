@@ -1105,9 +1105,17 @@ test("delivery releases the writer while waiting and overlapping jobs send only 
 	const waiting = new Promise<typeof item>((resolve) => {
 		complete = resolve;
 	});
-	const adapter: TrackerPort = { ...port, createDefect: () => waiting };
+	const started = Promise.withResolvers<void>();
+	const adapter: TrackerPort = {
+		...port,
+		createDefect: () => {
+			started.resolve();
+			return waiting;
+		},
+	};
 	const delivery = deliverTrackerRequests(h.app, adapter);
 	expect(deliverTrackerRequests(h.app, adapter)).toBe(delivery);
+	await started.promise;
 	await h.call("propose", { edits: [{ op: "create", outline: "Another case" }] });
 	expect(await h.call("tracker-status", { id: "tracker-wait-001" })).toMatchObject({ state: "sending" });
 	complete(item);
@@ -1141,10 +1149,15 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 		complete = resolve;
 	});
 	let calls = 0;
+	const started = Promise.withResolvers<void>();
 	const delivery = deliverTrackerRequests(h.app, {
 		...port,
-		createDefect: () => (++calls === 1 ? waiting : Promise.resolve(item)),
+		createDefect: () => {
+			started.resolve();
+			return ++calls === 1 ? waiting : Promise.resolve(item);
+		},
 	});
+	await started.promise;
 	await h.app.database.write(
 		async (db) =>
 			await db.transaction(async () => {

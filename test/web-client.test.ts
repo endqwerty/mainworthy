@@ -328,3 +328,41 @@ for (const clear of [false, true])
 			},
 			{ login: { signedIn: true }, logout: "lost" },
 		));
+
+test("busy is a retryable operation refusal in both clients and is never retried automatically", async () => {
+	const { readEnvelope, unwrap } = await import("../src/cli/client.ts");
+	const { CliError } = await import("../src/cli/errors.ts");
+	let requests = 0;
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch() {
+			requests++;
+			return Response.json(
+				{ ok: false, error: { code: "busy", message: "retry the same request with the same command id" } },
+				{ status: 503 },
+			);
+		},
+	});
+	try {
+		const error = await call(
+			"propose",
+			{ cmd: "busy-client-command", edits: [{ op: "create", body: { title: "preserved" } }] },
+			{ url: server.url.origin, project: "scratch" },
+		).catch((error: unknown) => error);
+		expect(error).toBeInstanceOf(ApiError);
+		expect(error).toMatchObject({ code: "busy", retryable: true, status: 503 });
+		const envelope = await readEnvelope(await fetch(server.url));
+		let cli: unknown;
+		try {
+			unwrap(envelope);
+		} catch (error) {
+			cli = error;
+		}
+		expect(cli).toBeInstanceOf(CliError);
+		expect(cli).toMatchObject({ code: "busy", retryable: true });
+		expect(requests).toBe(2);
+	} finally {
+		await server.stop(true);
+	}
+});

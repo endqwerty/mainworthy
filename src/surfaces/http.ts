@@ -17,6 +17,7 @@ import {
 import { headerAddress } from "../server/kernel/address.ts";
 import type { App, ChangeEvent, Config } from "../server/kernel/app.ts";
 import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
+import { isBusy } from "../server/kernel/db.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
@@ -986,6 +987,17 @@ export function serve(
 		fetch: (req: Request) =>
 			withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
 		error(error: Error) {
+			if (isBusy(error))
+				return withHeaders(
+					null,
+					jsonResponse(
+						{
+							ok: false,
+							error: { code: "busy", message: "the writer is busy; retry the same request with the same command id" },
+						},
+						503,
+					),
+				);
 			console.error("[mainworthy] request failed:", error);
 			return withHeaders(null, jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500));
 		},

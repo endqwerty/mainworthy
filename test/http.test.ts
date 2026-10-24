@@ -21,7 +21,7 @@ import { AuditReply, REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import { API_VERSION } from "../src/core/version.ts";
 import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
-import { waitMail } from "../src/server/identity/identity.ts";
+import { lockAllActors, waitMail } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
@@ -943,7 +943,12 @@ describe("graceful stop", () => {
 			expect(new TextDecoder().decode((await reader.read()).value)).toBe("retry: 2000\n\n");
 			const held = Promise.withResolvers<void>();
 			const entered = Promise.withResolvers<void>();
-			const blocking = instance.app.database.write(() => held.promise);
+			const blocking = instance.app.database.write((db) =>
+				db.transaction(async () => {
+					await lockAllActors(db);
+					await held.promise;
+				}),
+			);
 			const run = instance.app.database.write.bind(instance.app.database);
 			const gate = spyOn(instance.app.database, "write").mockImplementation((fn) => {
 				entered.resolve();
@@ -3354,7 +3359,12 @@ describe("a connection that sends nothing", () => {
 		// The gate is held until the idle time has provably passed: until the refused connection, silent since the
 		// same moment as the write below, has been closed for it.
 		const release = Promise.withResolvers<void>();
-		const held = instance.app.database.write(() => release.promise);
+		const held = instance.app.database.write((db) =>
+			db.transaction(async () => {
+				await lockAllActors(db);
+				await release.promise;
+			}),
+		);
 		const queued = waitingAtGate(instance, 2);
 		// Two writes that wait at that gate, on plain sockets: what comes back is what the server sent, where a
 		// client library may send a request again when its connection is closed. One has a body and one has none

@@ -59,6 +59,12 @@ that does neither leaves the approval in place. See [planned runs](./runs.md#clo
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
+If the server answers `busy`, retry the unchanged report with the same command id. The CLI exits with code 4
+and does not retry automatically. A report can already be accepted when that reply arrives. Acceptance keeps
+its runs pending until application or cancellation. Revoking the admitting token, ending the browser session,
+or removing the required grant before application refuses the report and removes its pending marks. You can
+submit the evidence again under a new command id with a credential that currently permits it.
+
 ## Upload a native report
 
 The same command reads Playwright JSON, Jest JSON, Vitest JSON,

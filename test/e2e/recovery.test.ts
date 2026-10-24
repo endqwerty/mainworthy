@@ -34,7 +34,7 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const failure of ["unreadable", "internal", "session change", "internal before recording"] as const) {
+for (const failure of ["unreadable", "internal", "session change", "internal before recording", "busy"] as const) {
 	for (const stage of failure === "internal" || failure === "session change"
 		? ["first send", "replay"]
 		: ["first send"]) {
@@ -66,10 +66,13 @@ for (const failure of ["unreadable", "internal", "session change", "internal bef
 						commands.push(z.object({ cmd: z.string() }).parse(input).cmd);
 						if (stage === "replay" && requests.length === 1) return route.abort();
 						if (requests.length !== (stage === "replay" ? 2 : 1)) return route.continue();
-						if (failure === "internal before recording")
+						if (failure === "internal before recording" || failure === "busy")
 							return route.fulfill({
-								status: 500,
-								json: { ok: false, error: { code: "internal", message: "Save interrupted" } },
+								status: failure === "busy" ? 503 : 500,
+								json: {
+									ok: false,
+									error: { code: failure === "busy" ? "busy" : "internal", message: "Save interrupted" },
+								},
 							});
 						const response = await route.fetch();
 						if (other) {
@@ -107,7 +110,7 @@ for (const failure of ["unreadable", "internal", "session change", "internal bef
 					if (evidence && failure === "session change" && stage === "first send")
 						await page.screenshot({ path: evidence });
 					expect((await server.api("find", { in: "cases" })).count).toBe(
-						failure === "internal before recording" ? 0 : 1,
+						failure === "internal before recording" || failure === "busy" ? 0 : 1,
 					);
 					await page.keyboard.press("Control+Enter");
 					await page.waitForURL("**/suite/c/*");
@@ -118,7 +121,9 @@ for (const failure of ["unreadable", "internal", "session change", "internal bef
 						version: 1,
 						steps: [{ action: "Read the saved case" }],
 					});
-					expect(commands).toHaveLength(stage === "replay" || failure === "internal before recording" ? 2 : 1);
+					expect(commands).toHaveLength(
+						stage === "replay" || failure === "internal before recording" || failure === "busy" ? 2 : 1,
+					);
 					for (const input of requests) expect(input).toEqual(requests[0]);
 					expect(lookups).toEqual(Array.from({ length: stage === "replay" ? 2 : 1 }, () => commands[0] ?? ""));
 					expect(status).not.toContain(".. Your draft");
@@ -235,8 +240,8 @@ for (const reply of ["missing gate", "unreadable", "lost", "unsent"]) {
 	);
 }
 
-for (const failure of ["internal", "session change", "begun"] as const) {
-	for (const stage of failure === "begun" ? ["first send"] : ["first send", "replay"]) {
+for (const failure of ["internal", "session change", "begun", "busy"] as const) {
+	for (const stage of failure === "begun" || failure === "busy" ? ["first send"] : ["first send", "replay"]) {
 		test.skipIf(!browserAvailable)(
 			`a report recovers after ${failure} on ${stage} without a second result`,
 			async () => {
@@ -270,6 +275,11 @@ for (const failure of ["internal", "session change", "begun"] as const) {
 						requests.push(input);
 						commands.push(z.object({ cmd: z.string() }).parse(input).cmd);
 						if (stage === "replay" && requests.length === 1) return route.fulfill({ json: { ok: true, result: {} } });
+						if (failure === "busy" && requests.length === 1)
+							return route.fulfill({
+								status: 503,
+								json: { ok: false, error: { code: "busy", message: "Report interrupted" } },
+							});
 						const response = await route.fetch();
 						if (requests.length === (stage === "replay" ? 2 : 1)) {
 							if (other) {
@@ -325,7 +335,7 @@ for (const failure of ["internal", "session change", "begun"] as const) {
 						(text) => text.includes("C-1 pass recorded on pinned version 1."),
 					);
 					expect(status).toContain("C-1 pass recorded on pinned version 1.");
-					expect(requests).toHaveLength(failure === "begun" || stage === "replay" ? 2 : 1);
+					expect(requests).toHaveLength(failure === "begun" || failure === "busy" || stage === "replay" ? 2 : 1);
 					for (const input of requests) expect(input).toEqual(requests[0]);
 					expect(new Set([...commands, ...lookups]).size).toBe(1);
 					const results = (await server.api("timeline", { ref: "C-1" })).entries.filter(
@@ -350,72 +360,88 @@ for (const failure of ["internal", "session change", "begun"] as const) {
 	}
 }
 
-test.skipIf(!browserAvailable)(
-	"a refused report replay releases the slot and keeps its note for a fresh result",
-	async () => {
-		const server = await startServer();
-		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
-		try {
-			await server.api("propose", {
-				edits: [1, 2].map((n) => ({ op: "create", outline: `Replay case ${n}\n  Open > Ready` })),
-			});
-			const plan = await server.api("plan", { name: "Refused replay", select: {} });
-			browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
-			const { page } = browser;
-			const commands: string[] = [];
-			let readable = false;
-			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
-			await browser.context.route("**/api/p/scratch/report", async (route) => {
-				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
-				if (commands.length === 1) return route.abort();
-				if (commands.length === 2)
-					return route.fulfill({
-						status: 409,
-						json: { ok: false, error: { code: "conflict", message: "The result needs a fresh request" } },
-					});
-				await route.continue();
-			});
-			await browser.context.route("**/api/p/scratch/command", (route) => (readable ? route.continue() : route.abort()));
-			await page.keyboard.press("f");
-			await page.keyboard.type("wrong total");
-			await page.keyboard.press("Enter");
-			await eventually(
-				() => page.locator("#stat").innerText(),
-				(text) => text.includes("C-1's outcome is unknown.") && text.includes("Its note is kept."),
-			);
-			await page.getByRole("button", { name: "Slot 1: C-1, missing", exact: true }).click();
-			readable = true;
-			await page.keyboard.press("p");
-			const refused = await eventually(
-				() => page.locator("#stat").innerText(),
-				(text) => text.includes("C-1 was not recorded: The result needs a fresh request."),
-			);
-			expect(refused).toContain("Its note is kept.");
-			expect(commands).toHaveLength(2);
-			expect(commands[1]).toBe(commands[0]);
-			expect((await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result")).toEqual(
-				[],
-			);
-			expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("wrong total");
-			await page.keyboard.press("p");
-			await eventually(
-				() => page.locator("#stat").innerText(),
-				(text) => text.includes("C-1 pass recorded"),
-			);
-			expect(commands).toHaveLength(3);
-			expect(commands[2]).not.toBe(commands[0]);
-			const slots = Slot.array().parse((await server.api("find", { in: "slots", run: plan.run })).items);
-			expect(slots[0]).toMatchObject({ case: "C-1", fills: [{ outcome: "pass", note: "wrong total" }] });
-			expect(
-				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
-			).toHaveLength(1);
-		} finally {
-			await browser?.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+for (const refusal of ["conflict", "cancelled"] as const)
+	test.skipIf(!browserAvailable)(
+		`a ${refusal} report replay releases the slot and keeps its note for a fresh result`,
+		async () => {
+			const server = await startServer();
+			let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("propose", {
+					edits: [1, 2].map((n) => ({ op: "create", outline: `Replay case ${n}\n  Open > Ready` })),
+				});
+				const plan = await server.api("plan", { name: "Refused replay", select: {} });
+				browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
+				const { page } = browser;
+				const commands: string[] = [];
+				let readable = false;
+				await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+				await browser.context.route("**/api/p/scratch/report", async (route) => {
+					commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+					if (commands.length === 1) return route.abort();
+					if (commands.length === 2 && refusal === "conflict")
+						return route.fulfill({
+							status: 409,
+							json: { ok: false, error: { code: "conflict", message: "The result needs a fresh request" } },
+						});
+					await route.continue();
+				});
+				await browser.context.route("**/api/p/scratch/command", (route) => {
+					if (!readable) return route.abort();
+					if (refusal === "cancelled")
+						return route.fulfill({
+							json: {
+								ok: true,
+								result: { state: "done", op: "report", reply: { refused: "report" }, seq: 2 } satisfies CommandFate,
+							},
+						});
+					return route.continue();
+				});
+				await page.keyboard.press("f");
+				await page.keyboard.type("wrong total");
+				await page.keyboard.press("Enter");
+				await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("C-1's outcome is unknown.") && text.includes("Its note is kept."),
+				);
+				await page.getByRole("button", { name: "Slot 1: C-1, missing", exact: true }).click();
+				readable = true;
+				await page.keyboard.press("p");
+				const refused = await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) =>
+						text.includes(
+							refusal === "conflict"
+								? "C-1 was not recorded: The result needs a fresh request."
+								: "The accepted report was refused before application.",
+						),
+				);
+				expect(refused).toContain("Its note is kept.");
+				expect(commands).toHaveLength(refusal === "conflict" ? 2 : 1);
+				if (refusal === "conflict") expect(commands[1]).toBe(commands[0]);
+				expect((await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result")).toEqual(
+					[],
+				);
+				expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("wrong total");
+				await page.keyboard.press("p");
+				await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("C-1 pass recorded"),
+				);
+				expect(commands).toHaveLength(refusal === "conflict" ? 3 : 2);
+				expect(commands.at(-1)).not.toBe(commands[0]);
+				const slots = Slot.array().parse((await server.api("find", { in: "slots", run: plan.run })).items);
+				expect(slots[0]).toMatchObject({ case: "C-1", fills: [{ outcome: "pass", note: "wrong total" }] });
+				expect(
+					(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+				).toHaveLength(1);
+			} finally {
+				await browser?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
 
 for (const first of ["fail", "pass"]) {
 	test.skipIf(!browserAvailable)(
@@ -939,6 +965,7 @@ test.skipIf(!browserAvailable)(
 			await page.waitForFunction(
 				() => Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) === 2,
 			);
+			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-1");
 			await page.keyboard.press("j");
 			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-2");
 			await page.keyboard.press("k");

@@ -6,6 +6,7 @@ import { conflict, forbidden, invalid } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
 import { addressKey } from "./limiter.ts";
+import { lockActors } from "./locks.ts";
 import { deliverMail, queueMail, requireMail } from "./mail.ts";
 import { hashPassword, PasswordWorkBusy } from "./passwords.ts";
 import { endSessionsOf, newSessionSecret, requireRecentProof } from "./sessions.ts";
@@ -113,11 +114,13 @@ export async function setEmail(
 	return { email, verified: false };
 }
 export async function verifyEmail(app: App, code: string, proven?: () => void): Promise<boolean> {
-	if ((await app.database.read(async (db) => await find(app, db, code)))?.kind !== "verify") return false;
+	const first = await app.database.read(async (db) => find(app, db, code));
+	if (first?.kind !== "verify") return false;
 	proven?.();
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				await lockActors(db, [first.contact.actor], true);
 				const link = await find(app, db, code);
 				if (link?.kind !== "verify") return false;
 				await db.run(Q.verify, { actor: link.contact.actor, revision: link.contact.revision, at: app.now() });
@@ -192,6 +195,7 @@ export async function resetPassword(
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				await lockActors(db, [first.contact.actor], true);
 				const link = await find(app, db, input.code);
 				if (link?.kind !== "reset") return "invalid";
 				const current = await livePassword(db, link.contact.actor);

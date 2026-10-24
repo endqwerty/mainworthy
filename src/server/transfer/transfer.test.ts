@@ -639,7 +639,9 @@ async function dump(db: ReadDb): Promise<Record<string, string[]>> {
 	const result: Record<string, string[]> = {};
 	for (const table of await db.catalog()) {
 		if (UNEXPORTED.includes(table.name) || table.name === "search_docs") continue;
-		const columns = table.columns.filter((column) => column.generated !== "stored");
+		const columns = table.columns.filter(
+			(column) => column.generated !== "stored" && !(table.name === "actors" && column.name === "auth_version"),
+		);
 		const fields = columns.flatMap((column) => [`'${column.name.replaceAll("'", "''")}'`, identifier(column.name)]);
 		const filter =
 			table.name === "meta" ? "WHERE key NOT IN ('schema_version', 'baseline_hash', 'archive_version')" : "";
@@ -965,11 +967,22 @@ describe("Mainworthy instance archives", () => {
 			return chunks.join("");
 		};
 		const kept = ["meta", "orgs", "actors", "tokens", "mail_contacts", "teams", "team_members"];
+		const keptState = async () =>
+			Promise.all(
+				kept.map(async (table) => {
+					const rows = await db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, []);
+					return rows
+						.map((row) => {
+							const copy = { ...row };
+							if (table === "actors") delete copy.auth_version;
+							return copy;
+						})
+						.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+				}),
+			);
 		const before = {
 			other: await other(),
-			kept: await Promise.all(
-				kept.map((table) => db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, [])),
-			),
+			kept: await keptState(),
 		};
 		const removed = await removeProject(db, "qa");
 		// Every table the fixture fills for the project lost its rows, the ones an archive leaves out included, and
@@ -1019,9 +1032,7 @@ describe("Mainworthy instance archives", () => {
 			{ actor: 71, project: 0 },
 		]);
 		expect(await other()).toBe(before.other);
-		expect(
-			await Promise.all(kept.map((table) => db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, []))),
-		).toEqual(before.kept);
+		expect(await keptState()).toEqual(before.kept);
 		expect(db.inTransaction).toBe(false);
 	});
 
@@ -1067,14 +1078,20 @@ describe("Mainworthy instance archives", () => {
 			await seed(client, { project: "demo", cases: 30, days: 1 });
 			const read = instance.app.database.read.bind(instance.app.database);
 			const kept = (await read((db) => db.allDynamic("SELECT * FROM projects WHERE key='scratch'")))[0];
-			const people = await read((db) => db.allDynamic("SELECT * FROM actors ORDER BY id"));
+			const people = () =>
+				read(async (db) =>
+					(await db.allDynamic<Record<string, unknown>>("SELECT * FROM actors ORDER BY id")).map(
+						({ auth_version: _version, ...actor }) => actor,
+					),
+				);
+			const beforePeople = await people();
 			let rows = 0;
 			for (let i = 0; i < 500; i++) {
 				const result = await instance.app.database.write((db) => removeProjectSlice(db, "demo", 16));
 				rows += result.rows;
 				expect(result.rows).toBeLessThanOrEqual(16);
 				expect((await read((db) => db.allDynamic("SELECT * FROM projects WHERE key='scratch'")))[0]).toEqual(kept);
-				expect(await read((db) => db.allDynamic("SELECT * FROM actors ORDER BY id"))).toEqual(people);
+				expect(await people()).toEqual(beforePeople);
 				if (result.done) {
 					expect(rows).toBeGreaterThan(100);
 					expect((await client.call("find", { limit: 1 })).items).toEqual([]);
@@ -1168,11 +1185,16 @@ describe("Mainworthy instance archives", () => {
 		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("project removal slices refuse nested transactions and never audit unrelated foreign keys", async () => {
+	test("project removal slices join the caller transaction and never audit unrelated foreign keys", async () => {
 		const db = await source();
-		await db.transaction(async () => {
-			await expect(removeProjectSlice(db, "qa")).rejects.toThrow(/transaction/);
-		});
+		const before = await db.allDynamic("SELECT * FROM projects");
+		await expect(
+			db.transaction(async () => {
+				await removeProjectSlice(db, "qa");
+				throw new Error("rollback the caller's removal slice");
+			}),
+		).rejects.toThrow("rollback the caller's removal slice");
+		expect(await db.allDynamic("SELECT * FROM projects")).toEqual(before);
 		await db.transaction(() =>
 			db.exec(`CREATE TABLE unrelated_broken (id INTEGER PRIMARY KEY, project INTEGER);
 		INSERT INTO unrelated_broken VALUES (1,9999);
@@ -1808,6 +1830,7 @@ describe("Mainworthy instance archives", () => {
 			"assertion_roots",
 			"assertion_seen",
 			"assertion_spreads",
+			"batch_admissions",
 			"change_ends",
 			"commit_status_delivery",
 			"commit_statuses",

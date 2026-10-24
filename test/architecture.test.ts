@@ -173,7 +173,7 @@ describe("the module map", () => {
 		// modules whose standing it writes; none of those may import `decisions` or `ops`.
 		const domain: Record<string, string[]> = {
 			"server/kernel": [],
-			"server/identity": ["server/kernel"],
+			"server/identity": ["batch_admissions", "server/kernel"],
 			"server/policy": ["server/kernel"],
 			"server/suite": ["server/kernel", "server/policy"],
 			"server/evidence": ["server/kernel", "server/suite"],
@@ -235,6 +235,7 @@ describe("the module map", () => {
 	const owners: Record<string, string[]> = {
 		"server/kernel": ["meta", "projects", "counters", "commands", "demo_projects"],
 		"server/identity": [
+			"batch_admissions",
 			"mail_contacts",
 			"orgs",
 			"actors",

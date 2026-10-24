@@ -217,7 +217,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					})
 					.catch((error: unknown) => {
 						if (!sessionCurrent(owner) || clearRemoved() || submitting.current?.input.cmd !== input.cmd) return;
-						const definite = error instanceof ApiError && error.status !== null;
+						const definite = error instanceof ApiError && error.status !== null && error.code !== "busy";
 						const replayChanged =
 							definite &&
 							error.code === "conflict" &&

@@ -90,7 +90,7 @@ export type BatchRow = {
 	model: string | null;
 	run: number | null;
 	build_url: string | null;
-	state: "accepted" | "processed";
+	state: "accepted" | "processed" | "cancelled";
 	counts: string;
 	staged: string | null;
 	receipt: string | null;
@@ -211,6 +211,7 @@ type FlipWrite = {
 type Columns<T> = { [K in keyof T]: readonly T[K][] };
 
 const Q = {
+	anyTest: sql<{ project: number }, { id: number }>("SELECT id FROM tests WHERE project = $project LIMIT 1"),
 	caseResultsOnTargets: sql<{ caseId: number; targets: readonly number[] }, ResultRow>(`
  SELECT r.* FROM results r WHERE r.basis_case=$caseId AND r.target=ANY($targets::bigint[]) AND ${uncorrectedResults("r.id")} ORDER BY r.seq,r.ord`),
 
@@ -319,7 +320,7 @@ const Q = {
 	),
 	changesByIds: sql<{ ids: readonly number[] }, ChangeRow>("SELECT * FROM changes WHERE id = ANY($ids::bigint[])"),
 	shardsForTargets: sql<{ ids: readonly number[] }, { target: number; job: string; shards: number; reported: string }>(
-		"SELECT target, job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches WHERE target = ANY($ids::bigint[]) AND shards IS NOT NULL AND method != 'agent' GROUP BY target, job, shards ORDER BY target, job",
+		"SELECT target, job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches WHERE target = ANY($ids::bigint[]) AND shards IS NOT NULL AND method != 'agent' AND state <> 'cancelled' GROUP BY target, job, shards ORDER BY target, job",
 	),
 	targetsOfCommit: sql<{ project: number; what: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what",
@@ -449,17 +450,20 @@ const Q = {
 	>(
 		`SELECT t.id AS target,b.job,t.env,b.shards,string_agg(DISTINCT b.shard::text, ',') AS reported
  FROM targets t JOIN batches b ON b.target=t.id
- WHERE t.project=$project AND t.what=$what AND b.shards IS NOT NULL AND b.method!='agent'
+ WHERE t.project=$project AND t.what=$what AND b.shards IS NOT NULL AND b.method!='agent' AND b.state <> 'cancelled'
  AND (t.id,b.job,b.shards)>($target,$job,$shards)
  GROUP BY t.id,b.job,b.shards ORDER BY t.id,b.job,b.shards LIMIT 50`,
 	),
 	shardsOf: sql<{ target: number }, { job: string; shards: number; reported: string }>(
 		`SELECT job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches
-		 WHERE target = $target AND shards IS NOT NULL AND method != 'agent' GROUP BY job, shards ORDER BY job`,
+		 WHERE target = $target AND shards IS NOT NULL AND method != 'agent' AND state <> 'cancelled' GROUP BY job, shards ORDER BY job`,
 	),
 	emptyReports: sql<{ target: number }, { declared: number; ordinary: number }>(
 		`SELECT coalesce(max((nothing_required = 1 AND method = 'auto')::integer), 0) AS declared,
 		 coalesce(max((nothing_required = 0)::integer), 0) AS ordinary FROM batches WHERE target = $target AND state = 'processed'`,
+	),
+	cancelBatch: sql<{ id: number }>(
+		"UPDATE batches SET state = 'cancelled', staged = NULL, key = key || ':cancelled:' || id::text WHERE id = $id AND state = 'accepted'",
 	),
 	markProcessed: sql<{ id: number; counts: string }>(
 		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL WHERE id = $id",
@@ -645,11 +649,11 @@ const Q = {
 	),
 	firstCounted: sql<{ project: number; what: string }, { seq: number | null }>(
 		`SELECT min(b.seq) AS seq FROM batches b JOIN targets t ON t.id = b.target
-		 WHERE t.project = $project AND t.what = $what AND b.method != 'agent'`,
+		 WHERE t.project = $project AND t.what = $what AND b.method != 'agent' AND b.state <> 'cancelled'`,
 	),
 	humanReported: sql<{ project: number; what: string }, { reported: number }>(
 		`SELECT 1 AS reported FROM batches b JOIN targets t ON t.id = b.target
-		 WHERE t.project = $project AND t.what = $what AND
+		 WHERE t.project = $project AND t.what = $what AND b.state <> 'cancelled' AND
 		 (b.method = 'human' OR EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'human')) LIMIT 1`,
 	),
 	// Every target of a commit, with no cap: which results a run counts and which repository a commit belongs
@@ -1441,6 +1445,9 @@ export async function* applySteps(
 	const scope = assertionScope(await mustTarget(ctx.db, batch.target), batch.id);
 	const staged = json<ResultIn[]>(batch.staged);
 	const project = ctx.project.id;
+	// The project row stays locked through application. An initially empty table can contain only tests
+	// this batch has written; still look up repeated keys so intervening slices' links and history are current.
+	const writtenKeys = (await ctx.db.get(Q.anyTest, { project })) ? undefined : new Set<string>();
 	const out: ApplyResult = {
 		results: [],
 		counts: countOutcomes([]),
@@ -1488,7 +1495,7 @@ export async function* applySteps(
 				if (row) heads.set(row.id, row);
 			}
 
-		const resolvedTests = await resolveTests(ctx, slice, namedCases);
+		const resolvedTests = await resolveTests(ctx, slice, namedCases, writtenKeys);
 		const linkedIds = [
 			...new Set(
 				resolvedTests.flatMap((row) =>
@@ -1916,6 +1923,7 @@ async function resolveTests(
 	ctx: Ctx,
 	inputs: readonly ResultIn[],
 	namedCases: ReadonlyMap<string, CaseRow | null>,
+	writtenKeys?: Set<string>,
 ): Promise<({ test: TestRow; fresh: boolean } | { reject: string })[]> {
 	const requests: (
 		| { key: string; kind: "manual" | "auto"; name: string; file: string | null; caseId: number | null }
@@ -1940,13 +1948,13 @@ async function resolveTests(
 			});
 		}
 	}
+	const keys = requests.flatMap((request) => ("key" in request ? [request.key] : []));
+	const lookup = writtenKeys ? keys.filter((key) => writtenKeys.has(key)) : keys;
 	const found = new Map(
-		(
-			await ctx.db.all(Q.testsByKeys, {
-				project: ctx.project.id,
-				keys: requests.flatMap((request) => ("key" in request ? [request.key] : [])),
-			})
-		).map((row) => [row.key, row]),
+		(lookup.length ? await ctx.db.all(Q.testsByKeys, { project: ctx.project.id, keys: lookup }) : []).map((row) => [
+			row.key,
+			row,
+		]),
 	);
 	const missing = new Map<string, Extract<(typeof requests)[number], { key: string }>>();
 	for (const request of requests)
@@ -1964,6 +1972,7 @@ async function resolveTests(
 		for (const test of await insertTests(ctx, rows)) {
 			found.set(test.key, test);
 			fresh.add(test.key);
+			writtenKeys?.add(test.key);
 		}
 	}
 	return requests.map((request) => {
@@ -2528,4 +2537,8 @@ async function insertFlips(ctx: Ctx, rows: readonly FlipWrite[]): Promise<void> 
 		secondTry: rows.map((row) => row.secondTry),
 		seq: rows.map((row) => row.seq),
 	});
+}
+
+export async function cancelBatch(ctx: Ctx, batch: number): Promise<void> {
+	await ctx.db.run(Q.cancelBatch, { id: batch });
 }

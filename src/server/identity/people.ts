@@ -53,6 +53,7 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer, startAddressKey } from "./limiter.ts";
+import { lockActors } from "./locks.ts";
 import {
 	beginOidc,
 	findNativeOidc,
@@ -278,10 +279,13 @@ class Stop extends Error {
 }
 
 /** Runs `work` under the gate in one transaction. A `Stop` thrown in it rolls everything back and is its answer. */
-async function commit<T>(app: App, work: (db: WriteDb) => Promise<T>): Promise<T | Refused> {
+async function commit<T>(app: App, actors: readonly number[], work: (db: WriteDb) => Promise<T>): Promise<T | Refused> {
 	return await app.database.write(async (db) => {
 		try {
-			return await db.transaction(async () => await work(db));
+			return await db.transaction(async () => {
+				await lockActors(db, actors, true);
+				return await work(db);
+			});
 		} catch (error) {
 			if (error instanceof Stop) return error.refused;
 			throw error;
@@ -392,7 +396,7 @@ export async function signInWithPassword(
 	}
 	about.proven?.();
 	const cookie = newSessionSecret();
-	return await commit(app, async (db) => {
+	return await commit(app, [person.id], async (db) => {
 		// The name is looked up again and must lead to a password with the very hash that was verified.
 		const now = await db.get(Q.personByName, { name: input.name });
 		const current = now ? await livePassword(db, now.id) : null;
@@ -484,7 +488,8 @@ export async function changePassword(
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async (): Promise<PasswordChange> => {
-				// The session, read on committed rows: nothing else writes while this holds the gate.
+				await lockActors(db, [person.id], true);
+				// Recheck the session and credential after the actor lock wait.
 				const still = await input.who(db);
 				const session = await input.session(db);
 				const now = await db.get(Q.personById, { id: person.id });
@@ -543,7 +548,7 @@ export async function proveCredential(
 			async (readDb) => await judgeAssertion(app, readDb, proof.passkey, null, input),
 		);
 		if (!first.ok) return attempt.wrong(first);
-		return await commit(app, async (db) => {
+		return await commit(app, [person.id], async (db) => {
 			if (!(await proofSession(app, input, db))) return no("context");
 			const now = await judgeAssertion(app, db, proof.passkey, null, input);
 			if (!now.ok) return attempt.wrong(now);
@@ -572,7 +577,7 @@ export async function proveCredential(
 			if (error instanceof PasswordWorkBusy) return no("busy");
 			throw error;
 		}
-		return await commit(app, async (db) => {
+		return await commit(app, [person.id], async (db) => {
 			const current = await livePassword(db, person.id);
 			if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 				return no("changed-meanwhile");
@@ -589,7 +594,7 @@ export async function proveCredential(
 		attempt.limiter.failed(attempt.keys, app.now());
 		return no("wrong-code");
 	}
-	return await commit(app, async (db) => {
+	return await commit(app, [person.id], async (db) => {
 		const current = await liveTotp(db, person.id);
 		if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 			return no("changed-meanwhile");
@@ -724,7 +729,7 @@ export async function signInWithPasskey(
 	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, async (db) => {
+	const entry = await commit(app, [first.row.actor], async (db) => {
 		const now = await judgeAssertion(app, db, answer, ceremony);
 		if (!now.ok) return now;
 		const opened = await openOn(app, db, now.row, cookie, about);
@@ -1111,7 +1116,8 @@ async function acceptByHash(
 		throw error;
 	}
 	const cookie = newSessionSecret();
-	return await commit(app, async (db): Promise<Accepted> => {
+	const replacing = input.browser === null ? null : await holderOf(app, input.browser);
+	return await commit(app, [first.person.id, ...(replacing ? [replacing.id] : [])], async (db): Promise<Accepted> => {
 		const now = await judge(db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
@@ -1281,7 +1287,7 @@ export async function finishOidcSignIn(
 	}
 	if (purpose.purpose === "link") {
 		const linking = purpose;
-		return await commit(app, async (db): Promise<OidcFinished> => {
+		return await commit(app, [linking.actor], async (db): Promise<OidcFinished> => {
 			// The browser that finishes is the session that began, and that session is still the person's.
 			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });
 			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
@@ -1305,7 +1311,9 @@ async function openOidcSession(
 	if ("native" in input && !findNativeOidc(app, input.native)) return attempt.wrong(no("challenge"));
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, async (db): Promise<Entry> => {
+	const initialIdentity = "identity" in input ? input.identity : findNativeOidc(app, input.native)?.identity;
+	const hint = initialIdentity ? await app.database.read((db) => oidcByHandle(db, oidcHandle(initialIdentity))) : null;
+	const entry = await commit(app, hint ? [hint.actor] : [], async (db): Promise<Entry> => {
 		const handoff = "native" in input ? takeNativeOidc(app, input.native) : null;
 		const identity = "identity" in input ? input.identity : handoff?.identity;
 		if (!identity) return no("challenge");
@@ -1352,7 +1360,8 @@ export async function signInWithTotp(
 	const attempt = factorAttempt(app, { kind: "sign-in", name: initial.name, address: about.address });
 	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
 	const cookie = newSessionSecret();
-	return await commit(app, async (db) => {
+	const factorPerson = await app.database.read((db) => db.get(Q.personByName, { name: initial.name }));
+	return await commit(app, factorPerson ? [factorPerson.id] : [], async (db) => {
 		const held = findTotp(app, input.challenge, "sign-in");
 		if (!held || held !== initial) return no("challenge");
 		const person = await db.get(Q.personByName, { name: held.name });

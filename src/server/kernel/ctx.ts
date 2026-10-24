@@ -2,7 +2,8 @@
 import { z } from "zod";
 import type { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import type { App } from "./app.ts";
-import { type ReadDb, sql, type WriteDb } from "./db.ts";
+import type { CallerReference } from "./caller.ts";
+import { Busy, type ReadDb, sql, type WriteDb } from "./db.ts";
 
 export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[]; roles?: readonly Role[] };
 
@@ -22,6 +23,7 @@ export const REF_PREFIX: Record<CounterName, string> = { case: "C", question: "Q
 
 export type Ctx<D extends ReadDb = WriteDb> = {
 	app: App;
+	reference?: CallerReference;
 	db: D;
 	project: ProjectRow;
 	actor: Actor;
@@ -59,6 +61,9 @@ export type Ctx<D extends ReadDb = WriteDb> = {
 
 const Q = {
 	project: sql<{ key: string }, ProjectRow>("SELECT * FROM projects WHERE key = $key"),
+	lockProjectKey: sql<{ key: string }>("SELECT pg_advisory_xact_lock(hashtextextended($key::text, 822))"),
+	lockProject: sql<{ id: number }, ProjectRow>("SELECT * FROM projects WHERE id = $id FOR UPDATE"),
+	lockProjects: sql<readonly [], { id: number }>("SELECT id FROM projects ORDER BY id FOR UPDATE"),
 	projectById: sql<{ id: number }, ProjectRow>("SELECT * FROM projects WHERE id = $id"),
 	bumpCounter: sql<{ project: number; name: string; count: number }, { value: number }>(
 		`INSERT INTO counters (project, name, value) VALUES ($project, $name, $count)
@@ -87,6 +92,7 @@ const Q = {
 	markDemo: sql<{ project: number; since: number }>(
 		"INSERT INTO demo_projects (project, since) VALUES ($project, $since)",
 	),
+	lockCommand: sql<{ id: string }>("SELECT pg_advisory_xact_lock(hashtextextended($id::text, 821))"),
 	command: sql<
 		{ id: string },
 		{ outcome: string; op: string; actor: number; project: number; seq: number; request: string }
@@ -121,6 +127,23 @@ export const findProject = async (db: ReadDb, key: string): Promise<ProjectRow |
 	await db.get(Q.project, { key });
 export const projectById = async (db: ReadDb, id: number): Promise<ProjectRow | null> =>
 	await db.get(Q.projectById, { id });
+export const lockProject = async (db: WriteDb, id: number): Promise<ProjectRow | null> =>
+	await db.get(Q.lockProject, { id });
+/** Guard an absent name, and restart if the project discovered before a wait was replaced. */
+export async function lockNamedProject(db: WriteDb, key: string): Promise<ProjectRow | null> {
+	let hint = await findProject(db, key);
+	if (!hint) {
+		await lockProjectKey(db, key);
+		hint = await findProject(db, key);
+	}
+	if (!hint) return null;
+	const locked = await lockProject(db, hint.id);
+	if (!locked || locked.key !== key || locked.identity !== hint.identity) throw new Busy();
+	return locked;
+}
+export async function lockAllProjects(db: WriteDb): Promise<void> {
+	await db.all(Q.lockProjects);
+}
 export const allProjects = async (db: ReadDb): Promise<ProjectRow[]> => await db.all(Q.projects);
 export const demoProjects = async (db: ReadDb): Promise<Set<number>> =>
 	new Set((await db.all(Q.demos)).map((row) => row.project));
@@ -182,8 +205,9 @@ export async function demoDeployment(db: ReadDb, project: number): Promise<DemoD
 	return text == null ? null : DemoDeployment.parse(JSON.parse(text));
 }
 
-/** Deployment bookkeeping is local operational state, not case standing. The caller owns a gate transaction. */
+/** Deployment bookkeeping is local operational state, not case standing. The caller owns the transaction. */
 export async function setDemoDeployment(db: WriteDb, project: number, state: DemoDeployment): Promise<void> {
+	await lockProject(db, project);
 	if ((await demoSince(db, project)) === null) throw new Error("deployment state needs a demo mark");
 	await db.run(Q.saveDemoDeployment, { project, deployment: JSON.stringify(state) });
 }
@@ -199,6 +223,10 @@ export const retiredDemos = (db: ReadDb): Promise<{ id: number; key: string }[]>
  * The stored request and reply of a command that already ran, or null. A retry of the same request returns the
  * reply and writes nothing; the same id with other content is refused.
  */
+export const lockCommand = async (db: WriteDb, id: string): Promise<void> => {
+	await db.get(Q.lockCommand, { id });
+};
+
 export const findCommand = async (db: ReadDb, id: string) => await db.get(Q.command, { id });
 
 /** Rewrites stored replies without changing which request each command id names, or an unfinished command. */
@@ -351,4 +379,12 @@ export function parseRef(text: string): { name: CounterName; no: number } | null
 	const names: Record<string, CounterName> = { C: "case", Q: "question", R: "run", T: "test", P: "proposal" };
 	const name = names[match[1] ?? ""];
 	return name ? { name, no: Number(match[2]) } : null;
+}
+
+export async function lockProjectRoster(db: WriteDb): Promise<void> {
+	await db.exec("LOCK TABLE projects IN SHARE ROW EXCLUSIVE MODE");
+}
+
+export async function lockProjectKey(db: WriteDb, key: string): Promise<void> {
+	await db.get(Q.lockProjectKey, { key });
 }

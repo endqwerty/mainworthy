@@ -9,6 +9,7 @@
 // so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { lockActors, lockCredential } from "./locks.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
 export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
@@ -237,12 +238,16 @@ export async function noteCredentialUse(db: WriteDb, id: number, at: number): Pr
 }
 
 /** Revokes one credential and erases what it held. False when it was revoked already or does not exist. */
-export const revokeCredential = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
-	(await db.run(Q.revoke, { id, at })).changes > 0;
+export const revokeCredential = async (db: WriteDb, id: number, at: number): Promise<boolean> => {
+	await lockCredential(db, id);
+	return (await db.run(Q.revoke, { id, at })).changes > 0;
+};
 
 /** Revokes every credential of a person and erases what each held. Returns how many. */
-export const revokeCredentialsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
-	(await db.run(Q.revokeOf, { actor, at })).changes;
+export const revokeCredentialsOf = async (db: WriteDb, actor: number, at: number): Promise<number> => {
+	await lockActors(db, [actor], true);
+	return (await db.run(Q.revokeOf, { actor, at })).changes;
+};
 
 /** Erases every credential's label and data, including revoked rows, while retaining credential ids. */
 export async function forgetCredentialsOf(db: WriteDb, actor: number, at: number): Promise<void> {
