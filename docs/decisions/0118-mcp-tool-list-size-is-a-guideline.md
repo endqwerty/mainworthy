@@ -31,7 +31,8 @@ Treat the size like a rate limit: measured use, a comparison with peers, and hea
   and does not fail the check. The pull request says why it is worth the size.
 - Each tool's size stays recorded exactly in that test, so any change to a description or schema has to update the
   table, and a reviewer sees it.
-- The limit of ten tools (`test/architecture.test.ts`) is unchanged.
+- The limit of ten tools (`test/architecture.test.ts`) is unchanged. *Amended 2026-10-24 (#906): the owner made
+  every budget a warning, the ten tools included; `src/surfaces/mcp.test.ts` reports each through `budget()`.*
 
 This amends decision 0006 for the size of the tool list. The token budgets of agent jobs (A1 to A6) remain to be set
 from a baseline as 0006 describes.
