@@ -1392,11 +1392,7 @@ describe("capture", () => {
 		let candidates = 0;
 		const limit = 25_000 + 100 * edits.length;
 		const spy = spyOn(Set.prototype, "add").mockImplementation(function (this: Set<unknown>, value: unknown) {
-			if (typeof value === "string" && value.includes("/")) {
-				candidates++;
-				// A runaway guard, not a budget: Bun cannot time out synchronous work, so a blow-up would hang the run.
-				if (candidates > 100 * limit) throw new Error("candidate work ran away: more than 100 times its baseline");
-			}
+			if (typeof value === "string" && value.includes("/")) candidates++;
 			return add.call(this, value);
 		});
 		let reply: Reply;
