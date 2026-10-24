@@ -16,8 +16,8 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and functional tests, browsers included; a missing prerequisite is named by `scripts/preflight.ts` |
-| `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357`, using the checkout's PostgreSQL cluster when no URL is set |
+| `bun run check` | type-check, lint and functional tests, browsers included; `scripts/preflight.ts` says why a machine cannot run it |
+| `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357`, on the checkout's PostgreSQL cluster if no URL is set |
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
 | `bun scripts/work.ts stop-server` | stop the servers you started |
