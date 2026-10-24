@@ -160,7 +160,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			repetitions.push({ name: row.name, results: repeated });
 			const values = [row, ...repeated].map((result) => result[result.criterion]);
 			console.log(
-				`  ${row.criterion} median ${percentile(values, 0.5).toFixed(2)} ms, range ${Math.min(...values).toFixed(2)} to ${Math.max(...values).toFixed(2)} ms; any trial miss fails the command.`,
+				`  ${row.criterion} median ${percentile(values, 0.5).toFixed(2)} ms, range ${Math.min(...values).toFixed(2)} to ${Math.max(...values).toFixed(2)} ms; a trial miss warns, ten times the budget fails the command.`,
 			);
 		}
 		return row;
