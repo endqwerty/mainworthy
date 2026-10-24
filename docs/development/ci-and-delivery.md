@@ -21,7 +21,7 @@ To deliver a change, follow these steps:
 4. Open a non-draft pull request. Give it the issue's milestone. Put `Closes #123` on a line of its own only when
    the merge makes everything the issue asks for true. Otherwise write `Part of #123`.
 5. Set `pr: <this PR's URL>` in each fragment this PR adds, commit and push that update, then run
-   `bun scripts/work.ts pr-body <number>`. It checks the linked issues, milestone, principles and fragment PR references.
+   `bun scripts/work.ts pr-body <number>`. It checks the linked issues, milestone and fragment PR references.
    CI's `description` job runs the same command; `pr: pending` is allowed only while the PR is a draft.
 6. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
 7. Once `gate` is green, run the Daybreak security audit on the head and its base, address every issue it declares,
