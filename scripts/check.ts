@@ -190,7 +190,8 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 		// an earlier run goes first, so that a runner that stops before it writes leaves none.
 		const report = junit ?? join(scratch, `${phase}.xml`);
 		rmSync(report, { force: true });
-		const phaseWorkers = phase === "parallel" ? (workers ?? defaultWorkers) : record ? workers : undefined;
+		// The performance phase runs one file at a time, so it gets one browser slot whatever `--workers` says.
+		const phaseWorkers = phase === "parallel" ? (workers ?? defaultWorkers) : 1;
 		const args = testArgs(phase, {
 			shard,
 			files: chosen,
