@@ -207,21 +207,6 @@ jobs:
       # Seven functional shards (CI_SHARDS in scripts/check-plan.ts) and the performance tests, or the files the change needs, in one
       # runner for each phase (`matrix` in scripts/ci-scope.ts). The gate job is given the same names.
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
-    services:
-      postgres:
-        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
-        ports:
-          - 5432:5432
-        # Fixture databases also keep shared statistics; Docker's 64 MiB default exhausted during a shard.
-        options: >-
-          --shm-size=256m
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     env:
       MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
@@ -230,6 +215,10 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Start PostgreSQL for this test phase
+        env:
+          TEST_PHASE: ${{ matrix.phase }}
+        run: bash scripts/ci-postgres.sh "$TEST_PHASE"
       - name: Source for the SQLite schema parity audit
         run: |
           revision=$(bun -e 'import { SQLITE_REVISION } from "./scripts/port-schema.ts"; process.stdout.write(SQLITE_REVISION)')
@@ -282,6 +271,13 @@ jobs:
           # gate script's to refuse (scripts/ci-gate.ts: "no report").
           if-no-files-found: error
           retention-days: 7
+      - name: PostgreSQL logs and cleanup
+        if: always()
+        run: |
+          if docker container inspect postgres >/dev/null 2>&1; then
+            docker logs postgres
+            docker rm --force postgres
+          fi
 
   gate:
     needs: [scope, static, tests, image, ios, description]
@@ -293,21 +289,6 @@ jobs:
       contents: read
       # For the tailnet step: GitHub signs who this job is, and Tailscale admits it on that.
       id-token: write
-    services:
-      postgres:
-        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
-        ports:
-          - 5432:5432
-        # Fixture databases also keep shared statistics; Docker's 64 MiB default exhausted during a shard.
-        options: >-
-          --shm-size=256m
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     env:
       MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
@@ -316,6 +297,10 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Start PostgreSQL for the disposable gate fallback
+        env:
+          TEST_PHASE: --only=parallel
+        run: bash scripts/ci-postgres.sh "$TEST_PHASE"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         # A shard with nothing to download is named, and failed, by the next step but one.
         continue-on-error: true
@@ -346,6 +331,13 @@ jobs:
           SHARDS: ${{ needs.scope.outputs.shards }}
           FILES: ${{ needs.scope.outputs.files }}
         run: bun scripts/ci-gate.ts test-results $SHARDS ${FILES:+"--files=$FILES"}
+      - name: PostgreSQL logs and cleanup
+        if: always()
+        run: |
+          if docker container inspect postgres >/dev/null 2>&1; then
+            docker logs postgres
+            docker rm --force postgres
+          fi
       - name: The scope, the type-check, the lint, the image, the iPhone app, the description and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
         # or left nothing to upload, and after a re-run the gate above would then read its older attempt's. A job
