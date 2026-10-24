@@ -1,6 +1,7 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import type { ResultStep } from "../src/core/results.ts";
 import {
 	batchById,
 	excuseForResult,
@@ -14,6 +15,7 @@ import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import {
 	countedTests,
+	fillsOf,
 	mustRun,
 	plannedCounting,
 	type RunTestWrite,
@@ -50,6 +52,128 @@ test("counting sibling failures reads their standing in batches", async () => {
 	expect(counted).toHaveLength(100);
 	expect(counted.every((row) => row.standing === "unexplained")).toBe(true);
 	expect(h.app.database.statementCount).toBeLessThanOrEqual(12);
+});
+
+test("a large planned report rebuilds complete slot evidence in bounded reads", async () => {
+	h = await harness();
+	await seed(101);
+	await h.call("plan", {
+		name: "Two checks per case",
+		select: { folders: ["checkout"] },
+		require: ["first", "second"].map((id) => ({
+			id,
+			kind: "exercise",
+			methods: ["human"],
+			minActors: 1,
+			basis: "exact",
+		})),
+	});
+	h.app.database.resetStatementCount();
+	await h.call("report", {
+		run: "R-1",
+		results: Array.from({ length: 101 }, (_, index) => ({
+			test: { case: `C-${index + 1}` },
+			outcome: index % 2 === 0 ? "pass" : "skip",
+			steps: [{ step: "x1", outcome: index % 2 === 0 ? "pass" : "skip" }],
+		})),
+	});
+	const statements = h.app.database.statementCount;
+	const rows = (await h.call<{ items: Slot[] }>("find", { in: "slots", run: "R-1", limit: 300 })).items;
+	expect(rows).toHaveLength(202);
+	expect(rows.filter((slot) => slot.state === "satisfied")).toHaveLength(102);
+	expect(rows.filter((slot) => slot.state === "skipped")).toHaveLength(100);
+	expect(rows.every((slot) => slot.fills.length === 1 && slot.fills[0]?.admitted === "exact")).toBe(true);
+	expect((await run("R-1")).tally).toMatchObject({ pass: 102, skipped: 100, missing: 100 });
+	expect(statements).toBeLessThanOrEqual(1150);
+});
+
+test("slot batches retain complete trails, job lanes and fresh corrections across evidence slices", async () => {
+	h = await harness();
+	await seed(1);
+	await h.call("plan", {
+		name: "Two producers",
+		select: { cases: ["C-1"] },
+		require: [{ id: "exercise", kind: "exercise", methods: ["auto"], minActors: 2, basis: "exact" }],
+	});
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+	const trail: ResultStep[] = [
+		{ step: "x1", outcome: "pass", durationMs: 8, actions: [{ text: "Full trail", durationMs: 3 }] },
+	];
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "alpha",
+			results: Array.from({ length: 201 }, (_, index) => ({
+				test: { key: `many-${index}` },
+				annotation: { case: "C-1", version: 1 },
+				outcome: "pass",
+				steps: trail,
+			})),
+		},
+		ci,
+	);
+	const slot = first(await slots("R-1"));
+	expect(slot.state).toBe("missing");
+	const before = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(before).toHaveLength(201);
+	expect(before.every((fill) => fill.job === "alpha" && fill.admitted === "exact" && fill.atStep === null)).toBe(true);
+	expect(before.map((fill) => fill.steps)).toEqual(Array.from({ length: 201 }, () => trail));
+	expect(before.map((fill) => fill.ord)).toEqual(Array.from({ length: 201 }, (_, index) => index));
+	const failureTrail: ResultStep[] = [
+		{ step: "x1", outcome: "fail", actions: [{ text: "Retained failure detail", outcome: "fail" }] },
+	];
+	const failed = await h.call<ReportReceipt>(
+		"report",
+		{
+			run: "R-1",
+			job: "beta",
+			results: [
+				{ test: { key: "many-0" }, annotation: { case: "C-1", version: 1 }, outcome: "fail", steps: failureTrail },
+			],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("failing");
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "alpha",
+			results: [{ test: { key: "many-0" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("failing");
+	const held = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(held).toHaveLength(203);
+	expect(held.find((fill) => fill.id === first(failed.results))).toMatchObject({
+		job: "beta",
+		outcome: "fail",
+		atStep: "x1",
+		steps: failureTrail,
+	});
+	await h.call(
+		"report",
+		{
+			run: "R-1",
+			job: "beta",
+			results: [
+				{
+					test: { key: "many-0" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "pass",
+					corrects: first(failed.results),
+				},
+			],
+		},
+		ci,
+	);
+	expect(first(await slots("R-1")).state).toBe("missing");
+	const corrected = await h.app.database.read((db) => fillsOf(db, slot.id));
+	expect(corrected).toHaveLength(203);
+	expect(corrected.some((fill) => fill.id === first(failed.results))).toBe(false);
+	expect((await run("R-1")).tally).toMatchObject({ missing: 1, unexplained: 0, disputed: 0 });
 });
 
 test("batched result standing preserves target priority, exact ties, null expiry and slot isolation", async () => {

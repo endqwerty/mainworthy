@@ -28,7 +28,6 @@ import {
 	acceptedBatches,
 	type BatchRow,
 	batchById,
-	batchesByIds,
 	changeById,
 	changeByKey,
 	changesBasedOn,
@@ -403,8 +402,8 @@ const Q = {
 	heldBy: sql<{ slot: number }, { result: number; corrected: number; discounted_by: number | null }>(
 		"SELECT result, corrected, discounted_by FROM slot_results WHERE slot = $slot",
 	),
-	admittedTo: sql<{ slot: number }, { result: number; admitted: string }>(
-		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0 AND discounted_by IS NULL",
+	admittedTo: sql<{ slots: readonly number[] }, { slot: number; result: number; admitted: string }>(
+		"SELECT slot, result, admitted FROM slot_results WHERE slot = ANY($slots::bigint[]) AND corrected = 0 AND discounted_by IS NULL",
 	),
 	newestChangeRun: sql<{ project: number; scope: string }, { id: number | null }>(
 		"SELECT max(id) AS id FROM runs WHERE project = $project AND scope = $scope",
@@ -538,44 +537,50 @@ export type Fill = {
 
 /** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
 export async function fillsOf(db: ReadDb, slot: number): Promise<Fill[]> {
-	const fills: Fill[] = [];
-	const admitted = await db.all(Q.admittedTo, { slot });
-	const results = new Map<number, ResultRow>();
-	const jobs = new Map<number, string>();
-	for (let start = 0; start < admitted.length; start += SLICE) {
-		const found = await resultsByIds(
-			db,
-			admitted.slice(start, start + SLICE).map((row) => row.result),
-		);
-		for (const result of found) results.set(result.id, result);
-		for (const batch of await batchesByIds(db, [...new Set(found.map((row) => row.batch))]))
-			jobs.set(batch.id, batch.job);
+	return (await fillsForSlots(db, [slot])).get(slot) ?? [];
+}
+
+/** A fixed read phase's complete admissions, grouped by slot; never retained across admission writes. */
+async function fillsForSlots(db: ReadDb, slots: readonly number[]): Promise<Map<number, Fill[]>> {
+	const fills = new Map<number, Fill[]>();
+	for (let start = 0; start < slots.length; start += SLICE) {
+		const admitted = await db.all(Q.admittedTo, { slots: slots.slice(start, start + SLICE) });
+		const ids = [...new Set(admitted.map((row) => row.result))];
+		const results = new Map<number, Awaited<ReturnType<typeof resultsByIds>>[number]>();
+		for (let offset = 0; offset < ids.length; offset += SLICE)
+			for (const result of await resultsByIds(db, ids.slice(offset, offset + SLICE))) results.set(result.id, result);
+		for (const row of admitted) {
+			const result = results.get(row.result);
+			if (!result) continue;
+			let slotFills = fills.get(row.slot);
+			if (!slotFills) {
+				slotFills = [];
+				fills.set(row.slot, slotFills);
+			}
+			slotFills.push({
+				id: result.id,
+				actor: result.actor,
+				model: result.model,
+				test: result.test,
+				attempt: result.attempt,
+				outcome: result.outcome,
+				seq: result.seq,
+				ord: result.ord,
+				signature: result.signature,
+				target: result.target,
+				job: result.job,
+				method: result.method,
+				admitted: row.admitted,
+				at: result.at,
+				note: result.note,
+				message: result.message,
+				atStep: resultFailedStep(result),
+				steps: resultTrail(result),
+			});
+		}
 	}
-	for (const row of admitted) {
-		const result = results.get(row.result);
-		if (!result) continue;
-		fills.push({
-			id: result.id,
-			actor: result.actor,
-			model: result.model,
-			test: result.test,
-			attempt: result.attempt,
-			outcome: result.outcome,
-			seq: result.seq,
-			ord: result.ord,
-			signature: result.signature,
-			target: result.target,
-			job: jobs.get(result.batch) ?? "",
-			method: result.method,
-			admitted: row.admitted,
-			at: result.at,
-			note: result.note,
-			message: result.message,
-			atStep: resultFailedStep(result),
-			steps: resultTrail(result),
-		});
-	}
-	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
+	for (const slotFills of fills.values()) slotFills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
+	return fills;
 }
 export const failingTestsOf = async (db: ReadDb, run: number, limit: number) =>
 	await db.all(Q.failingRunTests, { run, limit });
@@ -919,12 +924,19 @@ export async function* applyBatchSteps(
 
 	await flush();
 
+	// All admissions and corrections are written before this read phase. Projection writes below change none of them.
+	const fills = await fillsForSlots(ctx.db, [...touchedSlots.keys()]);
 	// Rebuild every slot the batch touched from its complete admitted set, and note the ones now in dispute.
 	for (const slot of touchedSlots.values()) {
 		const run = planned.find((r) => r.id === slot.run) ?? (await runById(ctx.db, slot.run));
 		if (!run) continue;
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
-		const next = await refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+		const next = await refreshSlot(
+			ctx,
+			slot,
+			obligation?.kind === "exercise" ? obligation : null,
+			fills.get(slot.id) ?? [],
+		);
 		if (next.state !== "disputed" && next.state !== "failing") continue;
 		// Every cause failing in the slot is its own question: answering one does not answer the others. Only the
 		// causes seen in this batch's scope are this batch's to ask about; one seen in another repository has its
@@ -967,8 +979,13 @@ export async function failuresShown(
 	run: RunRow,
 ): Promise<{ group: FailingGroup; target: number; by: number }[]> {
 	const out = new Map<string, { group: FailingGroup; target: number; by: number }>();
-	for (const slot of await ctx.db.all(Q.failingSlotRows, { run: run.id })) {
-		const fills = await fillsOf(ctx.db, slot.id);
+	const slots = await ctx.db.all(Q.failingSlotRows, { run: run.id });
+	const bySlot = await fillsForSlots(
+		ctx.db,
+		slots.map((slot) => slot.id),
+	);
+	for (const slot of slots) {
+		const fills = bySlot.get(slot.id) ?? [];
 		for (const [cause, seenOn] of json<Cause[]>(slot.causes)) {
 			const signature = await signatureById(ctx.db, cause);
 			if (!signature) continue;
@@ -1115,8 +1132,13 @@ export async function shownFailure(
 			if (result) await add(row.test, result.id, result.actor, result.message, true);
 		}
 	} else {
-		for (const slot of await ctx.db.all(Q.slotsBySignature, { run: run.id, signature: cause.signature })) {
-			for (const fill of await fillsOf(ctx.db, slot.id)) {
+		const slots = await ctx.db.all(Q.slotsBySignature, { run: run.id, signature: cause.signature });
+		const bySlot = await fillsForSlots(
+			ctx.db,
+			slots.map((slot) => slot.id),
+		);
+		for (const slot of slots) {
+			for (const fill of bySlot.get(slot.id) ?? []) {
 				if (fill.signature !== cause.signature || fill.target !== cause.target) continue;
 				if (fill.outcome !== "fail" && fill.outcome !== "error") continue;
 				await add(fill.test, fill.id, fill.actor, fill.message, fill.method !== "agent");
@@ -1164,8 +1186,9 @@ async function refreshSlot(
 	ctx: Ctx,
 	slot: SlotRow,
 	obligation: ExerciseObligation | null,
+	knownFills?: Fill[],
 ): Promise<{ state: SlotState; causes: Cause[] }> {
-	const fills = await fillsOf(ctx.db, slot.id);
+	const fills = knownFills ?? (await fillsOf(ctx.db, slot.id));
 	const byResult = new Map(fills.map((fill) => [fill.id, fill]));
 	const { agg, failing } = aggregateFills(fills);
 	// A cause is a failure signature on a target.
@@ -1236,9 +1259,13 @@ export type SlotDispute = {
 export async function disputesOf(db: ReadDb, run: RunRow): Promise<SlotDispute[]> {
 	if (run.origin !== "planned") return [];
 	const disputes: SlotDispute[] = [];
-	for (const slot of await db.all(Q.failingSlotRows, { run: run.id })) {
-		if (slot.state !== "disputed") continue;
-		const fills = await fillsOf(db, slot.id);
+	const slots = (await db.all(Q.failingSlotRows, { run: run.id })).filter((slot) => slot.state === "disputed");
+	const bySlot = await fillsForSlots(
+		db,
+		slots.map((slot) => slot.id),
+	);
+	for (const slot of slots) {
+		const fills = bySlot.get(slot.id) ?? [];
 		const folded = aggregateFills(fills);
 		const effectiveIds = new Set(folded.effective);
 		const failingIds = new Set(folded.failing);
@@ -1658,9 +1685,16 @@ async function count(
 			}
 		}
 		// A failing or disputed slot counts once, by all of its causes: it is excused only when every one is.
-		for (const slot of await db.all(Q.failingSlots, { run: run.id })) {
+		const slots = await db.all(Q.failingSlots, { run: run.id });
+		const bySlot = await fillsForSlots(
+			db,
+			slots.map((slot) => slot.id),
+		);
+		for (const slot of slots) {
 			const disputed = slot.state === "disputed";
-			const causes = await failingFillsOf(db, slot.id);
+			const fills = bySlot.get(slot.id) ?? [];
+			const failingIds = new Set(aggregateFills(fills).failing);
+			const causes = fills.filter((fill) => failingIds.has(fill.id));
 			const excuses = await mapAsync(
 				causes,
 				async (fill) =>

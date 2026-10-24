@@ -445,6 +445,9 @@ const Q = {
 	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
+	decisionsByIds: sql<{ ids: readonly number[] }, DecisionRow>(
+		"SELECT * FROM decisions WHERE id = ANY($ids::bigint[])",
+	),
 	holdEndingById: sql<{ id: number }, DecisionRow>(`SELECT d.* FROM decisions d WHERE d.id = $id AND ${HOLD_ENDING}`),
 	nearestJudgment: sql<{ question: number }, DecisionRow>(`
  WITH RECURSIVE history AS (
@@ -836,6 +839,13 @@ export async function endPassedHolds(
 
 export const decisionById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
 	await db.get(Q.decisionById, { id });
+export async function decisionsByIds(db: ReadDb, ids: readonly number[]): Promise<Map<number, DecisionRow>> {
+	const rows: DecisionRow[] = [];
+	const unique = [...new Set(ids)];
+	for (let at = 0; at < unique.length; at += 200)
+		rows.push(...(await db.all(Q.decisionsByIds, { ids: unique.slice(at, at + 200) })));
+	return new Map(rows.map((row) => [row.id, row]));
+}
 export const holdEndingById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
 	await db.get(Q.holdEndingById, { id });
 export const nearestJudgment = async (db: ReadDb, question: number): Promise<DecisionRow | null> =>

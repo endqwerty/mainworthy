@@ -2700,12 +2700,14 @@ describe("what a run and a change may count", () => {
 
 	test("placing a commit whose failure was answered in sixty environments asks about each of them once", async () => {
 		const ci = await pipeline();
+		const agent = await explorer();
+		const setupStatements = h.app.database.statementCount;
 		const commit = "manyenvs01";
 		const fail = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
 		const envs = Array.from({ length: 60 }, (_, i) => `env-${i}`);
 		// The agent reports all of them, and then a person answers each in turn: an answer for one environment
 		// leaves the others asked about, in a question that still lists what it had seen.
-		for (const env of envs) await report({ target: { repo: "app", commit, env }, results: [fail] }, await explorer());
+		for (const env of envs) await report({ target: { repo: "app", commit, env }, results: [fail] }, agent);
 		for (const _ of envs) expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		expect((await h.call<InboxReply>("inbox", { kind: "failure", limit: 500 })).items).toEqual([]);
 		// The pipeline's first report of the commit is applied: every answer given about the commit on its own
@@ -2715,6 +2717,7 @@ describe("what a run and a change may count", () => {
 			ci,
 		);
 		expect(placed.counts.total).toBe(1);
+		expect(h.app.database.statementCount - setupStatements).toBeLessThanOrEqual(11_000);
 		expect((await gate({ commit, repo: "app" })).verdict).toBe("passed");
 		const asked = (await h.call<InboxReply>("inbox", { kind: "failure", limit: 500 })).items;
 		expect(asked).toHaveLength(1);

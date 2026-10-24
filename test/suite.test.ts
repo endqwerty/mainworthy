@@ -84,6 +84,186 @@ test("sealing sibling edits reads their base versions together", async () => {
 	}
 });
 
+test("adopting independent edits batches versions, heads and search documents", async () => {
+	await h.call("propose", {
+		edits: Array.from({ length: 64 }, (_, n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before" },
+			tags: ["kept"],
+		})),
+	});
+	const before = h.app.database.statementCount;
+	const reply = await h.call<Proposed>("propose", {
+		edits: Array.from({ length: 64 }, (_, n) => ({
+			op: "edit",
+			case: `C-${n + 1}`,
+			base: 1,
+			body: { pre: "After bulk revision" },
+		})),
+	});
+	expect(h.app.database.statementCount - before).toBeLessThanOrEqual(100);
+	expect(reply.cases.map(({ ref, version }) => ({ ref, version }))).toEqual(
+		Array.from({ length: 64 }, (_, n) => ({ ref: `C-${n + 1}`, version: 2 })),
+	);
+	await h.app.database.read(async (db) => {
+		expect(await db.allDynamic("SELECT head,count(*) AS n FROM cases GROUP BY head")).toEqual([{ head: 2, n: 64 }]);
+		expect(
+			await db.allDynamic(
+				"SELECT v.no,count(*) AS n FROM versions v JOIN decisions d ON d.id=v.decision JOIN proposals p ON p.id=v.proposal WHERE d.kind='adopt' AND v.parent IS NOT DISTINCT FROM nullif(v.no-1,0) GROUP BY v.no ORDER BY v.no",
+			),
+		).toEqual([
+			{ no: 1, n: 64 },
+			{ no: 2, n: 64 },
+		]);
+	});
+	const page = await h.call<{ count: number; items: { tags: string[] }[] }>("find", {
+		text: "After bulk revision",
+		limit: 100,
+	});
+	expect(page.count).toBe(64);
+	expect(page.items.every((row) => row.tags.includes("kept"))).toBe(true);
+});
+
+test("a stale sibling edit falls back without repeatedly preloading the remaining batch", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	await h.call("propose", {
+		edits: Array.from({ length: 12 }, (_, n) => ({ op: "create", body: { title: `Case ${n}`, pre: "Before" } })),
+	});
+	const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const waiting = await h.call<Proposed>(
+		"propose",
+		{
+			edits: Array.from({ length: 12 }, (_, n) => ({
+				op: "edit",
+				case: `C-${n + 1}`,
+				base: 1,
+				body: { pre: "After" },
+			})),
+		},
+		agent,
+	);
+	expect(waiting.status).toBe("open");
+	await h.call("propose", { edits: [{ op: "edit", case: "C-12", base: 1, body: { title: "Changed while waiting" } }] });
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [waiting.question] });
+	let preloads = 0;
+	const restore = observeDatabase(h.app.database, (text) => {
+		if (text === "SELECT * FROM cases WHERE id = ANY($1::bigint[])") preloads++;
+	});
+	try {
+		expect(
+			await h.call("decide", { q: waiting.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+		expect(preloads).toBeLessThanOrEqual(4);
+		expect(await h.call("get", { refs: ["C-12"] })).toMatchObject([
+			{ title: "Changed while waiting", pre: "After", version: 3 },
+		]);
+	} finally {
+		restore();
+	}
+});
+
+test("batched adoption preserves proposal provenance and searchable tags", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	await h.call("propose", {
+		edits: ["firsttag", "secondtag"].map((tag, n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before" },
+			tags: [tag],
+		})),
+	});
+	const author = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const proposal = await h.call<Proposed>(
+		"propose",
+		{
+			reason: "The author's revision",
+			edits: [1, 2].map((n) => ({ op: "edit", case: `C-${n}`, base: 1, body: { pre: "After" } })),
+		},
+		author,
+	);
+	expect(proposal.status).toBe("open");
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+	expect(
+		await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject([{ status: "decided" }]);
+	await h.app.database.read(async (db) => {
+		expect(
+			await db.allDynamic(
+				"SELECT c.no,v.author,v.reason,c.updated_by FROM versions v JOIN cases c ON c.id=v.case_id WHERE v.no=2 ORDER BY c.no",
+			),
+		).toEqual([1, 2].map((no) => ({ no, author: author.id, reason: "The author's revision", updated_by: author.id })));
+		expect(await db.allDynamic("SELECT tags FROM search_docs ORDER BY id")).toEqual([
+			{ tags: "firsttag" },
+			{ tags: "secondtag" },
+		]);
+	});
+	expect(
+		(await h.call<{ items: { ref: string }[] }>("find", { text: "firsttag" })).items.map((row) => row.ref),
+	).toEqual(["C-1"]);
+});
+
+test("batched adoption refuses a newly invalid field before publishing any sibling", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	const setFields = async (choices: string[]) => {
+		const policy = await h.call<{ version: number; settings: Record<string, unknown> }>("admin", {
+			do: "policy.show",
+			project: "scratch",
+		});
+		const proposal = await h.call<Proposed>("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: policy.version,
+					settings: {
+						...policy.settings,
+						fields: { risk: { kind: "choice", label: "Risk", required: false, choices } },
+					},
+				},
+			],
+		});
+		const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+		expect(
+			await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+	};
+	await setFields(["low", "high"]);
+	await h.call("propose", {
+		edits: [1, 2, 3].map((n) => ({
+			op: "create",
+			body: { title: `Case ${n}`, pre: "Before", fields: { risk: "low" } },
+		})),
+	});
+	const author = await h.actor("reviewer", "agent", ["read", "produce"]);
+	const proposal = await h.call<Proposed>(
+		"propose",
+		{
+			edits: [1, 2, 3].map((n) => ({
+				op: "edit",
+				case: `C-${n}`,
+				base: 1,
+				body: { pre: "After", fields: { risk: n === 2 ? "high" : "low" } },
+			})),
+		},
+		author,
+	);
+	expect(proposal.status).toBe("open");
+	await setFields(["low"]);
+	const snapshot = () =>
+		h.app.database.read(async (db) => ({
+			cases: await db.allDynamic("SELECT * FROM cases ORDER BY id"),
+			versions: await db.allDynamic("SELECT * FROM versions ORDER BY case_id,no"),
+			docs: await db.allDynamic("SELECT * FROM search_docs ORDER BY id"),
+		}));
+	const before = await snapshot();
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposal.question] });
+	expect(
+		await h.call("decide", { q: proposal.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject([{ status: "invalid", needs: expect.stringContaining("case custom fields are not valid") }]);
+	expect(await snapshot()).toEqual(before);
+});
+
 test("bulk suite reads preserve reference and alias resolution and pair versions exactly", async () => {
 	await h.call("propose", {
 		edits: [
