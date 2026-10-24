@@ -1,3 +1,7 @@
+import { expect, test } from "bun:test";
+import type { SlotFill, Tally } from "../src/core/runs.ts";
+import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
+import type { Actor } from "../src/server/kernel/ctx.ts";
 // Random sequences of the things people, pipelines and agents do, with the engine's invariants checked after
 // every step. The examples in `integrity.test.ts` each pin one path; this looks for the paths nobody thought of.
 // The idea and the first version are the independent reviewer's (round 6 of the engine review); this one adds
@@ -34,12 +38,9 @@
 //
 // The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
-import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
-import type { SlotFill, Tally } from "../src/core/runs.ts";
-import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
-import type { Actor } from "../src/server/kernel/ctx.ts";
+import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
+import { testDatabase } from "./db.ts";
 import { harness } from "./helpers.ts";
 import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
 
@@ -48,24 +49,26 @@ const STEPS = 80;
 
 type AuditExcuse = { class: string; decision: number };
 
-export function auditExcuses(db: Database) {
+export async function auditExcuses(db: ReadDb) {
 	const key = (project: number, signature: number, scope: string, target: number) =>
 		JSON.stringify([project, signature, scope, target]);
 	const broad = new Map(
-		db
-			.query<AuditExcuse & { project: number; signature: number; scope: string; target: number }, []>(
-				"SELECT project, signature, scope, target, class, decision FROM excuses",
+		(
+			await db.all(
+				sql<readonly [], AuditExcuse & { project: number; signature: number; scope: string; target: number }>(
+					"SELECT project, signature, scope, target, class, decision FROM excuses",
+				),
 			)
-			.all()
-			.map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
+		).map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
 	);
 	const exact = new Map(
-		db
-			.query<AuditExcuse & { result: number }, []>(
-				"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
+		(
+			await db.all(
+				sql<readonly [], AuditExcuse & { result: number }>(
+					"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
+				),
 			)
-			.all()
-			.map((row) => [row.result, row]),
+		).map((row) => [row.result, row]),
 	);
 	return (project: number, signature: number, scope: string, target: number, result = 0): AuditExcuse | undefined => {
 		// Target specificity wins within broad standing, even against a newer global decision.
@@ -90,13 +93,18 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	};
 	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
 	const h = await harness({ preset });
-	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
+	const rows = async <T = Row>(query: string, ...args: (string | number)[]): Promise<T[]> => {
+		let index = 0;
+		return await h.app.database.read(
+			async (db) => await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args),
+		);
+	};
 	const trace: unknown[] = [];
 	const successful = new Map<string, number>();
-	const people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
-	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-	const agent = h.actor("explorer", "agent", ["read", "produce"]);
-	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
+	const people: Actor[] = [h.owner, await h.actor("second", "human", ["read", "produce", "answer", "plan"])];
+	const pipeline = await h.actor("pipeline", "ci", ["read", "record"]);
+	const agent = await h.actor("explorer", "agent", ["read", "produce"]);
+	const rule = Number((await rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'"))[0]?.id ?? 0);
 	const command = async (op: string, input: unknown, as: Actor = h.owner): Promise<unknown> => {
 		const reply = await h.raw(op, input, as);
 		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
@@ -113,8 +121,8 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					? `line:${target.line}@${target.repo}`
 					: `line:${target.line}`;
 
-	const audit = (): { what: string; detail: unknown } | null => {
-		const runs = rows("SELECT * FROM runs");
+	const audit = async (): Promise<{ what: string; detail: unknown } | null> => {
+		const runs = await rows("SELECT * FROM runs");
 		const newestInScope = new Map<string, number>();
 		for (const run of runs) {
 			if (run.scope !== null) {
@@ -123,7 +131,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			}
 		}
 		// A change speaks through its observed head only while that run belongs to this scope.
-		for (const change of rows("SELECT id, project, repo, head_sha FROM changes")) {
+		for (const change of await rows("SELECT id, project, repo, head_sha FROM changes")) {
 			const scope = `change:${change.id}`;
 			const head =
 				change.head_sha === null
@@ -138,20 +146,29 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			if (head) newestInScope.set(scope, Number(head.id));
 			else newestInScope.delete(scope);
 		}
-		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
-			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
+		const targets = new Map((await rows("SELECT * FROM targets")).map((target) => [Number(target.id), target]));
+		const open = (
+			await rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
+				`SELECT q.no, q.subject, q.evidence, string_agg(r.ref, ',' ORDER BY r.ref) AS refs FROM questions q
 			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
+			)
 		).map((question) => ({
 			...question,
 			subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
 			evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
 			refs: String(question.refs ?? "").split(","),
 		}));
-		const excuseSnapshot = auditExcuses(h.app.db.raw);
-		const excuseOf = (project: number, signature: number, scope: string, target: number, result = 0, slot?: number) =>
+		const excuseSnapshot = await h.app.database.read(async (db) => await auditExcuses(db));
+		const excuseOf = async (
+			project: number,
+			signature: number,
+			scope: string,
+			target: number,
+			result = 0,
+			slot?: number,
+		) =>
 			slot !== undefined
-				? slotSettlement(h.app.db, slot, result)
+				? await h.app.database.read(async (db) => await slotSettlement(db, slot, result))
 				: excuseSnapshot(project, signature, scope, target, result);
 
 		for (const run of runs) {
@@ -162,24 +179,27 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			if (live) {
 				const causes: { signature: number; target: number; result: number; slot?: number }[] =
 					run.origin === "change"
-						? rows<{ signature: number; target: number; result: number }>(
+						? await rows<{ signature: number; target: number; result: number }>(
 								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
 								id,
 							)
-						: rows<{ id: number; state: string }>(
-								"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
-								id,
-							).flatMap((slot) =>
-								failingSlotResults(h.app.db, slot.id).map((cause) => ({
-									...cause,
-									...(slot.state === "disputed" ? { slot: slot.id } : {}),
-								})),
+						: await flatMapAsync(
+								await rows<{ id: number; state: string }>(
+									"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
+									id,
+								),
+								async (slot) =>
+									(await h.app.database.read(async (db) => await failingSlotResults(db, slot.id))).map((cause) => ({
+										...cause,
+										...(slot.state === "disputed" ? { slot: slot.id } : {}),
+									})),
 							);
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
 					const scope = scopeOf(target, id);
-					if (excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
+					if (await excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot))
+						continue;
 					const asked = open.filter((question) => {
 						const subject = question.subject;
 						const evidence = question.evidence;
@@ -201,8 +221,8 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 
 			if (run.origin === "change") {
 				// 2. The commit's lanes point back to their source history.
-				const current = rows("SELECT * FROM run_tests WHERE run = ?", id);
-				const history = rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
+				const current = await rows("SELECT * FROM run_tests WHERE run = ?", id);
+				const history = await rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
 					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
 					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
 					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
@@ -229,7 +249,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					else {
 						const seenOn = targets.get(Number(row.target));
 						if (!seenOn) return { what: "a result on an unknown target", detail: row };
-						const excuse = excuseOf(
+						const excuse = await excuseOf(
 							Number(run.project),
 							Number(row.signature),
 							scopeOf(seenOn, id),
@@ -247,10 +267,12 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 
 			// 11. The questions the gate names are open ones.
 			for (const named of JSON.parse(String(run.blocking)) as string[]) {
-				const state = rows<{ state: string }>(
-					"SELECT state FROM questions WHERE project = ? AND no = ?",
-					Number(run.project),
-					Number(named.slice(2)),
+				const state = (
+					await rows<{ state: string }>(
+						"SELECT state FROM questions WHERE project = ? AND no = ?",
+						Number(run.project),
+						Number(named.slice(2)),
+					)
 				)[0]?.state;
 				if (state !== "open")
 					return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
@@ -258,7 +280,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		}
 
 		// Every slot fill belongs to an existing slot and result of the same case.
-		const orphaned = rows(`SELECT s.* FROM slot_results s
+		const orphaned = await rows(`SELECT s.* FROM slot_results s
 			LEFT JOIN slots slot ON slot.id = s.slot LEFT JOIN results r ON r.id = s.result
 			WHERE slot.id IS NULL OR r.id IS NULL OR r.basis_case != slot.case_id`);
 		if (orphaned.length > 0) return { what: "slot fills have no matching case result", detail: orphaned };
@@ -267,18 +289,18 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		for (const run of runs) {
 			if (run.origin !== "planned" || run.state !== "open") continue;
 			const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
-			for (const slot of rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
+			for (const slot of await rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
 				if (slot.state === "satisfied" || slot.state === "waived") tally.pass++;
 				else if (slot.state === "missing") tally.missing++;
 				else if (slot.state === "skipped") {
 					tally.skipped++;
 					tally.missing++;
 				} else {
-					const causes = failingSlotResults(h.app.db, Number(slot.id));
-					const excuses = causes.map(({ signature, target, result }) => {
+					const causes = await h.app.database.read(async (db) => await failingSlotResults(db, Number(slot.id)));
+					const excuses = await mapAsync(causes, async ({ signature, target, result }) => {
 						const seenOn = targets.get(target);
 						return seenOn
-							? excuseOf(
+							? await excuseOf(
 									Number(run.project),
 									signature,
 									scopeOf(seenOn, Number(run.id)),
@@ -304,7 +326,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		}
 
 		// Accepted fills point to the pinned case and a target accepted by their run.
-		for (const fill of rows(`SELECT sr.*, s.case_id, r.basis_case, t.commit_sha, t.repo, t.env, t.project AS target_project, run.project AS run_project, run.accepts, run.id AS run_id,
+		for (const fill of await rows(`SELECT sr.*, s.case_id, r.basis_case, t.commit_sha, t.repo, t.env, t.project AS target_project, run.project AS run_project, run.accepts, run.id AS run_id,
 			b.run AS typed FROM slot_results sr JOIN slots s ON s.id = sr.slot
 			JOIN runs run ON run.id = s.run JOIN results r ON r.id = sr.result
 			JOIN targets t ON t.id = r.target JOIN batches b ON b.id = r.batch WHERE run.state = 'open'`)) {
@@ -326,18 +348,27 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			if (subject.slot !== undefined) {
 				if (
 					(evidence.results ?? []).length > 0 &&
-					evidence.results?.every(
-						(result) =>
-							rows("SELECT decision FROM result_excuses WHERE slot = ? AND result = ?", subject.slot ?? 0, result)
-								.length > 0,
-					)
+					(await everyAsync(
+						evidence.results ?? [],
+						async (result) =>
+							(
+								await rows(
+									"SELECT decision FROM result_excuses WHERE slot = ? AND result = ?",
+									subject.slot ?? 0,
+									result,
+								)
+							).length > 0,
+					))
 				)
 					return { what: "a settled slot still has an open dispute question", detail: question };
 				continue;
 			}
 			const listed = evidence.targets ?? [];
 			const project = Number(runs[0]?.project ?? 0);
-			if (listed.length > 0 && listed.every((target) => excuseOf(project, subject.signature, subject.scope, target)))
+			if (
+				listed.length > 0 &&
+				(await everyAsync(listed, async (target) => await excuseOf(project, subject.signature, subject.scope, target)))
+			)
 				return {
 					what: "a question is open about a failure that has an answer everywhere it was seen",
 					detail: question,
@@ -346,11 +377,13 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 
 		// 12. Heads and runs come from reports a gate counts.
 		const counted = new Set(
-			rows<{ what: string }>(
-				"SELECT DISTINCT t.what FROM batches b JOIN targets t ON t.id = b.target WHERE b.method != 'agent'",
+			(
+				await rows<{ what: string }>(
+					"SELECT DISTINCT t.what FROM batches b JOIN targets t ON t.id = b.target WHERE b.method != 'agent'",
+				)
 			).map((row) => row.what),
 		);
-		for (const change of rows("SELECT key, repo, head_sha FROM changes WHERE head_sha IS NOT NULL")) {
+		for (const change of await rows("SELECT key, repo, head_sha FROM changes WHERE head_sha IS NOT NULL")) {
 			const what = `code:${change.repo ?? ""}@${change.head_sha}`;
 			if (!counted.has(what))
 				return { what: "a change's head is a commit no pipeline or person reported", detail: change };
@@ -361,37 +394,37 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		}
 
 		// 8. A superseded decision is not in force.
-		const standing = rows(
+		const standing = await rows(
 			`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
 			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
-			   AND json_extract(old.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')`,
+			   AND (old.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')`,
 		);
 		if (standing.length > 0) return { what: "a superseded decision is still its question's answer", detail: standing };
 
 		// 4. Excuses and the decisions they belong to.
-		const orphans = rows(
+		const orphans = await rows(
 			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
 			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
 			 WHERE q.state != 'decided' OR q.decision != d.id`,
 		);
 		if (orphans.length > 0) return { what: "an excuse outlived its decision", detail: orphans };
-		const bare = rows(
+		const bare = await rows(
 			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
-			 WHERE q.kind = 'failure' AND q.state = 'decided' AND json_extract(d.effects, '$.class') IS NOT NULL
+			 WHERE q.kind = 'failure' AND q.state = 'decided' AND (d.effects::jsonb)->>'class' IS NOT NULL
 			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
      AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
 		);
 		if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
-		const unsupported = invalidInherited(h.app.db);
+		const unsupported = await h.app.database.read(async (db) => await invalidInherited(db));
 		if (unsupported.length > 0)
 			return { what: "an inherited failure does not fail on its base now", detail: unsupported };
 
 		return null;
 	};
 
-	const commitGates = (): Map<number, string> =>
+	const commitGates = async (): Promise<Map<number, string>> =>
 		new Map(
-			rows("SELECT id, tally, verdict, blocking, state FROM runs WHERE origin = 'change'").map((run) => [
+			(await rows("SELECT id, tally, verdict, blocking, state FROM runs WHERE origin = 'change'")).map((run) => [
 				Number(run.id),
 				`${run.verdict} ${run.state} ${run.tally} ${run.blocking}`,
 			]),
@@ -406,30 +439,33 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	const seen: { now: { no: number; parties: Set<number> | null } | null } = { now: null };
 	// Whether this policy keeps this failure question from this person, read from the rows as they are before the
 	// command: who reported a failure with its cause in its scope, and who has a result in a slot that disputes it.
-	const keptFromAnswering = (no: number, as: Actor): boolean => {
+	const keptFromAnswering = async (no: number, as: Actor): Promise<boolean> => {
 		if (preset === "loose") return false;
-		const question = rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no)[0];
+		const question = (await rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no))[0];
 		if (!question) return false;
 		const subject = JSON.parse(question.subject) as { signature: number; scope: string; slot?: number };
-		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const reported = rows<{ target: number; run: number | null }>(
-			`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
+		const targets = new Map((await rows("SELECT * FROM targets")).map((target) => [Number(target.id), target]));
+		const reported = (
+			await rows<{ target: number; run: number | null }>(
+				`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
 			 WHERE r.signature = ? AND r.actor = ? AND r.outcome IN ('fail', 'error')`,
-			subject.signature,
-			as.id,
+				subject.signature,
+				as.id,
+			)
 		).some((row) => {
 			const target = targets.get(Number(row.target));
 			return target !== undefined && scopeOf(target, Number(row.run ?? 0)) === subject.scope;
 		});
 		const parties = new Set<number>();
 		if (subject.slot !== undefined)
-			for (const row of rows<{ actor: number }>(
+			for (const row of await rows<{ actor: number }>(
 				"SELECT DISTINCT r.actor FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL",
 				subject.slot,
 			))
 				parties.add(Number(row.actor));
 		seen.now = { no, parties: subject.slot !== undefined ? parties : null };
-		const decided = rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no)[0]?.state === "decided";
+		const decided =
+			(await rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no))[0]?.state === "decided";
 		const before = decided ? answeredAsDispute.get(no) : undefined;
 		return subject.slot === undefined
 			? preset === "strict" && reported
@@ -445,7 +481,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			],
 		});
 		// Under a policy where a person adopts new cases, the owner does, with the reason it asks for.
-		for (const waiting of rows<{ no: number; evidence_hash: string }>(
+		for (const waiting of await rows<{ no: number; evidence_hash: string }>(
 			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open'",
 		))
 			await command("decide", {
@@ -454,7 +490,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				answer: { is: "accept" },
 				reason: "seed",
 			});
-		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
+		expect(await rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
 		const commits = ["random01", "random02", "random03"];
 		for (let step = 0; step < STEPS; step++) {
 			const action = rand(100);
@@ -480,7 +516,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					...(outcome === "fail" ? cause() : {}),
 				};
 				if (rand(5) === 0) {
-					const earlier = rows<{ id: number }>(
+					const earlier = await rows<{ id: number }>(
 						`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
 						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL`,
 						as.id,
@@ -526,7 +562,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					{ commit: pick(commits), branch: "main", env: "prod" },
 					{ commit: pick(["change01", "change02"]), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
 				]);
-				gatesBefore = commitGates();
+				gatesBefore = await commitGates();
 				await command(
 					"report",
 					{
@@ -561,7 +597,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 				});
 			} else if (action < 72) {
 				// A person records a result by hand in an open run: two people on one case can dispute.
-				const planned = rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
+				const planned = await rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
 				if (planned.length > 0) {
 					const outcome = pick(["fail", "pass", "pass", "skip"]);
 					await command(
@@ -581,13 +617,14 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 					);
 				}
 			} else if (action < 94) {
-				const questions = rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
+				const questions = await rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
 					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided')",
 				);
 				if (questions.length > 0) {
 					const question = pick(questions);
 					const as = pick(people);
-					keptFrom = question.kind === "failure" && keptFromAnswering(question.no, as) ? `Q-${question.no}` : null;
+					keptFrom =
+						question.kind === "failure" && (await keptFromAnswering(question.no, as)) ? `Q-${question.no}` : null;
 					if (question.state === "decided" && rand(3) === 0)
 						settled = await command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
 					else
@@ -637,11 +674,11 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			seen.now = null;
 			keptFrom = null;
 			settled = null;
-			const problem = audit();
+			const problem = await audit();
 			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
 			// 10. The commits that had a gate before an agent's report read the same after it.
 			if (gatesBefore) {
-				const after = commitGates();
+				const after = await commitGates();
 				for (const [run, gate] of gatesBefore)
 					if (after.get(run) !== gate)
 						return {
@@ -657,9 +694,9 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 		if (
 			(successful.get("report") ?? 0) === 0 ||
 			(successful.get("plan") ?? 0) === 0 ||
-			rows("SELECT id FROM slots").length === 0 ||
-			rows("SELECT id FROM results").length === 0 ||
-			rows("SELECT id FROM runs").length === 0
+			(await rows("SELECT id FROM slots")).length === 0 ||
+			(await rows("SELECT id FROM results")).length === 0 ||
+			(await rows("SELECT id FROM runs")).length === 0
 		)
 			return {
 				seed,
@@ -670,7 +707,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			};
 		return null;
 	} finally {
-		h.close();
+		await h.close();
 	}
 }
 
@@ -689,7 +726,7 @@ function literalTransitions(): void {
 				accepts: { commit: target.commit },
 				require: [{ id: "exercise", kind: "exercise", methods: ["auto", "human"], basis: "exact", minActors: 2 }],
 			});
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			const report = async (outcome: string, attempt = 1, job = "unit") =>
 				await h.call(
 					"report",
@@ -734,7 +771,7 @@ function literalTransitions(): void {
 			});
 			expect(await snapshot()).toEqual({ slot: "disputed", gate: "blocked" });
 		} finally {
-			h.close();
+			await h.close();
 		}
 	});
 
@@ -762,7 +799,7 @@ function literalTransitions(): void {
 				accepts: { commit: "admission01" },
 				require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
 			});
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 			await h.call(
 				"report",
 				{
@@ -785,7 +822,7 @@ function literalTransitions(): void {
 				slots.items.map((slot) => ({ state: slot.state, fills: slot.fills.map((fill) => fill.admitted) })),
 			).toEqual([{ state, fills: admitted === null ? [] : [admitted] }]);
 		} finally {
-			h.close();
+			await h.close();
 		}
 	});
 
@@ -924,23 +961,34 @@ function literalTransitions(): void {
 export function sequences(preset: "loose" | "standard" | "strict"): void {
 	if (preset === "loose") literalTransitions();
 	if (preset === "loose")
-		test("the audit resolves broad and exact-result standing independently", () => {
-			using db = new Database(":memory:");
-			db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
+		test("the audit resolves broad and exact-result standing independently", async () => {
+			const fixture = await testDatabase({ schema: "empty" });
+			const database = await Database.open({ url: fixture.url });
+			try {
+				await database.write(
+					async (db) =>
+						await db.transaction(async () => {
+							await db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
 			CREATE TABLE result_excuses (result INTEGER, slot INTEGER, class TEXT, decision INTEGER);
 			INSERT INTO excuses VALUES (1, 2, 'line:main', 0, 'excused', 30), (1, 2, 'line:main', 4, 'attributed', 10);
 			INSERT INTO result_excuses VALUES (5, NULL, 'excused', 20), (6, NULL, 'excused', 9),
 				(7, NULL, 'excused', 10), (8, 99, 'excused', 40);`);
-			const excuseOf = auditExcuses(db);
-			expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-			expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
-			expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
-			expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
-			expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-			expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
-			expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+							const excuseOf = await auditExcuses(db);
+							expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+							expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
+							expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
+							expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
+							expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+							expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
+							expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+						}),
+				);
+			} finally {
+				await database.close();
+				await fixture.close();
+			}
 		});
 
 	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, async () => {
@@ -951,4 +999,24 @@ export function sequences(preset: "loose" | "standard" | "strict"): void {
 		}
 		expect(problems).toEqual([]);
 	}, 120_000);
+}
+
+async function everyAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (!(await callback(row))) return false;
+	return true;
+}
+
+async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {
+	const out: R[] = [];
+	for (const row of rows) {
+		const found = await callback(row);
+		out.push(...(Array.isArray(found) ? found : [found]));
+	}
+	return out;
+}
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
 }

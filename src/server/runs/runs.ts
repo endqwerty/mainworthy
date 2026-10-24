@@ -63,7 +63,7 @@ import {
 import { quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
-import { type ReadDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, versionOf } from "../suite/suite.ts";
@@ -115,7 +115,25 @@ export type SlotRow = {
 
 export type SlotLease = { slot: number; actor: number; since: number; until: number };
 
+export type RunTestWrite = {
+	run: number;
+	test: number;
+	result: number;
+	outcome: string;
+	signature: number | null;
+	attempt: number;
+	flipped: number;
+	lane: string;
+	target: number;
+};
+
 const Q = {
+	passesAny: sql<{ run: number; tests: readonly number[] }, { n: number }>(
+		"SELECT 1 AS n FROM run_tests WHERE run = $run AND outcome = 'pass' AND test = ANY($tests::bigint[]) LIMIT 1",
+	),
+	passingIn: sql<{ run: number; tests: readonly number[] }, { test: number; target: number }>(
+		"SELECT test, target FROM run_tests WHERE run = $run AND outcome = 'pass' AND test = ANY($tests::bigint[])",
+	),
 	receiptBuckets: sql<{ run: number; after: number }, { bucket: number }>(
 		"SELECT result/32 AS bucket FROM run_tests WHERE run=$run AND result/32>$after GROUP BY result/32 ORDER BY result/32 LIMIT 50",
 	),
@@ -126,7 +144,7 @@ const Q = {
 		"SELECT test,result,target,outcome,signature,flipped FROM run_tests WHERE run=$run AND result/32=$bucket ORDER BY result",
 	),
 	receiptBlockingCount: sql<{ id: number }, { n: number }>(
-		"SELECT json_array_length(blocking) AS n FROM runs WHERE id=$id",
+		"SELECT jsonb_array_length(blocking::jsonb) AS n FROM runs WHERE id=$id",
 	),
 	lease: sql<{ slot: number; now: number }, SlotLease>(
 		"SELECT l.* FROM slot_leases l JOIN slots s ON s.id = l.slot JOIN runs r ON r.id = s.run WHERE l.slot = $slot AND l.until > $now AND r.state = 'open'",
@@ -144,7 +162,7 @@ const Q = {
 	),
 	emptyChangeRuns: sql<{ project: number }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
-		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
+		 AND ((tally::jsonb)->>'pass')::bigint + ((tally::jsonb)->>'excused')::bigint = 0`,
 	),
 	inheritanceRuns: sql<{ project: number }, { id: number }>(
 		"SELECT id FROM runs WHERE project = $project AND origin = 'change' AND scope LIKE 'change:%'",
@@ -166,12 +184,12 @@ const Q = {
 	),
 	receivingPlanned: sql<{ project: number; commit: string | null }, RunRow>(
 		`SELECT * FROM runs WHERE project = $project AND origin = 'planned'
-		 AND (state = 'open' OR (state = 'closed' AND json_extract(accepts, '$.commit') = $commit))
+		 AND (state = 'open' OR (state = 'closed' AND (accepts::jsonb)->>'commit' = $commit))
 		 ORDER BY state, id DESC`,
 	),
 	plannedForCommit: sql<{ project: number; commit: string }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
-		 AND json_extract(accepts, '$.commit') = $commit
+		 AND (accepts::jsonb)->>'commit' = $commit
 		 ORDER BY state, id DESC`,
 	),
 	recent: sql<
@@ -186,34 +204,37 @@ const Q = {
 		RunRow
 	>(
 		`SELECT * FROM runs WHERE project = $project AND id < $before
-		 AND ($origin IS NULL OR origin = $origin) AND ($state IS NULL OR state = $state)
-		 AND ($change IS NULL OR change = $change)
+		 AND ($origin::text IS NULL OR origin = $origin) AND ($state::text IS NULL OR state = $state)
+		 AND ($change::bigint IS NULL OR change = $change)
 		 ORDER BY id DESC LIMIT $limit`,
 	),
-	insert: sql<{
-		project: number;
-		no: number;
-		name: string;
-		origin: string;
-		accepts: string;
-		what: string | null;
-		scope: string | null;
-		require: string;
-		change: number | null;
-		tally: string;
-		verdict: string;
-		actor: number;
-		at: number;
-		rev: number;
-	}>(
+	insert: sql<
+		{
+			project: number;
+			no: number;
+			name: string;
+			origin: string;
+			accepts: string;
+			what: string | null;
+			scope: string | null;
+			require: string;
+			change: number | null;
+			tally: string;
+			verdict: string;
+			actor: number;
+			at: number;
+			rev: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO runs (project, no, name, origin, accepts, accepts_what, scope, require, change, tally, verdict, created_by, created_at, rev)
-		 VALUES ($project, $no, $name, $origin, $accepts, $what, $scope, $require, $change, $tally, $verdict, $actor, $at, $rev)`,
+		 VALUES ($project, $no, $name, $origin, $accepts, $what, $scope, $require, $change, $tally, $verdict, $actor, $at, $rev) RETURNING id`,
 	),
 	accepted: sql<{ id: number; seq: number }>(
 		"UPDATE runs SET outstanding = outstanding + 1, accepted_seq = $seq, rev = $seq WHERE id = $id",
 	),
 	applied: sql<{ id: number; seq: number; rev: number }>(
-		"UPDATE runs SET outstanding = max(outstanding - 1, 0), applied_seq = max(applied_seq, $seq), rev = $rev WHERE id = $id",
+		"UPDATE runs SET outstanding = greatest(outstanding - 1, 0), applied_seq = greatest(applied_seq, $seq), rev = $rev WHERE id = $id",
 	),
 	project: sql<{
 		id: number;
@@ -229,21 +250,22 @@ const Q = {
 	setState: sql<{ id: number; state: string; signoff: number | null; rev: number }>(
 		"UPDATE runs SET state = $state, signoff = $signoff, rev = $rev WHERE id = $id",
 	),
-	upsertRunTest: sql<{
-		run: number;
-		test: number;
-		result: number;
-		outcome: string;
-		signature: number | null;
-		attempt: number;
-		flipped: number;
-		lane: string;
-		target: number;
-	}>(
+	upsertRunTest: sql<RunTestWrite>(
 		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
 		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped, $lane, $target)
 		 ON CONFLICT (run, test, lane) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
-		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
+		   attempt = excluded.attempt, flipped = greatest(run_tests.flipped, excluded.flipped)
+		 WHERE (excluded.attempt > run_tests.attempt
+		        AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error')))
+		    OR (excluded.attempt = run_tests.attempt
+		        AND (CASE excluded.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END)
+		         >= (CASE run_tests.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END))`,
+	),
+	upsertRunTests: sql<{ [K in keyof RunTestWrite]: readonly RunTestWrite[K][] }>(
+		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
+   SELECT * FROM unnest($run::bigint[], $test::bigint[], $result::bigint[], $outcome::text[], $signature::bigint[], $attempt::bigint[], $flipped::bigint[], $lane::text[], $target::bigint[])
+		 ON CONFLICT (run, test, lane) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
+		   attempt = excluded.attempt, flipped = greatest(run_tests.flipped, excluded.flipped)
 		 WHERE (excluded.attempt > run_tests.attempt
 		        AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error')))
 		    OR (excluded.attempt = run_tests.attempt
@@ -272,7 +294,7 @@ const Q = {
 	plannedShowing: sql<{ project: number; signature: number }, { run: number }>(
 		`SELECT DISTINCT s.run AS run FROM runs r JOIN slots s ON s.run = r.id AND s.state IN ('failing', 'disputed')
 		 WHERE r.project = $project AND r.origin = 'planned'
-		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
+		   AND EXISTS (SELECT 1 FROM jsonb_array_elements(s.causes::jsonb) WHERE ((value::jsonb)->>0)::bigint = $signature)`,
 	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
@@ -339,7 +361,7 @@ const Q = {
 		"UPDATE slots SET agg = $agg, state = $state, signature = $signature, causes = $causes, rev = $rev WHERE id = $id",
 	),
 	admit: sql<{ slot: number; result: number; run: number; admitted: string }>(
-		"INSERT OR IGNORE INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted)",
+		"INSERT INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted) ON CONFLICT DO NOTHING",
 	),
 	correctInSlot: sql<{ slot: number; result: number }>(
 		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result AND corrected = 0",
@@ -372,11 +394,11 @@ const Q = {
 	),
 	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
 		`SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed')
-		 AND EXISTS (SELECT 1 FROM json_each(slots.causes) WHERE json_extract(value, '$[0]') = $signature)`,
+		 AND EXISTS (SELECT 1 FROM jsonb_array_elements(slots.causes::jsonb) WHERE ((value::jsonb)->>0)::bigint = $signature)`,
 	),
 	clearDepends: sql<{ run: number }>("DELETE FROM depends_on WHERE run = $run"),
 	depend: sql<{ run: number; decision: number; expires: number | null }>(
-		"INSERT OR IGNORE INTO depends_on (run, decision, expires_at) VALUES ($run, $decision, $expires)",
+		"INSERT INTO depends_on (run, decision, expires_at) VALUES ($run, $decision, $expires) ON CONFLICT DO NOTHING",
 	),
 	dependents: sql<{ decision: number }, { run: number }>("SELECT run FROM depends_on WHERE decision = $decision"),
 };
@@ -405,17 +427,17 @@ export const recentRuns = async (
 export const slotById = async (db: ReadDb, id: number): Promise<SlotRow | null> => await db.get(Q.slotById, { id });
 export const slotsPage = async (db: ReadDb, run: number, after: number, limit: number): Promise<SlotRow[]> =>
 	await db.all(Q.slotsOfRun, { run, after, limit });
-export const leaseOf = async (ctx: Ctx, slot: number): Promise<SlotLease | null> =>
+export const leaseOf = async (ctx: Ctx<ReadDb>, slot: number): Promise<SlotLease | null> =>
 	await ctx.db.get(Q.lease, { slot, now: ctx.app.now() });
-export const workIn = async (ctx: Ctx, run: number) =>
-	ctx.db.get(Q.liveWork, { run, now: ctx.app.now() }) ?? { n: 0, until: null };
+export const workIn = async (ctx: Ctx<ReadDb>, run: number) =>
+	(await ctx.db.get(Q.liveWork, { run, now: ctx.app.now() })) ?? { n: 0, until: null };
 
-export async function workSlot(ctx: Ctx, run: RunRow, id: number): Promise<SlotRow> {
+export async function workSlot(ctx: Ctx<ReadDb>, run: RunRow, id: number): Promise<SlotRow> {
 	const slot = await slotById(ctx.db, id);
 	if (!slot || slot.run !== run.id) throw notFound(`slot ${id} in ${runRef(run)}`);
 	return slot;
 }
-async function canWork(ctx: Ctx, run: RunRow, slot: SlotRow): Promise<boolean> {
+async function canWork(ctx: Ctx<ReadDb>, run: RunRow, slot: SlotRow): Promise<boolean> {
 	const method = ctx.actor.kind === "ci" ? "auto" : ctx.actor.kind;
 	if (method === "rule") return false;
 	const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
@@ -438,12 +460,16 @@ export async function takeWork(
 	if (run.origin !== "planned" || run.state !== "open") throw invalid("only an open planned run has slots to take");
 	const slot =
 		input.slot === undefined
-			? (await ctx.db.all(Q.nextWork, { run: run.id, now: ctx.app.now() })).find(
-					(s) => canWork(ctx, run, s) && !effectiveFillsOf(ctx.db, s.id).some((f) => f.actor === ctx.actor.id),
+			? await findAsync(
+					await ctx.db.all(Q.nextWork, { run: run.id, now: ctx.app.now() }),
+					async (s) =>
+						(await canWork(ctx, run, s)) &&
+						!(await effectiveFillsOf(ctx.db, s.id)).some((f) => f.actor === ctx.actor.id),
 				)
 			: await workSlot(ctx, run, input.slot);
 	if (!slot) return { kind: "empty" };
-	if (!canWork(ctx, run, slot)) throw forbidden("your method is not admitted by this slot's run and pinned case");
+	if (!(await canWork(ctx, run, slot)))
+		throw forbidden("your method is not admitted by this slot's run and pinned case");
 	const held = await leaseOf(ctx, slot.id);
 	if (held && workHeldByOther(held, ctx.actor.id, ctx.app.now())) return { kind: "busy", lease: held };
 	const now = ctx.app.now();
@@ -457,7 +483,8 @@ export async function releaseWork(ctx: Ctx, run: RunRow, slot: SlotRow): Promise
 	ctx.touched.add(runRef(run));
 }
 
-export const slotCount = async (db: ReadDb, run: number): Promise<number> => db.get(Q.slotCount, { run })?.n ?? 0;
+export const slotCount = async (db: ReadDb, run: number): Promise<number> =>
+	(await db.get(Q.slotCount, { run }))?.n ?? 0;
 export type Fill = {
 	model: string | null;
 	id: number;
@@ -477,7 +504,7 @@ export type Fill = {
 	note: string | null;
 	message: string | null;
 	atStep: string | null;
-	steps: ReturnType<typeof resultTrail>;
+	steps: Awaited<ReturnType<typeof resultTrail>>;
 };
 
 /** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
@@ -487,7 +514,7 @@ export async function fillsOf(db: ReadDb, slot: number): Promise<Fill[]> {
 	const jobOf = async (batch: number): Promise<string> => {
 		let job = jobs.get(batch);
 		if (job === undefined) {
-			job = batchById(db, batch)?.job ?? "";
+			job = (await batchById(db, batch))?.job ?? "";
 			jobs.set(batch, job);
 		}
 		return job;
@@ -535,10 +562,7 @@ export const flippedIn = async (db: ReadDb, run: number): Promise<number> =>
 /** Whether a change run holds a passing result for any of these tests: the evidence that a failure stopped. */
 export async function passesAny(db: ReadDb, run: number, tests: readonly number[]): Promise<boolean> {
 	if (tests.length === 0) return false;
-	const rows = await db.allDynamic<{ n: number }>(
-		`SELECT 1 AS n FROM run_tests WHERE run = ? AND outcome = 'pass' AND test IN (${tests.map(() => "?").join(", ")}) LIMIT 1`,
-		[run, ...tests],
-	);
+	const rows = await db.all(Q.passesAny, { run, tests });
 	return rows.length > 0;
 }
 export const runsDependingOn = async (db: ReadDb, decision: number): Promise<number[]> =>
@@ -572,7 +596,7 @@ export async function ensureChangeRun(ctx: Ctx, target: TargetRow, create = true
 	const change = target.change !== null ? await changeById(ctx.db, target.change) : null;
 	const where = change ? change.key : (target.branch ?? target.line);
 	const no = await ctx.nextNo("run");
-	const { lastId } = await ctx.db.run(Q.insert, {
+	const { id: insertedId } = await ctx.db.one(Q.insert, {
 		project: ctx.project.id,
 		no,
 		name: `${target.commit_sha.slice(0, 7)} on ${where}`,
@@ -589,7 +613,7 @@ export async function ensureChangeRun(ctx: Ctx, target: TargetRow, create = true
 		rev: ctx.seq,
 	});
 	ctx.touched.add(ref("run", no));
-	return await runById(ctx.db, lastId);
+	return await runById(ctx.db, insertedId);
 }
 
 /**
@@ -602,7 +626,7 @@ async function matches(db: ReadDb, run: RunRow, target: TargetRow, typedInto: nu
 	if ("self" in accepts) return typedInto === run.id;
 	if ("build" in accepts)
 		return (
-			target.what === buildWhat(db, run.project, accepts.build) &&
+			target.what === (await buildWhat(db, run.project, accepts.build)) &&
 			(accepts.env === undefined || accepts.env === target.env)
 		);
 	if (target.commit_sha === null) return false;
@@ -629,7 +653,7 @@ export async function runsFor(
 	const change = await ensureChangeRun(ctx, target, producer !== "agent");
 	if (change) out.push(change);
 	for (const run of await ctx.db.all(Q.receivingPlanned, { project: ctx.project.id, commit: target.commit_sha })) {
-		if (matches(ctx.db, run, target, typedInto)) out.push(run);
+		if (await matches(ctx.db, run, target, typedInto)) out.push(run);
 	}
 	return out;
 }
@@ -653,12 +677,16 @@ export function describeAccepts(run: RunRow): string {
 async function targetsOfRun(db: ReadDb, run: RunRow): Promise<TargetRow[]> {
 	const accepts = acceptsOf(run);
 	if ("build" in accepts)
-		return (await targetsOfCommit(db, run.project, await buildWhat(db, run.project, accepts.build))).filter((target) =>
-			matches(db, run, target, null),
+		return await filterAsync(
+			await targetsOfCommit(db, run.project, await buildWhat(db, run.project, accepts.build)),
+			async (target) => await matches(db, run, target, null),
 		);
 	if (!("commit" in accepts)) return [];
 	if (run.origin === "change") return run.accepts_what ? await targetsOfCommit(db, run.project, run.accepts_what) : [];
-	return (await targetsWithCommit(db, run.project, accepts.commit)).filter((target) => matches(db, run, target, null));
+	return await filterAsync(
+		await targetsWithCommit(db, run.project, accepts.commit),
+		async (target) => await matches(db, run, target, null),
+	);
 }
 
 /**
@@ -691,6 +719,35 @@ export async function noteAccepted(
 }
 
 // ── Applying a batch ───────────────────────────────────────────────────────────────────────────────────────
+
+/** Preserve lane replacement order, including repeated tests, while writing distinct lane keys together. */
+export async function upsertRunTests(db: WriteDb, rows: readonly RunTestWrite[]): Promise<void> {
+	let pending: RunTestWrite[] = [];
+	const keys = new Set<string>();
+	const flush = async () => {
+		if (!pending.length) return;
+		await db.run(Q.upsertRunTests, {
+			run: pending.map((row) => row.run),
+			test: pending.map((row) => row.test),
+			result: pending.map((row) => row.result),
+			outcome: pending.map((row) => row.outcome),
+			signature: pending.map((row) => row.signature),
+			attempt: pending.map((row) => row.attempt),
+			flipped: pending.map((row) => row.flipped),
+			lane: pending.map((row) => row.lane),
+			target: pending.map((row) => row.target),
+		});
+		pending = [];
+		keys.clear();
+	};
+	for (const row of rows) {
+		const key = JSON.stringify([row.run, row.test, row.lane]);
+		if (keys.has(key)) await flush();
+		pending.push(row);
+		keys.add(key);
+	}
+	await flush();
+}
 
 /** Failures with one cause in one scope: what a `failure` question is about. */
 export type FailingGroup = {
@@ -748,6 +805,11 @@ export async function* applyBatchSteps(
 	// One lane per target, job and producer: a newer attempt in a lane replaces the one before it, and nothing
 	// from another lane (another job, another environment, another producer) can.
 	const lane = `${batch.target}:${batch.job}:${batch.actor}`;
+	const pending: RunTestWrite[] = [];
+	const flush = async () => {
+		await upsertRunTests(ctx.db, pending);
+		pending.length = 0;
+	};
 	let folded = 0;
 	for (const result of applied) {
 		if (folded++ > 0 && folded % SLICE === 0) yield;
@@ -757,8 +819,11 @@ export async function* applyBatchSteps(
 		if (changeRun && counted) {
 			// A correction withdraws the result it names: the lane it was in is folded again without it, so the
 			// attempt before it stands again if the correction does not take its place.
-			if (result.corrects !== null) await refoldLaneOf(ctx, changeRun, result.corrects);
-			await ctx.db.run(Q.upsertRunTest, {
+			if (result.corrects !== null) {
+				await flush();
+				await refoldLaneOf(ctx, changeRun, result.corrects);
+			}
+			pending.push({
 				run: changeRun.id,
 				test: result.test.id,
 				result: result.id,
@@ -775,7 +840,8 @@ export async function* applyBatchSteps(
 			for (const { slot } of await ctx.db.all(Q.slotsOfResult, { result: result.corrects })) {
 				const row = await slotById(ctx.db, slot);
 				if (!row || !plannedIds.has(row.run)) continue;
-				if (ctx.db.run(Q.correctInSlot, { slot, result: result.corrects }).changes > 0) touchedSlots.set(slot, row);
+				if ((await ctx.db.run(Q.correctInSlot, { slot, result: result.corrects })).changes > 0)
+					touchedSlots.set(slot, row);
 			}
 		}
 		if (result.basisCase !== null && planned.length > 0) {
@@ -797,7 +863,7 @@ export async function* applyBatchSteps(
 					caseMethods: await methodsOf(ctx.db, slot, result, declared),
 				});
 				if (!admitted) continue;
-				if (ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted }).changes > 0) {
+				if ((await ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted })).changes > 0) {
 					await releaseWork(ctx, run, slot);
 					touchedSlots.set(slot.id, slot);
 				}
@@ -813,9 +879,11 @@ export async function* applyBatchSteps(
 		}
 	}
 
+	await flush();
+
 	// Rebuild every slot the batch touched from its complete admitted set, and note the ones now in dispute.
 	for (const slot of touchedSlots.values()) {
-		const run = planned.find((r) => r.id === slot.run) ?? runById(ctx.db, slot.run);
+		const run = planned.find((r) => r.id === slot.run) ?? (await runById(ctx.db, slot.run));
 		if (!run) continue;
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		const next = await refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
@@ -823,7 +891,10 @@ export async function* applyBatchSteps(
 		// Every cause failing in the slot is its own question: answering one does not answer the others. Only the
 		// causes seen in this batch's scope are this batch's to ask about; one seen in another repository has its
 		// own question there.
-		const here = next.causes.filter(([, seenOn]) => scopeOf(mustTarget(ctx.db, seenOn), batch.run) === scope);
+		const here = await filterAsync(
+			next.causes,
+			async ([, seenOn]) => scopeOf(await mustTarget(ctx.db, seenOn), batch.run) === scope,
+		);
 		for (const id of new Set(here.map(([cause]) => cause))) {
 			const signature = await signatureById(ctx.db, id);
 			if (!signature) continue;
@@ -921,11 +992,11 @@ export async function runsShowing(db: ReadDb, project: number, signature: number
 async function heldInLane(
 	db: ReadDb,
 	lane: { target: number; test: number; actor: number; job: string },
-	counts: (result: NonNullable<ReturnType<typeof resultById>>) => boolean,
-): Promise<ReturnType<typeof resultById>> {
-	let held: ReturnType<typeof resultById> = null;
+	counts: (result: NonNullable<Awaited<ReturnType<typeof resultById>>>) => boolean,
+): Promise<Awaited<ReturnType<typeof resultById>>> {
+	let held: Awaited<ReturnType<typeof resultById>> = null;
 	for (const next of await laneHistory(db, lane)) {
-		if (!counts(next) || db.get(Q.judgedBy, { result: next.id })) continue;
+		if (!counts(next) || (await db.get(Q.judgedBy, { result: next.id }))) continue;
 		if (!held || replacesInLane(held, next)) held = next;
 	}
 	return held;
@@ -944,7 +1015,7 @@ export async function unexplainedShown(db: ReadDb, run: RunRow): Promise<Unexpla
 	const note = async (result: { id: number; signature: number | null; target: number }): Promise<void> => {
 		if (result.signature === null) return;
 		const scope = await scopeFor(result.target);
-		if (!quarantineFor(result.id) && !excuseForResult(db, { ...result, project: run.project }, scope))
+		if (!(await quarantineFor(result.id)) && !(await excuseForResult(db, { ...result, project: run.project }, scope)))
 			shown.set(`${result.signature}:${result.target}`, { signature: result.signature, target: result.target, scope });
 	};
 	if (run.origin === "change") {
@@ -953,7 +1024,7 @@ export async function unexplainedShown(db: ReadDb, run: RunRow): Promise<Unexpla
 	} else {
 		for (const slot of await db.all(Q.failingSlots, { run: run.id }))
 			for (const fill of await failingFillsOf(db, slot.id))
-				if (slot.state !== "disputed" || !excuseForDisputedSlot(db, slot.id, fill.id, run.id)) await note(fill);
+				if (slot.state !== "disputed" || !(await excuseForDisputedSlot(db, slot.id, fill.id, run.id))) await note(fill);
 	}
 	return [...shown.values()];
 }
@@ -1221,14 +1292,15 @@ async function comparisonLane(db: ReadDb, result: ResultRow): Promise<string> {
  */
 export async function failsOnBase(db: ReadDb, id: number): Promise<boolean> {
 	const result = await resultById(db, id);
-	if (!result || result.signature === null || signatureById(db, result.signature)?.class === "unknown") return false;
+	if (!result || result.signature === null || (await signatureById(db, result.signature))?.class === "unknown")
+		return false;
 	const base = await baseRunOf(db, await mustTarget(db, result.target));
 	if (!base) return false;
 	const lane = await comparisonLane(db, result);
-	return (await db.all(Q.effectiveOfTest, { run: base.id, test: result.test })).some((row) => {
+	return await someAsync(await db.all(Q.effectiveOfTest, { run: base.id, test: result.test }), async (row) => {
 		if ((row.outcome !== "fail" && row.outcome !== "error") || row.signature !== result.signature) return false;
-		const support = resultById(db, row.result);
-		return support !== null && comparisonLane(db, support) === lane;
+		const support = await resultById(db, row.result);
+		return support !== null && (await comparisonLane(db, support)) === lane;
 	});
 }
 /** Every change-scope commit, including those whose inherited questions were retired or never raised. */
@@ -1240,7 +1312,7 @@ export const countedTestsOf = async (db: ReadDb, run: number) => await db.all(Q.
 
 /** Whether a run counts a test failing with this cause, whether an answer explains it or not. */
 export const failsWith = async (db: ReadDb, run: number, signature: number): Promise<boolean> =>
-	db.get(Q.failsWith, { run, signature }) !== null;
+	(await db.get(Q.failsWith, { run, signature })) !== null;
 
 /** Where a run counts these tests passing: each test with each environment it passed in. */
 export async function passingIn(
@@ -1249,12 +1321,10 @@ export async function passingIn(
 	tests: readonly number[],
 ): Promise<{ test: number; env: string }[]> {
 	if (tests.length === 0) return [];
-	return (
-		await db.allDynamic<{ test: number; target: number }>(
-			`SELECT test, target FROM run_tests WHERE run = ? AND outcome = 'pass' AND test IN (${tests.map(() => "?").join(", ")})`,
-			[run, ...tests],
-		)
-	).map((row) => ({ test: row.test, env: mustTarget(db, row.target).env }));
+	return await mapAsync(await db.all(Q.passingIn, { run, tests }), async (row) => ({
+		test: row.test,
+		env: (await mustTarget(db, row.target)).env,
+	}));
 }
 
 /** Failures counted by this commit or pinned in a planned run, including a run already closed on them. */
@@ -1265,7 +1335,7 @@ export async function inheritedResultsOf(db: ReadDb, run: RunRow) {
 	for (const id of await plannedCounting(db, run.project, accepts.commit)) {
 		for (const slot of await db.all(Q.failingSlots, { run: id })) {
 			for (const fill of await failingFillsOf(db, slot.id)) {
-				if (fill.method === "agent" || mustTarget(db, fill.target).what !== run.accepts_what) continue;
+				if (fill.method === "agent" || (await mustTarget(db, fill.target)).what !== run.accepts_what) continue;
 				results.set(fill.id, {
 					result: fill.id,
 					test: fill.test,
@@ -1284,29 +1354,29 @@ export async function inheritedResultsOf(db: ReadDb, run: RunRow) {
 export async function inheritedEvidenceOf(db: ReadDb, run: RunRow) {
 	const bases = new Map<number, Map<string, number[]>>();
 	const targets = new Map<number, RunRow | null>();
-	return (await inheritedResultsOf(db, run)).flatMap((row) => {
+	return await flatMapAsync(await inheritedResultsOf(db, run), async (row) => {
 		if (row.signature === null || (row.outcome !== "fail" && row.outcome !== "error")) return [];
-		if (signatureById(db, row.signature)?.class === "unknown") return [];
-		const result = resultById(db, row.result);
+		if ((await signatureById(db, row.signature))?.class === "unknown") return [];
+		const result = await resultById(db, row.result);
 		if (!result || result.method === "agent") return [];
-		if (!targets.has(row.target)) targets.set(row.target, baseRunOf(db, mustTarget(db, row.target)));
+		if (!targets.has(row.target)) targets.set(row.target, await baseRunOf(db, await mustTarget(db, row.target)));
 		const baseRun = targets.get(row.target);
 		if (!baseRun) return [];
 		let lanes = bases.get(baseRun.id);
 		if (!lanes) {
 			lanes = new Map();
 			bases.set(baseRun.id, lanes);
-			for (const base of countedTestsOf(db, baseRun.id)) {
+			for (const base of await countedTestsOf(db, baseRun.id)) {
 				if (base.outcome !== "fail" && base.outcome !== "error") continue;
-				const support = resultById(db, base.result);
+				const support = await resultById(db, base.result);
 				if (!support || support.method === "agent") continue;
-				const key = comparisonLane(db, support);
+				const key = await comparisonLane(db, support);
 				const ids = lanes.get(key) ?? [];
 				ids.push(base.result);
 				lanes.set(key, ids);
 			}
 		}
-		const base = lanes.get(comparisonLane(db, result)) ?? [];
+		const base = lanes.get(await comparisonLane(db, result)) ?? [];
 		return base.length > 0 ? [{ ...row, base }] : [];
 	});
 }
@@ -1316,8 +1386,8 @@ export async function inheritanceAffected(db: ReadDb, run: RunRow): Promise<numb
 	if (run.origin !== "change" || !run.accepts_what) return [];
 	const targets = await targetsOfCommit(db, run.project, run.accepts_what);
 	const changes = new Set(
-		targets.flatMap((target) =>
-			target.commit_sha === null ? [] : changesBasedOn(db, run.project, target.commit_sha, target.repo),
+		await flatMapAsync(targets, async (target) =>
+			target.commit_sha === null ? [] : await changesBasedOn(db, run.project, target.commit_sha, target.repo),
 		),
 	);
 	if (run.change !== null) changes.add(run.change);
@@ -1359,7 +1429,7 @@ export type CountedTest = {
 };
 
 type Counting = {
-	quarantineFor: ReturnType<typeof quarantineLookup>;
+	quarantineFor: Awaited<ReturnType<typeof quarantineLookup>>;
 	scopeFor: (target: number) => Promise<string>;
 };
 
@@ -1385,7 +1455,7 @@ async function standingOf(
 	db: ReadDb,
 	run: RunRow,
 	{ quarantineFor, scopeFor }: Counting,
-	row: ReturnType<typeof countedTestsOf>[number],
+	row: Awaited<ReturnType<typeof countedTestsOf>>[number],
 ): Promise<CountedTest> {
 	const scope = await scopeFor(row.target);
 	const counted = (standing: CountedTest["standing"], excuse: CountedTest["excuse"] = null): CountedTest => ({
@@ -1425,7 +1495,10 @@ export async function countedTests(db: ReadDb, run: RunRow): Promise<CountedTest
 		db,
 		rows.filter((row) => row.flipped === 1).map((row) => row.result),
 	);
-	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
+	return await mapAsync(
+		rows,
+		async (row) => await standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
+	);
 }
 
 export async function* receiptResultBuckets(db: ReadDb, run: RunRow): AsyncGenerator<number> {
@@ -1446,7 +1519,10 @@ export async function countedReceiptBucket(db: ReadDb, run: RunRow, bucket: numb
 		db,
 		rows.filter((row) => row.flipped === 1).map((row) => row.result),
 	);
-	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
+	return await mapAsync(
+		rows,
+		async (row) => await standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
+	);
 }
 
 /**
@@ -1487,12 +1563,13 @@ async function count(
 		for (const slot of await db.all(Q.failingSlots, { run: run.id })) {
 			const disputed = slot.state === "disputed";
 			const causes = await failingFillsOf(db, slot.id);
-			const excuses = causes.map(
-				(fill) =>
-					quarantineFor(fill.id) ??
+			const excuses = await mapAsync(
+				causes,
+				async (fill) =>
+					(await quarantineFor(fill.id)) ??
 					(disputed
-						? excuseForDisputedSlot(db, slot.id, fill.id, run.id)
-						: excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target))),
+						? await excuseForDisputedSlot(db, slot.id, fill.id, run.id)
+						: await excuseForResult(db, { ...fill, project: run.project }, await scopeFor(fill.target))),
 			);
 			const quarantinedCauses = excuses.filter((excuse) => excuse && "quarantined" in excuse).length;
 			quarantined += quarantinedCauses;
@@ -1500,7 +1577,7 @@ async function count(
 			for (const fill of open) {
 				if (fill.signature === null) continue;
 				failing.add(causeKey(fill.signature, await scopeFor(fill.target), disputed ? slot.id : undefined));
-				if (disputed && !excuseForResult(db, { ...fill, project: run.project }, await scopeFor(fill.target)))
+				if (disputed && !(await excuseForResult(db, { ...fill, project: run.project }, await scopeFor(fill.target))))
 					failing.add(causeKey(fill.signature, await scopeFor(fill.target)));
 			}
 			for (const excuse of excuses) if (excuse) depends.set(excuse.decision, excuse.expires_at);
@@ -1585,7 +1662,7 @@ export async function retally(
 		rev: ctx.seq,
 	});
 	ctx.touched.add(runRef(run));
-	const updated = runById(ctx.db, run.id) ?? run;
+	const updated = (await runById(ctx.db, run.id)) ?? run;
 	return { run: updated, wantsSignoff: run.origin === "planned" && run.state === "open" && next === "passed", failing };
 }
 
@@ -1631,7 +1708,7 @@ export async function plan(
 	}
 	const no = await ctx.nextNo("run");
 	const what = null;
-	const { lastId } = await ctx.db.run(Q.insert, {
+	const { id: insertedId } = await ctx.db.one(Q.insert, {
 		project: ctx.project.id,
 		no,
 		name: input.name,
@@ -1651,7 +1728,7 @@ export async function plan(
 	for (const row of input.cases) {
 		for (const obligation of exercises) {
 			await ctx.db.run(Q.insertSlot, {
-				run: lastId,
+				run: insertedId,
 				caseId: row.id,
 				version: row.head,
 				claim: row.claim_hash,
@@ -1662,7 +1739,7 @@ export async function plan(
 			});
 		}
 	}
-	const run = await runById(ctx.db, lastId);
+	const run = await runById(ctx.db, insertedId);
 	if (!run) throw new Error("run was not stored");
 	ctx.touched.add(ref("run", no));
 
@@ -1693,7 +1770,10 @@ async function inheritAccepted(ctx: Ctx, run: RunRow): Promise<void> {
 		if (batch.project !== run.project) continue;
 		const target = await mustTarget(ctx.db, batch.target);
 		if ("commit" in accepts && target.commit_sha !== accepts.commit) continue;
-		if (matches(ctx.db, run, target, batch.run) || ("commit" in accepts && firstCountedReport(ctx.db, batch, target)))
+		if (
+			(await matches(ctx.db, run, target, batch.run)) ||
+			("commit" in accepts && (await firstCountedReport(ctx.db, batch, target)))
+		)
 			await ctx.db.run(Q.accepted, { id: run.id, seq: batch.seq });
 	}
 }
@@ -1731,7 +1811,7 @@ async function fillFromPrior(
 			if (judged) await ctx.db.run(Q.discount, { slot: slot.id, result: result.id, decision: judged.decision });
 			any = true;
 		}
-		if (any && refreshSlot(ctx, slot, obligation).state === "satisfied") satisfied++;
+		if (any && (await refreshSlot(ctx, slot, obligation)).state === "satisfied") satisfied++;
 	}
 	return satisfied;
 }
@@ -1769,7 +1849,7 @@ async function catchUp(ctx: Ctx, run: RunRow): Promise<void> {
 	// if that decision is withdrawn later the correction must already be known here.
 	for (const slot of slots) {
 		for (const held of await ctx.db.all(Q.heldBy, { slot: slot.id })) {
-			if (held.corrected === 0 && isWithdrawn(ctx.db, held.result))
+			if (held.corrected === 0 && (await isWithdrawn(ctx.db, held.result)))
 				await ctx.db.run(Q.correctInSlot, { slot: slot.id, result: held.result });
 		}
 	}
@@ -1858,7 +1938,7 @@ async function recount(ctx: Ctx, id: number): Promise<void> {
 async function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): Promise<void> {
 	const result = await resultById(ctx.db, id);
 	if (!result || result.method === "agent") return;
-	const job = batchById(ctx.db, result.batch)?.job ?? "";
+	const job = (await batchById(ctx.db, result.batch))?.job ?? "";
 	const lane = `${result.target}:${job}:${result.actor}`;
 	const before = await ctx.db.get(Q.laneRow, { run: commit.id, test: result.test, lane });
 	const held = await heldInLane(
@@ -1890,7 +1970,7 @@ async function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): Promise<void>
  * The gate of a commit, a run or a change. One row read and two comparisons: an unapplied upload or an expired
  * hold makes the answer `pending` whatever the stored verdict says, so a stale green is never served.
  */
-export async function gate(ctx: Ctx, input: GateTarget): Promise<GateStatus> {
+export async function gate(ctx: Ctx<ReadDb>, input: GateTarget): Promise<GateStatus> {
 	const run = await gateRun(ctx, input);
 	return run ? await gateOf(ctx, run) : nothingCounted();
 }
@@ -1906,16 +1986,16 @@ type GateTarget = {
  * The gate of one commit in one repository, `null` being the commit reported with none. Unlike `gate` by commit, it
  * never weighs other repositories that reported the same hash: the caller already knows which one it means.
  */
-export async function gateOfCommitIn(ctx: Ctx, repo: string | null, commit: string): Promise<GateStatus> {
+export async function gateOfCommitIn(ctx: Ctx<ReadDb>, repo: string | null, commit: string): Promise<GateStatus> {
 	const run = await ctx.db.get(Q.changeRun, { project: ctx.project.id, what: codeWhat(repo, commit) });
 	return run ? await gateOf(ctx, run) : nothingCounted();
 }
 
 /** The run whose gate a commit, a run or a change has. Null for a commit nothing a gate counts was reported for. */
-export async function gateRun(ctx: Ctx, input: GateTarget): Promise<RunRow | null> {
+export async function gateRun(ctx: Ctx<ReadDb>, input: GateTarget): Promise<RunRow | null> {
 	if (input.run) return await mustRun(ctx.db, ctx.project.id, input.run);
 	let what: string | null = null;
-	if (input.commit) what = targetByCommit(ctx.db, ctx.project.id, input.commit, input.repo)?.what ?? null;
+	if (input.commit) what = (await targetByCommit(ctx.db, ctx.project.id, input.commit, input.repo))?.what ?? null;
 	else if (input.change) {
 		// The head of this change in its own repository, never a commit of the same name in another.
 		const change = await changeByKey(ctx.db, ctx.project.id, input.change);
@@ -1940,19 +2020,19 @@ export const nothingCounted = (): GateStatus => ({
  * what is typed into it has no jobs, so only a commit's own run waits for shards.
  */
 export const waitingFor = async (db: ReadDb, run: RunRow): Promise<ShardWait[]> =>
-	run.origin === "change" ? waitingShards(db, await targetsOfRun(db, run)) : [];
+	run.origin === "change" ? await waitingShards(db, await targetsOfRun(db, run)) : [];
 
 /**
  * Whether more of a commit's results are on their way: a report accepted and not yet applied, or a shard of a job
  * that has not reported. What has been applied so far cannot say the commit's failures are gone.
  */
 export const stillArriving = async (db: ReadDb, run: RunRow): Promise<boolean> =>
-	run.outstanding > 0 || waitingFor(db, run).length > 0;
+	run.outstanding > 0 || (await waitingFor(db, run)).length > 0;
 
 /** The same verdict with scalar explanations, used by receipt manifests. Collections remain separately paged. */
-export async function receiptGateOf(ctx: Ctx, run: RunRow) {
+export async function receiptGateOf(ctx: Ctx<ReadDb>, run: RunRow) {
 	const tally = json<Tally>(run.tally);
-	const openCount = ctx.db.get(Q.receiptBlockingCount, { id: run.id })?.n ?? 0;
+	const openCount = (await ctx.db.get(Q.receiptBlockingCount, { id: run.id }))?.n ?? 0;
 	let waitingCount = 0;
 	let missing = 0;
 	let first: ShardWait | undefined;
@@ -2003,7 +2083,7 @@ export async function* receiptGateEvidence(db: ReadDb, run: RunRow): AsyncGenera
 			for (const wait of page) yield JSON.stringify({ collection: "waiting", item: wait });
 }
 
-export async function gateOf(ctx: Ctx, run: RunRow): Promise<GateStatus> {
+export async function gateOf(ctx: Ctx<ReadDb>, run: RunRow): Promise<GateStatus> {
 	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
 	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
@@ -2045,11 +2125,42 @@ async function permitsEmpty(
 		run.origin === "change" &&
 		Object.values(tally).every((n) => n === 0) &&
 		emptyReports === "nothing-required" &&
-		nothingRequiredOn(ctx.db, await targetsOfRun(ctx.db, run))
+		(await nothingRequiredOn(ctx.db, await targetsOfRun(ctx.db, run)))
 	);
 }
 
 /** A policy choice changes existing empty commit gates as well as future reports. */
 export async function reconsiderEmptyReports(ctx: Ctx): Promise<void> {
 	for (const run of await ctx.db.all(Q.emptyChangeRuns, { project: ctx.project.id })) ctx.recompute.add(run.id);
+}
+
+async function findAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return row;
+	return undefined;
+}
+
+async function filterAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	const out: T[] = [];
+	for (const row of rows) if (await callback(row)) out.push(row);
+	return out;
+}
+
+async function someAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return true;
+	return false;
+}
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
+}
+
+async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {
+	const out: R[] = [];
+	for (const row of rows) {
+		const found = await callback(row);
+		out.push(...(Array.isArray(found) ? found : [found]));
+	}
+	return out;
 }

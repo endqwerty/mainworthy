@@ -9,15 +9,17 @@ import type { Policy } from "../src/core/kinds.ts";
 import type { DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { sql, type WriteDb } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h.close());
 const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
 const base = async (fail: Record<number, string> = { 0: "same cause" }, attempt = 1) =>
 	await h.call("report", ciReport({ commit: "base0001", n: 2, fail, attempt }));
@@ -68,7 +70,7 @@ for (const answer of ["inherited", "mistaken"]) {
 for (const preset of ["loose", "standard"]) {
 	for (const declarationFirst of [true, false]) {
 		test(`${preset} keeps inherited failures visible with a declaration ${declarationFirst ? "before" : "after"} results`, async () => {
-			h.close();
+			await h.close();
 			h = await harness({ preset });
 			await h.call("propose", { edits: [{ op: "policy", emptyReports: "nothing-required" }] });
 			const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
@@ -84,20 +86,25 @@ for (const preset of ["loose", "standard"]) {
 			});
 			const declaration = { ...ordinary, job: "path-filter", results: [], nothingRequired: true };
 			if (declarationFirst) {
-				await h.call("report", declaration, h.actor("declarer", "ci", ["read", "record"]));
+				await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
 				expect(await gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 0, unexplained: 0 } });
 			}
 			await h.call("report", ordinary);
-			if (!declarationFirst) await h.call("report", declaration, h.actor("declarer", "ci", ["read", "record"]));
+			if (!declarationFirst) await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
 			expect(await gate("change01")).toMatchObject({
 				verdict: "blocked",
 				stale: false,
 				tally: preset === "loose" ? { excused: 1, unexplained: 1 } : { excused: 0, unexplained: 2 },
 			});
 			expect(
-				h.app.db.raw
-					.query("SELECT count(*) AS n FROM results WHERE batch IN (SELECT id FROM batches WHERE nothing_required = 1)")
-					.get(),
+				await h.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly [], { n: number }>(
+								"SELECT count(*) AS n FROM results WHERE batch IN (SELECT id FROM batches WHERE nothing_required = 1)",
+							),
+						),
+				),
 			).toEqual({ n: 0 });
 			await base({}, 2);
 			expect(await gate("change01")).toMatchObject({
@@ -111,7 +118,7 @@ for (const preset of ["loose", "standard"]) {
 
 test("a base declaration cannot supply inherited failure evidence", async () => {
 	const input = ciReport({ commit: "base0001", n: 0 });
-	await h.call("report", { ...input, nothingRequired: true }, h.actor("declarer", "ci", ["record"]));
+	await h.call("report", { ...input, nothingRequired: true }, await h.actor("declarer", "ci", ["record"]));
 	await change({ 0: "same cause" });
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
 });
@@ -125,7 +132,7 @@ test("loose accepts more than fifty distinct inherited causes", async () => {
 
 for (const preset of ["standard", "loose"]) {
 	test(`${preset} reads base evidence in proportion to 600 distinct causes`, async () => {
-		h.close();
+		await h.close();
 		h = await harness({ preset });
 		const fail = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [i, `distinct cause ${i}`]));
 		await h.call("report", ciReport({ commit: "base0001", n: 600, fail }));
@@ -133,9 +140,12 @@ for (const preset of ["standard", "loose"]) {
 		if (!run) throw new Error("missing base run");
 		const baseRun = Number(run.slice(2));
 		let reads = 0;
-		const all = h.app.db.all.bind(h.app.db);
-		const spy = spyOn(h.app.db, "all").mockImplementation((statement, ...params) => {
-			const rows = all(statement, ...params);
+		const all = (await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb)).all;
+		const spy = spyOn(
+			await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb),
+			"all",
+		).mockImplementation(async function (this: WriteDb, statement, ...params) {
+			const rows = await Reflect.apply(all, this, [statement, ...params]);
 			if (statement.text.includes("FROM run_tests") && params[0] && "run" in params[0] && params[0].run === baseRun)
 				reads += rows.length;
 			return rows;
@@ -172,13 +182,15 @@ test("a report's inherited answer reads only its affected runs, regardless of si
 		);
 	}
 	let reads = 0;
-	const all = h.app.db.all.bind(h.app.db);
-	const spy = spyOn(h.app.db, "all").mockImplementation((statement, ...params) => {
-		const rows = all(statement, ...params);
-		if (statement.text.startsWith("SELECT test, result, target, outcome, signature FROM run_tests"))
-			reads += rows.length;
-		return rows;
-	});
+	const all = (await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb)).all;
+	const spy = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "all").mockImplementation(
+		async function (this: WriteDb, statement, ...params) {
+			const rows = await Reflect.apply(all, this, [statement, ...params]);
+			if (statement.text.startsWith("SELECT test, result, target, outcome, signature FROM run_tests"))
+				reads += rows.length;
+			return rows;
+		},
+	);
 	try {
 		const receipt = await h.call<ReportReceipt>(
 			"report",
@@ -259,7 +271,7 @@ for (const unrelatedReport of [false, true]) {
 for (const initial of ["loose", "standard"] as const) {
 	test(`loose restores inherited standing on adoption after starting ${initial}`, async () => {
 		if (initial === "standard") {
-			h.close();
+			await h.close();
 			h = await harness({ preset: "standard" });
 		}
 		await base();
@@ -293,7 +305,7 @@ for (const initial of ["loose", "standard"] as const) {
 }
 
 test("loose keeps a cause question open while one of its failures still needs an answer", async () => {
-	h.close();
+	await h.close();
 	h = await harness({ preset: "standard" });
 	await base();
 	await change({ 0: "same cause", 1: "same cause" });
@@ -429,7 +441,7 @@ test("an agent's advice-only inherited replacement is refused without claiming l
 	await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
 	await base();
 	await change({ 0: "same cause" });
-	const agent = h.actor("reviewer", "agent", ["read", "produce", "answer"]);
+	const agent = await h.actor("reviewer", "agent", ["read", "produce", "answer"]);
 	const automatic = (await h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }, agent))
 		.items[0];
 	if (!automatic) throw new Error("missing inherited answer");
@@ -534,7 +546,7 @@ for (const refusal of ["reason", "admin"] as const) {
 		const automatic = (await h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" })).items[0];
 		if (!automatic) throw new Error("missing rule decision");
 		const input = { q: automatic.q, onEvidence: automatic.evidenceHash, answer: { is: "defect" } };
-		const member = h.actor("member", "human", ["read", "produce", "answer"]);
+		const member = await h.actor("member", "human", ["read", "produce", "answer"]);
 		const caller = refusal === "reason" ? h.owner : member;
 		expect(await h.call("decide", input, caller)).toMatchObject([
 			{
@@ -591,7 +603,7 @@ for (const refusal of ["reason", "admin"] as const) {
 		const automatic = (await h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" })).items[0];
 		if (!automatic) throw new Error("missing inherited answer");
 		const input = { q: automatic.q, onEvidence: automatic.evidenceHash, answer: { is: "defect" } };
-		const member = h.actor("member", "human", ["read", "produce", "answer"]);
+		const member = await h.actor("member", "human", ["read", "produce", "answer"]);
 		const caller = refusal === "admin" ? member : h.owner;
 		expect(await h.call("decide", input, caller)).toMatchObject([
 			{
@@ -850,7 +862,7 @@ test("an agent's matching failure stays unexplained in a planned run without cha
 		],
 	});
 	const before = await gate("change01");
-	const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+	const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 	await send("change01", { branch: "feature", pr: 69, base: "base0001" }, "agent", agent);
 	expect(await gate("change01")).toEqual(before);
 	expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
@@ -874,13 +886,16 @@ test("a duplicate report that changes the base cannot return with stale inherite
 test("accepted base results replayed by startup recovery revoke inheritance", async () => {
 	await base();
 	await change({ 0: "same cause" });
-	await h.app.db.transaction(async () => {
-		const project = await findProject(h.app.db, "scratch");
-		if (!project) throw new Error("missing project");
-		const ctx = makeCtx(h.app, project, h.owner, true);
-		await acceptReport(ctx, ciReport({ commit: "base0001", n: 2, attempt: 2 }));
-		await stampSeq(ctx);
-	});
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const project = await findProject(db, "scratch");
+				if (!project) throw new Error("missing project");
+				const ctx = makeCtx(h.app, db, project, h.owner, true);
+				await acceptReport(ctx, ciReport({ commit: "base0001", n: 2, attempt: 2 }));
+				await stampSeq(ctx);
+			}),
+	);
 	expect(await recoverAccepted(h.app)).toBe(1);
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
 	expect(await recoverAccepted(h.app)).toBe(0);
@@ -912,7 +927,7 @@ test("a base result judged a mistake stops supporting the change, and undo resto
 		accepts: { commit: "base0001", repo: "app" },
 		require: [{ kind: "exercise", id: "run", methods: ["auto"], basis: "exact", minActors: 1 }],
 	});
-	const other = h.actor("second-pipeline", "ci", ["read", "record"]);
+	const other = await h.actor("second-pipeline", "ci", ["read", "record"]);
 	await report("base0001", { branch: "main" }, "pass", other);
 	const question = (await h.call<InboxReply>("inbox", { kind: "failure" })).items.find((q) =>
 		q.answers.includes("mistaken"),
@@ -925,7 +940,7 @@ test("a base result judged a mistake stops supporting the change, and undo resto
 });
 
 test("an agent's results on the base cannot supply the rule's evidence", async () => {
-	const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+	const agent = await h.actor("reviewer", "agent", ["read", "produce"]);
 	await h.call("report", ciReport({ commit: "base0001", n: 2, fail: { 0: "same cause" } }), agent);
 	await change({ 0: "same cause" });
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
@@ -1003,15 +1018,17 @@ test("mutual base references reconcile from results without cycling decisions", 
 for (const revocation of ["base", "policy"]) {
 	test(`HTTP report and gate expose inheritance and immediate ${revocation} revocation`, async () => {
 		const directory = await mkdtemp(join(tmpdir(), "mainworthy-inherited-"));
+		const fixture = await testDatabase();
 		const instance = await start(
 			defaultConfig({
 				MAINWORTHY_DATA: directory,
+				MAINWORTHY_DATABASE_URL: fixture.url,
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_OWNER: "robin",
 				MAINWORTHY_MODE: "local",
 			}),
 			() => ({ ui: null }),
-			{ readers: 0 },
+			{},
 		);
 		try {
 			const client = new Client({ url: instance.url, token: undefined, project: "scratch" });
@@ -1038,6 +1055,7 @@ for (const revocation of ["base", "policy"]) {
 			});
 		} finally {
 			await instance.stop();
+			await fixture.close();
 			await rm(directory, { recursive: true, force: true });
 		}
 	});

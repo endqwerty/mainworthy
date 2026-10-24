@@ -24,7 +24,7 @@ import {
 import { setQuarantine, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { actorById, requirePolicyRoles } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { json } from "../kernel/db.ts";
+import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
@@ -64,9 +64,9 @@ import {
 } from "./questions.ts";
 
 type Tools = {
-	raiseSteps: (ctx: Ctx, r: Raise) => Generator<undefined, Raised, void>;
+	raiseSteps: (ctx: Ctx, r: Raise) => AsyncGenerator<undefined, Raised, void>;
 	/** Apply the new policy to inherited standing and open questions about tests with no case. */
-	reconsiderPolicySteps: (ctx: Ctx) => Generator<undefined, number, void>;
+	reconsiderPolicySteps: (ctx: Ctx) => AsyncGenerator<undefined, number, void>;
 };
 
 type Handler<K extends Kind> = {
@@ -85,9 +85,9 @@ type Handler<K extends Kind> = {
 		policy: Policy;
 	}) => HoldTerm[];
 	/** Whether the acting actor wrote the thing in question (the author of a proposal). */
-	isAuthor: (ctx: Ctx, question: QuestionRow & { kind: K }) => Promise<boolean>;
+	isAuthor: (ctx: Ctx<ReadDb>, question: QuestionRow & { kind: K }) => Promise<boolean>;
 	/** Whether the acting actor produced the evidence in question. */
-	isProducer: (ctx: Ctx, question: QuestionRow & { kind: K }) => Promise<boolean>;
+	isProducer: (ctx: Ctx<ReadDb>, question: QuestionRow & { kind: K }) => Promise<boolean>;
 	undoable: boolean;
 	undoHint: string;
 };
@@ -100,14 +100,14 @@ export async function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Rais
 	const { proposal, resolved } = sealed;
 	for (const edit of resolved)
 		if (edit.op === "policy") await requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
-	const summary = resolved.slice(0, 20).map((edit) => {
+	const summary = await mapAsync(resolved.slice(0, 20), async (edit) => {
 		switch (edit.op) {
 			case "create":
 				return { op: edit.op, title: edit.body.title, steps: edit.body.steps.length };
 			case "edit":
 			case "restore":
 			case "cover": {
-				const row = caseById(ctx.db, edit.caseId);
+				const row = await caseById(ctx.db, edit.caseId);
 				return {
 					op: edit.op,
 					case: row ? `C-${row.no}` : null,
@@ -197,7 +197,7 @@ const adoptHandler: Handler<"adopt"> = {
 	holds: ({ question }) => untilBasisChanges(question),
 	async isAuthor(ctx, question) {
 		const { proposal } = json<{ proposal: number }>(question.subject);
-		return proposalById(ctx.db, proposal)?.author === ctx.actor.id;
+		return (await proposalById(ctx.db, proposal))?.author === ctx.actor.id;
 	},
 	async isProducer(ctx, question) {
 		return await adoptHandler.isAuthor(ctx, question);
@@ -215,7 +215,7 @@ const adoptHandler: Handler<"adopt"> = {
  */
 async function* resolveConflictSteps(
 	ctx: Ctx,
-	proposal: NonNullable<ReturnType<typeof proposalById>>,
+	proposal: NonNullable<Awaited<ReturnType<typeof proposalById>>>,
 	answer: Extract<AnswerOf<"adopt">, { is: "merge" }>,
 	tools: Tools,
 ): AsyncGenerator<undefined, Record<string, unknown>, void> {
@@ -284,7 +284,7 @@ async function* resolveConflictSteps(
 }
 
 /** Whether a decision is still the one in force on its question. */
-async function stands(ctx: Ctx, decisionId: number): Promise<boolean> {
+async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 	const decision = await decisionById(ctx.db, decisionId);
 	const question = decision ? await questionById(ctx.db, decision.question) : null;
 	return question?.state === "decided" && question.decision === decisionId;
@@ -384,7 +384,7 @@ const mapHandler: Handler<"map"> = {
 		for (const [testId, previous, by] of linked ?? []) {
 			const test = await testById(ctx.db, testId);
 			if (!test) continue;
-			const earlier = by != null && stands(ctx, by) ? { caseId: previous, by } : { caseId: null, by: null };
+			const earlier = by != null && (await stands(ctx, by)) ? { caseId: previous, by } : { caseId: null, by: null };
 			await restoreLink(ctx, test, decision.id, earlier);
 		}
 	},
@@ -409,7 +409,7 @@ function folderFor(file: string): string {
  * The runs a question is about: the runs it lists as waiting for it and every run it names. A decision on a
  * failure changes how each of them counts the failure.
  */
-export async function runsAbout(ctx: Ctx, question: QuestionRow): Promise<number[]> {
+export async function runsAbout(ctx: Ctx<ReadDb>, question: QuestionRow): Promise<number[]> {
 	const ids = new Set(json<number[]>(question.blocks));
 	for (const about of await refsOf(ctx.db, question.id)) {
 		if (!/^R-\d+$/.test(about)) continue;
@@ -420,7 +420,7 @@ export async function runsAbout(ctx: Ctx, question: QuestionRow): Promise<number
 }
 
 /** The result producers in this slot, kept on its question after settlement too. */
-export async function disputeParties(ctx: Ctx, question: QuestionRow): Promise<number[]> {
+export async function disputeParties(ctx: Ctx<ReadDb>, question: QuestionRow): Promise<number[]> {
 	if (question.kind !== "failure" || question.subject.kind !== "slot") return [];
 	return [...new Set((await fillsOf(ctx.db, question.subject.slot)).map((fill) => fill.actor))];
 }
@@ -484,8 +484,11 @@ const failureHandler: Handler<"failure"> = {
 		const reask =
 			decidedOn === undefined
 				? []
-				: (json<{ targets?: number[] }>(question.evidence).targets ?? []).filter(
-						(other) => other !== decidedOn && mustTarget(ctx.db, other).what === mustTarget(ctx.db, decidedOn).what,
+				: await filterAsync(
+						json<{ targets?: number[] }>(question.evidence).targets ?? [],
+						async (other) =>
+							other !== decidedOn &&
+							(await mustTarget(ctx.db, other)).what === (await mustTarget(ctx.db, decidedOn)).what,
 					);
 		return {
 			class: klass,
@@ -560,8 +563,9 @@ const failureHandler: Handler<"failure"> = {
 		const kept = json<{ producers?: number[]; parties?: number[] }>(question.evidence);
 		if ((kept.producers ?? []).includes(actor) || (kept.parties ?? []).includes(actor)) return true;
 		if (subject.kind === "slot") return (await disputeParties(ctx, question)).includes(actor);
-		const reported = (await producedCause(ctx.db, ctx.project.id, subject.signature, actor)).some(
-			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
+		const reported = await someAsync(
+			await producedCause(ctx.db, ctx.project.id, subject.signature, actor),
+			async (seen) => scopeOf(await mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);
 		if (reported) return true;
 		return false;
@@ -660,7 +664,7 @@ type AnyHandler = {
 		question: QuestionRow,
 		answer: AnyAnswer,
 		tools: Tools,
-	) => Generator<undefined, Record<string, unknown>, void>;
+	) => AsyncGenerator<undefined, Record<string, unknown>, void>;
 	revert: Handler<Kind>["revert"];
 	holds: (input: { question: QuestionRow; answer: AnyAnswer; now: number; policy: Policy }) => HoldTerm[];
 	isAuthor: Handler<Kind>["isAuthor"];
@@ -682,3 +686,20 @@ const TYPED: { [K in Kind]: Handler<K> } = {
  * what makes handing each handler its own answer type sound; this map only erases that pairing for the lookup.
  */
 export const HANDLERS: Record<Kind, AnyHandler> = TYPED as unknown as Record<Kind, AnyHandler>;
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
+}
+
+async function filterAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	const out: T[] = [];
+	for (const row of rows) if (await callback(row)) out.push(row);
+	return out;
+}
+
+async function someAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return true;
+	return false;
+}
