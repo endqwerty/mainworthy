@@ -1386,6 +1386,7 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 		"../scripts/pg.ts",
 		"../scripts/preflight.ts",
 		"../scripts/work/processes.ts",
+		"bun:test",
 	]);
 	const check = readFileSync("scripts/check.ts", "utf8");
 	expect(check.indexOf('requireReady("check")')).toBeGreaterThan(0);
