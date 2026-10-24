@@ -35,7 +35,8 @@ test("records the design baselines for on-disk hot paths", async () => {
 			if (row.budget !== null) budget(`${row.name}: ${row.criterion}`, row[row.criterion], row.budget, "ms");
 		}
 	});
-}, 20_000);
+	// The limit bounds building the PostgreSQL dataset (9 s here, 16 to 20 s on a CI runner), not the paths it measures.
+}, 60_000);
 
 test("records the quarantined-report baseline after 3000 earlier trunk commits", async () => {
 	await withQuarantineWorkload(async (workload) => {
