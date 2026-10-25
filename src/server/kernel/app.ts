@@ -7,10 +7,12 @@ import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
 import { Database, type WriteDb } from "./db.ts";
 import type { JobService } from "./job-auth.ts";
+import { jobKeyOf } from "./job-input.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
 export type Config = {
+	jobKey?: string | undefined;
 	jobService?: JobService;
 	jobRunner?: boolean;
 	/** Where attachments live. */
@@ -290,6 +292,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		databaseUrl: env.MAINWORTHY_DATABASE_URL ?? "",
 		host,
 		...jobConfig(env),
+		jobKey: jobKeyOf(env.MAINWORTHY_JOB_KEY),
 		port: Number(env.MAINWORTHY_PORT ?? env.PORT ?? 7357),
 		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",
 		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",

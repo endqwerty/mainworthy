@@ -56,6 +56,7 @@ for (const email of ["recovery@example.org", null]) {
 	test(`a credentialless token-opened owner must add and prove a credential before ${email === null ? "removing" : "setting"} a recovery address`, async () => {
 		const smtp = await fakeSmtp();
 		const w = await world();
+		w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 		w.instance.app.config.mail = defaultConfig({
 			MAINWORTHY_SMTP_HOST: "127.0.0.1",
 			MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -140,6 +141,7 @@ test("stale browser import cannot install a verified address and gain an adminis
 	const body = await verifiedAdminArchive();
 	const smtp = await fakeSmtp();
 	const w = await world();
+	w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 	w.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -370,6 +372,7 @@ test("passkey finalization, password addition, removal and recovery address writ
 	w.clock.advance(9 * 60_000 + 59_000);
 	const pending = await w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
 	const answer = authenticator().register(pending);
+	w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 	w.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "localhost",
 		MAINWORTHY_MAIL_FROM: "mainworthy@example.com",

@@ -45,6 +45,7 @@ test("invite new --email delivers the printed link through the configured SMTP s
 			},
 			{
 				env: {
+					MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
 					MAINWORTHY_SMTP_HOST: "127.0.0.1",
 					MAINWORTHY_SMTP_PORT: String(smtp.port),
 					MAINWORTHY_SMTP_TLS: "none",

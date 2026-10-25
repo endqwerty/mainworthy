@@ -26,6 +26,9 @@ services:
     ports:
       - "7357:7357"
     environment:
+      # Generate once with `openssl rand -base64 32`, keep in .env alongside the database password.
+      # Empty refuses private mail enqueue; instances without mail can start.
+      MAINWORTHY_JOB_KEY: ${MAINWORTHY_JOB_KEY:-}
       MAINWORTHY_DATABASE_URL: postgres://mainworthy:${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}@postgres:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}

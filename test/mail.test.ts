@@ -35,7 +35,9 @@ const NEXT = "a quite different password";
 async function mailbox(options: Parameters<typeof fakeSmtp>[0] = {}) {
 	const smtp = await fakeSmtp(options);
 	const w = await world({ proxied: true });
+	w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 	w.instance.app.config.mail = defaultConfig({
+		MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),
 		MAINWORTHY_SMTP_TLS: "none",
@@ -153,6 +155,7 @@ test("a stored recovery address can be removed after mail is switched off", asyn
 	try {
 		const { cookie } = await verified(w, box.messages);
 		const before = box.messages.length;
+		w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 		w.instance.app.config.mail = undefined;
 		expect((await w.op("credential", { do: "email.set", email: "new@example.com" }, { cookie })).status).toBe(400);
 		expect((await w.op("credential", { do: "email.set", email: null }, { cookie })).status).toBe(200);
@@ -597,6 +600,7 @@ test("mail is optional and configured instances advertise password reset", async
 	expect(must(await plain.get("/api/login/methods"))).toMatchObject({ mail: false });
 	const configured = await world();
 	configured.instance.app.config.mail = defaultConfig({
+		MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: "2525",
 		MAINWORTHY_SMTP_TLS: "none",
@@ -663,6 +667,7 @@ await waitMail(app); await app.close(); console.log(JSON.stringify({ warnings })
 					env: {
 						...environment,
 						...(trusted ? { NODE_EXTRA_CA_CERTS: certificatePath } : {}),
+						MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
 						MAINWORTHY_SMTP_HOST: "127.0.0.1",
 						MAINWORTHY_SMTP_PORT: String(smtp.port),
 						MAINWORTHY_SMTP_TLS: mode,
@@ -719,6 +724,7 @@ test("verification and reset links finish on another App exactly once", async ()
 		const cookie = await joined(first, "robin", PASSWORD);
 		const second = await world({ dataDir: first.dataDir, clock: first.clock });
 		second.instance.app.config.mail = first.instance.app.config.mail;
+		second.instance.app.config.jobKey = first.instance.app.config.jobKey;
 		expect((await first.op("credential", contactInput("robin@example.com"), { cookie })).status).toBe(200);
 		await waitMail(first.instance.app);
 		const verification = linkCode(box.messages.at(-1)?.text ?? "", "email");
