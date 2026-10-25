@@ -6,7 +6,7 @@ import { sql } from "../src/server/kernel/db.ts";
 import { runArchive } from "../src/server/ops/archives.ts";
 import { changeStream } from "../src/surfaces/events.ts";
 import { serve } from "../src/surfaces/http.ts";
-import { harness } from "./helpers.ts";
+import { ciReport, harness } from "./helpers.ts";
 import { pauseRead } from "./identity-db.ts";
 
 test("a write on one App wakes a real change stream on another App", async () => {
@@ -36,6 +36,53 @@ test("a write on one App wakes a real change stream on another App", async () =>
 			seq: 2,
 			touched: expect.arrayContaining(["C-1"]),
 		});
+	} finally {
+		clearTimeout(deadline);
+		abort.abort();
+		await reader?.cancel().catch(() => {});
+		await listener.stop(true);
+		await second.close();
+		await first.close();
+	}
+});
+
+test("report acceptance and application both reach a peer stream in commit order", async () => {
+	const first = await harness();
+	const second = await openApp(first.app.config, { memory: true, now: first.app.now });
+	const listener = serve(second, first.owner);
+	const abort = new AbortController();
+	const deadline = setTimeout(() => abort.abort(), 5000);
+	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+	try {
+		const response = await fetch(`http://127.0.0.1:${listener.port}/api/p/scratch/events`, { signal: abort.signal });
+		reader = response.body?.getReader();
+		if (!reader) throw new Error("no event stream");
+		const decoder = new TextDecoder();
+		expect(decoder.decode((await reader.read()).value)).toBe("retry: 2000\n\n");
+		expect(await first.raw("report", ciReport({ commit: "shared-report", n: 1 }))).toMatchObject({ ok: true });
+		let buffered = "";
+		const events: unknown[] = [];
+		while (events.length < 2) {
+			const next = await reader.read();
+			if (next.done) throw new Error("stream ended before both report commits");
+			buffered += decoder.decode(next.value, { stream: true });
+			let boundary = buffered.indexOf("\n\n");
+			while (boundary !== -1) {
+				const frame = buffered.slice(0, boundary);
+				buffered = buffered.slice(boundary + 2);
+				const data = frame.split("\n").find((line) => line.startsWith("data:"));
+				if (data) events.push(JSON.parse(data.slice(5)));
+				boundary = buffered.indexOf("\n\n");
+			}
+		}
+		expect(events).toMatchObject([
+			{ project: "scratch", seq: 2, op: "report", actor: "" },
+			{ project: "scratch", seq: 3, op: "report", actor: "" },
+		]);
+		expect(await second.database.read((db) => db.allDynamic("SELECT seq,op FROM change_events ORDER BY seq"))).toEqual([
+			{ seq: 2, op: "report" },
+			{ seq: 3, op: "report" },
+		]);
 	} finally {
 		clearTimeout(deadline);
 		abort.abort();
