@@ -351,7 +351,7 @@ try:
     )
     for _ in range(150):
         if docker(
-            "exec", database, "pg_isready", "-U", "postgres", ok=False
+            "exec", database, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", ok=False
         ).returncode == 0:
             break
         time.sleep(0.2)

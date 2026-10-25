@@ -10,7 +10,7 @@ services:
       POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
       POSTGRES_PASSWORD: ${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mainworthy -d mainworthy"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U mainworthy -d mainworthy"]
       interval: 2s
       timeout: 5s
       retries: 15
