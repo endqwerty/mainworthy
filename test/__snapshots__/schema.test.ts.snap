@@ -44,6 +44,21 @@ column attachments.name: text NOT NULL
 column attachments.result: bigint NOT NULL
 column attachments.size: bigint NOT NULL
 column attachments.type: text NOT NULL
+column background_jobs.accepted_at: bigint NOT NULL
+column background_jobs.actor: bigint NULL
+column background_jobs.attempts: integer NOT NULL DEFAULT 0
+column background_jobs.effect: text NOT NULL
+column background_jobs.error: text NULL
+column background_jobs.id: text NOT NULL
+column background_jobs.input: text NOT NULL
+column background_jobs.kind: text NOT NULL
+column background_jobs.lease_until: bigint NULL
+column background_jobs.max_attempts: integer NOT NULL
+column background_jobs.next_at: bigint NOT NULL
+column background_jobs.owner: text NULL
+column background_jobs.started: boolean NOT NULL DEFAULT false
+column background_jobs.state: text NOT NULL DEFAULT 'ready'::text
+column background_jobs.token: text NULL
 column batch_admissions.actor: bigint NOT NULL
 column batch_admissions.auth_version: bigint NOT NULL
 column batch_admissions.batch: bigint NOT NULL
@@ -678,6 +693,22 @@ constraint attachments.attachments_result_not_null: NOT NULL result
 constraint attachments.attachments_size_check: CHECK (((size >= 0) AND (size <= 4194304)))
 constraint attachments.attachments_size_not_null: NOT NULL size
 constraint attachments.attachments_type_not_null: NOT NULL type
+constraint background_jobs.background_jobs_accepted_at_not_null: NOT NULL accepted_at
+constraint background_jobs.background_jobs_attempts_check: CHECK ((attempts >= 0))
+constraint background_jobs.background_jobs_attempts_not_null: NOT NULL attempts
+constraint background_jobs.background_jobs_check: CHECK (((state = 'running'::text) = ((owner IS NOT NULL) AND (token IS NOT NULL) AND (lease_until IS NOT NULL))))
+constraint background_jobs.background_jobs_effect_check: CHECK ((effect = ANY (ARRAY['repeatable'::text, 'uncertain'::text])))
+constraint background_jobs.background_jobs_effect_not_null: NOT NULL effect
+constraint background_jobs.background_jobs_id_not_null: NOT NULL id
+constraint background_jobs.background_jobs_input_not_null: NOT NULL input
+constraint background_jobs.background_jobs_kind_not_null: NOT NULL kind
+constraint background_jobs.background_jobs_max_attempts_check: CHECK (((max_attempts >= 1) AND (max_attempts <= 16)))
+constraint background_jobs.background_jobs_max_attempts_not_null: NOT NULL max_attempts
+constraint background_jobs.background_jobs_next_at_not_null: NOT NULL next_at
+constraint background_jobs.background_jobs_pkey: PRIMARY KEY (id)
+constraint background_jobs.background_jobs_started_not_null: NOT NULL started
+constraint background_jobs.background_jobs_state_check: CHECK ((state = ANY (ARRAY['ready'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'uncertain'::text])))
+constraint background_jobs.background_jobs_state_not_null: NOT NULL state
 constraint batch_admissions.batch_admissions_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
 constraint batch_admissions.batch_admissions_actor_not_null: NOT NULL actor
 constraint batch_admissions.batch_admissions_auth_version_not_null: NOT NULL auth_version
@@ -1806,6 +1837,8 @@ index assertion_spreads_pkey: CREATE UNIQUE INDEX assertion_spreads_pkey ON publ
 index assertion_spreads_root: CREATE INDEX assertion_spreads_root ON public.assertion_spreads USING btree (root)
 index attachments_pkey: CREATE UNIQUE INDEX attachments_pkey ON public.attachments USING btree (id)
 index attachments_result: CREATE INDEX attachments_result ON public.attachments USING btree (result, id)
+index background_jobs_due: CREATE INDEX background_jobs_due ON public.background_jobs USING btree (next_at, accepted_at, id) WHERE (state = ANY (ARRAY['ready'::text, 'running'::text]))
+index background_jobs_pkey: CREATE UNIQUE INDEX background_jobs_pkey ON public.background_jobs USING btree (id)
 index batch_admissions_pkey: CREATE UNIQUE INDEX batch_admissions_pkey ON public.batch_admissions USING btree (batch)
 index batches_accepted: CREATE INDEX batches_accepted ON public.batches USING btree (project, state) WHERE (state = 'accepted'::text)
 index batches_pkey: CREATE UNIQUE INDEX batches_pkey ON public.batches USING btree (id)
@@ -2037,6 +2070,7 @@ table assertion_roots:
 table assertion_seen:
 table assertion_spreads:
 table attachments:
+table background_jobs:
 table batch_admissions:
 table batches:
 table builds:

@@ -271,6 +271,29 @@ behind its expanded `steps`.
 
 <!-- generated:operations -->
 
+### job
+
+Run durable background work. Only the authenticated job service may call.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/job` |
+| Command | `mainworthy job` |
+| Needs | `admin` |
+| Effect | runs jobs on the job service |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>job</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].do` | `"run"` | yes |  |
+| `[1].id` | `string` | yes |  |
+| `[2].do` | `"tick"` | yes |  |
+
+</details>
+
 ### attach
 
 Append a screenshot or small file to a result you recorded. Supply the file as base64.

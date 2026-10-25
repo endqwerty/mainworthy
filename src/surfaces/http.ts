@@ -20,9 +20,10 @@ import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
 import { isBusy } from "../server/kernel/db.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
+import { authenticateJob } from "../server/kernel/job-auth.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
-import { invoke, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
+import { invoke, invokeService, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
 import { changeStream } from "./events.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
@@ -450,6 +451,19 @@ export async function handleOp(
 	project: string | null,
 	op: string,
 ): Promise<Response> {
+	const operation = OPS[op];
+	if (operation?.effect === "service") {
+		if (project !== null || !(await authenticateJob(req.headers.get("authorization"), app.config.jobService)))
+			return unauthenticated();
+		let input: unknown;
+		try {
+			input = await readJson(req);
+		} catch {
+			return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
+		}
+		server.timeout(req, 0);
+		return replyResponse(await invokeService(app, operation, input));
+	}
 	const session = await sessionFor(app, owner, req, server);
 	if (session instanceof Response) return session;
 	const at = timeOf(req);
@@ -933,9 +947,16 @@ export function serve(
 		maxRequestBodySize: STREAM_BODY_LIMIT,
 		...(ui?.websocket ? { websocket: ui.websocket } : {}),
 		routes: {
-			...withHeadersOnEvery(routes),
-			...keepingPolicyOnEvery(extra.open ?? {}),
-			...(ui ? { "/*": ui.route } : {}),
+			...withHeadersOnEvery(
+				app.config.jobService
+					? {
+							"/healthz": routes["/healthz"],
+							"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
+						}
+					: routes,
+			),
+			...keepingPolicyOnEvery(app.config.jobService ? {} : (extra.open ?? {})),
+			...(!app.config.jobService && ui ? { "/*": ui.route } : {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		} as any,
 		fetch: (req: Request) =>

@@ -1601,6 +1601,10 @@ describe("what a signed-in caller sees and ends", () => {
 		for (const op of OP_LIST) {
 			const path = op.scope === "project" ? `/api/p/scratch/${op.name}` : `/api/${op.name}`;
 			const reply = await w.post(path, { do: "list" }, bearer(token));
+			if (op.effect === "service") {
+				expect(reply.status).toBe(401);
+				continue;
+			}
 			if (reply.status !== 403 && reply.status !== 404) reached.push(op.name);
 		}
 		expect(reached).toEqual(["session", "credential"]);
@@ -2149,7 +2153,7 @@ describe("what the pages of the web UI asked of the server", () => {
 		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const { OP_LIST } = await import("../src/server/ops/index.ts");
-		const instance = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
+		const instance = OP_LIST.filter((op) => op.scope === "instance" && op.effect !== "service").map((op) => op.name);
 		expect(instance).toEqual(["admin", "session", "credential", "invitation"]);
 		for (const name of instance) {
 			const input = name === "admin" ? { do: "project.list" } : { do: "list" };

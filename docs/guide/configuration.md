@@ -58,6 +58,10 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen may offer the logins the phone keeps for this site. List each app as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). Separate the entries with commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
+| `MAINWORTHY_JOB_SERVICE` | `0` | Set to `1` on the separate job service. It serves only `/healthz` and `/api/job`; the public service refuses the job endpoint. Keep the host's invoker IAM check enabled for the configured service account. |
+| `MAINWORTHY_JOB_AUDIENCE` | none | Required on the job service. The HTTPS audience in the caller's Google OIDC token. |
+| `MAINWORTHY_JOB_ACCOUNT` | none | Required on the job service. The service account email that may invoke jobs. Tokens must have a valid Google signature, issuer, audience, expiry and verified account email. No shared job secret is used. |
+| `MAINWORTHY_JOB_RUNNER` | `1` | Set to `0` when HTTP requests dispatch jobs. The job service always disables the in-process runner. The runner polls durable rows on development and hosts with CPU between requests. |
 | `MAINWORTHY_DATABASE_URL` | required | PostgreSQL connection URL. `compose.yaml` starts PostgreSQL 18 and sets this for the app. |
 | `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
 | `MAINWORTHY_DB_WRITE_POOL` | `4` | Write-pool connections, an integer from 1 to 64. Writes lock their actors and projects; different projects can write concurrently. |

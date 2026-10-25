@@ -233,7 +233,7 @@ describe("the module map", () => {
 	// The owner of each table. A read of another module's data goes through that module's functions, so the
 	// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
 	const owners: Record<string, string[]> = {
-		"server/kernel": ["meta", "projects", "counters", "commands", "demo_projects", "change_events"],
+		"server/kernel": ["meta", "projects", "counters", "commands", "demo_projects", "change_events", "background_jobs"],
 		"server/identity": [
 			"batch_admissions",
 			"identity_ceremonies",
@@ -387,6 +387,7 @@ describe("the module map", () => {
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0100). Tracker delivery and hand-offs must never replay after import. None of these tables holds credentials.
 		const other = [
+			"background_jobs",
 			"change_events",
 			"assertion_seen",
 			"assertion_spreads",

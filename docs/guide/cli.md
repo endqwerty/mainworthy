@@ -266,6 +266,7 @@ Every operation of the API is also a command with the same name. Give its input 
 
 | Command | What it does |
 | --- | --- |
+| `mainworthy job` | Run durable background work. Only the authenticated job service may call. |
 | `mainworthy attach` | Append a screenshot or small file to a result you recorded. Supply the file as base64. |
 | `mainworthy attachment` | List a result's attachments, or read one as base64 with its file name and safe content type. |
 | `mainworthy propose` | Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next. |

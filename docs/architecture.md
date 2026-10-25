@@ -92,6 +92,7 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Request evidence | `plan` (start a run) · `work` (take, renew or give back a slot lease) |
 | Decide | `decide` (answer a question, or withdraw a decision) · `handoff` (send a failure question to a coding agent) |
 | Read | `attachment` (list or read a result's files) · `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` · `tracker-status` (delivery state and issue reference) · `handoff-status` (whether a failure's hand-off was sent) |
+| Background work | `job` (authenticated job service only; an in-process runner uses the same operation) |
 | Administer | `audit` (export retained decisions and evidence) · `admin` (projects, actors, grants, teams, tokens) |
 | Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password, passkeys, authenticator, recovery email and CLI tokens) · `invitation` (an admin invites or recovers a person with a link) |
 

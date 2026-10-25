@@ -94,6 +94,7 @@ const Q = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
+	"background_jobs",
 	"batch_admissions",
 	"identity_ceremonies",
 	"identity_ceremony_epoch",

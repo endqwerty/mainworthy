@@ -5,10 +5,13 @@ import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
 import { Database, type WriteDb } from "./db.ts";
+import type { JobService } from "./job-auth.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
 export type Config = {
+	jobService?: JobService;
+	jobRunner?: boolean;
 	/** Where attachments live. */
 	dataDir: string;
 	databaseUrl: string;
@@ -274,6 +277,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		dataDir: env.MAINWORTHY_DATA ?? defaultDataDir(env),
 		databaseUrl: env.MAINWORTHY_DATABASE_URL ?? "",
 		host,
+		...jobConfig(env),
 		port: Number(env.MAINWORTHY_PORT ?? env.PORT ?? 7357),
 		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",
 		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",
@@ -405,4 +409,21 @@ function adminMfaOf(env: Record<string, string | undefined>): boolean {
 	if (value === undefined || value === "" || value === "false") return false;
 	if (value === "true") return true;
 	throw new Error("MAINWORTHY_REQUIRE_ADMIN_MFA must be true or false");
+}
+
+function jobConfig(env: Record<string, string | undefined>): Pick<Config, "jobService" | "jobRunner"> {
+	const role = env.MAINWORTHY_JOB_SERVICE;
+	const runner = env.MAINWORTHY_JOB_RUNNER;
+	if (role && role !== "0" && role !== "1") throw new Error("MAINWORTHY_JOB_SERVICE must be 0 or 1");
+	if (runner && runner !== "0" && runner !== "1") throw new Error("MAINWORTHY_JOB_RUNNER must be 0 or 1");
+	if (role !== "1") return { jobRunner: runner !== "0" };
+	const audience = env.MAINWORTHY_JOB_AUDIENCE;
+	const account = env.MAINWORTHY_JOB_ACCOUNT;
+	if (!audience || !account) throw new Error("Job service requires MAINWORTHY_JOB_AUDIENCE and MAINWORTHY_JOB_ACCOUNT");
+	const url = new URL(audience);
+	if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search)
+		throw new Error("MAINWORTHY_JOB_AUDIENCE must be an HTTPS URL");
+	if (!/^[^\s@]+@[^\s@]+\.gserviceaccount\.com$/.test(account))
+		throw new Error("MAINWORTHY_JOB_ACCOUNT must name a service account");
+	return { jobService: { audience, account }, jobRunner: false };
 }
