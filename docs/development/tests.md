@@ -1,7 +1,7 @@
 # The check and the tests
 
-`bun run check` is the gate on your machine. It type-checks, lints and runs the functional tests,
-including browser tests.
+`bun run check` is the gate on your machine. It runs the type-check, lint, async-port guard and functional
+tests, including browser tests.
 CI runs those tests in shards and elapsed-time budgets on a dedicated runner. This page explains what
 the check does, how the tests are arranged and what keeps them from interfering with each other.
 
@@ -15,7 +15,7 @@ Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fall
 | --- | --- |
 | `bun test <file>` | one file. `bunfig.toml` preloads `test/preflight.ts`, which checks Bun and the packages first. |
 | `bun run test` | functional tests, with output as it comes. No type-check and no lint. |
-| `bun run check` | the type-check, the lint and functional tests, side by side |
+| `bun run check` | the type-check, the lint, the async-port guard and functional tests, side by side |
 | `bun run performance` | elapsed-time budgets, one file at a time. Run this alone on an idle machine. |
 | `bun scripts/check.ts test --only=parallel <file>...` | the named files of one phase, as CI runs the files a change needs |
 
@@ -31,7 +31,7 @@ The check runs these steps:
 
 1. `scripts/preflight.ts` checks Bun and the packages.
 2. If browser tests will run, the check compiles `test/e2e/serve.ts` once.
-3. The type-check, the lint and the tests start side by side.
+3. The type-check, the lint, `bun scripts/async-port.ts --check` and the tests start side by side.
 4. Functional test files run in parallel workers.
 5. The check prints a summary.
 
@@ -61,7 +61,7 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 | `src/**/*.test.ts` | pure functions beside their code: the outline grammar, diff, merge, signatures, durations |
 | `test/<area>.test.ts` | an area through the real registry: suite, evidence, runs, policy, sessions, tokens, passkeys, trackers, archives |
 | `test/sequences-*.test.ts` | long sequences of operations under each policy preset |
-| `test/architecture.test.ts` | the module map, the registry, the witness writers, migrations, the identity rules, the phone layout and what a public repository may contain |
+| `test/architecture.test.ts` | the module map, the registry, the witness writers, the PostgreSQL baseline, the identity rules, the phone layout and what a public repository may contain |
 | `test/integrity.test.ts` | one test for each thing that must never happen, such as a green gate with nothing proven or an agent's result counted as a pipeline's. Each came from an independent review. |
 | `test/budgets.test.ts` | operation counts on hot paths, reported as budgets |
 | `PERFORMANCE` in `scripts/check-plan.ts` | elapsed-time budgets for the paths people wait on |
@@ -72,12 +72,12 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 ## Keep tests independent
 
 Tests run beside each other. A test that fails only next to others shares something with them. Fix the sharing.
-Only elapsed-time measurements belong in `PERFORMANCE`. Keep deterministic correctness and operation-count
-checks in the functional suite. Shared benchmark workloads run their real operation and correctness check once
-in functional tests. Warmups and repeated samples belong to performance tests.
+Elapsed-time measurements and database process cleanup checks belong in `PERFORMANCE`. Keep other
+deterministic correctness and operation-count checks in the functional suite. Shared benchmark workloads run
+their real operation and correctness check once in functional tests. Warmups and repeated samples belong to performance tests.
 
-- For an in-memory instance, use `harness` in `test/helpers.ts`. It calls the real registry and has an
-  adjustable clock, project and actor helpers, and `ciReport` fixtures.
+- For an isolated PostgreSQL-backed app, use `harness` in `test/helpers.ts`. It calls the real registry and has
+  in-memory blobs, an adjustable clock, project and actor helpers, and `ciReport` fixtures.
 - For a real server, use `startServer` in `test/e2e/support.ts`. Its server binds port 0 and reports the URL the OS assigned.
   Each server has a fresh data directory, removed by its supervisor after the process exits.
 - For a browser, use the context `support.ts` hands out. It connects to the worker's shared Chromium.

@@ -327,112 +327,130 @@ check(
 );
 
 for (const surface of ["case", "run", "queue"])
-	for (const close of ["Escape", "Control+k"]) {
-		check(
-			`R3C-2 ${surface} palette restores the field and caret after ${close}`,
-			async () => {
-				const server = await startServer(surface === "queue" ? { preset: "standard" } : {});
-				await setupCases(server);
-				const run = await server.api("plan", { name: "Palette", select: {} });
-				if (surface === "queue") await failure(server, 1);
-				const h = await openPage(server, {
-					path:
-						surface === "run"
-							? `/p/scratch/runs/${run.run.slice(2)}`
-							: surface === "queue"
-								? "/p/scratch/queue"
-								: "/p/scratch/suite/c/1",
-				});
-				try {
-					const { page } = h;
-					let field = page.locator("#answer-extra");
-					if (surface === "case") {
-						await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
-						await page.keyboard.press("e");
-						field = page.getByRole("textbox", { name: "Step 1", exact: true });
-					} else if (surface === "run") {
-						await page.locator('[data-active="true"][data-ready="true"]').waitFor();
-						await page.keyboard.press("f");
-						field = page.getByRole("textbox", { name: "Result note" });
-					} else {
-						await page.locator("[data-current-question]").waitFor();
-						await page.keyboard.press("d");
-						field = page.locator("#answer-extra");
-					}
-					await field.fill("First half");
+	check(
+		`${surface} palette restores the field and caret after Escape and Control+k`,
+		async () => {
+			const server = await startServer(surface === "queue" ? { preset: "standard" } : {});
+			await setupCases(server);
+			const run = await server.api("plan", { name: "Palette", select: {} });
+			if (surface === "queue") await failure(server, 1);
+			const h = await openPage(server, {
+				path:
+					surface === "run"
+						? `/p/scratch/runs/${run.run.slice(2)}`
+						: surface === "queue"
+							? "/p/scratch/queue"
+							: "/p/scratch/suite/c/1",
+			});
+			try {
+				const { page } = h;
+				let field = page.locator("#answer-extra");
+				if (surface === "case") {
+					await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
+					await page.keyboard.press("e");
+					field = page.getByRole("textbox", { name: "Step 1", exact: true });
+				} else if (surface === "run") {
+					await page.locator('[data-active="true"][data-ready="true"]').waitFor();
+					await page.keyboard.press("f");
+					field = page.getByRole("textbox", { name: "Result note" });
+				} else {
+					await page.locator("[data-current-question]").waitFor();
+					await page.keyboard.press("d");
+					field = page.locator("#answer-extra");
+				}
+				let value = "First half";
+				await field.fill(value);
+				for (const close of ["Escape", "Control+k"]) {
 					await page.keyboard.press("Control+k");
 					await page.locator(".palette-input").waitFor();
 					await page.keyboard.press(close);
 					expect(await field.evaluate((e) => e === document.activeElement)).toBe(true);
-					await page.keyboard.type(" and second half");
-					expect(await field.inputValue()).toBe("First half and second half");
-				} finally {
-					await h.close();
-					await server.stop();
+					expect(await field.inputValue()).toBe(value);
+					expect(
+						await field.evaluate((e) =>
+							e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement
+								? [e.selectionStart, e.selectionEnd]
+								: null,
+						),
+					).toEqual([value.length, value.length]);
+					const suffix = close === "Escape" ? " and second half" : " and third half";
+					await page.keyboard.type(suffix);
+					value += suffix;
+					expect(await field.inputValue()).toBe(value);
+					expect(
+						await field.evaluate((e) =>
+							e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement
+								? [e.selectionStart, e.selectionEnd]
+								: null,
+						),
+					).toEqual([value.length, value.length]);
 				}
-			},
-			30_000,
-		);
-	}
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
 
 for (const surface of ["case", "queue"])
 	for (const read of ["slow", "failed"])
-		for (const answer of ["a", "r"]) {
-			check(
-				`R3C-1 ${surface} ${answer} and buttons wait for a ${read} proposal read`,
-				async () => {
-					const server = await startServer({ preset: "standard" });
-					await setupCases(server, 1);
-					const agent = z.object({ token: z.string() }).parse(
-						await server.api("admin", {
-							do: "token.create",
-							actor: "reviewer",
-							kind: "agent",
-							can: ["read", "produce"],
-							project: "scratch",
-						}),
-					).token;
-					const proposed = await server.api(
-						"propose",
-						{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed title" } }] },
-						{ token: agent },
-					);
-					if (!proposed.question || !proposed.proposal) throw new Error("Missing proposal");
-					const gate = latch();
-					let reads = 0;
-					const h = await openPage(server, {
-						path: surface === "case" ? "/p/scratch/suite/c/1" : "/p/scratch/queue",
-						setup: async (page) => {
-							await page.route("**/get", async (route) => {
-								const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
-								if (input.refs.includes(proposed.proposal ?? "")) {
-									reads++;
-									if (read === "slow") await gate.held;
-									else {
-										await route.fulfill({
-											json: { ok: false, error: { code: "internal", message: "Proposal read failed" } },
-										});
-										return;
-									}
+		check(
+			`${surface} accept and reject keys and buttons wait for a ${read} proposal read`,
+			async () => {
+				const server = await startServer({ preset: "standard" });
+				await setupCases(server, 1);
+				const agent = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "reviewer",
+						kind: "agent",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				).token;
+				const proposed = await server.api(
+					"propose",
+					{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed title" } }] },
+					{ token: agent },
+				);
+				if (!proposed.question || !proposed.proposal) throw new Error("Missing proposal");
+				const gate = latch();
+				let reads = 0;
+				const h = await openPage(server, {
+					path: surface === "case" ? "/p/scratch/suite/c/1" : "/p/scratch/queue",
+					setup: async (page) => {
+						await page.route("**/get", async (route) => {
+							const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+							if (input.refs.includes(proposed.proposal ?? "")) {
+								reads++;
+								if (read === "slow") await gate.held;
+								else {
+									await route.fulfill({
+										json: { ok: false, error: { code: "internal", message: "Proposal read failed" } },
+									});
+									return;
 								}
-								await route.continue();
-							});
-						},
-					});
-					try {
-						const { page } = h;
-						await page
-							.locator(surface === "case" ? `[data-proposal="${proposed.question}"]` : "[data-current-question]")
-							.waitFor();
-						await eventually(
-							async () => reads,
-							(n) => n > 0,
-						);
-						if (read === "failed") await page.getByText("Proposal read failed", { exact: false }).waitFor();
-						let decides = 0;
-						page.on("request", (request) => {
-							if (request.url().endsWith("/decide")) decides++;
+							}
+							await route.continue();
 						});
+					},
+				});
+				try {
+					const { page } = h;
+					await page
+						.locator(surface === "case" ? `[data-proposal="${proposed.question}"]` : "[data-current-question]")
+						.waitFor();
+					await eventually(
+						async () => reads,
+						(n) => n > 0,
+					);
+					if (read === "failed") await page.getByText("Proposal read failed", { exact: false }).waitFor();
+					let decides = 0;
+					page.on("request", (request) => {
+						if (request.url().endsWith("/decide")) decides++;
+					});
+					for (const answer of ["a", "r"]) {
 						await page.keyboard.press(answer);
 						await page.keyboard.press(answer);
 						expect(decides).toBe(0);
@@ -441,25 +459,34 @@ for (const surface of ["case", "queue"])
 							.filter({ hasText: answer === "a" ? "Accept" : "Reject" })
 							.first();
 						if (await button.isEnabled()) await button.click();
+						await page
+							.locator("#stat")
+							.filter({
+								hasText: read === "failed" ? "Proposal read failed" : "Still reading the proposal",
+							})
+							.waitFor();
 						expect(decides).toBe(0);
 						expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
-						gate.release();
-						if (read === "slow") {
-							await answerWhenRead(page, proposed.question, answer);
-							await eventually(
-								() => server.api("get", { refs: [proposed.question ?? ""] }),
-								(rows) => rows[0]?.state === "decided",
-							);
-						}
-					} finally {
-						gate.release();
-						await h.close();
-						await server.stop();
+						expect(
+							await page.locator(`[data-proposal-evidence="${proposed.question}"]`).getAttribute("data-proposal-read"),
+						).toBe(read === "failed" ? "error" : "loading");
 					}
-				},
-				30_000,
-			);
-		}
+					gate.release();
+					if (read === "slow") {
+						await answerWhenRead(page, proposed.question, "a");
+						await eventually(
+							() => server.api("get", { refs: [proposed.question ?? ""] }),
+							(rows) => rows[0]?.state === "decided",
+						);
+					}
+				} finally {
+					gate.release();
+					await h.close();
+					await server.stop();
+				}
+			},
+			30_000,
+		);
 
 check(
 	"R3C-4 held outcome and undo keys record once while held navigation still moves",

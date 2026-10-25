@@ -152,7 +152,7 @@ See [your data](docs/guide/data.md) for what an archive includes and leaves out.
 | --- | --- |
 | `bun run dev` | the server on `127.0.0.1:7357`, restarted when a file changes |
 | `bun test <file>` | one test file |
-| `bun run check` | the type-check, the lint and functional tests, browser tests included |
+| `bun run check` | the type-check, the lint, the async-port guard and functional tests, browser tests included |
 | `bun run performance` | elapsed-time measurements and baseline warnings; run on an idle machine |
 | `bun run browser` | installs the Chromium the browser tests run, once and again after a playwright-core upgrade |
 | `bun run build` | one self-contained executable in `dist/` |
@@ -170,7 +170,7 @@ The rules for contributors, people and agents, are in [AGENTS.md](AGENTS.md).
 | [docs/development/](docs/development/README.md) | how to work on the code, test it and deliver a change |
 | [docs/architecture.md](docs/architecture.md) | how it fits together, with diagrams |
 | [docs/product-design.md](docs/product-design.md) | the product design: thesis, domain model, operation layer, product surface |
-| [docs/decisions/](docs/decisions/) | one decision record per design choice, numbered in order |
+| [docs/decisions/](docs/decisions/) | selected design decisions; new records use dated filenames |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
 | [ios/](ios/README.md) | the iPhone app: how to install it on your phone, and how to work on it |

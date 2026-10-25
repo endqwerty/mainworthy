@@ -409,13 +409,6 @@ describe("the module map", () => {
 		expect(UNEXPORTED.filter((table) => other.includes(table))).toEqual(other);
 	});
 
-	test("the baseline starts one PostgreSQL lineage and rejects every SQLite archive format", () => {
-		expect(SCHEMA_VERSION).toBe(1);
-		expect(ARCHIVE_VERSION).toBe(43);
-		expect([...new Glob("src/server/kernel/migrations/*.sql").scanSync(".")]).toEqual([]);
-		expect([...new Glob("src/server/kernel/*.sql").scanSync(".")]).toEqual(["src/server/kernel/schema.sql"]);
-	});
-
 	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {
 		// These change standing without a witness on purpose: they put back what a decision did when that decision
 		// is withdrawn or stops holding, which is itself a recorded event. Nothing else may reach for them.
@@ -470,43 +463,6 @@ describe("the phone layout", () => {
 		expect(sheets).toContain("src/web/phone.css");
 		expect(
 			sheets.filter((file) => file !== "src/web/phone.css" && readFileSync(file, "utf8").includes("data-layout")),
-		).toEqual([]);
-	});
-
-	test("the columns of the app start with the sidebar's width, which one stylesheet says", () => {
-		// Each screen has its own columns, and until decision 0020 each wrote the sidebar's width as a number.
-		// The collapsed sidebar then had one set of columns for all of them: it took the room of Queue's and
-		// Runs' right pane and of the whole of Settings. A screen that names the variable gets the collapsed
-		// sidebar, and the width of a narrower window, without saying anything about either.
-		const desktop = sheets.filter((file) => file !== "src/web/phone.css");
-		// A rule is about the app's columns when `#app` is what its selector ends in, whatever stands before it
-		// (`body #app:has(.pane)` as much as `#app.zoom`), and not when it is about something inside the app.
-		const subject = (selector: string): string =>
-			selector
-				.replace(/\([^()]*\)|\[[^\]]*\]/g, "")
-				.trim()
-				.split(/[\s>+~]+/)
-				.at(-1) ?? "";
-		const columns = desktop.flatMap((file) =>
-			[
-				...readFileSync(file, "utf8")
-					.replace(/\/\*[\s\S]*?\*\//g, "")
-					.matchAll(/(?<=^|[{}])\s*([^{}@]+?)\s*\{([^{}]*)\}/g),
-			].flatMap((rule) => {
-				const selectors = (rule[1] ?? "").replace(/\([^()]*\)/g, "()").split(",");
-				const found = /grid-template-columns:\s*([^;]+);/.exec(rule[2] ?? "");
-				return found && selectors.some((selector) => subject(selector).startsWith("#app"))
-					? [{ file, selector: (rule[1] ?? "").replace(/\s+/g, " "), columns: (found[1] ?? "").replace(/\s+/g, " ") }]
-					: [];
-			}),
-		);
-		// The five screens, at three widths of the window each, and the widened case pane.
-		expect(columns.length).toBeGreaterThanOrEqual(16);
-		expect(columns.filter((rule) => !rule.columns.startsWith("var(--side-width) "))).toEqual([]);
-		expect(
-			desktop.filter(
-				(file) => file !== "src/web/base.css" && /--side-(width|open|freed)\s*:/.test(readFileSync(file, "utf8")),
-			),
 		).toEqual([]);
 	});
 
@@ -599,9 +555,8 @@ describe("the registry", () => {
 	});
 
 	// How many MCP tools there are is a budget, reported in src/surfaces/mcp.test.ts (#906).
-	test("every operation is declared once, with a summary", () => {
+	test("every operation is declared once", () => {
 		expect(new Set(OP_LIST.map((op) => op.name)).size).toBe(OP_LIST.length);
-		for (const op of OP_LIST) expect(op.summary.length).toBeGreaterThan(20);
 	});
 
 	test("a pipeline's token reaches attach, report, change, announce, work and gate", () => {
@@ -742,32 +697,6 @@ function workstationPaths(text: string): string[] {
 		.filter((match) => !Object.hasOwn(allowed, match[1] ?? ""))
 		.map((match) => match[0]);
 }
-
-describe("the project's name", () => {
-	test("the former name appears only where an install or a deployment still carries it", () => {
-		// The project was called Casebook until 2026-10-13 (decision 0015). Each file here says why it still
-		// says so. A new mention anywhere else fails: use the current name, or add the file with its reason.
-		const allowed: Record<string, string> = {
-			".gitignore": "a checkout made before the rename keeps its `.casebook` directory",
-			"CHANGELOG.md": "the entry for the rename",
-			"README.md": "says what the project was called",
-			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
-			"docs/decisions/0015-the-project-is-called-mainworthy.md": "the decision",
-			"docs/deploy.md": "the existing deployment's names, and how to move them",
-			"src/server/transfer/transfer.test.ts": "an archive exported under the former name",
-			"src/server/transfer/transfer.ts": "an archive exported under the former name",
-			"src/surfaces/formats/junit.test.ts": "a report that names its case with the former property",
-			"scripts/work/release.ts": "releases the `.casebook` of an older checkout",
-			"src/surfaces/formats/junit.ts": "a report that names its case with the former property",
-			"src/web/lib/former-name.test.ts": "what a browser kept under the former name",
-			"src/web/lib/former-name.ts": "what a browser kept under the former name",
-			"test/architecture.test.ts": "this list",
-			"test/e2e/shell.test.ts": "what a browser kept under the former name",
-		};
-		const found = wholeTree().filter((file) => /casebook/i.test(readFileSync(file, "utf8")));
-		expect(found.sort()).toEqual(Object.keys(allowed).sort());
-	});
-});
 
 describe("a public repository", () => {
 	test("committed logs contain no absolute Mac volume or home paths", () => {

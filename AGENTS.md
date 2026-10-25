@@ -46,7 +46,6 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither knows if a sentence is still true) |
 | **The repository is public.** Write no tailnet name, address on the tailnet or home network, or machine name: `example.ts.net` and a documentation-range address | `test/architecture.test.ts`, "a public repository" (tailnet names only; the rest is review) |
 | **The owner's name is not written here** (their request, 2026-10-13): write "the owner", and `robin` for an example person. The one exception is the copyright line (decision 0025) | `test/licences.test.ts`, "the owner's name is written only in the copyright line" |
-| **The former name** (decision 0015) stays only in the files the architecture test lists | `test/architecture.test.ts`, "the project's name" |
 | **A failing test in CI is yours to fix.** The instance's policy answers it "needs a fix", so `gate` stays red until a commit passes it. `bun scripts/work.ts ci` reads what failed (`docs/deploy.md`). Never overrule it with the owner token | the policy (`ci-policy`); the token is judgment |
 
 ## Working rules
