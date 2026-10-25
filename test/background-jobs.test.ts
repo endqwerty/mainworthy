@@ -150,3 +150,39 @@ test("an uncertain effect whose lease is lost after starting never runs again", 
 	expect(runs).toBe(1);
 	expect((await h.app.database.read((db) => jobById(db, id)))?.state).toBe("uncertain");
 });
+
+test("enqueue does not wait behind a live handler's job fence", async () => {
+	const id = await queued();
+	const claim = await claimJob(h.app, "worker", id);
+	if (!claim) throw new Error("missing claim");
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const held = h.app.database.write((db) =>
+		db.transaction(async () => {
+			await fenceJob(db, claim, h.app.now());
+			entered.resolve();
+			await release.promise;
+		}),
+	);
+	try {
+		await entered.promise;
+		expect(
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					await db.exec("SET LOCAL lock_timeout='100ms'");
+					return enqueueJob(db, {
+						kind: "test",
+						key: "one",
+						input: {},
+						actor: null,
+						acceptedAt: h.app.now(),
+						recurring: true,
+					});
+				}),
+			),
+		).toBe(id);
+	} finally {
+		release.resolve();
+		await held;
+	}
+});

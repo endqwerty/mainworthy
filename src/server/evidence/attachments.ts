@@ -21,10 +21,15 @@ const Q = {
  ORDER BY u.position RETURNING *`),
 
 	list: sql<{ result: number }, Attachment>("SELECT * FROM attachments WHERE result = $result ORDER BY id"),
+	referenced: sql<{ hash: string }, { present: boolean }>(
+		"SELECT EXISTS(SELECT 1 FROM attachments WHERE hash=$hash) AS present",
+	),
 	hashes: sql<readonly [], { hash: string }>("SELECT DISTINCT hash FROM attachments"),
 };
 export const attachmentsOf = async (db: ReadDb, result: number): Promise<Attachment[]> =>
 	await db.all(Q.list, { result });
+export const attachmentReferenced = async (db: ReadDb, hash: string): Promise<boolean> =>
+	(await db.one(Q.referenced, { hash })).present;
 export const attachmentHashes = async (db: ReadDb): Promise<Set<string>> =>
 	new Set((await db.all(Q.hashes)).map((row) => row.hash));
 /** Files are immutable evidence. A retry under its command id never appends twice. */
@@ -45,7 +50,7 @@ export async function recordAttachments(
 export async function attachmentContent(ctx: Ctx<ReadDb>, result: number, id: number) {
 	const attachment = (await attachmentsOf(ctx.db, result)).find((item) => item.id === id);
 	if (!attachment) throw notFound("attachment");
-	const bytes = ctx.app.blobs.get(attachment.hash);
+	const bytes = await ctx.app.blobs.get(attachment.hash);
 	if (!bytes || bytes.length !== attachment.size || attachmentType(bytes) !== attachment.type)
 		throw notFound("attachment content is missing or damaged; restore it from a backup");
 	return { kind: "file" as const, attachment, data: Buffer.from(bytes).toString("base64") };
@@ -68,7 +73,7 @@ export async function recordAttachmentSlice(
 			rows.push({
 				result,
 				name: file.name,
-				hash: ctx.app.blobs.put(bytes),
+				hash: await ctx.app.blobs.put(bytes),
 				size: bytes.length,
 				type: attachmentType(bytes),
 				at: file.at ?? null,

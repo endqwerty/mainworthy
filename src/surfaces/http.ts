@@ -727,7 +727,8 @@ function buildOpenApi(): Record<string, unknown> {
 				operationId: op.name,
 				summary: op.summary,
 				tags: [op.effect],
-				"x-mainworthy-needs": op.needs,
+				"x-mainworthy-needs": op.effect === "service" ? "job-service" : op.needs,
+				...(op.effect === "service" ? { security: [{ jobIdentity: [] }] } : {}),
 				"x-mainworthy-agent-tool": op.mcp !== null,
 				...(op.scope === "project"
 					? { parameters: [{ name: "project", in: "path", required: true, schema: { type: "string" } }] }
@@ -775,7 +776,16 @@ function buildOpenApi(): Record<string, unknown> {
 		},
 		paths,
 		components: {
-			securitySchemes: { token: { type: "http", scheme: "bearer" } },
+			securitySchemes: {
+				token: { type: "http", scheme: "bearer" },
+				jobIdentity: {
+					type: "http",
+					scheme: "bearer",
+					bearerFormat: "JWT",
+					description:
+						"Google OIDC token for the configured job audience and service account; accepted only on the job service.",
+				},
+			},
 			schemas: {
 				Failed: {
 					type: "object",

@@ -188,7 +188,7 @@ export async function executeHandoff(app: App, claim: JobClaim, input: unknown):
 			await lockProject(db, request.project);
 			await fenceJob(db, claim, app.now());
 			const row = await db.get(Q.one, { id: request.id, nonce: request.nonce });
-			if (!row || row.state !== "queued") return null;
+			if (row?.state !== "queued") return null;
 			await db.run(Q.claim, { id: row.id, nonce: row.nonce });
 			return { row, project: (await projectById(db, row.project))?.key };
 		}),

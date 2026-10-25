@@ -73,6 +73,7 @@ import {
 import { begunCommand, type Ctx, finishCommand, stampSeq } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { AcceptedRefusal, conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { enqueueJob } from "../kernel/jobs.ts";
 import { complete } from "../kernel/steps.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
@@ -224,6 +225,15 @@ export async function acceptReport(ctx: Ctx, input: ReportInput): Promise<{ batc
 	// Target metadata is accepted even when this report's results were already processed.
 	// Retargeting must therefore update inherited standing before a saved receipt can return.
 	if (ctx.changedBases.size > 0) await refold(ctx, [], { dissolveStale: true });
+	if (accepted.fresh)
+		await enqueueJob(ctx.db, {
+			kind: "recover-report",
+			key: String(accepted.batch.id),
+			input: { batch: accepted.batch.id },
+			actor: ctx.actor.id,
+			acceptedAt: accepted.batch.at,
+			dueAt: ctx.app.now() + 120_000,
+		});
 	return accepted;
 }
 

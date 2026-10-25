@@ -279,7 +279,7 @@ Run durable background work. Only the authenticated job service may call.
 | --- | --- |
 | HTTP | `POST /api/job` |
 | Command | `mainworthy job` |
-| Needs | `admin` |
+| Needs | Google OIDC identity of the configured job service account; ordinary admin tokens are refused |
 | Effect | runs jobs on the job service |
 | Agent tool | no |
 
@@ -291,6 +291,7 @@ Run durable background work. Only the authenticated job service may call.
 | `[1].do` | `"run"` | yes |  |
 | `[1].id` | `string` | yes |  |
 | `[2].do` | `"tick"` | yes |  |
+| `[3].do` | `"drain"` | yes |  |
 
 </details>
 

@@ -9,6 +9,7 @@ import { runCli } from "../src/cli/dispatch.ts";
 import { inThisProcess } from "../src/cli/test-support.ts";
 import { ReportInput } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { BLOB_GRACE_MS } from "../src/server/kernel/blob-objects.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
@@ -266,7 +267,7 @@ test("archives carry attachment content and validate its hash before restoring",
 				),
 		),
 	).rejects.toThrow(/attachment/);
-	h.app.blobs.prune(new Set());
+	if (item) await h.app.blobs.remove(item.hash);
 	expect(await h.raw("attachment", { result, id: item?.id })).toMatchObject({
 		ok: false,
 		error: { code: "not_found" },
@@ -401,7 +402,8 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	expect(reply.result.data).toBe(PNG);
 });
 
-test("startup prunes orphan bytes and recovers accepted attachment reports", async () => {
+test("startup queues age-bounded pruning and accepted attachment recovery without blocking HTTP", async () => {
+	let now = Date.now();
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-attachment-recovery-"));
 	dirs.push(dir);
 	const database = await testDatabase();
@@ -411,10 +413,11 @@ test("startup prunes orphan bytes and recovers accepted attachment reports", asy
 		MAINWORTHY_OWNER: "robin",
 		MAINWORTHY_PORT: "0",
 		MAINWORTHY_DATABASE_URL: database.url,
+		MAINWORTHY_JOB_RUNNER: "0",
 	});
-	let instance = await start(config, () => ({ ui: null }), {});
+	let instance = await start(config, () => ({ ui: null }), { now: () => now });
 	instances.push(instance);
-	const orphan = instance.app.blobs.put(Buffer.from("orphan"));
+	const orphan = await instance.app.blobs.put(Buffer.from("orphan"));
 	await instance.app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
@@ -433,9 +436,13 @@ test("startup prunes orphan bytes and recovers accepted attachment reports", asy
 	);
 	await instance.stop();
 	instances.pop();
-	instance = await start(config, () => ({ ui: null }), {});
+	now += BLOB_GRACE_MS + 1;
+	instance = await start(config, () => ({ ui: null }), { now: () => now });
 	instances.push(instance);
-	expect(instance.app.blobs.get(orphan)).toBeNull();
+	expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
+	expect(await instance.app.blobs.get(orphan)).not.toBeNull();
+	await instance.minute();
+	expect(await instance.app.blobs.get(orphan)).toBeNull();
 	expect(readdirSync(join(dir, "blobs"))).toHaveLength(1);
 	const response = await fetch(`${instance.url}/api/p/scratch/get`, {
 		method: "POST",

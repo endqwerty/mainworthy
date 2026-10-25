@@ -36,11 +36,12 @@ const Q = {
 		effect: string;
 		max: number;
 		due: number;
-		recurring: boolean;
 	}>(`
  INSERT INTO background_jobs(id,kind,input,actor,accepted_at,effect,max_attempts,next_at)
- VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due) ON CONFLICT(id) DO UPDATE SET state='ready',attempts=0,next_at=excluded.next_at,actor=excluded.actor,accepted_at=excluded.accepted_at,started=false,error=NULL
- WHERE $recurring AND background_jobs.state='succeeded'`),
+ VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due) ON CONFLICT(id) DO NOTHING`),
+	rearm: sql<{ id: string; at: number; actor: number | null; due: number }>(`
+ UPDATE background_jobs SET state='ready',attempts=0,next_at=$due,actor=$actor,accepted_at=$at,started=false,error=NULL
+ WHERE id IN (SELECT id FROM background_jobs WHERE id=$id AND state='succeeded' FOR UPDATE SKIP LOCKED)`),
 	one: sql<{ id: string }, Job>("SELECT * FROM background_jobs WHERE id=$id"),
 	next: sql<{ now: number; id: string | null; kind: string | null }, Job>(`
  SELECT * FROM background_jobs WHERE (state='ready' AND next_at <= $now OR state='running' AND lease_until <= $now)
@@ -83,8 +84,9 @@ export async function enqueueJob(
 		effect: job.effect ?? "repeatable",
 		max: job.maxAttempts ?? 5,
 		due: job.dueAt ?? job.acceptedAt,
-		recurring: job.recurring ?? false,
 	});
+	if (job.recurring)
+		await db.run(Q.rearm, { id, at: job.acceptedAt, actor: job.actor, due: job.dueAt ?? job.acceptedAt });
 	return id;
 }
 export const jobById = (db: ReadDb, id: string): Promise<Job | null> => db.get(Q.one, { id });

@@ -95,6 +95,7 @@ const Q = {
  */
 export const UNEXPORTED: readonly string[] = [
 	"background_jobs",
+	"blob_objects",
 	"batch_admissions",
 	"identity_ceremonies",
 	"identity_ceremony_epoch",
@@ -218,6 +219,9 @@ const INSTANCE_TABLES = [
 	"identity_ceremony_epoch",
 	"identity_limits",
 	"identity_starts",
+	"background_jobs",
+	"blob_objects",
+
 	"meta",
 	"orgs",
 	"actors",
@@ -371,7 +375,7 @@ export async function exportArchive(
 				let blob = "";
 				if (table.name === "attachments") {
 					const item = Attachment.parse(JSON.parse(row.json));
-					const content = options.blobs?.get(item.hash);
+					const content = await options.blobs?.get(item.hash);
 					if (!content || content.length !== item.size || attachmentType(content) !== item.type)
 						throw invalid(`attachment ${item.id} is missing or damaged; restore its content before exporting`);
 					blob = `,"blob":${JSON.stringify(Buffer.from(content).toString("base64"))}`;
@@ -508,7 +512,7 @@ export async function importArchive(
 			let position = 1;
 			let ended = false;
 			for (const name of UNEXPORTED) {
-				if (name === "identity_limits" || name === "identity_starts") continue;
+				if (name === "identity_limits" || name === "identity_starts" || name === "blob_objects") continue;
 				await db.runDynamic(`DELETE FROM ${identifier(name)}`);
 			}
 			await db.runDynamic("DELETE FROM search_docs");
@@ -548,7 +552,7 @@ export async function importArchive(
 						attachmentType(bytes) !== item.data.type
 					)
 						throw invalid("archive attachment does not match its hash, size or content type");
-					options.blobs.put(bytes);
+					await options.blobs.put(bytes);
 				} else if (entry.blob !== undefined) throw invalid("only an attachment row may carry blob content");
 				const columns = new Set(table.columns);
 				for (const column of entry.r.keys()) {
@@ -693,8 +697,7 @@ export async function removeBootstrap(db: WriteDb): Promise<void> {
 /**
  * Deletes project `key` and everything that is its own, in one transaction: the rows a project export selects,
  * the grants on it, its search index, its tracker requests and the ends of its changes. Who people are stays,
- * and so does every other project. The files of its attachments stay on disk until the next start prunes the ones
- * no row names (`start`). The project's key is free afterwards, and a project made under it starts empty.
+ * and so does every other project. The files of its attachments stay until the age-bounded prune job finds no row naming them. The project's key is free afterwards, and a project made under it starts empty.
  * A table with no ownership rule refuses the removal before a row goes, as it refuses a project export.
  *
  * No operation offers this. `mainworthy serve` calls it for the demo it seeds again (`MAINWORTHY_DEMO`, in

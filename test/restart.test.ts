@@ -174,7 +174,13 @@ test("a report accepted when the server is killed is applied in full when it sta
 	expect(await upload).toBeNull();
 
 	const second = await serve(dataDir);
-	const recovered = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
+	let recovered = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
+	while (recovered.state === "begun") {
+		const waiting = await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
+		expect(["pending", "blocked"]).toContain(waiting.verdict);
+		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		recovered = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
+	}
 	expect(recovered).toMatchObject({ state: "done", op: "report" });
 	const gate = await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
 	// Every result is there, none twice.
