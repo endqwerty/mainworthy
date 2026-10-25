@@ -10,9 +10,10 @@ git -C "$scratch" init -q
 for name in production.tfvars production.auto.tfvars production.tfvars.json production.auto.tfvars.json; do
   git -C "$scratch" check-ignore --no-index -q "$name"
 done
-# Service Networking bills calls without a resource project to the CI account's seed project, where it is off.
-if ! grep -Eq '^[[:space:]]*user_project_override[[:space:]]*=[[:space:]]*true' "$suite/versions.tf"; then
-  echo 'The google provider must bill each call to its resource project (user_project_override = true).' >&2
+# A call without a quota project is billed to the CI account's seed project, where these APIs are off.
+if ! grep -Eq '^[[:space:]]*user_project_override[[:space:]]*=[[:space:]]*true' "$suite/versions.tf" ||
+  ! grep -Eq '^[[:space:]]*billing_project[[:space:]]*=[[:space:]]*var\.production_project' "$suite/versions.tf"; then
+  echo 'The google provider must name production as the quota project of every call.' >&2
   exit 1
 fi
 cat > "$scratch/terraform" <<'MOCK'
