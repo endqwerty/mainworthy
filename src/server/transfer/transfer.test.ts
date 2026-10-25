@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { writerDatabase } from "../../../test/pg-scopes.ts";
 import { seed } from "../../cli/seed.ts";
-import { withInstance } from "../../cli/test-support.ts";
+import { inThisProcess, withInstance } from "../../cli/test-support.ts";
 
 async function harness(...args: Parameters<typeof import("../../../test/helpers.ts")["harness"]>) {
 	return (await import("../../../test/helpers.ts")).harness(...args);
@@ -574,7 +574,7 @@ async function insert(db: WriteDb, table: string, row: Row): Promise<void> {
 
 async function source(): Promise<WriteDb> {
 	const db = await database();
-	storage(db).put(attachmentBytes);
+	await storage(db).put(attachmentBytes);
 	await db.transaction(async () => {
 		await db.transaction(() => db.exec("SET CONSTRAINTS ALL DEFERRED"));
 		for (const [table, rows] of Object.entries(fixtures)) {
@@ -703,7 +703,15 @@ test("archives wait for retired demo cleanup instead of restoring retired data w
 		expect(
 			(await app.database.read((db) => exportWithBlobs(db, () => {}, { project: "demo", blobs: app.blobs }))).rows,
 		).toBeGreaterThan(0);
-		await drainRetiredDemos(instance);
+		const cleanup = await inThisProcess(
+			"retired demo cleanup",
+			async () => {
+				await drainRetiredDemos(instance);
+				return 0;
+			},
+			{ environment: {}, cwd: process.cwd(), input: "" },
+		);
+		expect(cleanup.code).toBe(0);
 		expect((await app.database.read((db) => exportWithBlobs(db, () => {}, { blobs: app.blobs }))).rows).toBeGreaterThan(
 			0,
 		);
@@ -1832,7 +1840,9 @@ describe("Mainworthy instance archives", () => {
 			"assertion_roots",
 			"assertion_seen",
 			"assertion_spreads",
+			"background_jobs",
 			"batch_admissions",
+			"blob_objects",
 			"change_ends",
 			"change_events",
 			"commit_status_delivery",

@@ -122,7 +122,7 @@ function capabilities(): string {
 		["Capability", "Operations it allows", "Held by default by"],
 		Capability.options.map((capability) => [
 			code(capability),
-			OP_LIST.filter((op) => needs(op.needs).includes(capability))
+			OP_LIST.filter((op) => op.effect !== "service" && needs(op.needs).includes(capability))
 				.map((op) => code(op.name))
 				.join(", ") || "none by itself; it makes an answer count where the policy asks a member",
 			kinds
@@ -214,9 +214,11 @@ function operations(): string {
 					[
 						"Needs",
 						// `self` names no capability: the operation is about what is the caller's own.
-						op.needs === "self"
-							? "no capability: any person or agent that is signed in, for what is their own"
-							: needs(op.needs).map(code).join(" or "),
+						op.effect === "service"
+							? "Google OIDC identity of the configured job service account; ordinary admin tokens are refused"
+							: op.needs === "self"
+								? "no capability: any person or agent that is signed in, for what is their own"
+								: needs(op.needs).map(code).join(" or "),
 					],
 					[
 						"Effect",

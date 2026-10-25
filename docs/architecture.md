@@ -138,6 +138,32 @@ A write outside a write scope does not compile. A write statement without an act
 A lost connection fails the operation and is never replaced mid-operation. Migrations use a separate
 advisory lock and dedicated connection. There are no reader threads, checkpoint workers or database-file locks.
 
+## Background jobs and startup
+
+Migrations and bootstrap remain startup work. Their migration, actor and project locks let any instance run them.
+Startup then enqueues recovery, assertion indexing and periodic work before opening application routes. It does not
+wait for those jobs to finish. Accepted reports remain pending until their request, a retry or a recovery job applies them.
+
+`kernel/jobs.ts` owns private PostgreSQL job rows. A writer enqueues on its transaction. A worker claims with
+`FOR UPDATE SKIP LOCKED`, commits its owner and random claim token, then works. Handlers lock actors and projects
+before fencing their final writes on that token. A lost or expired claim cannot finish over its successor. Repeatable
+work retries with bounded backoff; a started hand-off or issue creation becomes uncertain after lease loss. The
+process maps track shutdown only. Recurring jobs retain the existing status-post allowances and tracker backoff.
+
+The registry's `job` operation is available only on the separate job service. HTTP verifies the Google OIDC
+signature, issuer, audience, validity and service account email; the public service refuses that operation even for
+an admin. The local runner invokes the same registry operation. Cloud Tasks dispatch is step 3 of issue #821.
+
+Blob I/O is asynchronous. Every put, including reuse, commits a hash's last-put time before writing bytes, on a
+separate small metadata pool so it cannot wait behind its own domain transaction. A prune locks that row, checks its
+age and attachment references, deletes bytes, then removes the row. Its grace period is twice the transaction bound.
+An upload waiting behind a deletion refreshes or recreates the row before putting bytes again. Referenced candidates
+move behind unchecked candidates so a bounded prune slice makes progress. Object ages survive archive import because
+they describe the shared byte store; jobs do not survive import. Neither table is exported.
+
+Demo refresh and retired-demo cleanup stay paused at startup. Their manual CLI helpers remain as they were; this
+job change does not certify or re-enable that workload for issue #914.
+
 ## Who may call
 
 An actor is a person, an agent, a pipeline or the policy's own rule. What it may do is a grant per project (or

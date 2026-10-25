@@ -2,6 +2,7 @@
 import { join } from "node:path";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
+import { trackedBlobs } from "./blob-objects.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
 import { Database, type WriteDb } from "./db.ts";
@@ -151,8 +152,15 @@ export async function openApp(config: Config, options: { memory?: boolean; now?:
 		await database.close();
 		throw error;
 	});
+
+	const blobs = trackedBlobs(
+		config.databaseUrl,
+		options.memory ? memoryBlobs() : diskBlobs(config.dataDir),
+		options.now ?? Date.now,
+	);
 	const app: App = {
-		blobs: options.memory ? memoryBlobs() : diskBlobs(config.dataDir),
+		blobs: blobs.store,
+
 		database,
 		config,
 		now: options.now ?? Date.now,
@@ -181,7 +189,11 @@ export async function openApp(config: Config, options: { memory?: boolean; now?:
 		async close() {
 			listeners.clear();
 			wakes.clear();
-			await database.close();
+			try {
+				await blobs.close();
+			} finally {
+				await database.close();
+			}
 		},
 	};
 	return app;

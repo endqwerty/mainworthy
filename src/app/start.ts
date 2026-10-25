@@ -1,25 +1,22 @@
-import { rebuildAssertionIndexes } from "../server/evidence/assertions.ts";
-import { attachmentHashes } from "../server/evidence/attachments.ts";
-import { deliverHandoffs, recoverHandoffs, stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
+import { stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
 import {
 	bootstrap,
 	flushUses,
 	lockActors,
 	stopMail,
-	sweepSessions,
-	sweepSignInRecords,
 	validateBootstrap,
 	waitMail,
 } from "../server/identity/identity.ts";
 import { type App, type Config, openApp } from "../server/kernel/app.ts";
 import { type Actor, allProjects, lockProjectKey } from "../server/kernel/ctx.ts";
 import { createProject } from "../server/ops/admin.ts";
-import { recoverAccepted, recoverDisputes, sweep } from "../server/ops/jobs.ts";
-import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../server/ops/tracker-holds.ts";
+import { enqueueStartupJobs, jobOperation } from "../server/ops/jobs.ts";
+import { invokeService } from "../server/ops/registry.ts";
+import { stopTrackerPolls, waitTrackerPolls } from "../server/ops/tracker-holds.ts";
 import type { StatusPort } from "../server/statuses/port.ts";
-import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "../server/statuses/statuses.ts";
+import { stopCommitStatuses, waitCommitStatuses } from "../server/statuses/statuses.ts";
 import type { TrackerPort } from "../server/trackers/port.ts";
-import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "../server/trackers/requests.ts";
+import { stopTrackerRequests, waitTrackerRequests } from "../server/trackers/requests.ts";
 import { type Extra, type Patience, serve, upgradingListener, VERSION } from "../surfaces/http.ts";
 
 export type Instance = {
@@ -79,22 +76,6 @@ type StartOptions = OpenOptions & {
 	statusPort?: StatusPort;
 };
 
-async function recoverStartup(app: App, progress: (phase: string) => void = () => {}): Promise<void> {
-	progress("attachments");
-	await app.database.write(async (db) => {
-		app.blobs.prune(await attachmentHashes(db));
-		await db.transaction(async () => rebuildAssertionIndexes(db, false, () => progress("assertions")));
-	});
-	progress("assertions");
-	progress("accepted reports");
-	await recoverAccepted(app);
-	progress("disputes");
-	await recoverDisputes(app);
-	progress("handoffs");
-	await recoverHandoffs(app);
-	progress("recovered");
-}
-
 function validateStartup(config: Config): void {
 	validateBootstrap(config);
 	if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535)
@@ -140,50 +121,42 @@ async function startInstance(
 	const { app, owner } = opened;
 	let server: ReturnType<typeof serve>;
 	try {
-		await recoverStartup(app);
+		await enqueueStartupJobs(app);
 		signal?.throwIfAborted();
 		server = serve(app, owner, extra(app, owner), options.patience, listener);
 	} catch (error) {
 		await app.close();
 		throw error;
 	}
-	// Every writer gets its own database lease.
-	// Each job has its own write lease and runs in this order, so one that fails does not stop the next:
-	// questions whose decisions ran out are reopened, what was noted of the use of tokens and sessions is written,
-	// and then, with the rows current, sessions past a lifetime are ended and old sign-in records cleaned up.
-	// The policy's own actor is looked up inside the write lease, each time: an import replaces the actors, and the id
-	// it had when the server started may then be somebody else's (issue #123).
+	const runner = new AbortController();
+	const operation = jobOperation({ ...options, signal: runner.signal });
+	let stopping: Promise<void> | null = null;
 	let minuteWork: Promise<void> = Promise.resolve();
-	const runMinute = async (): Promise<void> => {
-		const jobs = [
-			["sweep", () => sweep(app)],
-			["writing last uses", () => flushUses(app)],
-			["ending expired sessions", () => sweepSessions(app)],
-			["deleting old sign-in records", () => sweepSignInRecords(app)],
-			["sending tracker requests", () => deliverTrackerRequests(app, options.trackerPort)],
-			["sending hand-offs", () => deliverHandoffs(app)],
-			["checking defect holds", () => pollDefectHolds(app, options.trackerPort)],
-			["posting GitHub commit statuses", () => deliverCommitStatuses(app, options.statusPort)],
-		] as const;
-		for (const [name, job] of jobs) {
-			await job().catch((error: unknown) => console.error(`[mainworthy] ${name} failed:`, error));
-		}
-	};
-	const minute = (): Promise<void> => {
-		minuteWork = minuteWork.then(runMinute);
+	const run = (periodic: boolean): Promise<void> => {
+		minuteWork = minuteWork
+			.then(async () => {
+				if (runner.signal.aborted) return;
+				const reply = await invokeService(app, operation, { do: periodic ? "tick" : "drain" });
+				if (!reply.ok) console.error("[mainworthy] background jobs failed", { code: reply.error.code });
+			})
+			.catch((error: unknown) => console.error("[mainworthy] background jobs failed", error));
 		return minuteWork;
 	};
-	const timer = setInterval(() => void minute(), 60_000);
-	timer.unref();
+	const minute = (): Promise<void> => run(true);
+	const timer = !config.jobService && config.jobRunner !== false ? setInterval(() => void minute(), 60_000) : null;
+	const poller = !config.jobService && config.jobRunner !== false ? setInterval(() => void run(false), 1000) : null;
+	timer?.unref();
+	poller?.unref();
 	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;
-	let stopping: Promise<void> | null = null;
 	return {
 		...opened,
 		url,
 		minute,
 		stop() {
 			stopping ??= (async () => {
-				clearInterval(timer);
+				runner.abort();
+				if (timer) clearInterval(timer);
+				if (poller) clearInterval(poller);
 				stopTrackerRequests(app);
 				stopHandoffs(app);
 				stopTrackerPolls(app);

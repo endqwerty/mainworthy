@@ -41,7 +41,7 @@ A result's `corrects` names an earlier result of yours that has not already been
 If another report has replaced that result, or an accepted report is still waiting to apply
 its correction, the server refuses the whole report with `conflict` before accepting it.
 The refusal says whether the earlier correction is applied or still waiting.
-After an interruption, retry the first report or let server startup finish it.
+After an interruption, retry the first report or let a background recovery job finish it.
 Read the latest results and correct the current result instead.
 Two results in one report cannot correct the same earlier result.
 

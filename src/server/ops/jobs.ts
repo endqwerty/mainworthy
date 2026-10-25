@@ -5,15 +5,26 @@ import { JobReply } from "../../core/replies.ts";
 // whose decisions ran out of time. Both are idempotent and run inside ordinary write transactions.
 import { recoverDisputes as reconcileDisputes, sweepExpired } from "../decisions/decisions.ts";
 import { expiredDecisions } from "../decisions/questions.ts";
+import { ensureAssertionIndex } from "../evidence/assertions.ts";
 import { acceptedBatches, batchById } from "../evidence/evidence.ts";
 import { executeHandoff, recoverHandoffs } from "../handoffs/handoffs.ts";
-import { actorById, lockActors, ruleActorId } from "../identity/identity.ts";
+import {
+	actorById,
+	flushUses,
+	lockActors,
+	ruleActorId,
+	sweepSessions,
+	sweepSignInRecords,
+} from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { AcceptedRefusal } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runJob } from "../kernel/jobs.ts";
+import type { StatusPort } from "../statuses/port.ts";
 import { executeCommitStatuses } from "../statuses/statuses.ts";
+import type { TrackerPort } from "../trackers/port.ts";
 import { executeTrackerRequest } from "../trackers/requests.ts";
+import { pruneBlobs } from "./blob-prune.ts";
 import { defineServiceOp } from "./registry.ts";
 import { executeTrackerPolls } from "./tracker-holds.ts";
 import { applyAccepted } from "./writes.ts";
@@ -26,9 +37,10 @@ import { applyAccepted } from "./writes.ts";
  * stays accepted, its gate keeps reading `pending`, and the reason is written to the log. An instance that
  * will not start because of one stored report would be worse than one honest `pending`.
  */
-export async function recoverAccepted(app: App, claim?: JobClaim): Promise<number> {
+export async function recoverAccepted(app: App, claim?: JobClaim, batchId?: number): Promise<number> {
 	let applied = 0;
 	for (const batch of await app.database.read(async (db) => acceptedBatches(db))) {
+		if (batchId !== undefined && batch.id !== batchId) continue;
 		let done: { key: string; seq: number; touched: string[]; actor: string } | null = null;
 		try {
 			done = await app.database.write(async (db) =>
@@ -57,6 +69,7 @@ export async function recoverAccepted(app: App, claim?: JobClaim): Promise<numbe
 			console.error(
 				`mainworthy: report ${batch.id} could not be applied and stays pending: ${error instanceof Error ? error.message : String(error)}`,
 			);
+			if (claim) throw error;
 		}
 		if (!done) continue;
 		applied++;
@@ -114,71 +127,105 @@ export async function sweep(app: App, as?: number, claim?: JobClaim): Promise<nu
 const JobRequest = z.discriminatedUnion("do", [
 	z.object({ do: z.literal("run"), id: z.string().min(1).max(2048) }),
 	z.object({ do: z.literal("tick") }),
+	z.object({ do: z.literal("drain") }),
 ]);
-export const jobOp = defineServiceOp({
-	name: "job",
-	scope: "instance",
-	effect: "service",
-	needs: "admin",
-	mcp: null,
-	summary: "Run durable background work. Only the authenticated job service may call.",
-	input: JobRequest,
-	output: JobReply,
-	async run(app, input) {
-		if (input.do === "tick") await enqueuePeriodicJobs(app);
-		let ran = 0;
-		const owner = randomUUID();
-		while (
-			ran < (input.do === "run" ? 1 : 20) &&
-			(await runJob(
-				app,
-				owner,
-				async (claim, payload) => {
-					switch (claim.kind) {
-						case "commit-statuses":
-							await executeCommitStatuses(app, claim);
-							break;
-						case "tracker-polls":
-							await executeTrackerPolls(app, claim);
-							break;
-						case "handoff":
-							await executeHandoff(app, claim, payload);
-							break;
-						case "tracker-request":
-							await executeTrackerRequest(app, claim, payload);
-							break;
-						case "recover-reports":
-							await recoverAccepted(app, claim);
-							break;
-						case "recover-disputes":
-							await recoverDisputes(app, claim);
-							break;
-						case "expire-decisions":
-							await sweep(app, undefined, claim);
-							break;
-						default:
-							throw new Error(`unknown job kind ${claim.kind}`);
-					}
-				},
-				input.do === "run" ? input.id : null,
-			))
-		)
-			ran++;
-		await recoverHandoffs(app);
-		return { ran };
-	},
-});
+export function jobOperation(ports: { trackerPort?: TrackerPort; statusPort?: StatusPort; signal?: AbortSignal } = {}) {
+	return defineServiceOp({
+		name: "job",
+		scope: "instance",
+		effect: "service",
+		needs: "admin",
+		mcp: null,
+		summary: "Run durable background work. Only the authenticated job service may call.",
+		input: JobRequest,
+		output: JobReply,
+		async run(app, input) {
+			if (input.do === "tick") await enqueuePeriodicJobs(app);
+			let ran = 0;
+			const owner = randomUUID();
+			while (
+				!ports.signal?.aborted &&
+				ran < (input.do === "run" ? 1 : 20) &&
+				(await runJob(
+					app,
+					owner,
+					async (claim, payload) => {
+						switch (claim.kind) {
+							case "commit-statuses":
+								await executeCommitStatuses(app, claim, ports.statusPort);
+								break;
+							case "tracker-polls":
+								await executeTrackerPolls(app, claim, ports.trackerPort);
+								break;
+							case "handoff":
+								await executeHandoff(app, claim, payload);
+								break;
+							case "tracker-request":
+								await executeTrackerRequest(app, claim, payload, ports.trackerPort);
+								break;
+							case "blob-prune":
+								await pruneBlobs(app, claim);
+								break;
+							case "flush-uses":
+								await flushUses(app);
+								break;
+							case "expire-sessions":
+								await sweepSessions(app);
+								break;
+							case "sign-in-retention":
+								await sweepSignInRecords(app);
+								break;
+							case "assertion-indexes":
+								await rebuildIndexes(app, claim);
+								break;
+							case "recover-report":
+								await recoverAccepted(app, claim, z.object({ batch: z.number().int() }).parse(payload).batch);
+								break;
+							case "recover-reports":
+								await recoverAccepted(app, claim);
+								break;
+							case "recover-disputes":
+								await recoverDisputes(app, claim);
+								break;
+							case "expire-decisions":
+								await sweep(app, undefined, claim);
+								break;
+							default:
+								throw new Error(`unknown job kind ${claim.kind}`);
+						}
+					},
+					input.do === "run" ? input.id : null,
+				))
+			)
+				ran++;
+			await recoverHandoffs(app);
+			return { ran };
+		},
+	});
+}
+export const jobOp = jobOperation();
 
 export async function enqueuePeriodicJobs(app: App): Promise<void> {
 	await app.database.write((db) =>
 		db.transaction(async () => {
 			const actor = await ruleActorId(db);
+			for (const batch of await acceptedBatches(db))
+				await enqueueJob(db, {
+					kind: "recover-report",
+					key: String(batch.id),
+					input: { batch: batch.id },
+					actor: batch.actor,
+					acceptedAt: batch.at,
+				});
 			for (const kind of [
-				"recover-reports",
 				"recover-disputes",
 				"expire-decisions",
 				"commit-statuses",
 				"tracker-polls",
+				"flush-uses",
+				"expire-sessions",
+				"sign-in-retention",
+				"blob-prune",
 			])
 				await enqueueJob(db, {
 					kind,
@@ -190,4 +237,41 @@ export async function enqueuePeriodicJobs(app: App): Promise<void> {
 				});
 		}),
 	);
+}
+
+export async function enqueueStartupJobs(app: App): Promise<void> {
+	await enqueuePeriodicJobs(app);
+	await app.database.write((db) =>
+		db.transaction(async () => {
+			for (const batch of await acceptedBatches(db))
+				await enqueueJob(db, {
+					kind: "recover-report",
+					key: `startup:${randomUUID()}`,
+					input: { batch: batch.id },
+					actor: batch.actor,
+					acceptedAt: batch.at,
+					dueAt: app.now(),
+				});
+			await enqueueJob(db, {
+				kind: "assertion-indexes",
+				key: "startup",
+				input: {},
+				actor: null,
+				acceptedAt: app.now(),
+				recurring: true,
+			});
+		}),
+	);
+}
+async function rebuildIndexes(app: App, claim: JobClaim): Promise<void> {
+	for (const project of await app.database.read(allProjects))
+		await app.database.write((db) =>
+			db.transaction(async () => {
+				if (!(await lockProject(db, project.id))) return;
+				await fenceJob(db, claim, app.now());
+				for await (const _ of ensureAssertionIndex(db, project.id)) {
+					/* Each query yields to other requests. */
+				}
+			}),
+		);
 }

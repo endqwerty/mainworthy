@@ -83,6 +83,9 @@ column batches.shards: bigint NULL
 column batches.staged: text NULL
 column batches.state: text NOT NULL
 column batches.target: bigint NOT NULL
+column blob_objects.checked_at: bigint NOT NULL DEFAULT 0
+column blob_objects.hash: text NOT NULL
+column blob_objects.put_at: bigint NOT NULL
 column builds.artifact: bigint NOT NULL
 column builds.id: bigint NOT NULL IDENTITY d
 column builds.label: text NOT NULL
@@ -740,6 +743,11 @@ constraint batches.batches_state_not_null: NOT NULL state
 constraint batches.batches_state_v2: CHECK ((state = ANY (ARRAY['accepted'::text, 'processed'::text, 'cancelled'::text])))
 constraint batches.batches_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
 constraint batches.batches_target_not_null: NOT NULL target
+constraint blob_objects.blob_objects_checked_at_not_null: NOT NULL checked_at
+constraint blob_objects.blob_objects_hash_check: CHECK ((hash ~ '^[a-f0-9]{64}$'::text))
+constraint blob_objects.blob_objects_hash_not_null: NOT NULL hash
+constraint blob_objects.blob_objects_pkey: PRIMARY KEY (hash)
+constraint blob_objects.blob_objects_put_at_not_null: NOT NULL put_at
 constraint builds.builds_artifact_fkey: FOREIGN KEY (artifact) REFERENCES artifacts(id) DEFERRABLE
 constraint builds.builds_artifact_not_null: NOT NULL artifact
 constraint builds.builds_id_not_null: NOT NULL id
@@ -1845,6 +1853,8 @@ index batches_pkey: CREATE UNIQUE INDEX batches_pkey ON public.batches USING btr
 index batches_project_key_key: CREATE UNIQUE INDEX batches_project_key_key ON public.batches USING btree (project, key)
 index batches_target: CREATE INDEX batches_target ON public.batches USING btree (target, seq)
 index batches_target_shards: CREATE INDEX batches_target_shards ON public.batches USING btree (target, job) WHERE (shards IS NOT NULL)
+index blob_objects_age: CREATE INDEX blob_objects_age ON public.blob_objects USING btree (checked_at, put_at, hash)
+index blob_objects_pkey: CREATE UNIQUE INDEX blob_objects_pkey ON public.blob_objects USING btree (hash)
 index builds_artifact_reset: CREATE INDEX builds_artifact_reset ON public.builds USING btree (artifact)
 index builds_pkey: CREATE UNIQUE INDEX builds_pkey ON public.builds USING btree (id)
 index builds_project_label_key: CREATE UNIQUE INDEX builds_project_label_key ON public.builds USING btree (project, label)
@@ -2073,6 +2083,7 @@ table attachments:
 table background_jobs:
 table batch_admissions:
 table batches:
+table blob_objects:
 table builds:
 table case_aliases:
 table case_tags:

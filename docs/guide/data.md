@@ -41,17 +41,17 @@ than writing an incomplete backup.
 
 There is no automatic evidence expiry or total disk quota. Monitor free space and
 include retained attachments and archive staging files in storage planning. A
-failed write or import can leave unreferenced blob files. Startup removes these
-before recovering accepted reports. Referenced evidence is kept when a producer
+failed write or import can leave unreferenced blob files. An age-bounded background job removes old unreferenced objects. Uploads refresh the object age before writing or reusing bytes, so a prune on another instance cannot remove an upload that is still within its transaction bound. Referenced evidence is kept when a producer
 is forgotten. File contents and file names may contain personal information and
 are not scanned or redacted.
 
 ## Recover from an unverifiable assertion cause
 
-If startup prints `invalid: cannot reconstruct assertion root <id>` and exits, a stored
+If an operation reports `invalid: cannot reconstruct assertion root <id>`, a stored
 assertion cause's hash matches neither its normalized text nor a verified file-split cause.
-The server stops before serving requests because it cannot rebuild the assertion index
-from that evidence. Import refuses an archive with the same inconsistency and rolls back.
+Startup schedules the assertion rebuild as a job; a failed rebuild leaves the server available
+for other work. The affected project may refuse operations until its evidence is repaired.
+Import refuses an archive with the same inconsistency and rolls back.
 
 1. Stop the app and preserve PostgreSQL plus the attachment directory. Follow [Back up](#back-up).
 2. Keep the exact error, signature id and image commit that refused to start.
@@ -60,7 +60,7 @@ from that evidence. Import refuses an archive with the same inconsistency and ro
 
 Without a tested backup, keep the preserved data and request a repair of the named
 signature. There is no automatic repair command for this error. Changing hashes or
-deleting evidence to force startup bypasses the consistency check rather than repairing
+deleting evidence to force a rebuild bypasses the consistency check rather than repairing
 the recorded cause.
 
 ## Export everything
