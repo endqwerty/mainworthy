@@ -18,7 +18,6 @@ const child = spawn(config.command[0] ?? "", config.command.slice(1), {
 	stdio: ["pipe", "pipe", "inherit"],
 	env: { ...process.env, MAINWORTHY_DATABASE_URL: database.url, MAINWORTHY_TEST_LIFETIME: crypto.randomUUID() },
 });
-child.stdout?.pipe(process.stdout);
 const exited = new Promise<number>((resolve) => {
 	child.once("exit", (code) => resolve(code ?? 1));
 	child.once("error", (error) => {
@@ -29,6 +28,8 @@ const exited = new Promise<number>((resolve) => {
 const pid = child.pid;
 const unregisterFixture = pid === undefined ? async () => {} : await registerOwnedChild(pid);
 if (pid !== undefined) await writeFile(join(config.data, "fixture-pid"), String(pid));
+// A fixture can publish its URL immediately; readiness must include its completed PID metadata.
+child.stdout?.pipe(process.stdout);
 const signal = (name: NodeJS.Signals) => {
 	if (pid === undefined) return;
 	try {
