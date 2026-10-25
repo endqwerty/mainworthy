@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { admit, createToken, hashToken, signInWithToken } from "../src/server/identity/identity.ts";
+import { admit, bootstrap, createToken, hashToken, signInWithToken } from "../src/server/identity/identity.ts";
 import { findSession } from "../src/server/identity/sessions.ts";
 import { noteUse } from "../src/server/identity/uses.ts";
 import { type App, openApp } from "../src/server/kernel/app.ts";
@@ -19,6 +19,28 @@ async function pair() {
 	opened.push({ h, peer });
 	return { h, peer };
 }
+
+test("asking the limiter repeatedly changes no allowance on either App", async () => {
+	const { h, peer } = await pair();
+	const { limiterOf } = await import("../src/server/identity/attempts.ts");
+	const keys = ["addr:203.0.113.99", "account:repeated-check"];
+	for (let i = 0; i < 301; i++) expect((await limiterOf(h.app).check(keys, h.app.now())).kind).toBe("free");
+	expect((await limiterOf(peer).check(keys, h.app.now())).kind).toBe("free");
+	for (let i = 0; i < 5; i++) expect((await limiterOf(peer).failed(keys, h.app.now())).kind).toBe("free");
+	for (const app of [h.app, peer])
+		expect(await limiterOf(app).check(keys, app.now())).toMatchObject({ kind: "blocked", retryAfterSeconds: 1 });
+});
+
+test("valid env-token admission agrees across Apps after 300 requests from one public address", async () => {
+	const { h, peer } = await pair();
+	const secret = "fixture-owner-token-0123456789abcdef";
+	h.app.config.ownerToken = secret;
+	await bootstrap(h.app);
+	const facts = { bearer: secret, cookie: null, sameOrigin: false, localOwner: null, address: "203.0.113.99" };
+	for (let i = 0; i < 300; i++) expect((await admit(h.app, facts)).kind).toBe("admitted");
+	expect((await admit(peer, facts)).kind).toBe("admitted");
+	expect((await admit(h.app, facts)).kind).toBe("admitted");
+});
 
 test.each(["failures", "starts"])(
 	"shared %s capacity remains bounded when another App locks every eviction candidate",

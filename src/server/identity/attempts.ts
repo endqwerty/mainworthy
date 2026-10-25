@@ -60,7 +60,6 @@ const Q = {
 	startRoom: sql(`DELETE FROM identity_starts WHERE key IN (
  SELECT key FROM identity_starts ORDER BY since LIMIT greatest(0, (SELECT count(*) FROM identity_starts) - 9999) FOR UPDATE SKIP LOCKED)`),
 };
-const proofStarts = new WeakMap<App, ReturnType<typeof createStartLimiter>>();
 const starts = new WeakMap<App, ReturnType<typeof createStartLimiter>>();
 function localStarts(app: App) {
 	let limiter = starts.get(app);
@@ -111,13 +110,6 @@ export function limiterOf(app: App): SharedLimiter {
 			return await app.database.admission(async (db) => (await db.one(Q.version)).version);
 		},
 		async check(keys, now) {
-			let local = proofStarts.get(app);
-			if (!local) {
-				local = createStartLimiter();
-				proofStarts.set(app, local);
-			}
-			const ceiling = local(keys.find((key) => key.startsWith("addr:")) ?? null, now);
-			if (ceiling.kind === "blocked") return { ...ceiling, version: 0 };
 			return await app.database.admission(async (db) => {
 				const version = (await db.one(Q.version)).version;
 				const rows = await db.all(Q.entries, { keys: keys.map(databaseKey) });
