@@ -14,6 +14,7 @@ Every report reads the one stream of results, from people, pipelines and agents 
    reports read that many 24-hour periods back from now.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between reports.
+The day and producer dropdowns follow the site's light or dark theme.
 
 From the command line, `mainworthy stats --of <report>` prints the same report as JSON, for example
 `mainworthy stats --of flaky --days 14`. Over HTTP it is `POST /api/p/<project>/stats` (see [the API](./api.md#stats)).
