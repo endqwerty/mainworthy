@@ -52,7 +52,7 @@
 		"test/e2e/tag-removal.test.ts": 7203,
 		"test/e2e/followups.test.ts": 7131,
 		"test/e2e/drafts.test.ts": 7529,
-		"test/work.test.ts": 8682,
+		"test/work.test.ts": 36755,
 		"test/e2e/tokens.test.ts": 6184,
 		"test/signin-start-limit.test.ts": 9641,
 		"test/e2e/execution.test.ts": 7467,
