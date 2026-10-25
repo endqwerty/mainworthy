@@ -312,7 +312,7 @@ export function signInRoutes(app: App, tools: Tools) {
 	/**
 	 * `POST /api/login/challenge`. `{}`: web passkey options. `{ native: true }`: native assertion options.
 	 * `{ invitation }`: who the invitation is for, and the options for registering a passkey with it.
-	 * It writes no row. An admitted anonymous start adds a challenge to the bounded map in memory;
+	 * An admitted anonymous start stores a challenge through the independent admission pool;
 	 * a working invitation reuses its challenge, with a successor near expiry for an ongoing prompt.
 	 */
 	async function challenge(req: Request, server: Listener): Promise<Response> {
@@ -330,7 +330,7 @@ export function signInRoutes(app: App, tools: Tools) {
 			if (looked.ok) return answered(looked.shown);
 			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
-		const begun = passkeySignInOptions(app, tools.address(req, server), "native" in body.data ? "native" : "web");
+		const begun = await passkeySignInOptions(app, tools.address(req, server), "native" in body.data ? "native" : "web");
 		if (!begun)
 			return "native" in body.data
 				? failed("invalid", "native passkey sign-in needs an HTTPS public address and an associated app domain", {

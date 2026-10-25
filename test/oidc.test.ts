@@ -353,6 +353,11 @@ describe("invitations", () => {
 		expect(asked.status).toBe(409);
 		expect(asked.body).toMatchObject({ ok: false, error: { details: { signedInAs: "sam" } } });
 		const begun = await begin(w, { invitation: code, replace: "sam" }, jar(sam));
+		expect(
+			(await w.rows<{ payload: string }>("SELECT payload FROM identity_ceremonies WHERE kind = 'oidc'"))
+				.map((row) => row.payload)
+				.join("\n"),
+		).not.toContain('"sam"');
 		const query = await authorize(idp, begun, { subject: "sub-robin" });
 		const accepted = await finish(w, query, jar(sam, begun.ceremony));
 		expect(must(await w.get<{ actor: string }>("/api/session", jar(sessionOf(accepted)))).actor).toBe("robin");
@@ -516,7 +521,8 @@ describe("a slow provider", () => {
 		const lines = await logged(async () => {
 			const finishing = finish(w, query, jar(begun.ceremony));
 			await reached;
-			clearChallenges(w.instance.app);
+			const peer = await world({ dataDir: w.dataDir, clock: w.clock, oidc: idp.config() });
+			await clearChallenges(peer.instance.app);
 			release();
 			expect((await finishing).text).toBe(REFUSED);
 		});
@@ -574,6 +580,30 @@ describe("native provider sign-in", () => {
 		w.post("/api/login", {
 			nativeOidc: { code, verifier, callback, instance: PUBLIC, ...more },
 		});
+	test("native handoffs cross Apps and an import on either App cancels them", async () => {
+		const idp = await provider();
+		const first = await world({ oidc: idp.config() });
+		await linked(first, idp, "robin", "native-robin");
+		const second = await world({ dataDir: first.dataDir, clock: first.clock, oidc: idp.config() });
+		const code = await handoff(first, idp);
+		const answers = await Promise.all([first, second].map((w) => exchange(w, code)));
+		expect(answers.map((answer) => answer.status).sort()).toEqual([200, 401]);
+		const cancelled = await handoff(first, idp);
+		await clearChallenges(second.instance.app);
+		expect((await exchange(first, cancelled)).text).toBe(REFUSED);
+	});
+	test("a native handoff retains no identity claims after the actor is forgotten", async () => {
+		const idp = await provider();
+		const w = await world({ oidc: idp.config() });
+		await linked(w, idp, "native-erased-person", "native-robin");
+		const code = await handoff(w, idp);
+		await w.ok("admin", { do: "actor.forget", name: "native-erased-person" });
+		const stored = JSON.stringify(await w.rows("SELECT payload FROM identity_ceremonies WHERE kind = 'oidc-native'"));
+		expect(stored).not.toContain("native-robin");
+		expect(stored).not.toContain("native-erased-person");
+		expect(stored).not.toContain('"identity"');
+		expect((await exchange(w, code)).text).toBe(REFUSED);
+	});
 	test("exchanges a code once for an ordinary credential-backed session, with no browser cookie", async () => {
 		const idp = await provider();
 		const w = await world({ oidc: idp.config() });
@@ -615,7 +645,7 @@ describe("native provider sign-in", () => {
 		clock.advance(60_000);
 		expect((await exchange(w, expired)).text).toBe(REFUSED);
 		const cleared = await handoff(w, idp);
-		clearChallenges(w.instance.app);
+		await clearChallenges(w.instance.app);
 		expect((await exchange(w, cleared)).text).toBe(REFUSED);
 	});
 
@@ -753,4 +783,15 @@ describe("native provider sign-in", () => {
 			expect(native.searchParams.get("error")).toBe("unauthenticated");
 		}
 	});
+});
+
+test("an OIDC ceremony can finish on another App, with one resulting session", async () => {
+	const idp = await provider();
+	const first = await world({ oidc: idp.config() });
+	await linked(first, idp, "robin", "shared-robin");
+	const second = await world({ dataDir: first.dataDir, clock: first.clock, oidc: idp.config() });
+	const begun = await begin(first);
+	const query = await authorize(idp, begun, { subject: "shared-robin" });
+	const answers = await Promise.all([first, second].map((w) => finish(w, query, jar(begun.ceremony))));
+	expect(answers.map((answer) => answer.status).sort()).toEqual([200, 401]);
 });

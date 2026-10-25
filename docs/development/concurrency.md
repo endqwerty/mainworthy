@@ -145,3 +145,22 @@ checks the existing product budgets; no product budget is raised.
 The measurement driver detects active whole checks and benchmarks. Append `--allow-overlap` when other loops
 run; it records their processes and labels the samples. Do not wait for those loops to stop. Such runs check
 correctness under that load; CI's quiet job checks isolated performance and the product budgets.
+
+## Shared admission and stream state
+
+Sign-in accounting uses keyed PostgreSQL rows and a separate two-connection admission pool. Failing a proof
+locks its sorted keys, rechecks their block, then counts it atomically. A success clears only failures no newer
+than the sequence version it observed. A local source ceiling limits queries before that pool. Anonymous
+ceremony allocation shares this pool, with one capacity lock per ceremony kind; it holds no connection while
+waiting for a provider or hashing a password. Authenticated ceremony consumption uses the domain transaction,
+so spending a challenge and opening its session commit or roll back together. Import invalidates a shared
+random generation in its transaction; an OIDC exchange rechecks it after the provider answers.
+
+Credential uses update their rows during the request, conditional on the stored time being more than a minute
+old and the exact secret hash still being live. No App keeps unwritten activity or supplies an idle grace period.
+
+Project writes record `change_events` and call PostgreSQL `pg_notify` before commit. PostgreSQL delivers the
+notification only after commit. Each App keeps one dedicated native Bun SQL listener; a notification wakes
+streams, which read ordered events by project sequence. A stream also catches up on every heartbeat, so a lost
+notification delays delivery but loses no committed state. Missing history or a replaced project prompts a full
+refresh. The stream checks authority again after its snapshot closes before sending anything.

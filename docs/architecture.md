@@ -247,7 +247,7 @@ halves a password can change, a person can be forgotten and an archive can be im
 number belongs to somebody else.
 
 The passkey verifier (`src/server/identity/webauthn.ts`) is hand-written, parses no CBOR and keeps nothing.
-The code around it keeps what it must (the list above `verifyRegistration` there). A challenge lives in memory
+The code around it keeps what it must (the list above `verifyRegistration` there). A challenge lives in PostgreSQL
 for five minutes with what it was issued for and where it was asked from (a browser's ceremony cookie, a
 session, an invitation), an answer is taken only from there, and the commit that stores the passkey or opens
 the session spends it. A credential id is unique on the instance for good, by an index. The person is the one the stored
@@ -256,14 +256,11 @@ commit: of two answers with the same counter above zero the second is refused. T
 against a stored zero both sign in, each on its own challenge: such an authenticator does not count. The relying party comes from `MAINWORTHY_PUBLIC_URL` and never from a request's `Host`; without the
 variable the instance has no passkeys.
 
-Being used is not a write. `admit` notes in memory when a token or a session was last used and from which
-address, and the server writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The
-address is the one `clientAddress` in `src/surfaces/http.ts` gives for the request; a use that has none (a request
-that never was on a connection) writes its time and leaves the address in the row. The idle check and
-`token.list` read the newer of the note and the row, so a read never waits for the writer. A crash loses the
-notes since the last write: somebody may have to sign in again early, and no session lives longer for it. The
-same minute timer ends, in the database, each session that has passed a lifetime, so that a clock set back does
-not revive it.
+`admit` writes a token or session use during the request (`src/server/identity/uses.ts`). A conditional update
+changes the row only when its stored use is more than a minute old. The hash of the presented secret binds the
+update, and a revoked token or ended session cannot be updated. A request without an address keeps the one on
+file. Every instance reads the same stored time: a session can expire up to a minute early, but never later
+than its idle limit. The periodic job records expired sessions so setting the clock back cannot revive them.
 
 Failed attempts are limited (decision 0017; `src/server/identity/limiter.ts`). `admit` counts a wrong bearer
 token, and `POST /api/login` a wrong token typed into the form, under two keys: the address the request came
@@ -277,13 +274,14 @@ block runs out by the clock. A token a person chose gets no pass, and a token th
 that decides. (A generated token later copied into the variable keeps the row the server made, and passes.)
 A request that presents a token is judged by the token, whatever cookie comes with it; a session cookie on a
 request with no token is never counted, and neither is the owner of the machine in local mode. The count is in
-memory, one for each instance, at most 10,000 keys, and a restart forgets it: a failed attempt writes nothing
-and never waits at the write gate. Every route that takes a session is under the limit, `/mcp`, the archive and
+PostgreSQL, shared by every instance, with at most 10,000 keys. Admission accounting and anonymous starts use
+a separate two-connection pool. A local source ceiling rejects floods before a database query. Restarting an
+instance grants no fresh allowance. Every route that takes a session is under the limit, `/mcp`, the archive and
 the change stream included, because each takes its session in one place (`sessionFor` in `src/surfaces/http.ts`).
 A route that takes none (`/healthz`, the API description, the documentation) looks at no token, and a sign-in
 body the schema refuses is refused before it is counted.
 
-A person's sign-in is counted in the same limiter (`src/server/identity/attempts.ts` holds an instance's one).
+A person's sign-in is counted in the same limiter (`src/server/identity/attempts.ts` holds its shared database implementation).
 A name and a password, and the current password of a change, are counted under the address and under the name
 (`accountKey`, lower-cased), and are not looked at while either is blocked; a success clears the name and never
 the address, and a name nobody has is counted exactly as a wrong password is. A passkey's answer that is

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
+import { Ceremonies, ceremonyWrite } from "./ceremonies.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
 import { addressKey } from "./limiter.ts";
 import { lockActors, lockIdentity } from "./locks.ts";
@@ -29,42 +31,43 @@ const Q = {
 	drop: sql<{ actor: number }>("DELETE FROM mail_contacts WHERE actor = $actor"),
 };
 type Link = { contact: Contact; expires: number } & ({ kind: "verify" } | { kind: "reset"; password: string | null });
-const links = new WeakMap<App, Map<string, Link>>();
+const LinkValue = z.intersection(
+	z.object({
+		contact: z.object({ actor: z.number().int(), revision: z.string() }),
+		expires: z.number(),
+		deadline: z.number(),
+	}),
+	z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("verify") }),
+		z.object({ kind: z.literal("reset"), password: z.string().nullable() }),
+	]),
+);
+const links = new Ceremonies("mail", (value) => LinkValue.parse(value));
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
-
-function heldLinks(app: App): Map<string, Link> {
-	let held = links.get(app);
-	if (!held) {
-		held = new Map();
-		links.set(app, held);
-	}
-	for (const [key, link] of held) if (app.now() >= link.expires) held.delete(key);
-	return held;
-}
-function issue(app: App, link: Link): string {
+const passwordDigest = (value: string | null): string | null => (value === null ? null : hash(value));
+async function issue(app: App, link: Link, db?: WriteDb): Promise<string> {
 	const code = newSessionSecret();
-	const held = heldLinks(app);
-	for (const [key, prior] of held)
-		if (prior.contact.actor === link.contact.actor && prior.kind === link.kind) held.delete(key);
-	if (held.size >= 10_000) {
-		const first = held.keys().next();
-		if (!first.done) held.delete(first.value);
-	}
-	held.set(hash(code), link);
+	await ceremonyWrite(app, db, async (lease) => {
+		await links.put(
+			lease,
+			hash(code),
+			{ ...link, contact: { actor: link.contact.actor, revision: link.contact.revision }, deadline: link.expires },
+			`${link.contact.actor}/${link.kind}`,
+			app.now(),
+			true,
+		);
+	});
 	return code;
 }
 async function find(app: App, db: ReadDb, code: string): Promise<Link | null> {
-	const link = heldLinks(app).get(hash(code));
+	const link = await links.get(db, hash(code), app.now());
 	if (!link) return null;
 	const now = await db.get(Q.get, { actor: link.contact.actor });
-	return now?.revision === link.contact.revision && now.name === link.contact.name ? link : null;
+	return now?.revision === link.contact.revision ? { ...link, contact: now } : null;
 }
-export function clearMailLinks(app: App): void {
-	links.delete(app);
-}
-export function clearMailLinksOf(app: App, actor: number): void {
-	const held = heldLinks(app);
-	for (const [key, link] of held) if (link.contact.actor === actor) held.delete(key);
+export async function clearMailLinksOf(db: WriteDb, actor: number): Promise<void> {
+	await links.clearOwner(db, `${actor}/verify`);
+	await links.clearOwner(db, `${actor}/reset`);
 }
 export async function forgetContact(db: WriteDb, actor: number): Promise<void> {
 	await lockIdentity(db);
@@ -105,18 +108,16 @@ export async function setEmail(
 	await db.run(Q.put, { actor, email, revision });
 	const contact = await db.get(Q.get, { actor });
 	if (!contact) throw invalid("only a person has an email address");
-	db.afterCommit(() => {
-		const code = issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 });
-		deliverMail(app, {
-			to: email,
-			subject: "Verify your Mainworthy email",
-			text: `Verify this address for ${contact.name}:\n${url}/email#${code}\n\nThis link works once for 24 hours. If you did not ask for it, ignore this message.`,
-		});
+	const code = await issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 }, db);
+	queueMail(app, db, {
+		to: email,
+		subject: "Verify your Mainworthy email",
+		text: `Verify this address for ${contact.name}:\n${url}/email#${code}\n\nThis link works once for 24 hours. If you did not ask for it, ignore this message.`,
 	});
 	return { email, verified: false };
 }
 export async function verifyEmail(app: App, code: string, proven?: () => void): Promise<boolean> {
-	const first = await app.database.read(async (db) => find(app, db, code));
+	const first = await app.database.admissionRead(async (db) => find(app, db, code));
 	if (first?.kind !== "verify") return false;
 	proven?.();
 	return await app.database.write(
@@ -124,11 +125,8 @@ export async function verifyEmail(app: App, code: string, proven?: () => void): 
 			await db.transaction(async () => {
 				await lockActors(db, [first.contact.actor], true);
 				const link = await find(app, db, code);
-				if (link?.kind !== "verify") return false;
+				if (link?.kind !== "verify" || !(await links.take(db, hash(code), app.now()))) return false;
 				await db.run(Q.verify, { actor: link.contact.actor, revision: link.contact.revision, at: app.now() });
-				db.afterCommit(() => {
-					heldLinks(app).delete(hash(code));
-				});
 				return true;
 			}),
 	);
@@ -152,15 +150,18 @@ export async function requestReset(
 	const limiter = limiterOf(app);
 	const peer = addressKey(address);
 	const keys = [`mail-reset:${hash(email)}`, ...(peer === null ? [] : [peer])];
-	const allowed = limiter.check(keys, app.now());
+	const allowed = await limiter.check(keys, app.now());
 	if (allowed.kind === "blocked") return { retryAfter: allowed.retryAfterSeconds };
-	limiter.failed(keys, app.now());
-	const contact = await app.database.read(async (readDb) => await readDb.get(Q.byEmail, { email }));
+	const failed = await limiter.failed(keys, app.now());
+	if (failed.kind === "blocked") return { retryAfter: failed.retryAfterSeconds };
+	const contact = await app.database.admissionRead(async (readDb) => await readDb.get(Q.byEmail, { email }));
 	if (contact) {
-		const code = issue(app, {
+		const code = await issue(app, {
 			kind: "reset",
 			contact,
-			password: await app.database.read(async (db) => (await livePassword(db, contact.actor))?.data ?? null),
+			password: passwordDigest(
+				await app.database.admissionRead(async (db) => (await livePassword(db, contact.actor))?.data ?? null),
+			),
 			expires: app.now() + 15 * 60_000,
 		});
 		deliverMail(app, {
@@ -179,12 +180,12 @@ export async function resetPassword(
 	const limiter = limiterOf(app);
 	const peer = addressKey(input.address);
 	const keys = peer === null ? [] : [peer];
-	const allowed = limiter.check(keys, app.now());
+	const allowed = await limiter.check(keys, app.now());
 	if (allowed.kind === "blocked") return { retryAfter: allowed.retryAfterSeconds };
-	const first = await app.database.read(async (readDb) => await find(app, readDb, input.code));
+	const first = await app.database.admissionRead(async (readDb) => await find(app, readDb, input.code));
 	if (first?.kind !== "reset") {
-		limiter.failed(keys, app.now());
-		return "invalid";
+		const failed = await limiter.failed(keys, app.now());
+		return failed.kind === "blocked" ? { retryAfter: failed.retryAfterSeconds } : "invalid";
 	}
 	input.proven?.();
 	let password: string;
@@ -201,15 +202,14 @@ export async function resetPassword(
 				const link = await find(app, db, input.code);
 				if (link?.kind !== "reset") return "invalid";
 				const current = await livePassword(db, link.contact.actor);
-				if ((current?.data ?? null) !== link.password) return "invalid";
+				if (passwordDigest(current?.data ?? null) !== link.password) return "invalid";
+				if (!(await links.take(db, hash(input.code), app.now()))) return "invalid";
 				const at = app.now();
 				if (current) await revokeCredential(db, current.id, at);
 				await insertPassword(db, { actor: link.contact.actor, hash: password, at });
 				await endSessionsOf(db, link.contact.actor, at, "ended");
 				await credentialNotice(app, db, link.contact.actor, "Your password was reset");
-				db.afterCommit(() => {
-					heldLinks(app).delete(hash(input.code));
-				});
+
 				return "changed";
 			}),
 	);

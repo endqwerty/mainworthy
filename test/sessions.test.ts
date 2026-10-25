@@ -677,7 +677,7 @@ describe("what ends a session", () => {
 	});
 
 	test.each(["idle", "absolute"] as const)(
-		"a reader uses unflushed activity and still enforces the %s end",
+		"a reader uses stored activity and still enforces the %s end",
 		async (end) => {
 			const clock = clockAt();
 			const instance = await boot({ clock });
@@ -686,7 +686,7 @@ describe("what ends a session", () => {
 			clock.advance(IDLE - HOUR);
 			expect(await statusOf(instance, { cookie })).toBe(200);
 			clock.advance(2 * HOUR);
-			expect((await stored(instance))[0]?.last_seen_at).toBe(T0);
+			expect((await stored(instance))[0]?.last_seen_at).toBe(T0 + IDLE - HOUR);
 			expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).body).toMatchObject({
 				ok: true,
 				result: { count: 0 },
@@ -781,7 +781,7 @@ describe("what ends a session", () => {
 			status: 404,
 		});
 		for (const c of cases) {
-			const pause = pauseRead(instance.app, "before");
+			const pause = pauseRead(instance.app, "before", c.headers.cookie ? 2 : 1);
 			const reading = post(instance, "/api/p/scratch/find", {}, c.headers);
 			try {
 				await pause.reached;
@@ -796,7 +796,7 @@ describe("what ends a session", () => {
 			}
 		}
 		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["read", "produce"] });
-		const pause = pauseRead(instance.app, "before");
+		const pause = pauseRead(instance.app, "before", 1);
 		const reading = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
 		try {
 			await pause.reached;
@@ -813,7 +813,7 @@ describe("what ends a session", () => {
 		const instance = await boot({});
 		await create(instance, "Removed grant payload");
 		const sam = await person(instance, "sam");
-		const pause = pauseRead(instance.app, "after");
+		const pause = pauseRead(instance.app, "after", 1);
 		const reading = post(instance, "/api/p/scratch/find", {}, bearer(sam.token));
 		try {
 			await pause.reached;
@@ -833,7 +833,7 @@ describe("what ends a session", () => {
 		test(`a completed read carries no data after its project is ${replacement ? "replaced" : "removed"}`, async () => {
 			const instance = await boot({});
 			await create(instance, "Deleted project secret");
-			const pause = pauseRead(instance.app, "after");
+			const pause = pauseRead(instance.app, "after", 1);
 			const reading = post(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
 			try {
 				await pause.reached;
@@ -856,100 +856,49 @@ describe("what ends a session", () => {
 });
 
 describe("what is written of a use", () => {
-	test("a token that only reads gets a last use after a flush, and the read did not wait for the writer", async () => {
+	test("a token read writes its last use before returning", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
-		const gate = holdGate(instance);
 		clock.advance(HOUR);
-		// Answered while a writer holds the gate: the read notes its use and writes nothing.
 		expect((await post(instance, "/api/p/scratch/find", {}, bearer(TOKEN))).status).toBe(200);
-		expect(await lastUsed(instance, 1)).toBeNull();
-		await gate.release();
-		// The list shows the use before it is written: it reads the newer of the row and what is noted.
-		clock.advance(HOUR);
-		const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" });
-		expect(listed.body.ok && listed.body.result).toMatchObject([{ id: 1, lastUsedAt: T0 + 2 * HOUR }]);
-		expect(await lastUsed(instance, 1)).toBeNull();
-		await flushUses(instance.app);
-		expect(await lastUsed(instance, 1)).toBe(T0 + 2 * HOUR);
+		expect(await lastUsed(instance, 1)).toBe(T0 + HOUR);
+		clock.advance(30_000);
+		expect(await statusOf(instance, bearer(TOKEN))).toBe(200);
+		expect(await lastUsed(instance, 1)).toBe(T0 + HOUR);
 	});
 
-	test("a use that arrives while a flush waits for the gate is not lost", async () => {
+	test("a failed use write refuses the request and a retry persists it", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
 		const { cookie } = await signIn(instance);
 		clock.advance(HOUR);
-		expect(await statusOf(instance, { cookie })).toBe(200);
-		const gate = holdGate(instance);
-		const flushing = flushUses(instance.app);
-		clock.advance(HOUR);
-		expect(await statusOf(instance, { cookie })).toBe(200);
-		await gate.release();
-		await flushing;
-		// Whichever of the two uses that flush wrote, the later one is what the session is idle from.
-		expect([T0 + HOUR, T0 + 2 * HOUR]).toContain((await stored(instance))[0]?.last_seen_at ?? 0);
-		clock.advance(IDLE - 1);
-		expect(await statusOf(instance, { cookie })).toBe(200);
-		await flushUses(instance.app);
-		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + 2 * HOUR + IDLE - 1 }]);
-	});
-
-	test("a failed flush loses nothing: what was noted is written by the next one", async () => {
-		const clock = clockAt();
-		const instance = await boot({ clock });
-		const { cookie } = await signIn(instance);
-		clock.advance(HOUR);
-		expect(await statusOf(instance, { cookie })).toBe(200);
 		const failing = spyOn(instance.app.database, "write").mockImplementationOnce(async () => {
-			throw new Error("the disk is full");
+			throw new Error("deliberate use-write failure");
 		});
+		const logged = spyOn(console, "error").mockImplementation(() => {});
 		try {
-			await expect(flushUses(instance.app)).rejects.toThrow("the disk is full");
+			expect(await statusOf(instance, { cookie })).toBe(500);
 		} finally {
 			failing.mockRestore();
+			logged.mockRestore();
 		}
 		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 }]);
-		// Still known while it is unwritten: thirteen days on from the use, not from the sign-in.
-		clock.advance(IDLE - 1);
-		await flushUses(instance.app);
-		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + HOUR }]);
-		expect(await lastUsed(instance, 1)).toBe(T0);
 		expect(await statusOf(instance, { cookie })).toBe(200);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + HOUR }]);
 	});
 
-	test("a flush after sign-out does not reopen the session, in either order at the gate", async () => {
+	test("sign-out preserves the stored last use and a later use cannot reopen it", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
-		const first = await signIn(instance);
+		const { cookie } = await signIn(instance);
 		clock.advance(HOUR);
-		expect(await statusOf(instance, { cookie: first.cookie })).toBe(200);
-		await signOut(instance, { cookie: first.cookie });
+		expect(await statusOf(instance, { cookie })).toBe(200);
+		await signOut(instance, { cookie });
 		clock.advance(HOUR);
-		await flushUses(instance.app);
-		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: T0 + HOUR, ended_why: "signed-out" }]);
-		expect(await statusOf(instance, { cookie: first.cookie })).toBe(401);
-
-		// The other order: the flush is already waiting at the gate when the sign-out arrives behind it.
-		const second = await signIn(instance);
-		clock.advance(HOUR);
-		expect(await statusOf(instance, { cookie: second.cookie })).toBe(200);
-		const gate = holdGate(instance);
-		const queue = gateQueue(instance);
-		try {
-			const flushing = flushUses(instance.app);
-			await queue.reaches(1);
-			const leaving = signOut(instance, { cookie: second.cookie });
-			await queue.reaches(2);
-			await gate.release();
-			await flushing;
-			expect((await leaving).status).toBe(200);
-		} finally {
-			queue.restore();
-			await gate.release();
-		}
-		await flushUses(instance.app);
-		expect((await stored(instance))[1]).toMatchObject({ ended_at: T0 + 3 * HOUR, ended_why: "signed-out" });
-		expect(await statusOf(instance, { cookie: second.cookie })).toBe(401);
+		expect(await statusOf(instance, { cookie })).toBe(401);
+		expect(await stored(instance)).toMatchObject([
+			{ last_seen_at: T0 + HOUR, ended_at: T0 + HOUR, ended_why: "signed-out" },
+		]);
 	});
 
 	test("a session past its idle time is refused though it keeps sending requests: a stale cookie does not renew itself", async () => {
@@ -1003,16 +952,16 @@ describe("what is written of a use", () => {
 		expect(await stored(instance)).toEqual([]);
 	});
 
-	test("the minute job does not end a session whose latest use is still only noted", async () => {
+	test("the minute job reads the latest durable use", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
 		const { cookie } = await signIn(instance);
 		clock.advance(13 * DAY);
 		expect(await statusOf(instance, { cookie })).toBe(200);
 		clock.advance(13 * DAY);
-		// The row still says the session was last seen at sign-in, twenty-six days ago.
+		// The earlier request persisted the use; another process can run the sweep.
 		await sweepSessions(instance.app);
-		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: null }]);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + 13 * DAY, ended_at: null }]);
 		expect(await statusOf(instance, { cookie })).toBe(200);
 	});
 
@@ -1158,32 +1107,16 @@ describe("an upgrade and an archive", () => {
 		}
 	});
 
-	test("a use noted while an import waits is not written to the token that takes the old one's id", async () => {
+	test("a delayed use after an import cannot touch a replacement token", async () => {
 		const instance = await boot({ mode: "local" });
 		const old = await ownToken(instance);
-		const gate = holdGate(instance);
-		const queue = gateQueue(instance);
-		try {
-			const importing = importCurrent(instance);
-			await queue.reaches(1);
-			const replacing = ownToken(instance);
-			await queue.reaches(2);
-			// Still a token until the import commits, so this use is noted under the id the new token will take.
-			expect(await statusOf(instance, bearer(old))).toBe(200);
-			// A flush that joins the queue now runs after both. It holds nothing of its own: it writes what is
-			// noted when its turn comes, and the import has cleared that.
-			const flushing = flushUses(instance.app);
-			await queue.reaches(3);
-			await gate.release();
-			expect((await importing).status).toBe(200);
-			await replacing;
-			await flushing;
-			expect(await lastUsed(instance, 1)).toBeNull();
-			const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" }, {});
-			expect(listed.body.ok && listed.body.result).toEqual([expect.objectContaining({ id: 1, lastUsedAt: null })]);
-		} finally {
-			queue.restore();
-		}
+		expect((await importCurrent(instance)).status).toBe(200);
+		await ownToken(instance);
+		const { noteUse } = await import("../src/server/identity/uses.ts");
+		await noteUse(instance.app, "token", 1, instance.app.now(), "192.0.2.10", sha256(old));
+		expect(await lastUsed(instance, 1)).toBeNull();
+		const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" }, {});
+		expect(listed.body.ok && listed.body.result).toEqual([expect.objectContaining({ id: 1, lastUsedAt: null })]);
 	});
 
 	test("an old archive is refused, and re-exporting its migrated database restores its cases and runs", async () => {

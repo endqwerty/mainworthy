@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
-import { Database } from "./db.ts";
+import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
+import { Database, type WriteDb } from "./db.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
@@ -113,6 +114,10 @@ export type App = {
 	subscribe: (listener: (event: ChangeEvent) => void) => () => void;
 	/** A failed subscriber is logged without its error text; the other subscribers still receive the event. */
 	publish: (event: ChangeEvent) => void;
+	/** Durable history and a wakeup in the writer's transaction; local subscribers run after commit. */
+	recordChange: (db: WriteDb, event: ChangeEvent) => Promise<void>;
+	/** Wake hints for streams, including a LISTEN reconnect. Streams reread durable history. */
+	subscribeChanges: (listener: () => void) => () => void;
 	close: () => Promise<void>;
 };
 
@@ -129,7 +134,21 @@ export async function openApp(config: Config, options: { memory?: boolean; now?:
 		throw error;
 	}
 	const listeners = new Set<(event: ChangeEvent) => void>();
-	return {
+	const wakes = new Set<() => void>();
+	const wake = () => {
+		for (const listener of wakes) {
+			try {
+				listener();
+			} catch {
+				console.error("[mainworthy] change wake subscriber failed");
+			}
+		}
+	};
+	await database.listen(CHANGE_CHANNEL, wake, wake).catch(async (error: unknown) => {
+		await database.close();
+		throw error;
+	});
+	const app: App = {
 		blobs: options.memory ? memoryBlobs() : diskBlobs(config.dataDir),
 		database,
 		config,
@@ -146,12 +165,23 @@ export async function openApp(config: Config, options: { memory?: boolean; now?:
 					console.error("[mainworthy] change subscriber failed:", { seq: event.seq });
 				}
 			}
+			wake();
+		},
+		async recordChange(db, event) {
+			await recordChange(db, event, app.now());
+			db.afterCommit(() => app.publish(event));
+		},
+		subscribeChanges(listener) {
+			wakes.add(listener);
+			return () => wakes.delete(listener);
 		},
 		async close() {
 			listeners.clear();
+			wakes.clear();
 			await database.close();
 		},
 	};
+	return app;
 }
 
 const FULL_COMMIT = /^[0-9a-f]{40}$/;

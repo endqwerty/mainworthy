@@ -12,16 +12,18 @@
 // otherwise trusts the TLS connection to the token endpoint for it, which the specification allows, and a token
 // signed with another key was accepted that way when this was built (2026-10-17).
 //
-// Ceremonies live in memory, as passkey challenges do: a restart ends them, and the person starts again.
+// Ceremonies and their import generation live in PostgreSQL, shared by every instance.
 //
 // The library is loaded the first time a ceremony needs it. An instance without a provider never loads it, and
 // neither does a command or a test that starts a server: loading it cost 5 ms a process (15 ms cold), which made
 // the check 2 s slower when every server loaded it (2026-10-17).
 import { createHash, randomBytes } from "node:crypto";
 import type { Configuration } from "openid-client";
+import { z } from "zod";
 import type { App } from "../kernel/app.ts";
+import type { WriteDb } from "../kernel/db.ts";
 import { takeStart } from "./attempts.ts";
-import { Ceremonies } from "./ceremonies.ts";
+import { Ceremonies, ceremonyGeneration, ceremonyWrite, holdCeremonyGeneration } from "./ceremonies.ts";
 import { type LimiterAnswer, startAddressKey } from "./limiter.ts";
 import { CEREMONY_MS } from "./webauthn.ts";
 
@@ -33,7 +35,7 @@ export type OidcPurpose =
 	| { readonly purpose: "sign-in" }
 	| ({ readonly purpose: "native" } & NativeOidcRequest)
 	/** An invitation, by the hash of its code, and the person the page said may be signed out of the browser. */
-	| { readonly purpose: "join"; readonly invitation: string; readonly replace: string | null }
+	| { readonly purpose: "join"; readonly invitation: string; readonly replace: number | null }
 	/** A signed-in person adding the identity, from the session by the hash of its cookie. */
 	| { readonly purpose: "link"; readonly actor: number; readonly session: string };
 
@@ -55,12 +57,29 @@ export type OidcRefusal =
 	/** The provider said no, could not be reached, or its answer did not hold up. */
 	| "provider";
 
-const ceremonies = new WeakMap<App, Ceremonies<Kept>>();
+const NativeRequest = z.object({
+	challenge: z.string(),
+	state: z.string(),
+	callback: z.string(),
+	instance: z.string(),
+});
+const Purpose = z.discriminatedUnion("purpose", [
+	z.object({ purpose: z.literal("sign-in") }),
+	NativeRequest.extend({ purpose: z.literal("native") }),
+	z.object({ purpose: z.literal("join"), invitation: z.string(), replace: z.number().int().nullable() }),
+	z.object({ purpose: z.literal("link"), actor: z.number().int(), session: z.string() }),
+]);
+const KeptValue = z.object({
+	purpose: Purpose,
+	browser: z.string().nullable(),
+	nonce: z.string(),
+	verifier: z.string(),
+	deadline: z.number(),
+});
+const ceremonies = new Ceremonies("oidc", (value): Kept => KeptValue.parse(value));
 type Library = typeof import("openid-client");
 type Held = { client: Library; configuration: Configuration };
 const configurations = new WeakMap<App, Promise<Held>>();
-/** How many times the ceremonies were cleared: a finish already past the map compares it when the provider answers. */
-const generations = new WeakMap<App, number>();
 
 /** The provider's configuration, discovered once; a failed discovery is tried again by the next ceremony. */
 function configurationOf(app: App): Promise<Held> {
@@ -93,15 +112,6 @@ function configurationOf(app: App): Promise<Held> {
 	return found;
 }
 
-function keptOf(app: App): Ceremonies<Kept> {
-	let kept = ceremonies.get(app);
-	if (!kept) {
-		kept = new Ceremonies();
-		ceremonies.set(app, kept);
-	}
-	return kept;
-}
-
 /**
  * Begins a ceremony: the address to send the browser to. `browser` is the hash of the ceremony cookie the reply
  * will set, and `redirect` the page the provider sends the browser back to. Null when the provider cannot be
@@ -128,16 +138,23 @@ export async function beginOidc(
 				? `invitation ${purpose.invitation}`
 				: (startAddressKey(input.address) ?? "unknown");
 	if (purpose.purpose === "sign-in" || purpose.purpose === "native") {
-		const quota = takeStart(app, input.address);
+		const quota = await takeStart(app, input.address);
 		if (quota.kind === "blocked") return quota;
 	}
 	const { client, configuration } = held;
 	const verifier = client.randomPKCECodeVerifier();
 	const state = client.randomState();
 	const nonce = client.randomNonce();
-	const kept = keptOf(app);
 	const now = app.now();
-	kept.put(state, { purpose: input.purpose, browser: input.browser, nonce, verifier, deadline }, owner, now);
+	await ceremonyWrite(app, undefined, (db) =>
+		ceremonies.put(
+			db,
+			state,
+			{ purpose: input.purpose, browser: input.browser, nonce, verifier, deadline },
+			owner,
+			now,
+		),
+	);
 	return client.buildAuthorizationUrl(configuration, {
 		redirect_uri: input.redirect,
 		scope: "openid email profile",
@@ -157,18 +174,24 @@ export async function finishOidc(
 	app: App,
 	input: { query: string; browser: string | null; redirect: string; native?: true },
 ): Promise<
-	| { ok: true; purpose: OidcPurpose; identity: Identity; generation: number }
+	| { ok: true; purpose: OidcPurpose; identity: Identity; generation: string }
 	| { ok: false; why: OidcRefusal; native?: NativeOidcRequest }
 > {
 	const params = new URLSearchParams(input.query);
 	const state = params.get("state");
-	const kept = state === null ? undefined : ceremonies.get(app)?.get(state);
-	if (state === null || !kept || app.now() >= kept.deadline) return { ok: false, why: "challenge" };
-	if ((kept.purpose.purpose === "native") !== (input.native === true)) return { ok: false, why: "context" };
-	if (kept.purpose.purpose !== "native" && (input.browser === null || kept.browser !== input.browser))
-		return { ok: false, why: "context" };
-	ceremonies.get(app)?.delete(state);
-	const generation = generations.get(app) ?? 0;
+	if (state === null) return { ok: false, why: "challenge" };
+	const accepted = await ceremonyWrite(app, undefined, async (db) => {
+		const kept = await ceremonies.get(db, state, app.now());
+		if (!kept) return { ok: false, why: "challenge" } as const;
+		if ((kept.purpose.purpose === "native") !== (input.native === true)) return { ok: false, why: "context" } as const;
+		if (kept.purpose.purpose !== "native" && (input.browser === null || kept.browser !== input.browser))
+			return { ok: false, why: "context" } as const;
+		if (!(await ceremonies.take(db, state, app.now()))) return { ok: false, why: "challenge" } as const;
+		return { ok: true, kept } as const;
+	});
+	if (!accepted.ok) return accepted;
+	const kept = accepted.kept;
+	const generation = kept.generation;
 	const refused = (): { ok: false; why: OidcRefusal; native?: NativeOidcRequest } => ({
 		ok: false,
 		why: "provider",
@@ -182,8 +205,8 @@ export async function finishOidc(
 			expectedNonce: kept.nonce,
 			idTokenExpected: true,
 		});
-		// An import while the code was exchanged ended this ceremony too, though it was no longer in the map.
-		if ((generations.get(app) ?? 0) !== generation) return { ok: false, why: "challenge" };
+		// An import while the code was exchanged ended this ceremony too, though its row was already consumed.
+		if ((await app.database.admissionRead(ceremonyGeneration)) !== generation) return { ok: false, why: "challenge" };
 		const claims = tokens.claims();
 		if (!claims) return refused();
 		const text = (value: unknown): string | null =>
@@ -205,30 +228,37 @@ export async function finishOidc(
 	}
 }
 
-/** Ends every ceremony under way: an import replaced every person a ceremony could name. */
-export function clearOidc(app: App): void {
-	ceremonies.delete(app);
-	handoffs.delete(app);
-	generations.set(app, (generations.get(app) ?? 0) + 1);
-}
-
 export const NATIVE_OIDC_CALLBACK = "com.mainworthy.app://signin/oidc";
 export type NativeOidcRequest = { challenge: string; state: string; callback: string; instance: string };
 export type NativeOidcExchange = { code: string; verifier: string; callback: string; instance: string };
-type Handoff = NativeOidcRequest & { identity: Identity; credential: number; actor: number; deadline: number };
-const handoffs = new WeakMap<App, Ceremonies<Handoff>>();
+type Handoff = NativeOidcRequest & { credential: number; actor: number; deadline: number };
+const HandoffValue = NativeRequest.extend({
+	credential: z.number().int(),
+	actor: z.number().int(),
+	deadline: z.number(),
+});
+const handoffs = new Ceremonies("oidc-native", (value): Handoff => HandoffValue.parse(value));
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** A short-lived proof, never a session, carried through the native callback. */
-export function issueNativeOidc(app: App, input: Omit<Handoff, "deadline">, generation: number): string | null {
-	if ((generations.get(app) ?? 0) !== generation) return null;
-	let kept = handoffs.get(app);
-	if (!kept) {
-		kept = new Ceremonies();
-		handoffs.set(app, kept);
-	}
+export async function issueNativeOidc(
+	app: App,
+	input: Omit<Handoff, "deadline">,
+	generation: string,
+): Promise<string | null> {
 	const code = randomBytes(32).toString("base64url");
-	kept.put(hash(code), { ...input, deadline: app.now() + 60_000 }, `credential ${input.credential}`, app.now());
+	const issued = await ceremonyWrite(app, undefined, async (db) => {
+		if (!(await holdCeremonyGeneration(db, generation))) return false;
+		await handoffs.put(
+			db,
+			hash(code),
+			{ ...input, deadline: app.now() + 60_000 },
+			`credential ${input.credential}`,
+			app.now(),
+		);
+		return true;
+	});
+	if (!issued) return null;
 	const back = new URL(input.callback);
 	back.searchParams.set("code", code);
 	back.searchParams.set("state", input.state);
@@ -236,9 +266,11 @@ export function issueNativeOidc(app: App, input: Omit<Handoff, "deadline">, gene
 }
 
 /** Checks the proof before the request is allowed to wait for the write gate without an idle timeout. */
-export function findNativeOidc(app: App, input: NativeOidcExchange): Handoff | null {
+export async function findNativeOidc(app: App, input: NativeOidcExchange, db?: WriteDb): Promise<Handoff | null> {
 	const key = hash(input.code);
-	const kept = handoffs.get(app)?.get(key);
+	const kept = db
+		? await handoffs.get(db, key, app.now())
+		: await app.database.admissionRead((read) => handoffs.get(read, key, app.now()));
 	if (
 		!kept ||
 		app.now() >= kept.deadline ||
@@ -251,8 +283,7 @@ export function findNativeOidc(app: App, input: NativeOidcExchange): Handoff | n
 }
 
 /** Consumes inside the session write's gate, so import and concurrent exchanges cannot change the recipient. */
-export function takeNativeOidc(app: App, input: NativeOidcExchange): Handoff | null {
-	const kept = findNativeOidc(app, input);
-	if (kept) handoffs.get(app)?.delete(hash(input.code));
-	return kept;
+export async function takeNativeOidc(app: App, input: NativeOidcExchange, db: WriteDb): Promise<Handoff | null> {
+	const kept = await findNativeOidc(app, input, db);
+	return kept && (await handoffs.take(db, hash(input.code), app.now())) ? kept : null;
 }

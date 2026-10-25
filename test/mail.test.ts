@@ -512,7 +512,7 @@ test("a password reset rechecks its proof after waiting at the write gate", asyn
 		const resetting = w.post("/api/login", { reset, password: NEXT });
 		try {
 			await waiting;
-			clearChallenges(w.instance.app);
+			await clearChallenges(w.instance.app);
 		} finally {
 			await gate.release();
 		}
@@ -703,7 +703,35 @@ test("only the owner changes another person's recovery address, and forgetting r
 		await waitMail(w.instance.app);
 		expect(box.messages.at(-1)?.text).toContain("Your sign-in methods were removed because your account was forgotten");
 		expect(await w.rows("SELECT * FROM mail_contacts")).toEqual([]);
+		const pending = JSON.stringify(await w.rows("SELECT payload FROM identity_ceremonies WHERE kind = 'mail'"));
+		expect(pending).not.toContain("robin@example.com");
+		expect(pending).not.toContain('"name":"robin"');
 		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(400);
+	} finally {
+		await box.close();
+	}
+});
+
+test("verification and reset links finish on another App exactly once", async () => {
+	const box = await mailbox();
+	try {
+		const first = box.w;
+		const cookie = await joined(first, "robin", PASSWORD);
+		const second = await world({ dataDir: first.dataDir, clock: first.clock });
+		second.instance.app.config.mail = first.instance.app.config.mail;
+		expect((await first.op("credential", contactInput("robin@example.com"), { cookie })).status).toBe(200);
+		await waitMail(first.instance.app);
+		const verification = linkCode(box.messages.at(-1)?.text ?? "", "email");
+		const verified = await Promise.all(
+			[first, second].map((w) => w.post("/api/login", { emailVerification: verification })),
+		);
+		expect(verified.map((answer) => answer.status).sort()).toEqual([200, 400]);
+		await first.post("/api/login", { resetRequest: "robin@example.com" });
+		await waitMail(first.instance.app);
+		const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+		const answers = await Promise.all([first, second].map((w) => w.post("/api/login", { reset, password: NEXT })));
+		expect(answers.map((answer) => answer.status).sort()).toEqual([200, 400]);
+		expect((await signIn(second, "robin", NEXT)).status).toBe(200);
 	} finally {
 		await box.close();
 	}

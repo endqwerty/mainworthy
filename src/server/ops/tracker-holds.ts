@@ -103,7 +103,7 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 					if (!(await finishTrackerPoll(db, schedule, app.now(), failure))) return null;
 					const diagnostic = await trackerPollError(db, decision.id);
 					const warning = diagnostic && failures.size === 0 ? diagnostic : null;
-					if (diagnostic === before && !closed) return { warning, event: null, ended: false };
+					if (diagnostic === before && !closed) return { warning, ended: false };
 					const ctx = makeCtx(app, db, currentProject, await ruleActor(db), true);
 					const ended = closed && (await endDefectHold(ctx, decision, ref));
 					const question = await questionById(db, decision.question);
@@ -112,17 +112,14 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 						for (const about of await refsOf(db, question.id)) ctx.touched.add(about);
 					}
 					await stampSeq(ctx);
-					return {
-						warning,
-						ended,
-						event: {
-							project: project.key,
-							seq: ctx.seq,
-							op: ended ? "tracker-closed" : "tracker-poll",
-							actor: ctx.actor.name,
-							touched: [...ctx.touched],
-						},
-					};
+					await app.recordChange(db, {
+						project: project.key,
+						seq: ctx.seq,
+						op: ended ? "tracker-closed" : "tracker-poll",
+						actor: ctx.actor.name,
+						touched: [...ctx.touched],
+					});
+					return { warning, ended };
 				}),
 		);
 		if (completion) {
@@ -134,7 +131,6 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 					issue: key,
 					diagnostic: completion.warning,
 				});
-			if (completion.event) app.publish(completion.event);
 			if (completion.ended) ended++;
 		}
 	}

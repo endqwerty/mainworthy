@@ -692,7 +692,7 @@ describe("as a surface uses it", () => {
 		const c = await caller();
 		for (let i = 0; i < 4; i++) await c.admit("203.0.113.9", wrong(i));
 		expect(await c.admit("203.0.113.9", CHOSEN)).toBe("admitted");
-		expect(c.limiter.size).toBe(1);
+		expect(await c.limiter.size()).toBe(1);
 		expect(await c.admit("203.0.113.9", "cb_another-secret")).toBe("unauthorized");
 		expect(await c.admit("203.0.113.9", GENERATED)).toBe("admitted");
 		expect(await c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
@@ -710,7 +710,7 @@ describe("as a surface uses it", () => {
 			}
 		}
 		// One key for each prefix, and none for an address.
-		expect(c.limiter.size).toBe(80);
+		expect(await c.limiter.size()).toBe(80);
 		for (let i = 0; i < 5; i++) await c.admit("127.0.0.1", wrong(i));
 		expect(await c.admit("::1", CHOSEN)).toBe("limited for 1 s");
 	});
@@ -718,10 +718,10 @@ describe("as a surface uses it", () => {
 	test("a secret with no prefix key is counted by address alone, and by nothing behind a proxy", async () => {
 		const c = await caller();
 		for (let i = 0; i < 20; i++) expect(await c.admit("127.0.0.1", i % 2 ? "" : "cb_")).toBe("unauthorized");
-		expect(c.limiter.size).toBe(0);
+		expect(await c.limiter.size()).toBe(0);
 		for (let i = 0; i < 5; i++) expect(await c.admit("203.0.113.9", "")).toBe("unauthorized");
 		expect(await c.admit("203.0.113.9", "cb_")).toBe("limited for 1 s");
-		expect(c.limiter.size).toBe(1);
+		expect(await c.limiter.size()).toBe(1);
 	});
 });
 

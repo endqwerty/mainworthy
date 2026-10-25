@@ -2,9 +2,9 @@ import { closeSync, openSync } from "node:fs";
 import { z } from "zod";
 import { ERROR_CODES } from "../../core/api.ts";
 import { ActorKind, Capability, Role } from "../../core/kinds.ts";
-import { bootstrap, lockAllActors, lockIdentityRoster } from "../identity/identity.ts";
+import { bootstrap, clearChallenges, lockAllActors, lockIdentityRoster } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
-import { lockAllProjects, lockProjectRoster } from "../kernel/ctx.ts";
+import { allProjects, lockAllProjects, lockProjectRoster } from "../kernel/ctx.ts";
 import type { WriteDb } from "../kernel/db.ts";
 import { fileLines, writeBytes } from "../transfer/spool.ts";
 import { exportArchive, importArchive, removeBootstrap } from "../transfer/transfer.ts";
@@ -83,9 +83,12 @@ export async function runArchive(
 			await lockProjectRoster(db);
 			await lockAllProjects(db);
 			await authorize?.(db);
+			await clearChallenges(app, db);
 			await removeBootstrap(db);
 			const counts = await importArchive(db, fileLines(task.path), { blobs: app.blobs });
 			const owner = task.mode === "local" ? (await bootstrap(app, db)).owner : null;
+			for (const project of await allProjects(db))
+				await app.recordChange(db, { project: project.key, seq: project.seq, op: "import", actor: "", touched: [] });
 			return { counts, owner };
 		}),
 	);

@@ -20,7 +20,7 @@ Somebody who already has an account invites you. You choose how you sign in:
 
 If you add an authenticator as a second sign-in step, we store its shared secret, the last accepted time step and SHA-256 hashes of its unused recovery codes. The shared secret is not encrypted by Mainworthy. Removing the authenticator erases the secret and recovery-code hashes.
 
-We store an invitation as a hash of its code, with who it is for and who made it. Email verification and password reset links stay in server memory only. A verification link works once for 24 hours, and a reset link works once for 15 minutes. Restarting the server clears them.
+We store an invitation as a hash of its code, with who it is for and who made it. Email verification and password reset links are stored in PostgreSQL by a hash of their code. Their rows hold the contact id and revision, without copying the name or email address. A verification link works once for 24 hours, and a reset link works once for 15 minutes. Restarting an instance preserves them; importing an archive invalidates them.
 
 ### Sessions
 
@@ -32,7 +32,7 @@ The server checks retention every minute while it runs. A stopped server or a lo
 
 ### Failed sign-ins
 
-To slow down anybody guessing passwords, the server remembers the network address and the name typed for each failed sign-in attempt. The server keeps these attempts only in memory, never on disk or in a log. The server stops using them at most 30 minutes after the last failed attempt. Restarting the server clears the attempts from memory.
+To slow down guesses, the server stores counts under SHA-256 digests of source addresses, account names and token prefixes. It stores these counters in PostgreSQL, shared by every instance, without keeping those keys as plaintext. The server stops using a failure count at most 30 minutes after the last failed attempt. Anonymous starts have a separate one-minute count. Restarting an instance preserves both counts. Expired rows can remain until cleanup or eviction, but do not extend a block.
 
 ### Product interactions
 
@@ -121,10 +121,10 @@ We keep information only for as long as it is needed:
 
 | What | How long |
 | --- | --- |
-| Failed sign-in attempts | Used for at most 30 minutes. Kept only in memory and cleared when the server restarts. |
-| A passkey sign-in or authenticator step in progress | Usable for 5 minutes. Kept only in memory and cleared when the server restarts. |
-| An email verification link | Usable once for 24 hours. Kept only in memory and cleared when the server restarts. |
-| A password reset link | Usable once for 15 minutes. Kept only in memory and cleared when the server restarts. |
+| Failed sign-in attempts | Digest-keyed counters in PostgreSQL, used for at most 30 minutes after the last failure. Restarts preserve them; expired rows can remain until cleanup or eviction. |
+| A passkey sign-in or authenticator step in progress | Usable for 5 minutes across instances and restarts. Stored in PostgreSQL; expired records are removed when that ceremony kind next allocates. |
+| An email verification link | Usable once for 24 hours across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
+| A password reset link | Usable once for 15 minutes across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
 | A recovery email address | Until you remove or replace it, or your account is forgotten |
 | A session's record | Deleted by the running server once the session has been ended for 30 days. See [sessions](#sessions). |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |

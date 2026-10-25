@@ -70,7 +70,7 @@ import {
 	teamProjectCapabilities,
 	teamsOf,
 } from "./teams.ts";
-import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
+import { clearUses, flushUses, noteUse } from "./uses.ts";
 
 export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
 export { queueMail, requireMail, stopMail, waitMail } from "./mail.ts";
@@ -636,9 +636,8 @@ const works = (token: TokenState, now: number): boolean =>
 type StandingToken = { id: number; actor: ActorRow; chosen: boolean };
 
 /**
- * The token with this hash and its actor's row, when the token works and the actor stands. On the reader: a
- * request is admitted before it queues at the write gate, and must not touch the writing connection while another
- * command's transaction is open on it.
+ * The token with this hash and its actor's row, when the token works and the actor stands. Admission uses its
+ * own connection pool; domain transactions pass their existing scope when rechecking authority.
  */
 async function standingToken(db: ReadDb, hash: string, now: number): Promise<StandingToken | null> {
 	const token = await db.get(Q.tokenActorByHash, { hash });
@@ -708,7 +707,6 @@ export async function resolveCaller(
 		case "cookie": {
 			const session = await findSession(app, reference.hash, {
 				db,
-				activity: reference.activity,
 				idleMs: reference.idleMs,
 			});
 			return session
@@ -818,10 +816,10 @@ async function present(app: App, secret: string, address: string | null): Promis
 	const prefix = prefixKey(secret);
 	const keys = [addressKey(address), prefix].filter((key) => key !== null);
 	const hash = hashToken(secret);
-	const answer = limiter.check(keys, now);
+	const answer = await limiter.check(keys, now);
 	if (answer.kind === "blocked") {
 		const token = isGeneratedSecret(secret)
-			? await app.database.read(async (readDb) => await standingToken(readDb, hash, now))
+			? await app.database.admission(async (readDb) => await standingToken(readDb, hash, now))
 			: null;
 		return token && !token.chosen
 			? { kind: "standing", token }
@@ -833,18 +831,19 @@ async function present(app: App, secret: string, address: string | null): Promis
 	const token =
 		secret.length > TOKEN_MAX
 			? null
-			: await app.database.read(async (readDb) => await standingToken(readDb, hash, now));
+			: await app.database.admission(async (readDb) => await standingToken(readDb, hash, now));
 	if (!token) {
-		limiter.failed(keys, now);
-		return { kind: "refused" };
+		const counted = await limiter.failed(keys, now);
+		return counted.kind === "blocked"
+			? { kind: "limited", retryAfter: counted.retryAfterSeconds }
+			: { kind: "refused" };
 	}
-	if (prefix !== null) limiter.succeeded([prefix]);
+	if (prefix !== null) await limiter.succeeded([prefix], answer.version);
 	return { kind: "standing", token };
 }
 
 /**
- * Who a request is: the one question every surface asks, once for each request. It reads committed rows on the
- * reader and writes nothing, so it never waits for a writer.
+ * Who a request is: the one question every surface asks, once for each request. It reads committed rows and records an admitted credential's use before returning.
  *
  * A token, when one is presented, and nothing else then: a wrong token is not rescued by a cookie. Else, for a
  * request from this server's own page, the session its cookie names. Else, in local mode, the owner of the
@@ -854,7 +853,7 @@ async function present(app: App, secret: string, address: string | null): Promis
  * it is 256 random bits that nobody guesses, and a browser that kept one after its session ended sends it with
  * every request. The owner of the machine proves nothing, so there is nothing to fail.
  *
- * The use is noted only after the caller passed, against the newest use known until then. A cookie that is past
+ * The use is written only after the caller passed, when its stored time is more than a minute old. A cookie that is past
  * its idle time is refused however often it is sent: it cannot renew itself.
  */
 export async function admit(app: App, facts: Facts): Promise<Admission> {
@@ -863,7 +862,7 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 		if (presented.kind !== "standing") return presented;
 		const { token } = presented;
 		const hash = hashToken(facts.bearer);
-		noteUse(app, "token", token.id, app.now(), facts.address, hash);
+		await noteUse(app, "token", token.id, app.now(), facts.address, hash);
 		return {
 			kind: "admitted",
 			session: {
@@ -881,7 +880,7 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 		const hash = hashToken(facts.cookie);
 		const found = await findSession(app, hash);
 		if (found) {
-			noteUse(app, "session", found.id, app.now(), facts.address, hash);
+			await noteUse(app, "session", found.id, app.now(), facts.address, hash);
 			return {
 				kind: "admitted",
 				session: {
@@ -889,7 +888,6 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 					reference: () => ({
 						via: "cookie",
 						hash,
-						activity: notedUse(app, "session", found.id) ?? 0,
 						idleMs: app.config.sessionIdleMs,
 					}),
 					id: async () => (await findSession(app, hash))?.id ?? null,
@@ -905,7 +903,6 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 										{
 											via: "cookie",
 											hash,
-											activity: notedUse(app, "session", found.id) ?? 0,
 											idleMs: app.config.sessionIdleMs,
 										},
 										project,
@@ -956,8 +953,8 @@ export async function signInWithToken(
 	if (presented.kind !== "standing") return presented;
 	const { token } = presented;
 	const tokenHash = hashToken(secret);
-	// The use is of the token as it stands now, noted before any wait. An import clears the notes when it commits.
-	noteUse(app, "token", token.id, app.now(), about.address, tokenHash);
+	// The hash binds this durable use to the token that was presented, even across an import.
+	await noteUse(app, "token", token.id, app.now(), about.address, tokenHash);
 	const cookie = newSessionSecret();
 	const signedIn = app.database.write(
 		async (db) =>
@@ -1217,19 +1214,17 @@ export async function removeGrant(_app: App, db: WriteDb, input: { actor: string
 }
 
 /**
- * Every token of the instance. `last_used_at` and `last_used_addr` are the newer of the row and what is noted and
- * not yet written (`uses.ts`), so a use shows in the list at once and not a minute later. `created_by` is the
+ * Every token of the instance. Uses are stored during their request, at most once per minute (`uses.ts`). `created_by` is the
  * name of the actor that made the token as history calls it now, or null when a start made it. `expired` is
  * whether the clock of this instance has reached the token's end, for a caller whose own clock may differ.
  */
 export async function listTokens(app: App, db: ReadDb) {
 	const now = app.now();
 	return (await db.all(Q.tokens, { org: await orgId(db) })).map((row) => {
-		const noted = notedUse(app, "token", row.id);
 		return {
 			...row,
-			last_used_at: noted === null ? row.last_used_at : Math.max(row.last_used_at ?? 0, noted),
-			last_used_addr: lastAddress(app, "token", row.id, { at: row.last_used_at, addr: row.last_used_addr }),
+			last_used_at: row.last_used_at,
+			last_used_addr: row.last_used_addr,
 			expired: row.expires_at !== null && now >= row.expires_at,
 		};
 	});
@@ -1268,14 +1263,13 @@ export const tokenOwner = async (db: ReadDb, id: number): Promise<number | null>
 export async function listPersonalTokens(app: App, db: ReadDb, actor: number) {
 	const now = app.now();
 	return (await db.all(Q.personalTokens, { actor })).map((row) => {
-		const noted = notedUse(app, "token", row.id);
 		return {
 			id: row.id,
 			label: row.label,
 			createdAt: row.created_at,
 			expiresAt: row.expires_at,
 			expired: row.expires_at !== null && now >= row.expires_at,
-			lastUsedAt: noted === null ? row.last_used_at : Math.max(row.last_used_at ?? 0, noted),
+			lastUsedAt: row.last_used_at,
 			revoked: row.revoked_at !== null,
 		};
 	});
@@ -1335,11 +1329,6 @@ export async function sweepSignInRecords(app: App): Promise<void> {
 				if (tokens.some((row) => !affected.has(row.actor))) throw new Busy();
 				for (const token of tokens) await db.run(Q.forgetTokenAddress, { id: token.id });
 				await sweepInvitations(db, now);
-				forgetNotedAddresses(
-					app,
-					"token",
-					tokens.map((token) => token.id),
-				);
 			}),
 	);
 }
@@ -1382,14 +1371,8 @@ export async function forgetActor(
 	await credentialNotice(app, db, row.id, "Your sign-in methods were removed because your account was forgotten");
 	await db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = await revokeTokensOf(db, row.id, at);
-	// A token's label can name the person, and its address says where they were. Both go from the row; the
-	// address also goes from what is noted and not yet written. When each token was last used stays.
+	// A token's label and address can identify the person. Erase both; retain when it was last used.
 	await db.run(Q.forgetTokenDetails, { actor: row.id });
-	forgetNotedAddresses(
-		app,
-		"token",
-		(await db.all(Q.tokensOf, { actor: row.id })).map((token) => token.id),
-	);
 	// A disabled actor's sessions are refused anyway. Ending them says why in each row, and keeps them ended if
 	// the row of the actor is ever changed by hand.
 	await endSessionsOf(db, row.id, at);
