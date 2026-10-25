@@ -36,7 +36,8 @@ resource "google_sql_database_instance" "app" {
       point_in_time_recovery_enabled = each.key == "production"
       transaction_log_retention_days = 7
       start_time                     = "09:00"
-      location                       = local.region
+      # Google keeps no backup location while backups are off, so preview sets none.
+      location = each.key == "production" ? local.region : null
       backup_retention_settings {
         retained_backups = 7
       }
