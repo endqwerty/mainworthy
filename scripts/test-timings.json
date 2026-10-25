@@ -203,6 +203,6 @@
 		"test/async-port.test.ts": 4461,
 		"test/schema.test.ts": 1047,
 		"test/spine.test.ts": 967,
-		"test/e2e/suite-commands.test.ts": 8951
+		"test/e2e/suite-commands.test.ts": 21332
 	}
 }

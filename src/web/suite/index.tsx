@@ -431,19 +431,25 @@ export function SuiteScreen() {
 	const commandStatus = useRef(0);
 	const settleRetained = useCallback(
 		async (action: RetainedProposal, subject: string): Promise<void> => {
+			if (!sessionCurrent(owner)) return;
 			const status = ++commandStatus.current;
-			const navigation = navigationToken();
+			setStatus(`${subject} is being checked. It will not be retried.`);
 			let message: string;
 			try {
 				const fate = await call("command", { cmd: action.input.cmd }, { project, owner });
 				if (fate.state === "done") {
 					const reply = ProposeReply.parse(fate.reply);
-					message =
-						reply.status === "adopted"
-							? `${subject} was recorded.`
-							: reply.status === "open"
-								? waitingStatus(`${subject} proposed`, reply.question)
-								: `${subject} was ${reply.status}.`;
+					const edit = action.input.edits[0];
+					if (reply.status === "adopted") {
+						message =
+							edit.op === "restore" && reply.cases.length === 0
+								? `${edit.case} already has that version's content. Nothing changed.`
+								: `${subject} was recorded.`;
+					} else if (reply.status === "open") {
+						message = waitingStatus(`${subject} proposed`, reply.question);
+					} else if (reply.status === "conflict") {
+						message = `${subject} has a conflict. The case is unchanged.`;
+					} else message = `${subject} was ${reply.status}.`;
 					void invalidateProject(project);
 				} else {
 					message = `${subject} ${fate.state === "begun" ? "is still running" : "was not recorded when checked"}. It will not be retried.`;
@@ -452,8 +458,7 @@ export function SuiteScreen() {
 				const reason = errorMessage(error, "Could not check the outcome.");
 				message = `${subject}: ${reason}${/[.!?]$/.test(reason) ? "" : "."} Outcome unknown. It will not be retried.`;
 			}
-			if (sessionCurrent(owner) && commandStatus.current === status && navigationToken() === navigation)
-				setStatus(message);
+			if (sessionCurrent(owner) && commandStatus.current === status) setStatus(message);
 		},
 		[project, owner, setStatus],
 	);
@@ -2298,6 +2303,8 @@ export function SuiteScreen() {
 				setStatus("Previous version restored as a new version.");
 			} else if (reply.status === "open") {
 				setStatus(waitingStatus("Restore proposed", reply.question));
+			} else if (reply.status === "conflict") {
+				setStatus("The restore has a conflict. The case is unchanged.");
 			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
 			void invalidateProject(project);
 		} catch (error) {

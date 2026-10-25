@@ -384,3 +384,216 @@ for (const action of ["folder", "restore"] as const) {
 		}
 	});
 }
+
+async function loseFirstReply(harness: PageHarness) {
+	const requests: unknown[] = [];
+	await harness.context.route("**/api/p/scratch/propose", async (route) => {
+		requests.push(route.request().postDataJSON());
+		if (requests.length > 1) return route.continue();
+		await route.fetch();
+		await route.abort("failed");
+	});
+	return requests;
+}
+
+async function holdCommand(harness: PageHarness) {
+	let release = () => {};
+	let started = () => {};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const ready = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	const commands: unknown[] = [];
+	await harness.context.route("**/api/p/scratch/command", async (route) => {
+		commands.push(route.request().postDataJSON());
+		const response = await route.fetch();
+		started();
+		await gate;
+		await route.fulfill({ response });
+	});
+	return { ready, release, commands };
+}
+
+for (const move of ["twice", "back", "new action"] as const) {
+	test.skipIf(!browserAvailable)(`a restore departure lookup survives moving ${move}`, async () => {
+		const server = await startServer();
+		for (let i = 1; i <= 5; i++) {
+			await server.api("propose", { edits: [{ op: "create", body: { title: `Case ${i} one` } }] });
+			await server.api("propose", {
+				edits: [{ op: "edit", case: `C-${i}`, base: 1, body: { title: `Case ${i} two` } }],
+			});
+		}
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/2" });
+		const held = await holdCommand(harness);
+		try {
+			const { page } = harness;
+			await page.locator("#detail .ctitle").filter({ hasText: "Case 2 two" }).waitFor();
+			const requests = await loseFirstReply(harness);
+			await page.keyboard.press("u");
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await page.keyboard.type(move === "back" ? "j" : "jj");
+			await held.ready;
+			if (move === "back") await page.keyboard.press("k");
+			await page
+				.locator("#detail .ctitle")
+				.filter({ hasText: move === "back" ? "Case 2 one" : "Case 4 two" })
+				.waitFor();
+			const pending = await page.locator("#stat").textContent();
+			if (move === "new action") {
+				await page.keyboard.press("u");
+				await page.locator("#stat").filter({ hasText: "Previous version restored as a new version." }).waitFor();
+			}
+			const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
+			held.release();
+			await response;
+			if (move === "new action") {
+				await page.evaluate(
+					() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+				);
+				expect(await page.locator("#stat").textContent()).toBe("Previous version restored as a new version.");
+				expect(requests).toHaveLength(2);
+			} else {
+				await page.locator("#stat").filter({ hasText: "Restore for C-2 was recorded." }).waitFor();
+				expect(requests).toHaveLength(1);
+			}
+			expect(pending).toContain("C-2");
+			expect(pending).not.toContain("check it and retry");
+			expect(held.commands).toEqual([{ cmd: Request.parse(requests[0]).cmd }]);
+			expect((await server.api("get", { refs: ["C-2"] }))[0]).toMatchObject({ title: "Case 2 one", version: 3 });
+			expect((await server.api("get", { refs: ["C-4"] }))[0]).toMatchObject(
+				move === "new action" ? { title: "Case 4 one", version: 3 } : { title: "Case 4 two", version: 2 },
+			);
+		} finally {
+			held.release();
+			await harness.close();
+			await server.stop();
+		}
+	});
+}
+
+test.skipIf(!browserAvailable)("a folder departure lookup survives Escape then another parent", async () => {
+	const server = await startServer();
+	await server.api("propose", {
+		edits: [
+			{ op: "folder", name: "Left" },
+			{ op: "folder", name: "Right" },
+		],
+	});
+	const harness = await openPage(server, { path: "/p/scratch/suite?folder=Left" });
+	const held = await holdCommand(harness);
+	try {
+		const { page } = harness;
+		await page.locator("#ltitle").filter({ hasText: "Left" }).waitFor();
+		const requests = await loseFirstReply(harness);
+		await page.keyboard.type("nf");
+		await page.getByRole("textbox", { name: "New folder name" }).fill("Child");
+		await page.keyboard.press("Enter");
+		await page
+			.locator("#stat")
+			.filter({ hasText: /check it and retry/ })
+			.waitFor();
+		await page.keyboard.press("Escape");
+		await held.ready;
+		await page.locator("#tree .fo").filter({ hasText: "Right" }).click();
+		const pending = await page.locator("#stat").textContent();
+		held.release();
+		await page.locator("#stat").filter({ hasText: 'Folder "Left/Child" was recorded.' }).waitFor();
+		expect(pending).toContain("Left/Child");
+		expect(pending).not.toContain("check it and retry");
+		expect(held.commands).toEqual([{ cmd: Request.parse(requests[0]).cmd }]);
+		expect(requests).toHaveLength(1);
+		expect((await server.api("find", { in: "folders" })).items.map((row) => row.path).sort()).toEqual([
+			"Left",
+			"Left/Child",
+			"Right",
+		]);
+	} finally {
+		held.release();
+		await harness.close();
+		await server.stop();
+	}
+});
+
+test.skipIf(!browserAvailable)(
+	"a restore departure lookup names a recorded no-op without claiming a change",
+	async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", {
+			edits: [
+				{ op: "restore", case: "C-1", to: 1 },
+				{ op: "create", body: { title: "Other case" } },
+			],
+		});
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = harness;
+			await page.locator("#detail .ctitle").filter({ hasText: "First title" }).waitFor();
+			const requests = await loseFirstReply(harness);
+			await page.locator(".timeline-group summary").click();
+			await page.locator('[data-version="2"]').focus();
+			await page.keyboard.press("u");
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await page.getByRole("option").filter({ hasText: "Other case" }).click();
+			await page
+				.locator("#stat")
+				.filter({ hasText: "C-1 already has that version's content. Nothing changed." })
+				.waitFor();
+			expect(requests).toHaveLength(1);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "First title", version: 3 });
+		} finally {
+			await harness.close();
+			await server.stop();
+		}
+	},
+);
+
+for (const path of ["normal", "departure"] as const) {
+	test.skipIf(!browserAvailable)(`the ${path} restore path describes a conflict in a sentence`, async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+		const conflict = await server.api("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Conflicting title" } }],
+		});
+		expect(conflict.status).toBe("conflict");
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page, context } = harness;
+			await begin(harness, "restore");
+			await context.route("**/api/p/scratch/propose", async (route) => {
+				if (path === "departure") await route.abort("failed");
+				else await route.fulfill({ json: { ok: true, result: conflict } });
+			});
+			await context.route("**/api/p/scratch/command", async (route) => {
+				await route.fulfill({ json: { ok: true, result: { state: "done", op: "propose", seq: 1, reply: conflict } } });
+			});
+			await page.keyboard.press("u");
+			if (path === "departure") {
+				await page
+					.locator("#stat")
+					.filter({ hasText: /check it and retry/ })
+					.waitFor();
+				await page.getByRole("option").filter({ hasText: "Other case" }).click();
+			}
+			await page
+				.locator("#stat")
+				.filter({
+					hasText: `${path === "departure" ? "Restore for C-1" : "The restore"} has a conflict. The case is unchanged.`,
+				})
+				.waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Second title", version: 2 });
+		} finally {
+			await harness.close();
+			await server.stop();
+		}
+	});
+}
