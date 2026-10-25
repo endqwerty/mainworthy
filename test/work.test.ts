@@ -859,54 +859,6 @@ test("sync-branch keeps a merge commit that main does not hold", async () => {
 	expect(await syncBranch(clone, false)).toBe("t3/thread is at origin/main");
 });
 
-const legacyOverBudget = `typecheck          2.0 s  ok
-lint               1.0 s  ok
-tests: parallel  120.0 s  ok
-tests: quiet      40.0 s  ok
-tests            160.0 s
-total            162.0 s
-
-OVER BUDGET: the tests took 160.0 s; the budget is 130 s and the limit 150 s (scripts/check-plan.ts).
-`;
-
-test("check-time refuses functional failures even when the legacy timing marker is printed", async () => {
-	const repo = await repository();
-	const failedStages = ["typecheck", "lint", "tests: parallel", "tests: quiet"].map((stage) =>
-		legacyOverBudget.replace(new RegExp(`(${stage}\\s+[\\d.]+ s\\s+)ok`), "$1FAILED (exit 1)"),
-	);
-	for (const { output, error, exit } of [
-		...failedStages.map((output) => ({ output, error: "", exit: 1 })),
-		{ output: legacyOverBudget, error: "FAILED: another functional stage\n", exit: 1 },
-		{ output: legacyOverBudget, error: "", exit: 2 },
-		{ output: legacyOverBudget.replace(/^lint.*\n/m, ""), error: "", exit: 1 },
-		{ output: legacyOverBudget.replace(/^OVER BUDGET:.*\n/m, ""), error: "", exit: 1 },
-		{ output: `${legacyOverBudget}unexpected shutdown\n`, error: "", exit: 1 },
-		{ output: "tests 160.0 s\nOVER BUDGET: the tests took 160 s\n", error: "", exit: 1 },
-	]) {
-		await expect(
-			compare(
-				"HEAD~1",
-				"HEAD",
-				{
-					rounds: 1,
-					install: false,
-					repo,
-					busy: async () => false,
-					command: [
-						process.execPath,
-						"-e",
-						"process.stdout.write(process.argv[1]); process.stderr.write(process.argv[2]); process.exit(Number(process.argv[3]))",
-						output,
-						error,
-						String(exit),
-					],
-				},
-				() => {},
-			),
-		).rejects.toThrow(`failed (exit ${exit})`);
-	}
-});
-
 test("check-time stops at a command that failed, and at no rounds", async () => {
 	const repo = await repository();
 	const options = {
@@ -919,9 +871,9 @@ test("check-time stops at a command that failed, and at no rounds", async () => 
 	await expect(compare("HEAD~1", "HEAD", options, () => {})).rejects.toThrow("failed (exit 1)");
 	const over = {
 		...options,
-		command: [process.execPath, "-e", "process.stdout.write(process.argv[1]); process.exit(1)", legacyOverBudget],
+		command: ["sh", "-c", "echo 'tests 160.0 s'; echo 'OVER BUDGET: the tests took 160 s'; exit 1"],
 	};
-	expect(await compare("HEAD~1", "HEAD", over, () => {})).toContain("base: 160.0 s");
+	await expect(compare("HEAD~1", "HEAD", over, () => {})).rejects.toThrow("failed (exit 1)");
 	await expect(compare("HEAD~1", "HEAD", { ...options, rounds: 0 }, () => {})).rejects.toThrow("at least 1");
 });
 
