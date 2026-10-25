@@ -56,6 +56,8 @@ column background_jobs.lease_until: bigint NULL
 column background_jobs.max_attempts: integer NOT NULL
 column background_jobs.next_at: bigint NOT NULL
 column background_jobs.owner: text NULL
+column background_jobs.private_input: boolean NOT NULL DEFAULT false
+column background_jobs.queue_order: bigint NOT NULL IDENTITY a
 column background_jobs.started: boolean NOT NULL DEFAULT false
 column background_jobs.state: text NOT NULL DEFAULT 'ready'::text
 column background_jobs.token: text NULL
@@ -709,6 +711,9 @@ constraint background_jobs.background_jobs_max_attempts_check: CHECK (((max_atte
 constraint background_jobs.background_jobs_max_attempts_not_null: NOT NULL max_attempts
 constraint background_jobs.background_jobs_next_at_not_null: NOT NULL next_at
 constraint background_jobs.background_jobs_pkey: PRIMARY KEY (id)
+constraint background_jobs.background_jobs_private_input_not_null: NOT NULL private_input
+constraint background_jobs.background_jobs_queue_order_key: UNIQUE (queue_order)
+constraint background_jobs.background_jobs_queue_order_not_null: NOT NULL queue_order
 constraint background_jobs.background_jobs_started_not_null: NOT NULL started
 constraint background_jobs.background_jobs_state_check: CHECK ((state = ANY (ARRAY['ready'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'uncertain'::text])))
 constraint background_jobs.background_jobs_state_not_null: NOT NULL state
@@ -1845,8 +1850,9 @@ index assertion_spreads_pkey: CREATE UNIQUE INDEX assertion_spreads_pkey ON publ
 index assertion_spreads_root: CREATE INDEX assertion_spreads_root ON public.assertion_spreads USING btree (root)
 index attachments_pkey: CREATE UNIQUE INDEX attachments_pkey ON public.attachments USING btree (id)
 index attachments_result: CREATE INDEX attachments_result ON public.attachments USING btree (result, id)
-index background_jobs_due: CREATE INDEX background_jobs_due ON public.background_jobs USING btree (next_at, accepted_at, id) WHERE (state = ANY (ARRAY['ready'::text, 'running'::text]))
+index background_jobs_due: CREATE INDEX background_jobs_due ON public.background_jobs USING btree (next_at, accepted_at, queue_order) WHERE (state = ANY (ARRAY['ready'::text, 'running'::text]))
 index background_jobs_pkey: CREATE UNIQUE INDEX background_jobs_pkey ON public.background_jobs USING btree (id)
+index background_jobs_queue_order_key: CREATE UNIQUE INDEX background_jobs_queue_order_key ON public.background_jobs USING btree (queue_order)
 index batch_admissions_pkey: CREATE UNIQUE INDEX batch_admissions_pkey ON public.batch_admissions USING btree (batch)
 index batches_accepted: CREATE INDEX batches_accepted ON public.batches USING btree (project, state) WHERE (state = 'accepted'::text)
 index batches_pkey: CREATE UNIQUE INDEX batches_pkey ON public.batches USING btree (id)

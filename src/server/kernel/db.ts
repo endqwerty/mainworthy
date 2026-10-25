@@ -128,6 +128,7 @@ export interface WriteDb extends ReadDb {
 	commit(): Promise<void>;
 	rollback(): Promise<void>;
 	readonly inTransaction: boolean;
+	beforeCommit(effect: () => void | Promise<void>): void;
 	afterCommit(effect: () => void | Promise<void>): void;
 }
 
@@ -259,7 +260,8 @@ export function json<T>(text: string): T {
 }
 
 type Effect = () => void | Promise<void>;
-type Transaction = { aborted: { error: unknown } | null; queues: Effect[][] };
+type QueuedEffect = { phase: "before" | "after"; run: Effect };
+type Transaction = { aborted: { error: unknown } | null; queues: QueuedEffect[][] };
 type Lease = {
 	conn: ReservedSQL;
 	alive: boolean;
@@ -346,11 +348,14 @@ class Scope implements WriteDb {
 		const tx = this.requireWrite();
 		if (tx.queues.length !== 1) throw new Error("cannot commit with an open savepoint");
 		if (tx.aborted) throw new TransactionAborted(tx.aborted.error);
+		for (const effect of tx.queues[0] ?? []) if (effect.phase === "before") await effect.run();
+		this.checkAborted(tx);
 		await query(this.lease, "COMMIT", [], true);
 		this.lease.tx = null;
 		for (const effect of tx.queues[0] ?? []) {
+			if (effect.phase !== "after") continue;
 			try {
-				const result = effect();
+				const result = effect.run();
 				if (result) void result.catch(() => console.error("[mainworthy] after-commit effect failed"));
 			} catch {
 				console.error("[mainworthy] after-commit effect failed");
@@ -368,11 +373,16 @@ class Scope implements WriteDb {
 			this.lease.tx = null;
 		}
 	}
+	beforeCommit(effect: Effect): void {
+		const queue = this.requireWrite().queues.at(-1);
+		if (!queue) throw new Error("transaction effect queue missing");
+		queue.push({ phase: "before", run: effect });
+	}
 	afterCommit(effect: Effect): void {
 		const tx = this.requireWrite();
 		const queue = tx.queues.at(-1);
 		if (!queue) throw new Error("transaction effect queue missing");
-		queue.push(effect);
+		queue.push({ phase: "after", run: effect });
 	}
 	async transaction<T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
 		if (this.lease.tx) {
@@ -394,7 +404,7 @@ class Scope implements WriteDb {
 		if (tx.aborted) throw new TransactionAborted(tx.aborted.error);
 		const name = `mw_sp_${tx.queues.length}`;
 		await query(this.lease, `SAVEPOINT ${name}`);
-		const effects: Effect[] = [];
+		const effects: QueuedEffect[] = [];
 		tx.queues.push(effects);
 		let completed = false;
 		try {
@@ -410,7 +420,12 @@ class Scope implements WriteDb {
 	private checkAborted(tx: Transaction): void {
 		if (tx.aborted) throw new TransactionAborted(tx.aborted.error);
 	}
-	private async finishSavepoint(tx: Transaction, name: string, completed: boolean, effects: Effect[]): Promise<void> {
+	private async finishSavepoint(
+		tx: Transaction,
+		name: string,
+		completed: boolean,
+		effects: QueuedEffect[],
+	): Promise<void> {
 		try {
 			if (!completed) {
 				try {
@@ -525,11 +540,14 @@ export class Database {
 	private readonly readers: SQL;
 	private readonly writers: SQL;
 	private readonly admissions: SQL;
+	private readonly jobs: SQL;
+
 	private readonly shutdown = new AbortController();
 
 	private count = 0;
 	private readonly activeWrites = new Set<Promise<void>>();
 	private constructor(private readonly options: OpenOptions) {
+		this.jobs = new SQL(options.url, { bigint: true, max: 1 });
 		this.readers = new SQL(options.url, {
 			bigint: true,
 			max: poolSize(options.readPool ?? process.env.MAINWORTHY_DB_POOL, 2),
@@ -637,7 +655,7 @@ export class Database {
 		const finished = Promise.withResolvers<void>();
 		this.activeWrites.add(finished.promise);
 		try {
-			return await this.writeLease(fn, options);
+			return await this.writeLease(fn, options, this.writers);
 		} finally {
 			finished.resolve();
 			this.activeWrites.delete(finished.promise);
@@ -654,11 +672,21 @@ export class Database {
 			this.activeWrites.delete(finished.promise);
 		}
 	}
-
+	/** Only job bookkeeping uses this pool; SMTP never holds a domain connection while waiting. */
+	async jobWrite<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+		const finished = Promise.withResolvers<void>();
+		this.activeWrites.add(finished.promise);
+		try {
+			return await this.writeLease(fn, options, this.jobs);
+		} finally {
+			finished.resolve();
+			this.activeWrites.delete(finished.promise);
+		}
+	}
 	private async writeLease<T>(
 		fn: (db: WriteDb) => T | Promise<T>,
 		options: { signal?: AbortSignal },
-		pool = this.writers,
+		pool: SQL,
 	): Promise<T> {
 		const lease = await this.lease(pool, options.signal).catch((error: unknown) => {
 			if (options.signal?.aborted) throw options.signal.reason;
@@ -739,7 +767,7 @@ export class Database {
 		await this.notifications?.close();
 		this.shutdown.abort(new Error("database is closed"));
 		await Promise.all(this.activeWrites);
-		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close()]);
+		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close(), this.jobs.close()]);
 	}
 }
 export async function migrationLock<T>(database: Database, fn: (db: WriteDb) => T | Promise<T>): Promise<T> {

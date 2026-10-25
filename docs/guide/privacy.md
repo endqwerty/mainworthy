@@ -10,7 +10,7 @@ This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone ap
 
 ### Identity and access
 
-An account is a name and a way to sign in. We do not require an email address or a real name. If the instance has mail enabled, you can add a recovery email address. We store the address and whether and when you verified it. We use that information to send recovery links and notices about changes to your sign-in methods.
+An account is a name and a way to sign in. We do not require an email address or a real name. If the instance has mail enabled, you can add a recovery email address. We store the address and whether and when you verified it. We use that information to send recovery links and notices about changes to your sign-in methods. Pending outgoing mail jobs temporarily hold the recipient and message, including any one-use sign-in link. They are excluded from exports. A completed or exhausted job removes that message input. SMTP credentials stay in the server environment.
 
 Somebody who already has an account invites you. You choose how you sign in:
 
@@ -113,7 +113,7 @@ There is no in-app request for forgetting or self-service account deletion yet. 
 
 ## How we secure your data
 
-Every connection to `mainworthy.com` is encrypted with TLS. We store passwords as argon2id hashes. We store tokens, session cookies and invitation codes as SHA-256 hashes. None of these secrets can be read back from the database. Mainworthy does not encrypt the database itself. The server protects the database. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status are included in exports.
+Every connection to `mainworthy.com` is encrypted with TLS. We store passwords as argon2id hashes. We store tokens, session cookies and invitation codes as SHA-256 hashes. Credential tables keep only hashes of these secrets. A pending mail job can temporarily contain the one-use link it is delivering, as described above. Mainworthy does not encrypt the database itself. The server protects the database. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status are included in exports.
 
 ## Data retention
 
@@ -125,6 +125,7 @@ We keep information only for as long as it is needed:
 | A passkey sign-in or authenticator step in progress | Usable for 5 minutes across instances and restarts. Stored in PostgreSQL; expired records are removed when that ceremony kind next allocates. |
 | An email verification link | Usable once for 24 hours across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
 | A password reset link | Usable once for 15 minutes across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
+| An outgoing mail message | Until its job succeeds or exhausts its bounded retries. Private job input is excluded from archives. |
 | A recovery email address | Until you remove or replace it, or your account is forgotten |
 | A session's record | Deleted by the running server once the session has been ended for 30 days. See [sessions](#sessions). |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |

@@ -6,8 +6,10 @@ import { json, type ReadDb, sql, type WriteDb } from "./db.ts";
 export type JobInput = z.infer<ReturnType<typeof z.json>>;
 export type Job = {
 	id: string;
+	queue_order: number;
 	kind: string;
 	input: string;
+	private_input: boolean;
 	actor: number | null;
 	accepted_at: number;
 	effect: "repeatable" | "uncertain";
@@ -36,26 +38,30 @@ const Q = {
 		effect: string;
 		max: number;
 		due: number;
+		privateInput: boolean;
 	}>(`
- INSERT INTO background_jobs(id,kind,input,actor,accepted_at,effect,max_attempts,next_at)
- VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due) ON CONFLICT(id) DO NOTHING`),
-	rearm: sql<{ id: string; at: number; actor: number | null; due: number }>(`
- UPDATE background_jobs SET state='ready',attempts=0,next_at=$due,actor=$actor,accepted_at=$at,started=false,error=NULL
+ INSERT INTO background_jobs(id,kind,input,actor,accepted_at,effect,max_attempts,next_at,private_input)
+ VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due,$privateInput) ON CONFLICT(id) DO NOTHING`),
+	rearm: sql<{ id: string; at: number; actor: number | null; due: number; input: string; privateInput: boolean }>(`
+ UPDATE background_jobs SET state='ready',attempts=0,next_at=$due,actor=$actor,accepted_at=$at,input=$input,private_input=$privateInput,started=false,error=NULL
  WHERE id IN (SELECT id FROM background_jobs WHERE id=$id AND state='succeeded' FOR UPDATE SKIP LOCKED)`),
+	pending: sql<{ kind: string; now: number }, { present: boolean }>(
+		`SELECT EXISTS(SELECT 1 FROM background_jobs WHERE kind=$kind AND (state='ready' AND next_at <= $now OR state='running' AND lease_until > $now)) AS present`,
+	),
 	one: sql<{ id: string }, Job>("SELECT * FROM background_jobs WHERE id=$id"),
 	next: sql<{ now: number; id: string | null; kind: string | null }, Job>(`
  SELECT * FROM background_jobs WHERE (state='ready' AND next_at <= $now OR state='running' AND lease_until <= $now)
- AND ($id::text IS NULL OR id=$id) AND ($kind::text IS NULL OR kind=$kind) ORDER BY next_at,accepted_at,id FOR UPDATE SKIP LOCKED LIMIT 1`),
+ AND ($id::text IS NULL OR id=$id) AND ($kind::text IS NULL OR kind=$kind) ORDER BY next_at,accepted_at,queue_order FOR UPDATE SKIP LOCKED LIMIT 1`),
 	claim: sql<{ id: string; owner: string; token: string; until: number }, JobClaim>(`
  UPDATE background_jobs SET state='running',owner=$owner,token=$token,lease_until=$until,attempts=attempts+1,started=false
  WHERE id=$id RETURNING *`),
 	terminal: sql<{ id: string; state: string }>(`
- UPDATE background_jobs SET state=$state,owner=NULL,token=NULL,lease_until=NULL WHERE id=$id`),
+ UPDATE background_jobs SET state=$state,input=CASE WHEN private_input THEN 'null' ELSE input END,owner=NULL,token=NULL,lease_until=NULL WHERE id=$id`),
 	fence: sql<{ id: string; token: string; now: number }, { id: string }>(`
  SELECT id FROM background_jobs WHERE id=$id AND token=$token AND state='running' AND lease_until > $now FOR UPDATE`),
 	start: sql<{ id: string; token: string }>("UPDATE background_jobs SET started=true WHERE id=$id AND token=$token"),
 	finish: sql<{ id: string; token: string; now: number; state: string; next: number; error: string | null }>(`
- UPDATE background_jobs SET state=$state,next_at=$next,error=$error,owner=NULL,token=NULL,lease_until=NULL
+ UPDATE background_jobs SET state=$state,input=CASE WHEN private_input AND $state <> 'ready' THEN 'null' ELSE input END,next_at=$next,error=$error,owner=NULL,token=NULL,lease_until=NULL
  WHERE id=$id AND token=$token AND state='running' AND lease_until > $now`),
 };
 
@@ -72,6 +78,7 @@ export async function enqueueJob(
 		maxAttempts?: number;
 		dueAt?: number;
 		recurring?: boolean;
+		privateInput?: boolean;
 	},
 ): Promise<string> {
 	const id = jobId(job.kind, job.key);
@@ -84,11 +91,21 @@ export async function enqueueJob(
 		effect: job.effect ?? "repeatable",
 		max: job.maxAttempts ?? 5,
 		due: job.dueAt ?? job.acceptedAt,
+		privateInput: job.privateInput ?? false,
 	});
 	if (job.recurring)
-		await db.run(Q.rearm, { id, at: job.acceptedAt, actor: job.actor, due: job.dueAt ?? job.acceptedAt });
+		await db.run(Q.rearm, {
+			id,
+			at: job.acceptedAt,
+			actor: job.actor,
+			due: job.dueAt ?? job.acceptedAt,
+			input: JSON.stringify(job.input),
+			privateInput: job.privateInput ?? false,
+		});
 	return id;
 }
+export const jobsPending = async (db: ReadDb, kind: string, now: number): Promise<boolean> =>
+	(await db.one(Q.pending, { kind, now })).present;
 export const jobById = (db: ReadDb, id: string): Promise<Job | null> => db.get(Q.one, { id });
 
 /** Takes only job locks. No actor or project lock may be taken on this transaction afterwards. */
@@ -98,7 +115,7 @@ export async function claimJob(
 	id: string | null = null,
 	kind: string | null = null,
 ): Promise<JobClaim | null> {
-	return app.database.write((db) =>
+	return app.database.jobWrite((db) =>
 		db.transaction(async () => {
 			for (;;) {
 				const row = await db.get(Q.next, { now: app.now(), id, kind });
@@ -128,7 +145,7 @@ export async function fenceJob(db: WriteDb, claim: JobClaim, now: number): Promi
 	if (!(await db.get(Q.fence, { id: claim.id, token: claim.token, now }))) throw new LostJobClaim();
 }
 export async function finishJob(app: App, claim: JobClaim, error: boolean): Promise<boolean> {
-	return app.database.write((db) =>
+	return app.database.jobWrite((db) =>
 		db.transaction(
 			async () =>
 				(
@@ -162,7 +179,7 @@ export async function runJob(
 	const claim = await claimJob(app, owner, id, kind);
 	if (!claim) return false;
 	try {
-		await app.database.write((db) =>
+		await app.database.jobWrite((db) =>
 			db.transaction(async () => {
 				await fenceJob(db, claim, app.now());
 				await db.run(Q.start, { id: claim.id, token: claim.token });
@@ -210,7 +227,7 @@ export async function runPeriodicJob(
 	kind: string,
 	handler: (claim: JobClaim) => Promise<number>,
 ): Promise<number> {
-	const id = await app.database.write((db) =>
+	const id = await app.database.jobWrite((db) =>
 		db.transaction(() =>
 			enqueueJob(db, { kind, key: "periodic", input: {}, actor: null, acceptedAt: app.now(), recurring: true }),
 		),
