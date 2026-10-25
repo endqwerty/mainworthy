@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import type { TrackerItem, TrackerReceipt } from "../src/core/tracker.ts";
-import { type App, defaultConfig } from "../src/server/kernel/app.ts";
+import { type App, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../src/server/ops/tracker-holds.ts";
 import { githubPort } from "../src/server/trackers/github.ts";
@@ -623,8 +623,8 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 				return reply.promise;
 			},
 		});
-		expect(pollDefectHolds(h.app, port)).toBe(polling);
 		await entered.promise;
+		expect(await pollDefectHolds(h.app, port)).toBe(0);
 		if (change === "answer")
 			await h.call("decide", {
 				q: question.q,
@@ -1114,12 +1114,14 @@ test("delivery releases the writer while waiting and overlapping jobs send only 
 		},
 	};
 	const delivery = deliverTrackerRequests(h.app, adapter);
-	expect(deliverTrackerRequests(h.app, adapter)).toBe(delivery);
 	await started.promise;
+	const peer = await openApp(h.app.config, { memory: true, now: h.app.now });
+	const overlapping = deliverTrackerRequests(peer, adapter);
 	await h.call("propose", { edits: [{ op: "create", outline: "Another case" }] });
 	expect(await h.call("tracker-status", { id: "tracker-wait-001" })).toMatchObject({ state: "sending" });
 	complete(item);
-	expect(await delivery).toBe(1);
+	expect((await delivery) + (await overlapping)).toBe(1);
+	await peer.close();
 	expect(await deliverTrackerRequests(h.app, adapter)).toBe(0);
 });
 
@@ -1430,8 +1432,8 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		trackerReply.resolve(item);
 		await minute;
 		expect(logged.mock.calls).toContainEqual([
-			"[mainworthy] sending tracker requests failed:",
-			expect.objectContaining({ message: "tracker reply write failed" }),
+			"[mainworthy] job failed",
+			expect.objectContaining({ kind: "tracker-request" }),
 		]);
 		expect(await Promise.race([outcome, Bun.sleep(20).then(() => "draining")])).toBe("draining");
 		readReply.resolve();
@@ -1512,10 +1514,7 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 			current.app.database.read(async (db) => await db.get(sql<readonly [], { n: number }>("SELECT 1 AS n"))),
 		).rejects.toThrow(/closed/i);
 		expect(logged.mock.calls).toEqual([
-			[
-				"[mainworthy] sending tracker requests failed:",
-				expect.objectContaining({ message: "tracker reply write failed after drain" }),
-			],
+			["[mainworthy] job failed", expect.objectContaining({ kind: "tracker-request" })],
 		]);
 	} finally {
 		trackerReply.resolve(item);
