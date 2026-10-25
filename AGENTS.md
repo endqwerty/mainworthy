@@ -59,7 +59,8 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - A decision record (a dated file in `docs/decisions/`) is only for a choice that is hard to reverse, would surprise a
   reader and came from a real trade-off. A `proposed` record binds nothing. Quote the owner with how firm they were
   ("maybe", "for now"); never cite them for an agent's choice.
-- After a pull request lands, check that `/healthz` names its commit.
+- Until the Google Cloud cutover, Coolify is best-effort; check its `/healthz` only after migration or startup changes.
+  After cutover, check that Cloud Run's `/healthz` names the commit after every landing.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a

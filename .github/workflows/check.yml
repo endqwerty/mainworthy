@@ -90,6 +90,16 @@ jobs:
       - run: bun run lint
       - run: bun scripts/async-port.ts --check
 
+      # These are local static checks: no backend, OIDC token, Google credentials or cloud calls.
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra
+      - run: terraform -chdir=infra init -backend=false -lockfile=readonly
+      - run: terraform -chdir=infra validate
+      - run: bash infra/ci.test.sh
+
   image:
     needs: scope
     if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true' }}

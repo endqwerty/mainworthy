@@ -13,7 +13,9 @@ reader. Pull requests get neither. This replaces the earlier record's proposal t
 Terraform owns the private job service's configuration. Step 5 owns only its application image and traffic,
 excluded explicitly from Terraform updates. The proxy image, identity, networking, secret references, mount,
 limits and probes stay in Terraform. Step 5 must patch those two release fields, preserve all others, and use the
-same `mainworthy-infrastructure` concurrency group. Whole-template replacement would violate this boundary.
+same `mainworthy-infrastructure` writer concurrency group. Manual drift uses a separate group so it cannot
+cancel a pending apply. Step 5 must reconcile infrastructure and release in one writer run, rather than let
+an image-only run replace a queued infrastructure change. Whole-template replacement would violate this boundary.
 Check that a release followed by a drift check has no diff, and that an infrastructure update preserves the
 released image and traffic.
 
@@ -26,7 +28,9 @@ That would make the resource graph look complete without checking the app's actu
 Bootstrap leaves `runtime` null. It creates the databases, network, registry, secrets, bucket and queue. Once the
 tested app and proxy images exist, secret versions and SQL grants are ready, and the mount/proxy checks pass,
 set both image digests together. Terraform then creates the private job service, invoker binding and Scheduler
-job. There is no placeholder application, polling timer or second live host to retire later.
+job. The Cloud Tasks dispatcher and its real-queue acceptance remain a step-3 follow-up after step 4 makes
+the first tested image available, before step 5 releases public traffic. This infrastructure slice does not
+complete step 3. There is no placeholder application, polling timer or second live host to retire later.
 
 The owner's 2026-10-25 direction removes the home-server rollback and any work to run both hosts. In the earlier
 record's steps 3 to 7, drop the old-host fallback rehearsal, request-holding proxy work for this move and the

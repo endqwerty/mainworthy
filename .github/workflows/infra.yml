@@ -11,7 +11,7 @@ permissions:
 
 # The backend lock also protects state. A dispatch never takes a write lock.
 concurrency:
-  group: mainworthy-infrastructure
+  group: ${{ github.event_name == 'workflow_dispatch' && 'mainworthy-infrastructure-drift' || 'mainworthy-infrastructure' }}
   cancel-in-progress: false
 
 jobs:
