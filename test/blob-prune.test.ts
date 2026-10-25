@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, openApp } from "../src/server/kernel/app.ts";
@@ -154,4 +154,39 @@ test("referenced objects do not starve an orphan beyond the first prune slice", 
 	expect(await h.app.blobs.get(orphan)).not.toBeNull();
 	await prune();
 	expect(await h.app.blobs.get(orphan)).toBeNull();
+});
+
+test("startup enrolls pre-upgrade files once and prunes only the orphan after a full grace", async () => {
+	const raw = await setup();
+	const orphan = await raw.put(Buffer.from("orphan from before upgrade"));
+	const kept = Buffer.from("referenced before upgrade");
+	h.app.blobs = raw;
+	await h.call("report", {
+		target: { session: "before-upgrade" },
+		results: [
+			{ test: { key: "one" }, outcome: "pass", attachments: [{ name: "log.txt", data: kept.toString("base64") }] },
+		],
+	});
+	await writeFile(join(directory, "blobs/not-an-object"), "ignored");
+	await mkdir(join(directory, "blobs", "a".repeat(64)));
+	await symlink(join(directory, "blobs", orphan), join(directory, "blobs", "b".repeat(64)));
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT hash FROM blob_objects"))).toEqual([]);
+	h.advance(2 * BLOB_GRACE_MS);
+	const enrolledAt = h.app.now();
+	await peer.close();
+	peer = await openApp({ ...h.app.config, dataDir: directory }, { now: h.app.now });
+	await prune();
+	expect(await raw.get(orphan)).not.toBeNull();
+	h.advance(BLOB_GRACE_MS);
+	await prune();
+	expect(await raw.get(orphan)).not.toBeNull();
+	await peer.close();
+	peer = await openApp({ ...h.app.config, dataDir: directory }, { now: h.app.now });
+	h.advance(1);
+	await prune();
+	expect(await raw.get(orphan)).toBeNull();
+	expect(await raw.get(blobHash(kept))).toEqual(kept);
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT hash,put_at FROM blob_objects"))).toEqual([
+		{ hash: blobHash(kept), put_at: enrolledAt },
+	]);
 });

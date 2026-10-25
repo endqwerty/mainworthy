@@ -91,6 +91,8 @@ The server checks configuration before creating the data directory or taking its
 
 Reads use pooled PostgreSQL connections. `MAINWORTHY_READERS` is removed. The server starts only with a PostgreSQL URL.
 
+Existing hash-named attachment files are enrolled for pruning at startup with a fresh grace period. Later starts preserve each recorded age. Pruning retains referenced files and removes unreferenced files only after the grace period, including orphans left before the job-based prune was introduced.
+
 PostgreSQL owns its write-ahead log and checkpoints. Back up PostgreSQL and local attachments together; Mainworthy creates no automatic upgrade copy.
 
 GitHub Issues and Jira Cloud are optional. Each supports one destination for one project per instance, through the API and command line. See [create or link a tracker defect](./decide.md#create-or-link-a-tracker-defect). A partial or malformed configuration stops the server with a message that names the variables without quoting credentials. If both trackers name the same Mainworthy project, new defects go to Jira. GitHub remains available for commit statuses and existing defect holds.
