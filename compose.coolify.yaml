@@ -131,8 +131,10 @@ services:
     depends_on:
       mainworthy:
         condition: service_healthy
+    # The app answers /healthz 503 while upgrading, which plain wget calls a failure; any answer from it through
+    # nginx is live. nginx itself answers 502 when the app does not.
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD-SHELL", "wget -S -O /dev/null http://127.0.0.1:8080/healthz 2>&1 | grep -q 'HTTP/1.[01] \\(200\\|503\\)'"]
       interval: 30s
       timeout: 3s
     restart: unless-stopped
