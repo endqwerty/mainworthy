@@ -13,6 +13,10 @@ terraform {
 
 provider "google" {
   region = local.region
+  # Bill each call to its resource's project. Without this, calls without a
+  # resource project (Service Networking's connections and operations) go to
+  # the CI account's own seed project, which enables none of these APIs.
+  user_project_override = true
 }
 
 locals {

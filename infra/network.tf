@@ -25,6 +25,14 @@ resource "google_compute_global_address" "sql" {
   network       = google_compute_network.app[each.key].id
 }
 
+# The first apply (2026-10-25) created both connections, then failed reading
+# their operations from the seed project; adopt them instead of creating again.
+import {
+  for_each = local.projects
+  to       = google_service_networking_connection.sql[each.key]
+  id       = "projects/${each.value}/global/networks/mainworthy:servicenetworking.googleapis.com"
+}
+
 resource "google_service_networking_connection" "sql" {
   for_each                = local.projects
   network                 = google_compute_network.app[each.key].id
