@@ -1,0 +1,78 @@
+name: private infrastructure execution
+
+on:
+  workflow_call:
+    secrets:
+      GCP_PRODUCTION_PROJECT:
+        required: true
+      GCP_PREVIEW_PROJECT:
+        required: true
+      GCP_ATTACHMENTS_BUCKET:
+        required: true
+      GCP_TERRAFORM_STATE_BUCKET:
+        required: true
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_INFRA_DEPLOY_ACCOUNT:
+        required: true
+      GCP_INFRA_PLAN_ACCOUNT:
+        required: true
+      GCP_JOB_RUNTIME:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TF_VAR_production_project: ${{ secrets.GCP_PRODUCTION_PROJECT }}
+      TF_VAR_preview_project: ${{ secrets.GCP_PREVIEW_PROJECT }}
+      TF_VAR_attachments_bucket: ${{ secrets.GCP_ATTACHMENTS_BUCKET }}
+      TF_VAR_runtime: ${{ secrets.GCP_JOB_RUNTIME || 'null' }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_INFRA_DEPLOY_ACCOUNT: ${{ secrets.GCP_INFRA_DEPLOY_ACCOUNT }}
+      GCP_INFRA_PLAN_ACCOUNT: ${{ secrets.GCP_INFRA_PLAN_ACCOUNT }}
+      STATE_BUCKET: ${{ secrets.GCP_TERRAFORM_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Mask infrastructure identifiers before setup or authentication
+        run: bash ci.sh mask
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.0
+          terraform_wrapper: false
+      - name: Check formatting before authentication
+        run: terraform fmt -check -recursive
+      - name: Check CI failure paths without credentials
+        run: bash ci.test.sh
+      - name: Sign in with the event's restricted identity
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ github.event_name == 'push' && secrets.GCP_INFRA_DEPLOY_ACCOUNT || secrets.GCP_INFRA_PLAN_ACCOUNT }}
+          project_id: ${{ secrets.GCP_PRODUCTION_PROJECT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Plan and apply on push, or read drift on dispatch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          # SQL creation can outlast the GitHub OIDC token. The impersonated token covers the 45-minute job.
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: bash ci.sh "$EVENT_NAME"

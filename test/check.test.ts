@@ -1069,7 +1069,8 @@ test("the app names its database by an alias only the internal database network 
 	).not.toEqual(wanted);
 });
 
-test("every workflow pins every action to a full commit with a release version comment", () => {
+test("every workflow pins external actions and local workflows to the reviewed commit", () => {
+	const localWorkflow = /^\.\/\.github\/workflows\/[\w-]+\.ya?ml$/;
 	const job = z.object({
 		uses: z.string().optional(),
 		steps: z.array(z.object({ uses: z.string().optional() })).default([]),
@@ -1082,8 +1083,16 @@ test("every workflow pins every action to a full commit with a release version c
 			.filter((uses) => uses !== undefined);
 		const lines = [...source.matchAll(/^[\t ]*(?:-[\t ]+)?uses:[\t ]*(.+)$/gm)];
 		expect(lines.length, `${file}: every action has its own annotated uses line`).toBe(actions.length);
-		for (const uses of actions) expect(uses, file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
-		for (const line of lines) expect(line[1], file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
+		for (const uses of actions) {
+			if (localWorkflow.test(uses)) {
+				expect(Bun.file(uses).size, `${file}: local workflows use the caller's exact commit`).toBeGreaterThan(0);
+			} else expect(uses, file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+		}
+		for (const line of lines) {
+			if (!localWorkflow.test(line[1] ?? "")) {
+				expect(line[1], file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
+			}
+		}
 	}
 });
 

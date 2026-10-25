@@ -725,7 +725,8 @@ describe("a public repository", () => {
 		expect(paths).toEqual([]);
 	});
 
-	test("no file names a private tailnet or workstation account", () => {
+	test("no file names a private tailnet or workstation account, or carries Terraform variables", () => {
+		expect(wholeTree().filter((file) => /\.tfvars(?:\.json)?$/.test(file))).toEqual([]);
 		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
 		// real name, and the history was not rewritten.
 		expect([".env", ".env.local", ".env.example"].map((name) => LOCAL.test(name))).toEqual([true, true, false]);

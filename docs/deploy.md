@@ -38,6 +38,16 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    during an apply may see intermediate state; rerun it once the writer finishes. No PR event can federate, including one
    from this repository. A manual run on another branch skips the job and the pool also refuses it.
 
+The entry workflow passes repository variables to `infra-execute.yml` as reusable-workflow secrets. Actions
+therefore masks their values before printing any step environment. The first script step also registers masks
+for identifier components and derived runtime service-account emails. The private foundation must permit this
+exact called workflow in its WIF condition, while keeping `infra.yml` on `main` as the caller.
+Terraform output and saved plans stay in a restricted directory under `RUNNER_TEMP`, removed when the script
+exits and never uploaded. Public logs show only plan counts, `No changes.`, and redacted error headers on failure.
+Resource attributes and diagnostic context stay out of the log. Error headers redact configured identifiers,
+URLs, email addresses and project numbers. There are no Terraform outputs: no consumer needs them, and removing
+them prevents apply from printing cloud identifiers. Diagnose failures through the owner's private cloud access.
+
 Plans run only in CI after merge or a manual dispatch of main's workflow. Local author checks use no Google
 login and run only `fmt`, `init -backend=false`, and `validate`. Put `TF_DATA_DIR` in task scratch outside the
 checkout when initializing locally, so repository privacy tests do not read downloaded provider binaries.
