@@ -152,8 +152,8 @@ correctness under that load; CI's quiet job checks isolated performance and the 
 
 Sign-in accounting uses keyed PostgreSQL rows and a separate two-connection admission pool. Failing a proof
 locks its sorted keys, rechecks their block, then counts it atomically. A success clears only failures no newer
-than the sequence version it observed. A local source ceiling limits queries before that pool. Anonymous
-ceremony allocation shares this pool, with one capacity lock per ceremony kind; it holds no connection while
+than the sequence version it observed. Anonymous ceremony starts have a local source ceiling before shared
+accounting. Ceremony allocation shares this pool, with one capacity lock per ceremony kind; it holds no connection while
 waiting for a provider or hashing a password. Authenticated ceremony consumption uses the domain transaction,
 so spending a challenge and opening its session commit or roll back together. Import invalidates a shared
 random generation in its transaction; an OIDC exchange rechecks it after the provider answers.
