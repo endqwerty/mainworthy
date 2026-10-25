@@ -8,40 +8,60 @@ sweeps, delivery bookkeeping, and project administration take the same project r
 If the row discovered before a lock wait was replaced, the writer returns `busy` before running its operation.
 A missing project name is guarded through the transaction so a new project cannot appear behind the check.
 
-Authority changes take `FOR UPDATE` on every affected actor. Lock actors by ascending id, at their final
-strength. Then take organisation roster guards, team membership guards by id, project rows by id, and job
-rows. Ordinary project writers skip the membership guards. A team grant change discovers members, locks those actors, locks the
-team row with `FOR NO KEY UPDATE`, and checks membership again. A newly discovered member causes rollback
-and `busy`, so a retry discovers the complete set. Membership changes use the same actor and team locks.
-Organisation changes version every member. Database triggers increment `actors.auth_version` inside the
-transaction that changes grants, memberships, organisation authority, credentials, tokens, or sessions.
+Identity writers take the transaction advisory lock `pg_advisory_xact_lock(821, 1)` before discovery or any
+actor, roster, team, project, or command lock. This covers every instance write in the registry, sign-in and
+sign-out, credential and contact changes, bootstrap, identity sweeps, archive import, and project authority
+maintenance. Exclusive actor locking joins that same identity lock. Token/session lookup and identity creation
+join it before resolving names or ids, including when no row exists. The two-integer advisory key has a
+separate namespace from the one-integer project-key and command-id locks.
 
-Instance writes have no shared authority mutex. They lock their caller for admission and the actors whose
-authority or credentials they change. Creating an actor guards its organisation's roster row. Creating a
-project locks its key until commit, then its newly inserted row. Bootstrap locks only the owner, the policy
-actor, configured-token owners, and affected admins, then guards organisation creation. Project-specific
-personal and team grant changes also lock that project after their affected actors and membership guards.
-Instance settings come from server configuration. Startup reconciliation takes those bootstrap locks when
-it changes authority or configured tokens; there is no writable instance settings table. Project policy
-settings take their project's row lock and a decision witness.
-The shared commit-status delivery allowance locks its singleton row after the project, so its read and update
-remain atomic across project workers. A whole-instance
-archive import is maintenance affecting every identity and project. It exclusively locks the actor roster,
-then its actors, then the project roster and project rows. That excludes even an insertion into an empty
-instance. A demo swap locks the affected grant holders and teams, reserves the project's key, then locks its
-row before reading deployment state. Grant movement locks the union of source and destination authority,
-with projects in id order. It checks the complete grant footprint again after waiting and restarts if another
-holder appeared or the project was renamed. Ready-state bookkeeping locks the project too. Each retired-demo
-cleanup slice keeps its authority and project locks until the slice commits, then yields. Startup refresh and
+Within an identity transaction, lock affected actors by ascending id at their final strength. Then take
+organisation roster guards, team membership guards by id, project rows by id, and job rows. A team grant
+change discovers and locks its members before its project. Another identity transaction cannot create,
+rename, remove, or change the owner of a discovered row until commit or rollback. The registry no longer
+reserves missing names with the organisation row or repeats footprint checks after later waits.
+Actor-before-project ordering still matters: an ordinary project writer may hold an actor while waiting
+for that project. Database triggers increment `actors.auth_version` inside the transaction that changes
+grants, memberships, organisation authority, credentials, tokens, or sessions.
+
+Ordinary project data writes, report acceptance/application, recovery, and delivery bookkeeping never take
+the identity lock. They take shared actor locks followed by their project row. Last-use flushing also stays
+outside the identity lock: it changes activity fields only, locks its actors before updating tokens or
+sessions, and checks that their owners still belong to its locked set. None of these transactions changes
+identity or upgrades an actor lock, so it cannot wait back on the identity lock. Different projects still
+write concurrently. An identity writer waiting for a busy actor or project holds the identity lock and
+queues all other identity writers, including unrelated sign-ins and token creation. Password hashing and
+provider verification happen before the serialized sign-in commit.
+
+Creating a project locks its key until commit, then its newly inserted row. Bootstrap locks only the owner,
+policy actor, configured-token owners, and affected admins, then guards organisation creation.
+Project-specific grants also lock that project after their affected actors and membership guards.
+Instance settings come from server configuration. Project policy settings take their project's row lock and
+a decision witness. The shared commit-status delivery allowance locks its singleton row after the project.
+
+A whole-instance archive import takes the identity lock, then exclusively locks the actor roster, its actors,
+the project roster, and project rows. That excludes even an insertion into an empty instance. A demo swap
+and grant movement take the identity lock before discovering the affected authority and projects. They lock
+the union of source and destination authority, reserve project keys, then lock projects in id order and
+recheck project identities. Ready-state bookkeeping locks the project too. Each retired-demo cleanup slice
+keeps its identity, authority, and project locks until the slice commits, then yields. Startup refresh and
 cleanup remain paused.
 
-Actor creation takes its organisation guard before any project row. A newly inserted actor is private to
-that transaction until commit, and the roster guard excludes a competing insertion. Missing actor or team
-names reserve the same guard so they cannot appear between a footprint check and its use. Team creation
-also takes that guard. Operation inputs are parsed before discovering lock keys, so stripped fields cannot change lock strength. After project or command
-waits, the registry checks the discovered actor and team footprint again and returns `busy` if it grew.
-Sign-in commits also return `busy` if a person, credential or browser session resolves to an actor they did
-not lock.
+Operation inputs are parsed before discovering lock keys, so stripped fields cannot change lock strength.
+Sign-in proof discovery can happen before the identity transaction. Its commit still returns `busy` if a
+person, credential, or browser session resolves to an actor it did not lock.
+
+Run `bun bench/identity-contention.ts 5` for two 5,000-result scenarios: identity requests directly beside a
+report, and identity requests behind a project grant change already waiting for that report. Each sample
+verifies the committed result count, token hash, and session count. On 2026-10-24, five alternating baseline
+and serialized runs per scenario measured token sign-in at median 6.702 ms, range 3.463 to 13.091 ms, directly
+beside the report. Token creation measured 3.105 ms, range 1.780 to 7.894 ms. Both finished while the report
+still held its project in every direct sample. Behind the grant change, sign-in measured 455.574 ms, range
+348.125 to 1178.582 ms, and token creation measured 452.218 ms, range 345.971 to 1175.676 ms. Both waited for
+the report in every queued sample. The corresponding baseline medians were 5.192/3.641 ms directly and
+2.684/1.754 ms behind the grant change, for sign-in/token creation respectively. These shared-machine
+samples included another whole check and a focused test run. They show the serialization cost when an
+identity writer waits for a report, not an isolated speed comparison or a production latency bound.
 
 A report commits acceptance separately from application. The private `batch_admissions` table holds the
 exact admitted token or session reference and the actor's authority version. The actor and project locks

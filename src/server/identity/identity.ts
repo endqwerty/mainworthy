@@ -1,4 +1,4 @@
-import { lockActors, lockCallActors, lockProjectAuthority } from "./locks.ts";
+import { lockActors, lockCallActors, lockIdentity, lockProjectAuthority } from "./locks.ts";
 
 export {
 	batchAllowed,
@@ -7,6 +7,7 @@ export {
 	lockActors,
 	lockAllActors,
 	lockCallActors,
+	lockIdentity,
 	lockIdentityRoster,
 	lockProjectAuthority,
 } from "./locks.ts";
@@ -393,6 +394,7 @@ export async function bootstrap(
 			}
 		}
 	}
+	await lockIdentity(db);
 	const discovery = { owner: app.config.owner, was: app.config.ownerWas ?? null };
 	const affected = (await db.all(Q.bootstrapActors, discovery)).map((row) => row.id);
 	await lockActors(db, affected, true);
@@ -1065,6 +1067,7 @@ export async function createToken(
 		return await app.database.write(
 			async (writer) => await writer.transaction(async () => await createToken(app, input, caller, writer)),
 		);
+	await lockIdentity(db);
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	mustBeName(input.actor);
 	const org = await orgId(db);
@@ -1128,6 +1131,7 @@ export async function invitedPerson(
 	db: WriteDb,
 	input: { name: string; can: readonly Capability[]; project: number },
 ): Promise<{ id: number; name: string; isNew: boolean }> {
+	await lockIdentity(db);
 	mustBeName(input.name);
 	const org = await orgId(db);
 	const existing = await db.get(Q.actorByName, { org, name: input.name });
@@ -1173,6 +1177,7 @@ export async function setGrant(
 	input: { actor: string; project: number; can: readonly Capability[]; roles?: readonly Role[] },
 	caller: ProofContext | null = null,
 ): Promise<Role[]> {
+	await lockIdentity(db);
 	const hint = await mustActor(db, input.actor);
 	await lockActors(db, [hint.id], true);
 	if (input.project > 0) await lockProject(db, input.project);
@@ -1203,6 +1208,7 @@ export async function moveProjectGrants(db: WriteDb, from: number, to: number): 
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */
 export async function removeGrant(_app: App, db: WriteDb, input: { actor: string; project: number }): Promise<boolean> {
+	await lockIdentity(db);
 	const hint = await mustActor(db, input.actor);
 	await lockActors(db, [hint.id], true);
 	if (input.project > 0) await lockProject(db, input.project);
@@ -1241,6 +1247,7 @@ export async function lastTokenOf(db: ReadDb, id: number, now: number): Promise<
 }
 
 export async function revokeToken(app: App, db: WriteDb, id: number): Promise<boolean> {
+	await lockIdentity(db);
 	const target = await tokenOwner(db, id);
 	if (target !== null) await lockActors(db, [target], true);
 	const at = app.now();
@@ -1320,6 +1327,7 @@ export async function sweepSignInRecords(app: App): Promise<void> {
 	await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				await lockIdentity(db);
 				const hints = await db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
 				const affected = new Set(hints.map((row) => row.actor));
 				await lockActors(db, [...affected], true);
@@ -1363,6 +1371,7 @@ export async function forgetActor(
 	db: WriteDb,
 	name: string,
 ): Promise<{ forgotten: string; tokensRevoked: number }> {
+	await lockIdentity(db);
 	const hint = await db.get(Q.actorByName, { org: await orgId(db), name });
 	if (hint) await lockActors(db, [hint.id], true);
 	const row = await db.get(Q.actorByName, { org: await orgId(db), name });

@@ -9,6 +9,7 @@ import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { actorById, resolveCaller } from "./identity.ts";
 
 const Q = {
+	identity: sql<readonly []>("SELECT pg_advisory_xact_lock(821, 1)"),
 	share: sql<{ ids: readonly number[] }, { id: number; auth_version: number }>(
 		"SELECT id, auth_version FROM actors WHERE id = ANY($ids::bigint[]) ORDER BY id FOR SHARE",
 	),
@@ -23,8 +24,6 @@ const Q = {
 	token: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM tokens WHERE id = $id"),
 	session: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM sessions WHERE id = $id"),
 	credential: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM credentials WHERE id = $id"),
-	orgGuard: sql<readonly []>("SELECT id FROM orgs ORDER BY id LIMIT 1 FOR NO KEY UPDATE"),
-	teamNamed: sql<{ name: string }, { id: number }>("SELECT id FROM teams WHERE name = $name"),
 	guard: sql<{ name: string }, { id: number }>("SELECT id FROM teams WHERE name = $name ORDER BY id FOR NO KEY UPDATE"),
 	team: sql<{ name: string }, { id: number }>(
 		"SELECT m.actor AS id FROM team_members m JOIN teams t ON t.id = m.team WHERE t.name = $name ORDER BY m.actor",
@@ -53,27 +52,35 @@ const Q = {
 	),
 	forget: sql<{ batch: number }>("DELETE FROM batch_admissions WHERE batch = $batch"),
 };
+/** Identity discovery and mutation share one transaction lock, before any actor or project lock. */
+export async function lockIdentity(db: WriteDb): Promise<void> {
+	if (!db.inTransaction) throw new Error("identity locks need a transaction");
+	await db.all(Q.identity);
+}
 export async function lockActors(db: WriteDb, ids: readonly number[], exclusive = false): Promise<void> {
+	if (exclusive) await lockIdentity(db);
 	await db.all(exclusive ? Q.exclusive : Q.share, { ids: [...new Set(ids)].sort((a, b) => a - b) });
 }
 export async function lockAllActors(db: WriteDb): Promise<void> {
+	await lockIdentity(db);
 	await lockActors(
 		db,
 		(await db.all(Q.all)).map((row) => row.id),
 		true,
 	);
 }
-/** Discover keys from parsed input. Recheck the returned footprint after later waits without taking new locks. */
+/** Identity writers serialize before discovery, then take their complete actor footprint before project rows. */
 export async function lockCallActors(
 	db: WriteDb,
 	caller: Pick<Actor, "id">,
 	op: string,
 	input: unknown,
-): Promise<() => Promise<void>> {
+): Promise<void> {
 	if (!["admin", "session", "credential", "invitation"].includes(op)) {
 		await lockActors(db, [caller.id]);
-		return async () => {};
+		return;
 	}
+	await lockIdentity(db);
 	const parsed = z.record(z.string(), z.unknown()).safeParse(input);
 	const data = parsed.success ? parsed.data : {};
 	const names = [
@@ -83,13 +90,6 @@ export async function lockCallActors(
 	].filter((value): value is string => typeof value === "string");
 	const named = await db.all(Q.named, { names });
 	const affected = named.map((row) => row.id);
-	const teamName =
-		typeof data.team === "string"
-			? data.team
-			: op === "admin" && data.do === "team.create" && typeof data.name === "string"
-				? data.name
-				: null;
-	const teamHint = teamName === null ? [] : await db.all(Q.teamNamed, { name: teamName });
 	if (op === "credential" && data.actor === undefined) affected.push(caller.id);
 	const idQuery =
 		op === "session" ? Q.session : data.do === "token.revoke" ? Q.token : op === "credential" ? Q.credential : null;
@@ -101,31 +101,9 @@ export async function lockCallActors(
 		affected.push(...(await db.all(Q.team, { name: data.team })).map((row) => row.id));
 	const ids = [...new Set([caller.id, ...affected])].sort((a, b) => a - b);
 	for (const id of ids) await lockActors(db, [id], affected.includes(id));
-	if (names.some((name) => !named.some((row) => row.name === name)) || (teamName !== null && teamHint.length === 0))
-		await db.all(Q.orgGuard);
-	const guardedTeam = typeof data.team === "string" ? await db.all(Q.guard, { name: data.team }) : [];
+	if (typeof data.team === "string") await db.all(Q.guard, { name: data.team });
 	if (data.do === "actor.forget")
 		await db.all(Q.guards, { ids: (await db.all(Q.actorTeams, { ids: affected })).map((row) => row.id) });
-	const check = async () => {
-		const rebound = (await db.all(Q.named, { names })).map((row) => row.id);
-		if (rebound.some((id) => !affected.includes(id))) throw new Busy();
-		if (typeof data.team === "string") {
-			if (
-				(await db.all(Q.teamNamed, { name: data.team })).some((row) => !guardedTeam.some((held) => held.id === row.id))
-			)
-				throw new Busy();
-			if (teamGrant && (await db.all(Q.team, { name: data.team })).some((row) => !affected.includes(row.id)))
-				throw new Busy();
-		}
-		if (
-			typeof data.id === "number" &&
-			idQuery &&
-			(await db.all(idQuery, { id: data.id })).some((row) => !affected.includes(row.id))
-		)
-			throw new Busy();
-	};
-	await check();
-	return check;
 }
 
 export async function keepBatchAdmission(ctx: Ctx, batch: number): Promise<void> {
@@ -167,20 +145,23 @@ export async function batchAllowed(
 }
 
 export async function lockTokenHash(db: WriteDb, hash: string): Promise<void> {
+	await lockIdentity(db);
 	const row = await db.get(Q.tokenHash, { hash });
 	if (row) {
 		await lockActors(db, [row.id]);
 		if ((await db.get(Q.tokenHash, { hash }))?.id !== row.id) throw new Busy();
 	}
 }
-export async function lockSessionHash(db: WriteDb, hash: string, exclusive = true): Promise<void> {
+export async function lockSessionHash(db: WriteDb, hash: string): Promise<void> {
+	await lockIdentity(db);
 	const row = await db.get(Q.sessionHash, { hash });
 	if (row) {
-		await lockActors(db, [row.id], exclusive);
+		await lockActors(db, [row.id], true);
 		if ((await db.get(Q.sessionHash, { hash }))?.id !== row.id) throw new Busy();
 	}
 }
 export async function lockCredential(db: WriteDb, id: number): Promise<void> {
+	await lockIdentity(db);
 	const row = await db.get(Q.credential, { id });
 	if (row) {
 		await lockActors(db, [row.id], true);
@@ -189,6 +170,7 @@ export async function lockCredential(db: WriteDb, id: number): Promise<void> {
 }
 
 export async function lockIdentityRoster(db: WriteDb): Promise<void> {
+	await lockIdentity(db);
 	await db.exec("LOCK TABLE actors IN ACCESS EXCLUSIVE MODE");
 }
 
@@ -198,6 +180,7 @@ export async function lockProjectAuthority(
 	projects: number | readonly number[],
 	caller?: number,
 ): Promise<void> {
+	await lockIdentity(db);
 	const ids = [...new Set(typeof projects === "number" ? [projects] : projects)].sort((a, b) => a - b);
 	const hints = [];
 	const affected = new Set<number>();

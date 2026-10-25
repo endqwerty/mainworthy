@@ -5,7 +5,7 @@ import { type Actor, allProjects, findProject, lockProject } from "../kernel/ctx
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { hasAdminGrant, providerVouches } from "./identity.ts";
-import { lockCallActors } from "./locks.ts";
+import { lockCallActors, lockIdentity } from "./locks.ts";
 import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
@@ -93,6 +93,7 @@ export async function teamsOf(db: ReadDb, actor: number) {
 }
 
 export async function dropTeamMemberships(db: WriteDb, actor: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.forget, { actor });
 }
 
@@ -111,12 +112,11 @@ export async function manageTeams(
 	input: TeamInput,
 	context: string | null = null,
 ) {
-	const checkActors = await lockCallActors(db, by, "admin", input);
+	await lockCallActors(db, by, "admin", input);
 	if ((input.do === "team.grant.set" || input.do === "team.grant.remove") && input.project !== undefined) {
 		const project = await findProject(db, input.project);
 		if (!project || !(await lockProject(db, project.id))) throw notFound(`project ${input.project}`);
 	}
-	await checkActors();
 	const keys = new Map((await allProjects(db)).map((project) => [project.id, project.key]));
 	const projectKey = (id: number): string => (id === 0 ? "*" : (keys.get(id) ?? `project ${id}`));
 	const displayGrants = async (team: number) =>
@@ -226,6 +226,7 @@ export async function manageTeams(
 
 /** The caller holds the transaction that swaps demo projects. */
 export async function moveTeamProjectGrants(db: WriteDb, from: number, to: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.moveProjectGrants, { from, to });
 	await db.run(Q.moveProjectEvents, { from, to });
 }

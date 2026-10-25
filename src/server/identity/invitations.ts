@@ -3,6 +3,7 @@
 // The link carries a code of 32 random bytes and this file never sees it: it is given the code's SHA-256 and
 // stores that, as `sessions.ts` does for a cookie. An invitation is good once, until it runs out or is revoked.
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { lockIdentity } from "./locks.ts";
 
 /** `join`: a new person's first way in. `recover`: accepted, it replaces every way the person signed in. */
 export type InvitationPurpose = "join" | "recover";
@@ -62,6 +63,7 @@ export async function insertInvitation(
 	db: WriteDb,
 	input: { actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expiresAt: number },
 ): Promise<number> {
+	await lockIdentity(db);
 	return (
 		await db.one(Q.insert, {
 			actor: input.actor,
@@ -75,19 +77,26 @@ export async function insertInvitation(
 }
 
 /** Spends an invitation. False, with nothing written, when it is not good any more: used, revoked or run out. */
-export const spendInvitation = async (db: WriteDb, hash: string, at: number): Promise<boolean> =>
-	(await db.run(Q.use, { hash, at })).changes === 1;
+export async function spendInvitation(db: WriteDb, hash: string, at: number): Promise<boolean> {
+	await lockIdentity(db);
+	return (await db.run(Q.use, { hash, at })).changes === 1;
+}
 
 /** Revokes an invitation nobody has accepted. False when it was used or revoked, or does not exist. */
-export const revokeInvitation = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
-	(await db.run(Q.revoke, { id, at })).changes > 0;
+export async function revokeInvitation(db: WriteDb, id: number, at: number): Promise<boolean> {
+	await lockIdentity(db);
+	return (await db.run(Q.revoke, { id, at })).changes > 0;
+}
 
 /** Revokes every invitation of a person that nobody has accepted. Returns how many. */
-export const revokeInvitationsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
-	(await db.run(Q.revokeOf, { actor, at })).changes;
+export async function revokeInvitationsOf(db: WriteDb, actor: number, at: number): Promise<number> {
+	await lockIdentity(db);
+	return (await db.run(Q.revokeOf, { actor, at })).changes;
+}
 
 /** Deletes invitations thirty days after their first end. Under the write gate. */
 export async function sweepInvitations(db: WriteDb, now: number): Promise<number> {
+	await lockIdentity(db);
 	return (await db.run(Q.dropEnded, { before: now - 30 * 86_400_000 })).changes;
 }
 
