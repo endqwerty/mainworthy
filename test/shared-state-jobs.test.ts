@@ -1,12 +1,14 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { createToken, signInWithToken } from "../src/server/identity/identity.ts";
 import { lockIdentity } from "../src/server/identity/locks.ts";
 import { type App, openApp } from "../src/server/kernel/app.ts";
 import { lockProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Database } from "../src/server/kernel/db.ts";
 import { claimJob, JOB_LEASE_MS, type JobClaim, jobById } from "../src/server/kernel/jobs.ts";
-import { enqueuePeriodicJobs, enqueueStartupJobs, jobOp } from "../src/server/ops/jobs.ts";
+import { enqueuePeriodicJobs, enqueueStartupJobs, jobOp, recoverAccepted } from "../src/server/ops/jobs.ts";
 import { invokeService } from "../src/server/ops/registry.ts";
-import { acceptReport } from "../src/server/ops/writes.ts";
+import { acceptReport, reportOp } from "../src/server/ops/writes.ts";
+import { serve } from "../src/surfaces/http.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -310,4 +312,109 @@ for (const kind of ["expire-sessions", "sign-in-retention"]) {
 			}
 		});
 	}
+}
+
+for (const replaced of [false, true]) {
+	test(`a pending HTTP report is recovered once by two runners${replaced ? " after an expired claim" : ""}`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Accepted for recovery" } }] });
+		await h.call("admin", { do: "project.create", key: "held" });
+		const [other] = await h.app.database.read((db) =>
+			db.allDynamic<{ id: number }>("SELECT id FROM projects WHERE key='held'"),
+		);
+		if (!other || !("steps" in reportOp)) throw new Error("missing report fixture");
+		const acquired = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const holder = h.app.database.write((db) =>
+			db.transaction(async () => {
+				await lockProject(db, other.id);
+				acquired.resolve();
+				await release.promise;
+			}),
+		);
+		await acquired.promise;
+		const steps = reportOp.steps;
+		const paused = spyOn(reportOp, "steps").mockImplementation(async function* (ctx, input) {
+			const iterator = steps(ctx, input);
+			const first = await iterator.next();
+			if (first.done) return first.value;
+			yield first.value;
+			await lockProject(ctx.db, other.id);
+			return yield* iterator;
+		});
+		const short = await Database.open({ url: h.app.config.databaseUrl, lockWaitMs: 30 });
+		const listener = serve({ ...h.app, database: short }, h.owner);
+		try {
+			const response = await fetch(`http://127.0.0.1:${listener.port}/api/p/scratch/report`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					cmd: "pending-job-report",
+					target: { commit: "pending-job-report" },
+					results: [{ test: { case: "C-1" }, outcome: "pass" }],
+				}),
+			});
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				ok: true,
+				result: { batch: expect.any(Number), results: [], gate: { verdict: "pending" } },
+			});
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT state,receipt FROM batches"))).toEqual([
+				{ state: "accepted", receipt: null },
+			]);
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 0 }]);
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT outcome FROM commands"))).toEqual([
+				{ outcome: "" },
+			]);
+		} finally {
+			paused.mockRestore();
+			release.resolve();
+			await holder;
+			await listener.stop(true);
+			await short.close();
+		}
+		peer = await openApp(h.app.config, { memory: true, now: h.app.now });
+		const [job] = await h.app.database.read((db) =>
+			db.allDynamic<{ id: string; next_at: number; batch: number }>(
+				"SELECT id,next_at,(input::json->>'batch')::integer AS batch FROM background_jobs WHERE kind='recover-report'",
+			),
+		);
+		if (!job) throw new Error("acceptance did not enqueue recovery");
+		for (const app of [h.app, peer])
+			expect(await invokeService(app, jobOp, { do: "run", id: job.id })).toEqual({
+				ok: true,
+				result: { ran: 0 },
+				seq: null,
+			});
+		h.advance(job.next_at - h.app.now());
+		if (replaced) {
+			const stale = await claimJob(h.app, "old-instance", job.id);
+			if (!stale) throw new Error("missing old claim");
+			h.advance(JOB_LEASE_MS);
+			const successor = await claimJob(peer, "new-instance", job.id);
+			if (!successor) throw new Error("missing successor claim");
+			await expect(recoverAccepted(h.app, stale, job.batch)).rejects.toThrow("claim expired");
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
+				{ state: "accepted" },
+			]);
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 0 }]);
+			h.advance(JOB_LEASE_MS);
+		}
+		const replies = await Promise.all([h.app, peer].map((app) => invokeService(app, jobOp, { do: "run", id: job.id })));
+		expect(replies).toContainEqual({ ok: true, result: { ran: 1 }, seq: null });
+		expect(replies).toContainEqual({ ok: true, result: { ran: 0 }, seq: null });
+		expect(await h.app.database.read((db) => jobById(db, job.id))).toMatchObject({ state: "succeeded" });
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
+			{ state: "processed" },
+		]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 1 }]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT * FROM batch_admissions"))).toEqual([]);
+		const retry = await h.call("report", {
+			cmd: "pending-job-report",
+			target: { commit: "pending-job-report" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		expect(retry).toMatchObject({ counts: { total: 1, pass: 1 }, results: [expect.any(Number)] });
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 1 }]);
+	});
 }
