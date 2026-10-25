@@ -18,8 +18,27 @@ if ! grep -Eq '^[[:space:]]*user_project_override[[:space:]]*=[[:space:]]*true' 
 fi
 cat > "$scratch/terraform" <<'MOCK'
 #!/usr/bin/env bash
-args=$(printf '%s' "$*" | sed -E 's@/[^ ]*/mainworthy-infra\.[^/ ]+/apply.tfplan@apply.tfplan@g')
+args=$(printf '%s' "$*" | sed -E 's@/[^ ]*/mainworthy-infra\.[^/ ]+/([a-z]+\.tfplan)@\1@g')
 printf '%s\n' "$args" >> "$CALLS"
+if [ "$1" = show ]; then
+  cat <<'PLAN'
+{"resource_changes": [
+  {"address": "google_sql_database.app", "change": {"actions": ["create"], "before": null,
+    "after": {"name": "mainworthy", "project": "example-private-project"}}},
+  {"address": "google_storage_bucket.attachments", "change": {"actions": ["update"],
+    "before": {"labels": {"app": "old"}, "name": "example-private-project-attachments"},
+    "after": {"labels": {"app": "new"}, "name": "example-private-project-attachments"}}},
+  {"address": "google_service_networking_connection.sql[\"production\"]", "change": {"actions": ["no-op"],
+    "before": {}, "after": {}, "importing": {"id": "projects/example-private-project/global/networks/mainworthy"}}},
+  {"address": "google_service_networking_connection.sql[\"preview\"]", "change": {"actions": ["update"],
+    "before": {"deletion_policy": null, "network": "example-private-project"},
+    "after": {"deletion_policy": "ABANDON", "network": "example-private-project"},
+    "importing": {"id": "projects/example-private-project/global/networks/mainworthy"}}},
+  {"address": "google_compute_network.app[\"preview\"]", "change": {"actions": ["no-op"], "before": {}, "after": {}}}
+]}
+PLAN
+  exit 0
+fi
 printf '%s\n' 'resource project = example-private-project' 'email = mainworthy-jobs@example-private-project.iam.gserviceaccount.com' 'url = https://mainworthy-jobs-123456789012.us-west1.run.app'
 printf 'runtime = %s\n' "${TF_VAR_runtime:-null}"
 if [ "$1" = plan ]; then
@@ -60,20 +79,33 @@ for value in "$TF_VAR_production_project" "$STATE_BUCKET" \
   grep -Fqx -- "::add-mask::$value" "$scratch/masks"
 done
 run_ci push
-grep -Fx 'Plan: 3 to add, 1 to change, 0 to destroy.' "$scratch/public.log"
+cat > "$scratch/expected" <<'EXPECTED'
+Plan: 3 to add, 1 to change, 0 to destroy.
+create google_sql_database.app
+update google_storage_bucket.attachments (labels)
+import google_service_networking_connection.sql["production"]
+import and update google_service_networking_connection.sql["preview"] (deletion_policy)
+Apply complete! Resources: 3 added, 1 changed, 0 destroyed.
+EXPECTED
+diff -u "$scratch/expected" "$scratch/public.log"
 cat > "$scratch/expected" <<'EXPECTED'
 init -no-color -lockfile=readonly -backend-config=bucket=example-state
 validate -no-color
 plan -no-color -lock-timeout=5m -out=apply.tfplan
+show -no-color -json apply.tfplan
 apply -no-color -lock-timeout=5m apply.tfplan
 EXPECTED
 diff -u "$scratch/expected" "$CALLS"
+# The first apply on main printed nothing: a plan that imports says so in its summary.
+PLAN_SUMMARY='Plan: 2 to import, 3 to add, 1 to change, 0 to destroy.' run_ci push
+grep -Fx 'Plan: 2 to import, 3 to add, 1 to change, 0 to destroy.' "$scratch/public.log"
 : > "$CALLS"
 run_ci workflow_dispatch
 cat > "$scratch/expected" <<'EXPECTED'
 init -no-color -lockfile=readonly -backend-config=bucket=example-state
 validate -no-color
-plan -no-color -lock=false -detailed-exitcode
+plan -no-color -lock=false -detailed-exitcode -out=drift.tfplan
+show -no-color -json drift.tfplan
 EXPECTED
 diff -u "$scratch/expected" "$CALLS"
 for event in push workflow_dispatch; do
@@ -91,6 +123,8 @@ rc=$?
 set -e
 test "$rc" = 2
 if grep -q '^apply ' "$CALLS"; then echo 'Drift must never apply.' >&2; exit 1; fi
+# Drift names what differs, so it can be diagnosed from the public log alone.
+grep -Fx 'update google_storage_bucket.attachments (labels)' "$scratch/public.log"
 : > "$CALLS"
 export PLAN_EXIT=0 APPLY_EXIT=1
 if run_ci push; then echo 'A failed apply must fail CI.' >&2; exit 1; fi
@@ -123,7 +157,7 @@ from pathlib import Path
 masks = [line.removeprefix("::add-mask::").replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")
          for line in Path(sys.argv[1]).read_text().splitlines()]
 public = Path(sys.argv[2]).read_text()
-assert public == "Plan: 3 to add, 1 to change, 0 to destroy.\n"
+assert public.startswith("Plan: 3 to add, 1 to change, 0 to destroy.\ncreate google_sql_database.app\n"), public
 generic = "Error: image sql_proxy_image github github-actions global projects locations providers"
 runtime = list(json.loads(os.environ["TF_VAR_runtime"]).values())
 rendered = public + generic + "\n" + "\n".join(runtime + [os.environ["GCP_WORKLOAD_IDENTITY_PROVIDER"], "234567890123"])

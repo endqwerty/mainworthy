@@ -45,7 +45,9 @@ for runtime image references, the WIF project number, seed project ids and deriv
 The private foundation must permit this exact called workflow in its WIF condition,
 while keeping `infra.yml` on `main` as the caller.
 Terraform output and saved plans stay in a restricted directory under `RUNNER_TEMP`, removed when the script
-exits and never uploaded. Public logs show only plan counts, `No changes.`, and redacted error headers on failure.
+exits and never uploaded. Public logs show only the plan and apply counts, `No changes.`, one line per planned change (its action, its
+resource address and the names of the attributes that change, never their values; a drift check names what differs),
+and redacted error headers on failure.
 Full resource diffs and multiline diagnostic context stay out of the log. Error headers redact configured identifiers,
 URLs, email addresses, project numbers, IPv4 and IPv6 addresses, and UUID-shaped identifiers.
 Error headers can still contain unforeseen non-secret attributes.
