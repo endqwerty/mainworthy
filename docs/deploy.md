@@ -29,12 +29,13 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    | `GCP_JOB_RUNTIME` | Unset or `null` for bootstrap. Later a JSON object with `image` and `sql_proxy_image`, both digest references |
 
 3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
-   the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's concurrency group serializes runs; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
+   the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's writer concurrency group serializes applies; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
    both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime accounts,
    IAM SQL users, secret containers and the Tasks queue. It does not create the job service without real images.
 4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
    -detailed-exitcode` because it cannot create lock objects. Exit 0 means no change, 2 means drift, and 1 is an
-   error. Drift fails the job and needs review. Dispatch never applies. No PR event can federate, including one
+   error. Drift fails the job and needs review. Dispatch never applies and has its own concurrency group, so it cannot cancel a pending writer. A drift check
+   during an apply may see intermediate state; rerun it once the writer finishes. No PR event can federate, including one
    from this repository. A manual run on another branch skips the job and the pool also refuses it.
 
 Plans run only in CI after merge or a manual dispatch of main's workflow. Local author checks use no Google
@@ -44,6 +45,10 @@ Keep the committed provider lockfile and use Terraform 1.17.0. Run `bash infra/c
 ordering and failure paths with a local stand-in for Terraform, without credentials.
 
 ### Enable the private job service
+
+The required `check.yml` static job runs formatting, backend-free initialization, validation and the CI command
+test before merge, without Google credentials. Changes to `infra/` select that job and the repository checks
+that read infrastructure files.
 
 Complete these gates before enabling `GCP_JOB_RUNTIME`:
 
@@ -74,7 +79,8 @@ Complete these gates before enabling `GCP_JOB_RUNTIME`:
 The job service accepts Google OIDC for its deterministic Run URL, from the jobs service account only. It keeps
 Cloud Run's invoker IAM check on, and the app verifies the token again at `POST /api/job`. Scheduler sends
 `{"do":"tick"}` every minute. The Tasks queue fixes the destination, method, content type, audience and identity;
-only the app account may enqueue. The Cloud Tasks dispatcher still needs to send the registry's run body, give
+only the app account may enqueue. Step 3 continues with the Cloud Tasks dispatcher after step 4 supplies the
+first tested image, before step 5 releases public traffic. That follow-up must send the registry's run body, give
 it a 600-second dispatch deadline and reconcile a lost dispatch from durable jobs. Scheduler's service timeout
 and attempt deadline are 600 seconds. Retries and expired claims must pass the real queue checks before cutover.
 A periodic tick can recover jobs even when dispatch fails, but it is not a latency guarantee.
@@ -98,7 +104,9 @@ traffic. Updating the bootstrap image variable alone does not release a new imag
 Keep the build-once image, `/healthz` commit, continuous-request deploy, Cloud Run revision rollback, compatible
 schema, backup/restore and client-address proof checks in the accepted record. Drop the home-server fallback,
 parallel-host operation and switch-back rehearsal. Once those checks pass, move Cloudflare to Cloud Run and
-retire the old deployment. Until then the existing deployment instructions below describe the current host.
+retire the Coolify instance and its autodeploy. Until cutover, Coolify is best-effort: check it only after
+migration or startup changes. After cutover, check Cloud Run's `/healthz` commit after every landing. The
+existing deployment instructions below describe the current host.
 
 ## PostgreSQL cutover at merge
 

@@ -166,6 +166,21 @@ test("every TypeScript change selects the static job that runs the async port gu
 });
 
 test("the static job runs for every file the type-check and the lint read", () => {
+	for (const file of ["infra/data.tf", "infra/ci.sh"])
+		expect(plan([file], tests), file).toMatchObject({ jobs: { static: true, image: false, ios: false } });
+	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
+	expect(workflow).toMatchObject({
+		jobs: {
+			static: {
+				steps: expect.arrayContaining([
+					{ run: "terraform fmt -check -recursive infra" },
+					{ run: "terraform -chdir=infra init -backend=false -lockfile=readonly" },
+					{ run: "terraform -chdir=infra validate" },
+					{ run: "bash infra/ci.test.sh" },
+				]),
+			},
+		},
+	});
 	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { include: string[] };
 	for (const directory of tsconfig.include) expect(covers(STATIC, `${directory}/a.ts`), directory).toBe(true);
 	const biome = JSON.parse(readFileSync("biome.json", "utf8")) as {
@@ -284,6 +299,7 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 		"compose.coolify.yaml": "tests",
 		"compose.yaml": "tests",
 		docs: "static named tests",
+		infra: "static named tests",
 		ios: "static ios named tests",
 		licences: "static tests",
 		"package.json": "static image ios tests",

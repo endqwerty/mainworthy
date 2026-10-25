@@ -36,10 +36,11 @@ export const CI: Paths = {
 
 /**
  * What the type-check, lint and async-port guard read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
- * `vcs.useIgnoreFile`), and the packages with what installs them.
+ * `vcs.useIgnoreFile`), the packages with what installs them, and the offline Terraform checks.
  */
 export const STATIC: Paths = {
 	include: [
+		"infra/**",
 		"src/**",
 		"test/**",
 		"bench/**",
@@ -106,7 +107,7 @@ export const IOS: Paths = {
  * which `scripts/diagrams.ts` stamps and `test/docs.test.ts` checks through it.
  */
 export const NAMED: Paths = {
-	include: [".changes/**", "docs/**", "*.md", ".github/**", "ios/**"],
+	include: [".changes/**", "docs/**", "*.md", ".github/**", "ios/**", "infra/**"],
 	exclude: [
 		"docs/guide/**",
 		"docs/diagrams/**",
