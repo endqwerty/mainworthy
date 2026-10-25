@@ -67,16 +67,6 @@ ACTIONS = {
     ("delete", "create"): "replace", ("create", "delete"): "replace", ("forget",): "forget",
     ("forget", "create"): "forget and create", ("create", "forget"): "create and forget",
 }
-# An instance key prints only when this directory's Terraform spells it out; a key taken from a value never does.
-SOURCE = "\n".join(path.read_text() for path in Path(__file__).resolve().parent.glob("*.tf"))
-
-
-def address(text):
-    def key(match):
-        literal = match[1]
-        known = re.search(rf'(?<![\w-]){re.escape(literal)}(?![\w-])', SOURCE) if literal else None
-        return match[0] if known else "[*]"
-    return re.sub(r'\["((?:[^"\\]|\\.)*)"\]', key, text)
 
 
 def changed(before, after, unknown):
@@ -102,7 +92,7 @@ def plan_changes(path, values):
         elif "importing" in change:
             verb = f"import and {verb}"
         names = changed(change.get("before"), change.get("after"), change.get("after_unknown")) if "update" in verb else []
-        line = f"{verb} {address(resource.get('address', '?'))}" + (f" ({', '.join(names)})" if names else "")
+        line = f"{verb} {resource.get('address', '?')}" + (f" ({', '.join(names)})" if names else "")
         print(redact(line, values))
 
 
