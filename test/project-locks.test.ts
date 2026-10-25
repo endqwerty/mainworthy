@@ -1726,7 +1726,7 @@ for (const target of ["actor", "team"] as const) {
 }
 
 import { forgetActor } from "../src/server/identity/identity.ts";
-import { credentialOp, invitationOp, sessionOp } from "../src/server/ops/people.ts";
+import { credentialOp, invitationOp } from "../src/server/ops/people.ts";
 
 function observeLockErrors() {
 	const states: string[] = [];
@@ -1835,17 +1835,16 @@ for (const op of ["admin", "invitation"] as const) {
 	});
 }
 
-for (const kind of ["token", "credential", "session", "own-session"] as const) {
+for (const kind of ["token", "credential"] as const) {
 	test(`an id appearing after discovery cannot acquire a late owner lock for ${kind}`, async () => {
 		h = await harness();
 		const caller = await h.actor("administrator", "human", ["admin"]);
-		const owner = kind === "own-session" ? caller : h.owner;
-		const token = await createToken(h.app, { actor: owner.name, kind: "human", can: [], project: 0, label: "browser" });
+		const owner = h.owner;
 		if (kind === "credential")
 			await h.app.database.write((db) =>
 				db.transaction(() => insertPassword(db, { actor: owner.id, hash: "unused", at: h.app.now() })),
 			);
-		const table = kind === "token" ? "tokens" : kind === "credential" ? "credentials" : "sessions";
+		const table = kind === "token" ? "tokens" : "credentials";
 		const next = await h.app.database.read((db) =>
 			db.allDynamic<{ id: number }>(`SELECT coalesce(max(id), 0) + 1 AS id FROM ${table}`),
 		);
@@ -1855,13 +1854,9 @@ for (const kind of ["token", "credential", "session", "own-session"] as const) {
 		const reached = barrier();
 		const resume = barrier();
 		const paused =
-			kind === "token"
-				? pauseIdentityOp(adminOp, reached, resume)
-				: kind === "credential"
-					? pauseIdentityOp(credentialOp, reached, resume)
-					: pauseIdentityOp(sessionOp, reached, resume);
+			kind === "token" ? pauseIdentityOp(adminOp, reached, resume) : pauseIdentityOp(credentialOp, reached, resume);
 		const op = paused.name;
-		const input = { do: kind === "token" ? "token.revoke" : kind === "credential" ? "remove" : "end", id };
+		const input = { do: kind === "token" ? "token.revoke" : "remove", id };
 		const changing = invoke(
 			h.app,
 			{ [op]: paused },
@@ -1873,30 +1868,19 @@ for (const kind of ["token", "credential", "session", "own-session"] as const) {
 				kind === "token"
 					? await createToken(h.app, { actor: owner.name, kind: "human", can: [], project: 0, label: "late" })
 					: await h.app.database.write((db) =>
-							db.transaction(async () =>
-								kind === "credential"
-									? {
-											id: (
-												await insertOidc(db, {
-													actor: owner.id,
-													handle: "https://provider.example#late",
-													label: "late",
-													at: h.app.now(),
-												})
-											).id,
-										}
-									: await openSession(h.app, db, {
-											tokenHash: hashToken(token.secret),
-											sessionHash: hashToken("late-session"),
-											userAgent: null,
-											address: null,
-										}),
+							db.transaction(() =>
+								insertOidc(db, {
+									actor: owner.id,
+									handle: "https://provider.example#late",
+									label: "late",
+									at: h.app.now(),
+								}),
 							),
 						);
-			if (made?.id !== id) throw new Error("the competing operation did not create the predicted fixture id");
+			if (made.id !== id) throw new Error("the competing operation did not create the predicted fixture id");
 			await h.app.database.write((db) =>
 				db.transaction(async () => {
-					await lockActors(db, [owner.id], kind !== "own-session");
+					await lockActors(db, [owner.id], true);
 					await lockActors(db, [caller.id], true);
 				}),
 			);
@@ -1914,7 +1898,7 @@ for (const kind of ["token", "credential", "session", "own-session"] as const) {
 		expect(settled.map((result) => result.status)).toEqual(["fulfilled"]);
 		if (kind === "token") expect(reply).toMatchObject({ ok: true, result: { revoked: false } });
 		else expect(reply).toMatchObject({ ok: false, error: { code: "not_found" } });
-		const column = kind === "token" || kind === "credential" ? "revoked_at" : "ended_at";
+		const column = "revoked_at";
 		expect(
 			await h.app.database.read((db) => db.allDynamic(`SELECT ${column} FROM ${table} WHERE id = $1`, [id])),
 		).toEqual([{ [column]: null }]);
@@ -1990,5 +1974,335 @@ for (const rollback of [false, true]) {
 			await waiting;
 		}
 		expect(await waiting).toMatchObject({ ok: true, result: true });
+	});
+}
+
+for (const path of ["assignment", "adoption", "placement", "trigger"] as const) {
+	test(`project foreign keys do not deadlock a waiting authority change: ${path}`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Existing case" } }] });
+		const target = await h.actor("referenced", path === "assignment" || path === "trigger" ? "human" : "agent", [
+			"read",
+			"produce",
+		]);
+		const writer = await h.actor("writer", "human", ["read", "produce", "plan", "answer"]);
+		let input: unknown = { name: "Assigned run", select: {}, assign: [target.name] };
+		const planning = path === "assignment" || path === "trigger";
+		if (!planning) {
+			await h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+			const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+				.items[0];
+			if (!policy) throw new Error("missing policy question");
+			await h.call("decide", {
+				q: policy.q,
+				onEvidence: policy.evidenceHash,
+				answer: { is: "accept" },
+				reason: "Require review",
+			});
+			await h.call(
+				"propose",
+				{
+					edits: [
+						path === "adoption"
+							? { op: "create", body: { title: "Proposed case" } }
+							: { op: "place", cases: ["C-1"], tags: { add: ["moved"] } },
+					],
+				},
+				target,
+			);
+			const question = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+				.items[0];
+			if (!question) throw new Error("missing adoption question");
+			input = { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason: "Reviewed" };
+		}
+		const reached = barrier();
+		const resume = barrier();
+		const op = planning ? planOp : decideOp;
+		const paused = planning
+			? defineOp({
+					...planOp,
+					effect: "write",
+					async run(ctx: Ctx, data: Parameters<typeof planRun>[1]) {
+						reached.resolve();
+						await resume.promise;
+						return await planRun(ctx, data);
+					},
+				})
+			: defineOp({
+					...decideOp,
+					effect: "write",
+					async *steps(ctx: Ctx, data: Parameters<typeof decideSteps>[1]) {
+						reached.resolve();
+						await resume.promise;
+						return yield* decideSteps(ctx, data);
+					},
+				});
+		const errors = observeLockErrors();
+		const writing = invoke(
+			h.app,
+			{ [op.name]: paused },
+			{ op: op.name, project: "scratch", input, actor: async () => writer },
+		);
+		await reached.promise;
+		const changing =
+			path === "trigger"
+				? h.app.database.write((db) =>
+						db.transaction(async () => {
+							await lockIdentity(db);
+							await db.run(
+								sql<{ actor: number }>(
+									'UPDATE grants SET can = \'["read","produce","answer"]\' WHERE actor = $actor AND project = 0',
+								),
+								{ actor: target.id },
+							);
+							await lockProject(db, 1);
+							return { ok: true };
+						}),
+					)
+				: h.raw("admin", {
+						do: "grant.set",
+						actor: target.name,
+						project: "scratch",
+						can: ["read", "produce", "answer"],
+					});
+		void changing.catch(() => {});
+		try {
+			await blocked();
+		} finally {
+			resume.resolve();
+		}
+		const settled = await Promise.allSettled([writing, changing]);
+		errors.restore();
+		expect(errors.states).not.toContain("40P01");
+		expect(settled.map((result) => result.status === "fulfilled" && result.value.ok)).toEqual([true, true]);
+		const stored = await h.app.database.read((db) =>
+			db.allDynamic(
+				planning
+					? "SELECT assignee AS actor FROM slots"
+					: path === "adoption"
+						? "SELECT author AS actor FROM versions WHERE case_id = (SELECT max(id) FROM cases) ORDER BY no DESC LIMIT 1"
+						: "SELECT actor FROM placements ORDER BY id DESC LIMIT 1",
+			),
+		);
+		expect(stored).toEqual([{ actor: target.id }]);
+	});
+}
+
+import { decideOp, decideSteps, planOp, planRun } from "../src/server/ops/writes.ts";
+
+test("an unrelated sign-in finishes while a grant change waits for a project", async () => {
+	h = await harness();
+	await h.actor("grant-target", "human", ["read"]);
+	const token = await createToken(h.app, { actor: h.owner.name, kind: "human", can: [], project: 0, label: "sign-in" });
+	const reached = barrier();
+	const resume = barrier();
+	const holding = h.app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, 1);
+			reached.resolve();
+			await resume.promise;
+		}),
+	);
+	await reached.promise;
+	const changing = h.raw("admin", { do: "grant.set", actor: "grant-target", project: "scratch", can: ["read"] });
+	await blocked();
+	const signingIn = (async () => {
+		const opened = await signInWithToken(h.app, token.secret, { userAgent: null, address: null });
+		return opened.kind === "opening" ? await opened.signedIn : null;
+	})();
+	try {
+		const result = await Promise.race([
+			signingIn,
+			new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+		]);
+		expect(result).not.toBeNull();
+	} finally {
+		resume.resolve();
+		await Promise.all([holding, changing, signingIn]);
+	}
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT actor FROM sessions"))).toEqual([
+		{ actor: h.owner.id },
+	]);
+});
+
+for (const ownSession of [false, true]) {
+	test(`session end refuses an id absent at discovery when sign-in creates it for ${ownSession ? "the caller" : "another actor"}`, async () => {
+		h = await harness();
+		const caller = await h.actor("administrator", "human", ["admin"]);
+		const owner = ownSession ? caller : h.owner;
+		const token = await createToken(h.app, { actor: owner.name, kind: "human", can: [], project: 0, label: "late" });
+		const reached = barrier();
+		const resume = barrier();
+		const write = h.app.database.write.bind(h.app.database);
+		let first = true;
+		h.app.database.write = (work, options) =>
+			write(async (db) => {
+				if (first) {
+					first = false;
+					const all = db.all.bind(db);
+					db.all = async (statement, ...params) => {
+						const rows = await all(statement, ...params);
+						if (statement.text === "SELECT actor AS id FROM sessions WHERE id = $1") {
+							reached.resolve();
+							await resume.promise;
+						}
+						return rows;
+					};
+				}
+				return await work(db);
+			}, options);
+		const ending = h.raw("session", { do: "end", id: 1 }, caller);
+		await reached.promise;
+		try {
+			const opened = await signInWithToken(h.app, token.secret, { userAgent: null, address: null });
+			expect(opened.kind).toBe("opening");
+			if (opened.kind === "opening") expect(await opened.signedIn).not.toBeNull();
+		} finally {
+			resume.resolve();
+			h.app.database.write = write;
+			await ending;
+		}
+		expect(await ending).toMatchObject({ ok: false, error: { code: "not_found" } });
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT id, actor, ended_at FROM sessions"))).toEqual([
+			{ id: 1, actor: owner.id, ended_at: null },
+		]);
+	});
+}
+
+for (const method of ["password", "legacy password", "totp", "passkey", "oidc"] as const) {
+	test(`${method} sign-in commits outside an unrelated waiting grant's identity lock`, async () => {
+		h = await harness();
+		h.app.config.publicUrl = "https://mainworthy.example";
+		h.app.config.passwordCost = { memoryCost: 1024, timeCost: 1 };
+		const signer = await h.actor("signer", "human", []);
+		await h.actor("grant-target", "human", ["read"]);
+		const idp = method === "oidc" ? await provider({ subject: "signer" }) : null;
+		let signIn: () => Promise<unknown>;
+		try {
+			if (method === "passkey") {
+				const invitation = await invoke(h.app, OPS, {
+					op: "invitation",
+					project: null,
+					input: { do: "create", name: signer.name },
+					actor: async () => h.owner,
+				});
+				if (!invitation.ok) throw new Error("invitation refused");
+				const invited = z.object({ code: z.string() }).parse(invitation.result);
+				const shown = await showInvitation(h.app, invited.code, null);
+				if (!shown.ok || !shown.shown.passkey) throw new Error("registration unavailable");
+				const device = authenticator();
+				const joined = await acceptInvitation(
+					h.app,
+					{
+						code: invited.code,
+						password: undefined,
+						passkey: device.register(shown.shown.passkey),
+						label: "key",
+						replace: null,
+						browser: null,
+					},
+					{ userAgent: null, address: null },
+				);
+				if (!joined.ok) throw new Error("registration refused");
+				const begun = passkeySignInOptions(h.app, null);
+				if (!begun || !("options" in begun)) throw new Error("sign-in unavailable");
+				signIn = () =>
+					signInWithPasskey(
+						h.app,
+						{ answer: device.assert(begun.options), ceremony: begun.ceremony },
+						{ userAgent: null, address: null },
+					);
+			} else if (idp) {
+				h.app.config.oidc = idp.config();
+				await h.app.database.write((db) =>
+					db.transaction(() =>
+						insertOidc(db, {
+							actor: signer.id,
+							handle: oidcHandle({ issuer: idp.issuer, subject: "signer" }),
+							label: "provider",
+							at: h.app.now(),
+						}),
+					),
+				);
+				const begun = await beginOidcSignIn(h.app, { purpose: "sign-in" }, null);
+				if (!begun.ok) throw new Error("OIDC unavailable");
+				const authorized = await fetch(begun.url, { redirect: "manual" });
+				const query = new URL(authorized.headers.get("location") ?? "").search;
+				signIn = () =>
+					finishOidcSignIn(
+						h.app,
+						{ query, ceremony: begun.ceremony, browser: null },
+						{ userAgent: null, address: null },
+					);
+			} else {
+				const password =
+					method === "legacy password" ? "Cafe\u0301 correct horse battery staple" : "correct horse battery staple";
+				const hash =
+					method === "legacy password"
+						? await Bun.password.hash(password, { algorithm: "argon2id", ...h.app.config.passwordCost })
+						: await hashPassword(password, h.app.config.passwordCost);
+				await h.app.database.write((db) =>
+					db.transaction(() => insertPassword(db, { actor: signer.id, hash, at: h.app.now() })),
+				);
+				if (method === "totp") {
+					const secret = newTotpSecret();
+					const factor = await h.app.database.write((db) =>
+						db.transaction(() =>
+							insertTotp(db, {
+								actor: signer.id,
+								data: JSON.stringify({ secret, lastStep: -1, recovery: [] }),
+								at: h.app.now(),
+							}),
+						),
+					);
+					const ceremony = "sign-in-browser";
+					const challenge = issueTotp(h.app, {
+						kind: "sign-in",
+						name: signer.name,
+						password: hash,
+						rehashed: null,
+						factor,
+						context: CONTEXT.browser(secretHash(ceremony)),
+					});
+					signIn = () =>
+						signInWithTotp(
+							h.app,
+							{ challenge: challenge.challenge, code: totpCode(secret, Math.floor(h.app.now() / 30_000)), ceremony },
+							{ userAgent: null, address: null },
+						);
+				} else
+					signIn = () => signInWithPassword(h.app, { name: signer.name, password }, { userAgent: null, address: null });
+			}
+			const reached = barrier();
+			const resume = barrier();
+			const holding = h.app.database.write((db) =>
+				db.transaction(async () => {
+					await lockProject(db, 1);
+					reached.resolve();
+					await resume.promise;
+				}),
+			);
+			await reached.promise;
+			const changing = h.raw("admin", { do: "grant.set", actor: "grant-target", project: "scratch", can: ["read"] });
+			await blocked();
+			const signingIn = signIn();
+			try {
+				const result = await Promise.race([
+					signingIn,
+					new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+				]);
+				expect(result).toMatchObject({ ok: true, signedIn: { cookie: expect.any(String) } });
+			} finally {
+				resume.resolve();
+				await Promise.all([holding, changing, signingIn]);
+			}
+			expect(
+				await h.app.database.read((db) =>
+					db.allDynamic("SELECT count(*) AS n FROM sessions WHERE actor = $1", [signer.id]),
+				),
+			).toEqual([{ n: method === "passkey" ? 2 : 1 }]);
+		} finally {
+			idp?.stop();
+		}
 	});
 }

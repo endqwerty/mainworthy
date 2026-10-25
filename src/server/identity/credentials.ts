@@ -9,7 +9,7 @@
 // so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
-import { lockActors, lockCredential, lockIdentity } from "./locks.ts";
+import { lockActors, lockCredential, lockIdentity, lockSignInActor } from "./locks.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
 export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
@@ -127,7 +127,7 @@ export async function insertTotp(db: WriteDb, input: { actor: number; data: stri
 }
 
 export async function updateTotp(db: WriteDb, row: CredentialRow, data: string, at: number): Promise<boolean> {
-	await lockIdentity(db);
+	await lockSignInActor(db, row.actor);
 	return row.kind === "totp" && (await db.run(Q.counted, { id: row.id, was: row.data, data, at })).changes === 1;
 }
 
@@ -224,7 +224,7 @@ export async function countPasskeyUse(
 	shown: { signCount: number; backupEligible: boolean; backedUp: boolean },
 	at: number,
 ): Promise<boolean> {
-	await lockIdentity(db);
+	await lockSignInActor(db, row.actor);
 	const stored = storedPasskey(row);
 	if (!stored) return false;
 	const data = dataOf({ ...stored, publicKey: stored.key, ...shown });
@@ -233,7 +233,7 @@ export async function countPasskeyUse(
 
 /** Refreshes a legacy password's hash without changing the credential its existing sessions rest on. */
 export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: string, at: number): Promise<boolean> {
-	await lockIdentity(db);
+	await lockSignInActor(db, row.actor);
 	return (
 		row.kind === "password" && (await db.run(Q.counted, { id: row.id, was: row.data, data: hash, at })).changes === 1
 	);
@@ -241,7 +241,6 @@ export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: stri
 
 /** Notes that a credential signed its person in. */
 export async function noteCredentialUse(db: WriteDb, id: number, at: number): Promise<void> {
-	await lockIdentity(db);
 	await db.run(Q.used, { id, at });
 }
 

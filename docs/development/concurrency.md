@@ -9,14 +9,19 @@ If the row discovered before a lock wait was replaced, the writer returns `busy`
 A missing project name is guarded through the transaction so a new project cannot appear behind the check.
 
 Identity writers take the transaction advisory lock `pg_advisory_xact_lock(821, 1)` before discovery or any
-actor, roster, team, project, or command lock. This covers every instance write in the registry, sign-in and
-sign-out, credential and contact changes, bootstrap, identity sweeps, archive import, and project authority
-maintenance. Exclusive actor locking joins that same identity lock. Token/session lookup and identity creation
+actor, roster, team, project, or command lock. This covers every instance write in the registry, sign-out,
+credential and contact changes, bootstrap, identity sweeps, archive import, and project authority
+maintenance. Exclusive actor locking joins that same identity lock. Identity mutation lookups and creation
 join it before resolving names or ids, including when no row exists. The two-integer advisory key has a
 separate namespace from the one-integer project-key and command-id locks.
 
-Within an identity transaction, lock affected actors by ascending id at their final strength. Then take
-organisation roster guards, team membership guards by id, project rows by id, and job rows. A team grant
+Within an identity transaction, lock affected actors by ascending id at their final strength. Authority
+changes use `FOR NO KEY UPDATE`: it conflicts with another authority change and with a writer's `FOR SHARE`,
+so writers reread committed authority after waiting. It permits the `FOR KEY SHARE` checks that inserts into
+slots, cases, versions, placements and other project tables take through their foreign keys to actors.
+Using `FOR UPDATE` here would deadlock a project writer referencing another actor with an authority change
+that holds that actor and waits for the project. After actor locking, take organisation roster guards,
+team membership guards by id, project rows by id, and job rows. A team grant
 change discovers and locks its members before its project. Another identity transaction cannot create,
 rename, remove, or change the owner of a discovered row until commit or rollback. The registry no longer
 reserves missing names with the organisation row or repeats footprint checks after later waits.
@@ -28,10 +33,27 @@ Ordinary project data writes, report acceptance/application, recovery, and deliv
 the identity lock. They take shared actor locks followed by their project row. Last-use flushing also stays
 outside the identity lock: it changes activity fields only, locks its actors before updating tokens or
 sessions, and checks that their owners still belong to its locked set. None of these transactions changes
-identity or upgrades an actor lock, so it cannot wait back on the identity lock. Different projects still
-write concurrently. An identity writer waiting for a busy actor or project holds the identity lock and
-queues all other identity writers, including unrelated sign-ins and token creation. Password hashing and
-provider verification happen before the serialized sign-in commit.
+identity or upgrades an actor lock. Their foreign-key checks can lock other actors after their project,
+but `FOR KEY SHARE` is compatible with authority's `FOR NO KEY UPDATE`. Different projects still write
+concurrently. An identity writer waiting for a busy actor or project holds the identity lock and queues
+other identity writers, including token creation.
+
+Sign-in does not join the identity lock or lock projects. Token session creation takes `FOR SHARE` on the
+existing token owner and refuses an absent or replaced owner. Password, passkey, OIDC and TOTP sign-in
+commits lock their one discovered actor with `FOR NO KEY UPDATE` before rereading proof or updating credential
+counters. They never acquire another actor or the identity lock afterwards. Proof that resolves to another
+actor returns `busy`. Session insertion does not change authority. Since sign-in can insert a session while
+an identity transaction holds the mutex, session ending rejects an id absent at discovery as `not_found`
+before the operation can discover a late owner. An existing session's owner stays stable: moving or ending
+it still takes the identity lock. Sign-in can wait for a change or writer involving its own actor; an
+unrelated actor's waiting grant change does not queue it.
+
+No application writer changes `actors.id`. Forgetting preserves the actor row and pseudonymizes its name;
+bootstrap can rename the owner. PostgreSQL may strengthen these name updates to `FOR UPDATE` because of
+`UNIQUE (org, name)`. Registry forgetting locks every project before the rename; bootstrap and direct
+forgetting take no project locks after it. They therefore cannot hold a stronger actor lock while waiting
+back on a project's foreign-key writer. Whole-instance import deletes actor rows under the actor roster's
+`ACCESS EXCLUSIVE` table lock, acquired before any project locks. That stronger exclusion remains necessary.
 
 Creating a project locks its key until commit, then its newly inserted row. Bootstrap locks only the owner,
 policy actor, configured-token owners, and affected admins, then guards organisation creation.
@@ -48,20 +70,26 @@ keeps its identity, authority, and project locks until the slice commits, then y
 cleanup remain paused.
 
 Operation inputs are parsed before discovering lock keys, so stripped fields cannot change lock strength.
-Sign-in proof discovery can happen before the identity transaction. Its commit still returns `busy` if a
-person, credential, or browser session resolves to an actor it did not lock.
+Proof discovery can happen before the commit transaction. Sign-in and invitation acceptance return `busy`
+if a person, credential, or browser session resolves to an actor they did not lock.
 
 Run `bun bench/identity-contention.ts 5` for two 5,000-result scenarios: identity requests directly beside a
 report, and identity requests behind a project grant change already waiting for that report. Each sample
-verifies the committed result count, token hash, and session count. On 2026-10-24, five alternating baseline
-and serialized runs per scenario measured token sign-in at median 6.702 ms, range 3.463 to 13.091 ms, directly
-beside the report. Token creation measured 3.105 ms, range 1.780 to 7.894 ms. Both finished while the report
-still held its project in every direct sample. Behind the grant change, sign-in measured 455.574 ms, range
-348.125 to 1178.582 ms, and token creation measured 452.218 ms, range 345.971 to 1175.676 ms. Both waited for
-the report in every queued sample. The corresponding baseline medians were 5.192/3.641 ms directly and
-2.684/1.754 ms behind the grant change, for sign-in/token creation respectively. These shared-machine
-samples included another whole check and a focused test run. They show the serialization cost when an
-identity writer waits for a report, not an isolated speed comparison or a production latency bound.
+verifies the committed result count, token hash, and session count, and records which request finished
+before releasing the report's project barrier.
+
+On 2026-10-25, five alternating before/after samples per scenario compared commit `841e93e3` (serialized
+sign-in) with the actor-only sign-in change. Behind the waiting grant change, token sign-in fell from
+median 471.648 ms (334.151–815.154 ms) to 5.993 ms (3.277–7.902 ms). It committed before report release in all
+five changed samples and none of the five baseline samples. Token creation still waited for the report in
+every queued sample: before median 469.359 ms (332.531–813.211 ms), after 341.248 ms (271.457–457.571 ms).
+Direct sign-in measured before 5.521 ms (3.714–5.839 ms), after 4.114 ms (2.875–4.933 ms); token creation
+measured before 2.865 ms (1.965–4.058 ms), after 2.549 ms (1.685–3.470 ms). Both finished before report
+release in every direct sample. All twenty reports committed exactly 5,000 results and each identity
+request's stored rows were checked. The 10-core machine had another whole check and a focused test run
+active. These are shared-machine contention observations, not isolated throughput comparisons or a
+production latency bound. The queued baseline's limiter was the identity advisory lock held by the grant
+change, itself waiting for the report's project row. Changed sign-in no longer joins that queue.
 
 A report commits acceptance separately from application. The private `batch_admissions` table holds the
 exact admitted token or session reference and the actor's authority version. The actor and project locks
