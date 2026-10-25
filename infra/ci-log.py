@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Publish only Terraform summaries and redacted error headers to public CI logs."""
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+
+def identifiers():
+    values = set()
+    for name, value in os.environ.items():
+        if name.startswith(("TF_VAR_", "GCP_")) or name == "STATE_BUCKET":
+            if value and value != "null":
+                values.add(value)
+                # Mask JSON leaves and path components, including the WIF project number.
+                values.update(re.findall(r"[\w.@:-]+", value))
+    project = os.environ.get("TF_VAR_production_project", "")
+    if project:
+        for account in ("app", "jobs"):
+            email = f"mainworthy-{account}@{project}.iam.gserviceaccount.com"
+            values.update((email, email.removesuffix(".gserviceaccount.com")))
+    runtime = json.loads(os.environ.get("TF_VAR_runtime", "null"))
+    if isinstance(runtime, dict):
+        values.update(value for value in runtime.values() if isinstance(value, str))
+    return sorted(values, key=len, reverse=True)
+
+
+def redact(line, values):
+    for value in values:
+        line = line.replace(value, "***")
+    # These are assigned by Google and cannot all be computed before Terraform runs.
+    line = re.sub(r"(?:https?|gs)://[^\s\"'<>]+", "***", line)
+    line = re.sub(r"[\w.+%-]+@[\w.-]+", "***", line)
+    line = re.sub(r"[\w.-]+\.run\.app\b", "***", line)
+    line = re.sub(r"\b\d{6,}\b", "***", line)
+    return line
+
+
+values = identifiers()
+if sys.argv[1] == "mask":
+    for value in values:
+        escaped = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::add-mask::{escaped}")
+else:
+    failed = sys.argv[2] != "0"
+    for line in Path(sys.argv[1]).read_text(errors="replace").splitlines():
+        if re.fullmatch(r"Plan: \d+ to add, \d+ to change, \d+ to destroy\.?", line):
+            print(line)
+        elif line.startswith("No changes."):
+            print("No changes.")
+        elif failed and line.startswith("Error:"):
+            print(redact(line, values))
