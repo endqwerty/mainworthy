@@ -94,10 +94,11 @@ type VisibleRow =
 	| { kind: "folder"; folder: FolderRow; count: number };
 const unsorted = "Unsorted";
 const nothingPlaced = "No cases changed. Nothing to undo.";
-type PlacementInput = Api["propose"]["input"] & { cmd: string; projectIdentity: string };
+type ProposalInput = Api["propose"]["input"] & { cmd: string; projectIdentity: string };
+type RetainedProposal = { input: ProposalInput; queued: boolean };
 type PlacementUndo = {
 	preview: Edit[];
-	input: PlacementInput;
+	input: ProposalInput;
 	cmd: string;
 	ready: Promise<Api["propose"]["reply"]>;
 	queued: boolean;
@@ -425,6 +426,9 @@ export function SuiteScreen() {
 	const [creatingFolder, setCreatingFolder] = useState(false);
 	const [folderText, setFolderText] = useState("");
 	const undo = useRef<PlacementUndo | null>(null);
+	const folderCreation = useRef<RetainedProposal | null>(null);
+	const versionRestore = useRef<RetainedProposal | null>(null);
+	const projectReplaced = useRef(false);
 	const viewport = useRef<HTMLDivElement>(null);
 	const filter = useRef<HTMLInputElement>(null);
 	const foldersQuery = useQueryOp({ project, op: "find", input: { in: "folders" } });
@@ -2013,7 +2017,7 @@ export function SuiteScreen() {
 			},
 		};
 	}
-	async function recoverPlacement(input: PlacementInput): Promise<Api["propose"]["reply"]> {
+	async function recoverProposal(input: ProposalInput): Promise<Api["propose"]["reply"]> {
 		const fate = await call("command", { cmd: input.cmd }, { project, owner });
 		return fate.state === "done" ? ProposeReply.parse(fate.reply) : call("propose", input, { project, owner });
 	}
@@ -2141,7 +2145,100 @@ export function SuiteScreen() {
 			}),
 		);
 	}
+	async function createFolder(): Promise<void> {
+		if (!projectIdentity || projectReplaced.current || folderCreation.current?.queued) return;
+		const retry = folderCreation.current !== null;
+		const action =
+			folderCreation.current ??
+			({
+				input: {
+					edits: [{ op: "folder", name: folderText, ...(route.folder ? { parent: route.folder } : {}) }],
+					cmd: randomId(),
+					projectIdentity,
+				},
+				queued: false,
+			} satisfies RetainedProposal);
+		folderCreation.current = action;
+		action.queued = true;
+		setStatus("Creating folder.");
+		try {
+			const reply = await (retry ? recoverProposal(action.input) : call("propose", action.input, { project, owner }));
+			if (!sessionCurrent(owner)) return;
+			folderCreation.current = null;
+			setCreatingFolder(false);
+			setFolderText("");
+			setStatus(
+				reply.status === "open"
+					? waitingStatus("Folder proposed", reply.question)
+					: `Folder ${reply.status === "adopted" ? "created" : reply.status}.`,
+			);
+			void invalidateProject(project);
+		} catch (error) {
+			if (!sessionCurrent(owner)) return;
+			if (obsoleteProject(error)) {
+				folderCreation.current = null;
+				projectReplaced.current = true;
+				setCreatingFolder(false);
+				setStatus("The project was replaced. Reload before creating folders.");
+			} else {
+				if (error instanceof ApiError && error.code !== "internal") folderCreation.current = null;
+				setStatus(`${errorMessage(error, "Folder could not be created")}. Press Enter to check it and retry.`);
+			}
+		} finally {
+			action.queued = false;
+		}
+	}
+	async function restoreVersion(): Promise<void> {
+		if (projectReplaced.current || versionRestore.current?.queued) return;
+		const retry = versionRestore.current !== null;
+		if (!versionRestore.current) {
+			if (!view || view.version <= 1 || !projectIdentity) return;
+			const focused = document.activeElement;
+			const raw =
+				focused instanceof HTMLElement ? focused.closest("[data-version]")?.getAttribute("data-version") : null;
+			const previous = raw && /^\d+$/.test(raw) ? Number(raw) - 1 : view.version - 1;
+			if (previous < 1) {
+				setStatus("Version 1 is the first version.");
+				return;
+			}
+			versionRestore.current = {
+				input: { edits: [{ op: "restore", case: view.ref, to: previous }], cmd: randomId(), projectIdentity },
+				queued: false,
+			};
+		}
+		const action = versionRestore.current;
+		action.queued = true;
+		try {
+			const reply = await (retry ? recoverProposal(action.input) : call("propose", action.input, { project, owner }));
+			if (!sessionCurrent(owner)) return;
+			versionRestore.current = null;
+			// Adopted with no case stamped: the case already holds that content, and nothing was recorded.
+			if (reply.status === "adopted" && reply.cases.length === 0)
+				setStatus("The case already has that version's content. Nothing changed.");
+			else if (reply.status === "adopted") {
+				draftRef.current = null;
+				setDraftState(null);
+				setStatus("Previous version restored as a new version.");
+			} else if (reply.status === "open") {
+				setStatus(waitingStatus("Restore proposed", reply.question));
+			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
+			void invalidateProject(project);
+		} catch (error) {
+			if (!sessionCurrent(owner)) return;
+			if (obsoleteProject(error)) {
+				versionRestore.current = null;
+				projectReplaced.current = true;
+				setStatus(placementObsolete);
+			} else {
+				if (error instanceof ApiError && error.code !== "internal") versionRestore.current = null;
+				setStatus(`${errorMessage(error, "Undo failed")}. Press u to check it and retry.`);
+			}
+		} finally {
+			action.queued = false;
+		}
+	}
 	async function undoLast(): Promise<void> {
+		if (projectReplaced.current) return;
 		if (undo.current) {
 			const action = undo.current;
 			if (action.queued) return;
@@ -2151,7 +2248,7 @@ export function SuiteScreen() {
 			let wantsRead = false;
 			try {
 				setStatus("Undo queued. It will follow the pending change.");
-				const original = await action.ready.catch(() => recoverPlacement(action.input));
+				const original = await action.ready.catch(() => recoverProposal(action.input));
 				if (original.status !== "adopted") return;
 				wantsRead = true;
 				const edits = original.placements;
@@ -2159,7 +2256,7 @@ export function SuiteScreen() {
 					setStatus(nothingPlaced);
 					return;
 				}
-				const reply = await recoverPlacement({ ...action.input, edits, cmd: action.cmd });
+				const reply = await recoverProposal({ ...action.input, edits, cmd: action.cmd });
 				if (reply.status === "adopted") {
 					optimistic.confirm(edits);
 					const changed = reply.placements.length;
@@ -2180,32 +2277,7 @@ export function SuiteScreen() {
 			} finally {
 				void optimistic.settle(wantsRead);
 			}
-		} else if (view && view.version > 1) {
-			const focused = document.activeElement;
-			const raw =
-				focused instanceof HTMLElement ? focused.closest("[data-version]")?.getAttribute("data-version") : null;
-			const previous = raw && /^\d+$/.test(raw) ? Number(raw) - 1 : view.version - 1;
-			if (previous < 1) {
-				setStatus("Version 1 is the first version.");
-				return;
-			}
-			const reply = await call(
-				"propose",
-				{ edits: [{ op: "restore", case: view.ref, to: previous }] },
-				{ project, owner },
-			);
-			// Adopted with no case stamped: the case already holds that content, and nothing was recorded.
-			if (reply.status === "adopted" && reply.cases.length === 0)
-				setStatus("The case already has that version's content. Nothing changed.");
-			else if (reply.status === "adopted") {
-				draftRef.current = null;
-				setDraftState(null);
-				setStatus("Previous version restored as a new version.");
-			} else if (reply.status === "open") {
-				setStatus(waitingStatus("Restore proposed", reply.question));
-			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
-			void invalidateProject(project);
-		}
+		} else await restoreVersion();
 	}
 	useEffect(() => {
 		const drop = (event: Event) => {
@@ -2490,21 +2562,12 @@ export function SuiteScreen() {
 						className="inline-form"
 						onSubmit={(event) => {
 							event.preventDefault();
-							void call(
-								"propose",
-								{ edits: [{ op: "folder", name: folderText, ...(route.folder ? { parent: route.folder } : {}) }] },
-								{ project, owner },
-							)
-								.then(() => {
-									setCreatingFolder(false);
-									setFolderText("");
-									void invalidateProject(project);
-								})
-								.catch((error: unknown) => setStatus(errorMessage(error, "Folder could not be created")));
+							void createFolder();
 						}}
 					>
 						<input
 							aria-label="New folder name"
+							readOnly={folderCreation.current !== null}
 							className="form-input"
 							ref={focusOnce}
 							value={folderText}

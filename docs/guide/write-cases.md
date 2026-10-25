@@ -202,6 +202,9 @@ version as a new version. With a timeline version focused, it restores that vers
 predecessor. The API can request a specific version to restore.
 When the policy asks a person first, the status line says the restore is proposed and names its question.
 The case stays at its current version until that question is answered.
+If a restore reply is lost, press <kbd>u</kbd> again. The page checks that request's recorded outcome before retrying it.
+An already-recorded restore leaves later edits alone.
+If the project was replaced under the same key, the page discards the restore and asks you to reload.
 See [the API guide](./api.md) for that operation.
 
 Restoring creates history. It never deletes or rewrites the earlier versions.
@@ -216,6 +219,9 @@ To create a folder, follow these steps.
 3. Press <kbd>Enter</kbd>.
 
 Creating a folder while inside another folder places it below that folder.
+If the reply is lost, press <kbd>Enter</kbd> again to check the same request before retrying it.
+The name stays read-only until the outcome is known.
+If the project was replaced under the same key, the server refuses the old creation and the page asks you to reload.
 Select a folder in the sidebar to see its cases.
 
 Creating, renaming, or moving a folder cannot introduce a duplicate path.
