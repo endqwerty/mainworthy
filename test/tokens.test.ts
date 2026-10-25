@@ -12,7 +12,6 @@ import {
 	admit,
 	authenticate,
 	bootstrap,
-	flushUses,
 	hasAdminGrant,
 	hashToken,
 	listActors,
@@ -407,7 +406,6 @@ describe("sign-in record retention", () => {
 			null,
 			LOOPBACK,
 		]);
-		await flushUses(instance.app);
 		expect((await listed(instance)).filter((row) => row.id !== 1).map((row) => row.lastUsedFrom)).toEqual([
 			null,
 			null,
@@ -719,20 +717,31 @@ describe("what a token's row says", () => {
 		});
 	});
 
-	test("a read by a token writes where it came from after a flush, and the read did not wait for the writer", async () => {
+	test("a read by a token waits for its durable activity write before answering", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
 		const gate = holdGate(instance);
+		const write = instance.app.database.write.bind(instance.app.database);
+		const queued = Promise.withResolvers<void>();
+		instance.app.database.write = (fn, options) => {
+			instance.app.database.write = write;
+			queued.resolve();
+			return write(fn, options);
+		};
+		clock.advance(HOUR);
+		let answered = false;
+		const pending = post(instance, "/api/p/scratch/find", {}, bearer(OWNER)).then((reply) => {
+			answered = true;
+			return reply;
+		});
 		try {
-			clock.advance(HOUR);
-			// Answered while a writer holds the gate: the read notes its use and its address, and writes nothing.
-			expect((await post(instance, "/api/p/scratch/find", {}, bearer(OWNER))).status).toBe(200);
+			await queued.promise;
+			expect(answered).toBe(false);
 			expect(await tokens(instance)).toMatchObject([{ last_used_at: null, last_used_addr: null }]);
 		} finally {
-			// Released whatever happened, or the instance could not stop and the test's failure would be a timeout.
 			await gate.release();
 		}
-		await flushUses(instance.app);
+		expect((await pending).status).toBe(200);
 		expect(await tokens(instance)).toMatchObject([{ last_used_at: T0 + HOUR, last_used_addr: LOOPBACK }]);
 	});
 
@@ -748,8 +757,6 @@ describe("what a token's row says", () => {
 		);
 		clock.advance(HOUR);
 		expect(await statusOf(instance, { cookie })).toBe(200);
-		expect(await sessions(instance)).toMatchObject([{ last_seen_at: T0, last_seen_addr: "192.0.2.7" }]);
-		await flushUses(instance.app);
 		expect(await sessions(instance)).toMatchObject([
 			{ created_addr: LOOPBACK, last_seen_at: T0 + HOUR, last_seen_addr: LOOPBACK },
 		]);
@@ -766,52 +773,45 @@ describe("what a token's row says", () => {
 			);
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(OWNER))).toBe(200);
-		await flushUses(app);
 		expect(await tokens(instance)).toMatchObject([{ last_used_at: T0 + HOUR, last_used_addr: LOOPBACK }]);
 		// A request that never was on a connection has no address to note. The time is written, the address stays.
 		const offline = new Request("http://mainworthy.test/api/session", { headers: bearer(OWNER) });
 		clock.advance(HOUR);
 		expect((await sessionOf(app, offline, instance.owner))?.via).toBe("token");
-		await flushUses(app);
 		expect(await tokens(instance)).toMatchObject([{ last_used_at: T0 + 2 * HOUR, last_used_addr: LOOPBACK }]);
-		// The same between two flushes: the address noted first is still the last one known.
+		// A later request without an address preserves the last known address.
 		await rewrite(T0 + 2 * HOUR, "192.0.2.7");
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(OWNER))).toBe(200);
 		clock.advance(HOUR);
 		expect((await sessionOf(app, offline, instance.owner))?.via).toBe("token");
-		await flushUses(app);
 		expect(await tokens(instance)).toMatchObject([{ last_used_at: T0 + 4 * HOUR, last_used_addr: LOOPBACK }]);
-		// The row was since used from elsewhere and later than what is noted now (the clock was set back).
+		// A later stored time survives a request after the clock was set back.
 		await rewrite(T0 + DAY, "198.51.100.9");
 		expect(await statusOf(instance, bearer(OWNER))).toBe(200);
 		expect((await listed(instance))[0]).toMatchObject({ lastUsedAt: T0 + DAY, lastUsedFrom: "198.51.100.9" });
-		await flushUses(app);
 		expect(await tokens(instance)).toMatchObject([{ last_used_at: T0 + DAY, last_used_addr: "198.51.100.9" }]);
 	});
 });
 
 describe("forgetting a person", () => {
-	test("it erases where their tokens were last used from, written or only noted, and keeps when", async () => {
+	test("it erases the durable token address, keeps its latest time and refuses later uses", async () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam" });
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(sam.token))).toBe(200);
-		await flushUses(instance.app);
-		// One use is in the row and a later one is only noted when the person is forgotten.
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(sam.token))).toBe(200);
 		const row = async () => (await tokens(instance)).find((found) => found.id === sam.id);
-		expect(await row()).toMatchObject({ last_used_at: T0 + HOUR, last_used_addr: LOOPBACK });
+		expect(await row()).toMatchObject({ last_used_at: T0 + 2 * HOUR, last_used_addr: LOOPBACK });
 		await admin(instance, { do: "actor.forget", name: "sam" });
-		expect(await row()).toMatchObject({ last_used_at: T0 + HOUR, last_used_addr: null, revoked_at: T0 + 2 * HOUR });
+		expect(await row()).toMatchObject({ last_used_at: T0 + 2 * HOUR, last_used_addr: null, revoked_at: T0 + 2 * HOUR });
 		expect((await listed(instance)).find((found) => found.id === sam.id)).toMatchObject({
 			lastUsedAt: T0 + 2 * HOUR,
 			lastUsedFrom: null,
 		});
-		// The flush that follows writes when the token was last used and no address.
-		await flushUses(instance.app);
+		expect(await statusOf(instance, bearer(sam.token))).toBe(401);
 		expect(await row()).toMatchObject({ last_used_at: T0 + 2 * HOUR, last_used_addr: null });
 		// Nobody else's address went with it.
 		expect((await tokens(instance))[0]).toMatchObject({ last_used_addr: LOOPBACK });

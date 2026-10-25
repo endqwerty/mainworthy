@@ -4,6 +4,7 @@ import { waitMail } from "../src/server/identity/identity.ts";
 import { totpCode } from "../src/server/identity/totp.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import type { Database } from "../src/server/kernel/db.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { pgRun } from "./identity-db.ts";
 import { fakeSmtp } from "./mail-support.ts";
@@ -32,6 +33,25 @@ const refused = (reply: { status: number; body: unknown }) => {
 	expect(reply.status).toBe(403);
 	expect(reply.body).toMatchObject({ ok: false, error: { code: "recent_proof_required" } });
 };
+
+/** Pause after admission persists activity, before the request can read authority and queue its domain write. */
+async function admitted<T>(w: World, start: () => Promise<T>) {
+	const database = w.instance.app.database;
+	const write = database.write.bind(database);
+	const reached = Promise.withResolvers<void>();
+	const resume = Promise.withResolvers<void>();
+	const intercept: Database["write"] = async (fn, options) => {
+		database.write = write;
+		const result = await write(fn, options);
+		reached.resolve();
+		await resume.promise;
+		return result;
+	};
+	database.write = intercept;
+	const pending = start();
+	await reached.promise;
+	return { pending, release: () => resume.resolve() };
+}
 
 for (const email of ["recovery@example.org", null]) {
 	test(`a credentialless token-opened owner must add and prove a credential before ${email === null ? "removing" : "setting"} a recovery address`, async () => {
@@ -169,17 +189,19 @@ test("browser import rechecks proof after waiting at the write gate", async () =
 	const cookie = await preparedImport(w);
 	expect((await proof(w, cookie)).status).toBe(200);
 	w.clock.advance(9 * 60_000 + 59_000);
+	const request = await admitted(w, () => importBody(w, body, { cookie }));
 	const gate = holdGate(w.instance);
 	try {
 		const waiting = waitingAtGate(w.instance, 1);
-		const pending = importBody(w, body, { cookie });
+		request.release();
 		await waiting;
 		w.clock.advance(1_001);
 		await gate.release();
-		const response = await pending;
+		const response = await request.pending;
 		refused({ status: response.status, body: await response.json() });
 		expect(await w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
 	} finally {
+		request.release();
 		await gate.release();
 	}
 });
@@ -250,19 +272,25 @@ test("queued team membership checks the current admin grant inside the writer", 
 	const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 	await w.ok("admin", { do: "team.create", name: "Quality" });
 	stale(w);
+	const grant = await admitted(w, () => w.op("admin", { do: "team.grant.set", team: "Quality", can: ["admin"] }));
+	const member = await admitted(w, () =>
+		w.op("admin", { do: "team.member.add", team: "Quality", person: "controlled" }, { cookie }),
+	);
 	const gate = holdGate(w.instance);
 	try {
 		const grantWaiting = waitingAtGate(w.instance, 1);
-		const grant = w.op("admin", { do: "team.grant.set", team: "Quality", can: ["admin"] });
+		grant.release();
 		await grantWaiting;
 		const memberWaiting = waitingAtGate(w.instance, 1);
-		const member = w.op("admin", { do: "team.member.add", team: "Quality", person: "controlled" }, { cookie });
+		member.release();
 		await memberWaiting;
 		await gate.release();
-		expect((await grant).status).toBe(200);
-		refused(await member);
+		expect((await grant.pending).status).toBe(200);
+		refused(await member.pending);
 		expect(must(await w.op("admin", { do: "team.list" }))).toMatchObject([{ name: "Quality", members: [] }]);
 	} finally {
+		grant.release();
+		member.release();
 		await gate.release();
 	}
 });
@@ -448,15 +476,17 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 		"UPDATE credentials SET data = jsonb_set(jsonb_set(data::jsonb, '{secret}', to_jsonb(?::text)), '{lastStep}', '-1'::jsonb)::text WHERE kind = 'totp'",
 		[secret],
 	);
+	const request = await admitted(w, () => w.post("/api/account/proof", { code }, { cookie }));
 	const gate = holdGate(w.instance);
 	try {
 		const waiting = waitingAtGate(w.instance, 1);
-		const pending = w.post("/api/account/proof", { code }, { cookie });
+		request.release();
 		await waiting;
 		w.clock.advance(1_500);
 		await gate.release();
-		expect((await pending).status).toBe(200);
+		expect((await request.pending).status).toBe(200);
 	} finally {
+		request.release();
 		await gate.release();
 	}
 	expect((await w.post("/api/account/proof", { code }, { cookie })).status).toBe(403);
@@ -505,16 +535,22 @@ test("proof rereads credential and session state after waiting for the writer", 
 	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
+	const request = await admitted(w, () => proof(w, cookie));
 	const gate = holdGate(w.instance);
 	const waiting = waitingAtGate(w.instance, 1);
-	const pending = proof(w, cookie);
-	await waiting;
-	await gate.run(async (db) => await pgRun(w.instance.app, "UPDATE sessions SET ended_at = ?", [w.clock.now()], db));
-	await gate.release();
-	expect((await pending).status).toBe(403);
-	expect((await w.rows<{ at: number | null }>("SELECT reauthenticated_at AS at FROM sessions"))[0]?.at).not.toBe(
-		w.clock.now(),
-	);
+	try {
+		request.release();
+		await waiting;
+		await gate.run(async (db) => await pgRun(w.instance.app, "UPDATE sessions SET ended_at = ?", [w.clock.now()], db));
+		await gate.release();
+		expect((await request.pending).status).toBe(403);
+		expect((await w.rows<{ at: number | null }>("SELECT reauthenticated_at AS at FROM sessions"))[0]?.at).not.toBe(
+			w.clock.now(),
+		);
+	} finally {
+		request.release();
+		await gate.release();
+	}
 });
 
 test("a password replaced ahead of a queued proof cannot authenticate the still-live passkey session", async () => {
@@ -528,22 +564,28 @@ test("a password replaced ahead of a queued proof cannot authenticate the still-
 		{ cookie: begun.cookie },
 	);
 	stale(w);
-	const gate = holdGate(w.instance);
-	const firstWaiting = waitingAtGate(w.instance, 1);
-	const change = w.post(
-		"/api/account/password",
-		{ current: PASSWORD, next: "a replacement long password" },
-		{ cookie },
+	const change = await admitted(w, () =>
+		w.post("/api/account/password", { current: PASSWORD, next: "a replacement long password" }, { cookie }),
 	);
-	await firstWaiting;
-	const nextWaiting = waitingAtGate(w.instance, 1);
-	const checking = proof(w, login.cookie);
-	await nextWaiting;
-	await gate.release();
-	expect((await change).status).toBe(200);
-	expect((await checking).status).toBe(403);
-	expect(await w.status({ cookie: login.cookie })).toBe(200);
-	refused(await w.op("credential", { do: "totp.begin" }, { cookie: login.cookie }));
+	const checking = await admitted(w, () => proof(w, login.cookie));
+	const gate = holdGate(w.instance);
+	try {
+		const firstWaiting = waitingAtGate(w.instance, 1);
+		change.release();
+		await firstWaiting;
+		const nextWaiting = waitingAtGate(w.instance, 1);
+		checking.release();
+		await nextWaiting;
+		await gate.release();
+		expect((await change.pending).status).toBe(200);
+		expect((await checking.pending).status).toBe(403);
+		expect(await w.status({ cookie: login.cookie })).toBe(200);
+		refused(await w.op("credential", { do: "totp.begin" }, { cookie: login.cookie }));
+	} finally {
+		change.release();
+		checking.release();
+		await gate.release();
+	}
 });
 
 test("a future proof fails closed and failed password proofs share sign-in throttling", async () => {
