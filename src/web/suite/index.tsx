@@ -1444,7 +1444,13 @@ export function SuiteScreen() {
 					};
 					const outgoing = liveDrafts.current.get(source.id);
 					if (outgoing?.id === source.id) {
-						const sending = { ...cleanTitle(outgoing), sent };
+						const sending = {
+							...cleanTitle(outgoing),
+							body: recovered
+								? outgoing.body
+								: mergeBodies({ base: snapshot.body, mine: outgoing.body, theirs: cleaned.body }).merged,
+							sent,
+						};
 						liveDrafts.current.set(sending.id, sending);
 						if (draftRef.current?.id === sending.id) {
 							draftRef.current = sending;
@@ -1606,7 +1612,7 @@ export function SuiteScreen() {
 						tagChanges.remove.length > 0 ||
 						JSON.stringify({ body: normalizedBody, covers: normalized.covers }) !==
 							JSON.stringify({ body, covers: cleaned.covers });
-					const merged = carried({ sent: body, live: normalized.body, recorded: adopted, newId: stepIdFor(ref) });
+					const merged = carried({ sent: body, live: latest.body, recorded: adopted, newId: stepIdFor(ref) });
 					// A step with an expected result and no action yet is in no version. Its draft stays on the device,
 					// and is not sent again for it: `more` is only what a version can take.
 					unfinished = holdsUnfinishedStep(merged);
