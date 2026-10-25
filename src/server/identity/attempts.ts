@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { App } from "../kernel/app.ts";
-import { Busy, sql } from "../kernel/db.ts";
+import { Busy, sql, type WriteDb } from "../kernel/db.ts";
 import {
 	afterFailure,
 	blockLeft,
@@ -25,6 +25,8 @@ const Stored = z.discriminatedUnion("kind", [
 ]);
 const databaseKey = (key: string): string => createHash("sha256").update(key).digest("hex");
 const Q = {
+	retention: sql<{ now: number }>("DELETE FROM identity_limits WHERE expires_at <= $now"),
+	startRetention: sql<{ before: number }>("DELETE FROM identity_starts WHERE since <= $before"),
 	version: sql<readonly [], { version: number }>("SELECT nextval('identity_limit_version') AS version"),
 	entries: sql<{ keys: readonly string[] }, { key: string; entry: string; version: number }>(
 		"SELECT key,entry,version FROM identity_limits WHERE key = ANY($keys::text[])",
@@ -164,4 +166,9 @@ export function limiterOf(app: App): SharedLimiter {
 	};
 	limiters.set(app, limiter);
 	return limiter;
+}
+
+export async function sweepAttempts(db: WriteDb, now: number): Promise<void> {
+	await db.run(Q.retention, { now });
+	await db.run(Q.startRetention, { before: now - 60_000 });
 }

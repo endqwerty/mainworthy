@@ -1419,3 +1419,6 @@ export async function hasAdminGrant(db: ReadDb, actor: number): Promise<boolean>
 	const row = await db.get(Q.actorById, { id: actor });
 	return row !== null && row.disabled_at === null && (await toActor(db, row, null)).can.includes("admin");
 }
+
+export { sweepAttempts } from "./attempts.ts";
+export { sweepCeremonies } from "./ceremonies.ts";

@@ -3592,6 +3592,11 @@ describe("what a decision may change", () => {
 				),
 		);
 		expect(await recoverDisputes(h.app)).toBe(1);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT op FROM change_events WHERE project=1 AND seq=(SELECT seq FROM projects WHERE id=1)"),
+			),
+		).toEqual([{ op: "recover-disputes" }]);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1, pass: 0 } });
 		expect((await open("failure")).title).toStartWith("Disputed C-1");
 		expect(

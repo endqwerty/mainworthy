@@ -6,6 +6,9 @@ export const CHANGE_CHANNEL = "mainworthy_changes";
 const Touched = z.array(z.string());
 type StoredChange = { seq: number; op: string; touched: string };
 const Q = {
+	retention: sql<{ project: number; before: number }>(
+		"DELETE FROM change_events WHERE project = $project AND at <= $before",
+	),
 	record: sql<{ project: string; seq: number; op: string; touched: string; at: number }>(
 		`INSERT INTO change_events (project, seq, op, touched, at)
 		 SELECT id, $seq, $op, $touched, $at FROM projects WHERE key = $project
@@ -50,4 +53,9 @@ export async function changesSince(
 		actor: "",
 		touched: Touched.parse(JSON.parse(row.touched)),
 	}));
+}
+
+/** Event hints expire after a day; a cursor with missing history refreshes the full project. */
+export async function sweepChanges(db: WriteDb, project: number, now: number): Promise<void> {
+	await db.run(Q.retention, { project, before: now - 24 * 3_600_000 });
 }

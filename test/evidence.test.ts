@@ -2411,6 +2411,11 @@ describe("work the server does on its own", () => {
 		// ...the process dies here. Nothing is lost: the batch is staged, and the gate does not claim green.
 		expect((await gate("6666666a")).verdict).toBe("pending");
 		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT op FROM change_events WHERE project=1 AND seq=(SELECT seq FROM projects WHERE id=1)"),
+			),
+		).toEqual([{ op: "report" }]);
 		expect(await gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
 		expect(await recoverAccepted(h.app)).toBe(0);
 	});
@@ -2526,6 +2531,11 @@ describe("work the server does on its own", () => {
 		expect(await sweep(h.app, rule)).toBe(0); // still holds
 		h.advance(15 * 86_400_000);
 		expect(await sweep(h.app, rule)).toBe(1);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT op FROM change_events WHERE project=1 AND seq=(SELECT seq FROM projects WHERE id=1)"),
+			),
+		).toEqual([{ op: "sweep" }]);
 		expect((await queue()).counts.open).toBe(1);
 		expect(await gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
 		// The expired decision stays in the ledger, followed by the row that records that it ran out.
