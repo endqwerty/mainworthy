@@ -856,12 +856,13 @@ async function present(app: App, secret: string, address: string | null): Promis
  * The use is written only after the caller passed, when its stored time is more than a minute old. A cookie that is past
  * its idle time is refused however often it is sent: it cannot renew itself.
  */
-export async function admit(app: App, facts: Facts): Promise<Admission> {
+export async function admit(app: App, facts: Facts, proven?: () => void): Promise<Admission> {
 	if (facts.bearer !== null) {
 		const presented = await present(app, facts.bearer, facts.address);
 		if (presented.kind !== "standing") return presented;
 		const { token } = presented;
 		const hash = hashToken(facts.bearer);
+		proven?.();
 		await noteUse(app, "token", token.id, app.now(), facts.address, hash);
 		return {
 			kind: "admitted",
@@ -880,6 +881,7 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 		const hash = hashToken(facts.cookie);
 		const found = await findSession(app, hash);
 		if (found) {
+			proven?.();
 			await noteUse(app, "session", found.id, app.now(), facts.address, hash);
 			return {
 				kind: "admitted",
@@ -947,12 +949,13 @@ export type SignedIn = { cookie: string; expiresAt: number };
 export async function signInWithToken(
 	app: App,
 	secret: string,
-	about: { userAgent: string | null; address: string | null },
+	about: { userAgent: string | null; address: string | null; proven?: () => void },
 ): Promise<{ kind: "opening"; signedIn: Promise<SignedIn | null> } | { kind: "refused" } | Limited> {
 	const presented = await present(app, secret, about.address);
 	if (presented.kind !== "standing") return presented;
 	const { token } = presented;
 	const tokenHash = hashToken(secret);
+	about.proven?.();
 	// The hash binds this durable use to the token that was presented, even across an import.
 	await noteUse(app, "token", token.id, app.now(), about.address, tokenHash);
 	const cookie = newSessionSecret();
