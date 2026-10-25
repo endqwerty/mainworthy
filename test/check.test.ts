@@ -998,36 +998,75 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(readFileSync("Dockerfile", "utf8")).toContain("ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT");
 });
 
-/** The host in the app's database URL, when it is an alias only the internal database network gives the database. */
-function coolifyDatabaseHost(text: string): { host: string; internalAlias: boolean } {
+/** Where the app's database host name resolves in a Compose file: the networks that give the database that alias. */
+function coolifyDatabaseName(text: string) {
+	const attached = z
+		.union([
+			z.array(z.string()),
+			z.record(z.string(), z.object({ aliases: z.array(z.string()).optional() }).nullable()),
+		])
+		.optional();
 	const compose = z
 		.object({
 			services: z.record(
 				z.string(),
-				z.object({
-					environment: z.record(z.string(), z.string()).optional(),
-					networks: z
-						.union([z.array(z.string()), z.record(z.string(), z.object({ aliases: z.array(z.string()) }).nullable())])
-						.optional(),
-				}),
+				z.object({ environment: z.record(z.string(), z.string()).optional(), networks: attached }),
 			),
-			networks: z.record(z.string(), z.object({ internal: z.boolean().optional() }).nullable()),
+			networks: z.record(
+				z.string(),
+				z.object({ internal: z.boolean().optional(), enable_ipv6: z.boolean().optional() }).nullable(),
+			),
 		})
 		.parse(Bun.YAML.parse(text));
+	const names = (networks: z.infer<typeof attached>) =>
+		Array.isArray(networks) ? networks : Object.keys(networks ?? {});
 	const url = compose.services.mainworthy?.environment?.MAINWORTHY_DATABASE_URL ?? "";
 	const host = /@([^:/]+):/.exec(url)?.[1] ?? "";
-	const networks = compose.services.postgres?.networks;
-	const aliases = networks && !Array.isArray(networks) ? (networks.database?.aliases ?? []) : [];
-	return { host, internalAlias: compose.networks.database?.internal === true && aliases.includes(host) };
+	const database = compose.services.postgres?.networks;
+	const aliasedOn = Array.isArray(database)
+		? []
+		: Object.entries(database ?? {})
+				.filter(([, network]) => network?.aliases?.includes(host))
+				.map(([name]) => name);
+	return {
+		host,
+		aliasedOn,
+		internal: aliasedOn.every((name) => compose.networks[name]?.internal === true),
+		ipv6: aliasedOn.some((name) => compose.networks[name]?.enable_ipv6 === true),
+		appAttached: aliasedOn.every((name) => names(compose.services.mainworthy?.networks).includes(name)),
+		isServiceName: host in compose.services,
+	};
 }
 
 test("the app names its database by an alias only the internal database network knows", () => {
 	// Coolify attaches every service to its shared network under its service name, where its own database is also
 	// `postgres`: the app resolved that name to an address there and never reached its database (2026-10-25).
-	expect(coolifyDatabaseHost(readFileSync("compose.coolify.yaml", "utf8"))).toEqual({
+	const wanted = {
 		host: "mainworthy-database",
-		internalAlias: true,
-	});
+		aliasedOn: ["database"],
+		internal: true,
+		ipv6: false,
+		appAttached: true,
+		isServiceName: false,
+	};
+	const text = readFileSync("compose.coolify.yaml", "utf8");
+	expect(coolifyDatabaseName(text)).toEqual(wanted);
+	const swap = (from: string, to: string) => {
+		expect(text).toContain(from);
+		return coolifyDatabaseName(text.replace(from, to));
+	};
+	expect(swap("@mainworthy-database:", "@postgres:")).not.toEqual(wanted);
+	expect(swap("    networks: [default, database]\n", "    networks: [default]\n")).not.toEqual(wanted);
+	expect(
+		swap("  database:\n    internal: true\n", "  database:\n    internal: true\n    enable_ipv6: true\n"),
+	).not.toEqual(wanted);
+	expect(swap("    internal: true\n", "    internal: false\n")).not.toEqual(wanted);
+	expect(
+		swap(
+			"        aliases: [mainworthy-database]\n",
+			"        aliases: [mainworthy-database]\n      default:\n        aliases: [mainworthy-database]\n",
+		),
+	).not.toEqual(wanted);
 });
 
 test("every workflow pins every action to a full commit with a release version comment", () => {
