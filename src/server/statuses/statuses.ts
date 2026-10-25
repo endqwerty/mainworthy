@@ -12,6 +12,15 @@ import {
 import type { App } from "../kernel/app.ts";
 import { type Ctx, findProject, lockProject, makeCtx } from "../kernel/ctx.ts";
 import { json, sql, type WriteDb } from "../kernel/db.ts";
+import {
+	enqueueJob,
+	fenceJob,
+	type JobClaim,
+	kindJobsStopped,
+	runPeriodicJob,
+	stopKindJobs,
+	waitKindJobs,
+} from "../kernel/jobs.ts";
 import { gate, gatesOfCommits } from "../runs/runs.ts";
 import { githubStatusesPort } from "./github.ts";
 import { type StatusDraft, type StatusPort, StatusRateLimit } from "./port.ts";
@@ -158,14 +167,24 @@ async function queue(
 		watch_until: app.now() + 30 * 86_400_000,
 		error: null,
 	});
+	if (!known)
+		await enqueueJob(ctx.db, {
+			kind: "commit-statuses",
+			key: "periodic",
+			input: {},
+			actor: ctx.actor.id,
+			acceptedAt: ctx.now,
+			recurring: true,
+		});
 }
 
-async function refresh(app: App, db: WriteDb): Promise<void> {
+async function refresh(app: App, db: WriteDb, claim: JobClaim): Promise<void> {
 	const config = app.config.github;
 	if (!app.config.githubStatuses || !config || !app.config.publicUrl) return;
 	const hint = await findProject(db, config.project);
 	const project = hint ? await lockProject(db, hint.id) : null;
 	if (!project || project.key !== config.project || project.identity !== hint?.identity) return;
+	await fenceJob(db, claim, app.now());
 	const ctx = makeCtx(app, db, project, { id: 0, kind: "rule", name: "rule", can: [] }, true);
 	const rows = await db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() });
 	if (!rows.length) return;
@@ -192,30 +211,16 @@ async function refresh(app: App, db: WriteDb): Promise<void> {
 	}
 }
 
-const active = new WeakMap<App, Promise<number>>();
-const stopping = new WeakSet<App>();
-
 export function deliverCommitStatuses(app: App, port?: StatusPort): Promise<number> {
-	const running = active.get(app);
-	if (running !== undefined) return running;
-	if (stopping.has(app)) return Promise.resolve(0);
-	const work = deliver(app, port).finally(() => active.delete(app));
-	active.set(app, work);
-	return work;
+	return runPeriodicJob(app, "commit-statuses", (claim) => executeCommitStatuses(app, claim, port));
 }
+export const stopCommitStatuses = (app: App): void => stopKindJobs(app, "commit-statuses");
+export const waitCommitStatuses = (app: App): Promise<void> => waitKindJobs(app, "commit-statuses");
 
-export function stopCommitStatuses(app: App): void {
-	stopping.add(app);
-}
-
-export async function waitCommitStatuses(app: App): Promise<void> {
-	await active.get(app)?.catch(() => undefined);
-}
-
-async function deliver(app: App, supplied?: StatusPort): Promise<number> {
+export async function executeCommitStatuses(app: App, claim: JobClaim, supplied?: StatusPort): Promise<number> {
 	await app.database.write(async (db) =>
 		db.transaction(async () => {
-			if (!stopping.has(app)) await refresh(app, db);
+			await refresh(app, db, claim);
 		}),
 	);
 	let delivered = 0;
@@ -224,12 +229,14 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 			async (db) =>
 				await db.transaction(async () => {
 					const config = app.config.github;
-					if (stopping.has(app) || !app.config.githubStatuses || !config || !app.config.publicUrl) return null;
+					if (kindJobsStopped(app, "commit-statuses") || !app.config.githubStatuses || !config || !app.config.publicUrl)
+						return null;
 					const hint = await findProject(db, config.project);
 					const project = hint ? await lockProject(db, hint.id) : null;
 					if (!project || project.key !== config.project || project.identity !== hint?.identity) return null;
 					const now = app.now();
 					const delivery = await deliveryState(db);
+					await fenceJob(db, claim, app.now());
 					const posts = Posts.parse(json<unknown>(delivery.posts)).filter((at) => at > now - 3_600_000);
 					if (delivery.pause_until > now || posts.length >= 240 || posts.filter((at) => at > now - 60_000).length >= 20)
 						return null;
@@ -284,6 +291,7 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 						await lockProject(db, row.project);
 						await db.run(Q.finish, { nonce: row.nonce, sent: row.desired, next: nextAt });
 						const delivery = await deliveryState(db);
+						await fenceJob(db, claim, app.now());
 						if (delivery) await db.run(Q.saveDelivery, { ...delivery, failures: 0 });
 					}),
 			);
@@ -295,9 +303,10 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 				async (db) =>
 					await db.transaction(async () => {
 						await lockProject(db, row.project);
+						const delivery = await deliveryState(db);
+						await fenceJob(db, claim, app.now());
 						let next = app.now() + retryDelay(row.attempts + 1);
 						if (error instanceof StatusRateLimit) {
-							const delivery = await deliveryState(db);
 							const failures = Math.min(delivery.failures + 1, MAX_ATTEMPTS);
 							const headerDeadline = Math.min(
 								app.now() + MAX_HEADER_PAUSE,
@@ -319,6 +328,7 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 		await app.database.write(async (db) =>
 			db.transaction(async () => {
 				await lockProject(db, row.project);
+				await fenceJob(db, claim, app.now());
 				await db.run(Q.defer, {
 					project: row.project,
 					repository: row.repository,

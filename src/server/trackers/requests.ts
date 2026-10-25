@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { mayRun } from "../../core/kinds.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody } from "../../core/model.ts";
@@ -8,6 +9,7 @@ import type { App } from "../kernel/app.ts";
 import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { enqueueJob, fenceJob, type JobClaim, runKindJobs, stopKindJobs, waitKindJobs } from "../kernel/jobs.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
 import { TrackerError, type TrackerPort } from "./port.ts";
@@ -35,7 +37,7 @@ const Q = {
 	one: sql<{ project: number; id: string }, RequestRow>(
 		"SELECT * FROM tracker_requests WHERE project = $project AND id = $id",
 	),
-	next: sql<readonly [], RequestRow>("SELECT * FROM tracker_requests WHERE state = 'queued' ORDER BY at, id LIMIT 1"),
+	job: sql<{ id: string; nonce: string }, RequestRow>("SELECT * FROM tracker_requests WHERE id=$id AND nonce=$nonce"),
 	claim: sql<{ id: string; nonce: string }>(
 		"UPDATE tracker_requests SET state = 'sending' WHERE id = $id AND nonce = $nonce AND state = 'queued'",
 	),
@@ -112,77 +114,77 @@ export async function queueDefect(ctx: Ctx, input: TrackerInput): Promise<Tracke
 		at: ctx.now,
 	};
 	await ctx.db.run(Q.insert, request);
+	await enqueueJob(ctx.db, {
+		kind: "tracker-request",
+		key: request.nonce,
+		input: { id: request.id, nonce: request.nonce, project: request.project },
+		actor: ctx.actor.id,
+		acceptedAt: ctx.now,
+		effect: request.action === "create" ? "uncertain" : "repeatable",
+	});
 	return receipt(request);
 }
 
-const active = new WeakMap<App, Promise<number>>();
-const stopping = new WeakSet<App>();
-
+const TrackerJob = z.object({ id: z.string(), nonce: z.string(), project: z.number().int() });
 export function deliverTrackerRequests(app: App, port?: TrackerPort): Promise<number> {
-	const running = active.get(app);
-	if (running !== undefined) return running;
-	if (stopping.has(app)) return Promise.resolve(0);
-	const work = deliver(app, port).finally(() => active.delete(app));
-	active.set(app, work);
-	return work;
-}
-
-export function stopTrackerRequests(app: App): void {
-	stopping.add(app);
-}
-
-export async function waitTrackerRequests(app: App): Promise<void> {
-	await active.get(app)?.catch(() => undefined);
-}
-
-async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 	let delivered = 0;
-	for (let n = 0; n < 20; n++) {
-		const claimed = await app.database.write(async (db) =>
-			db.transaction(async () => {
-				if (stopping.has(app)) return null;
-				const hint = await db.get(Q.next);
-				if (hint) await lockProject(db, hint.project);
-				const next = await db.get(Q.next);
-				if (next && next.project !== hint?.project) return null;
-				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
-				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
-			}),
-		);
-		if (!claimed) break;
-		const { row, project } = claimed;
-		let issue: TrackerItem | null = null;
-		let error: string | null = null;
-		try {
-			const config = project
-				? configuredTrackers(app.config, project).find((tracker) => tracker.destination === row.repository)
-				: undefined;
-			if (!config)
-				throw new TrackerError("The configured tracker project or repository changed; the request was not sent.");
-			const port = supplied ?? config.port();
-			issue =
-				row.action === "create"
-					? await port.createDefect({ title: row.title, body: row.body })
-					: await port.getItem(row.item_key ?? "");
-		} catch (caught) {
-			error =
-				caught instanceof TrackerError
-					? caught.message
-					: "The tracker request failed; check the tracker before creating another issue.";
-		}
-		await app.database.write(async (db) =>
-			db.transaction(async () => {
-				await lockProject(db, row.project);
-				return await db.run(Q.finish, {
-					id: row.id,
-					nonce: row.nonce,
-					issue: issue ? JSON.stringify(issue) : null,
-					error,
-					state: issue ? "complete" : "failed",
-				});
-			}),
-		);
-		delivered++;
+	return runKindJobs(app, "tracker-request", async (claim, input) => {
+		if (await executeTrackerRequest(app, claim, input, port)) delivered++;
+	}).then(() => delivered);
+}
+export const stopTrackerRequests = (app: App): void => stopKindJobs(app, "tracker-request");
+export const waitTrackerRequests = (app: App): Promise<void> => waitKindJobs(app, "tracker-request");
+
+export async function executeTrackerRequest(
+	app: App,
+	claim: JobClaim,
+	input: unknown,
+	supplied?: TrackerPort,
+): Promise<boolean> {
+	const request = TrackerJob.parse(input);
+	const claimed = await app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, request.project);
+			await fenceJob(db, claim, app.now());
+			const row = await db.get(Q.job, { id: request.id, nonce: request.nonce });
+			if (!row || row.state !== "queued") return null;
+			await db.run(Q.claim, { id: row.id, nonce: row.nonce });
+			return { row, project: (await projectById(db, row.project))?.key };
+		}),
+	);
+	if (!claimed) return false;
+	const { row, project } = claimed;
+	let issue: TrackerItem | null = null;
+	let error: string | null = null;
+	try {
+		const config = project
+			? configuredTrackers(app.config, project).find((tracker) => tracker.destination === row.repository)
+			: undefined;
+		if (!config)
+			throw new TrackerError("The configured tracker project or repository changed; the request was not sent.");
+		const port = supplied ?? config.port();
+		issue =
+			row.action === "create"
+				? await port.createDefect({ title: row.title, body: row.body })
+				: await port.getItem(row.item_key ?? "");
+	} catch (caught) {
+		error =
+			caught instanceof TrackerError
+				? caught.message
+				: "The tracker request failed; check the tracker before creating another issue.";
 	}
-	return delivered;
+	await app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, row.project);
+			await fenceJob(db, claim, app.now());
+			await db.run(Q.finish, {
+				id: row.id,
+				nonce: row.nonce,
+				issue: issue ? JSON.stringify(issue) : null,
+				error,
+				state: issue ? "complete" : "failed",
+			});
+		}),
+	);
+	return true;
 }

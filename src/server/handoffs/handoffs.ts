@@ -7,6 +7,16 @@ import type { App, Config } from "../kernel/app.ts";
 import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
+import {
+	enqueueJob,
+	fenceJob,
+	type JobClaim,
+	jobById,
+	jobId,
+	runKindJobs,
+	stopKindJobs,
+	waitKindJobs,
+} from "../kernel/jobs.ts";
 
 /**
  * A hand-off sends one failure question to a coding agent: a JSON post, signed with the configured secret, to the
@@ -30,19 +40,14 @@ const Q = {
 	latest: sql<{ question: number }, HandoffRow>(
 		"SELECT * FROM handoffs WHERE question = $question ORDER BY at DESC, queue_order DESC LIMIT 1",
 	),
-	next: sql<readonly [], HandoffRow>("SELECT * FROM handoffs WHERE state = 'queued' ORDER BY at, id LIMIT 1"),
+	one: sql<{ id: string; nonce: string }, HandoffRow>("SELECT * FROM handoffs WHERE id=$id AND nonce=$nonce"),
 	claim: sql<{ id: string; nonce: string }>(
 		"UPDATE handoffs SET state = 'sending' WHERE id = $id AND nonce = $nonce AND state = 'queued'",
 	),
 	finish: sql<{ id: string; nonce: string; state: string; error: string | null }>(
 		"UPDATE handoffs SET state = $state, error = $error WHERE id = $id AND nonce = $nonce AND state = 'sending'",
 	),
-	interruptedProjects: sql<readonly [], { project: number }>(
-		"SELECT DISTINCT project FROM handoffs WHERE state = 'sending' ORDER BY project",
-	),
-	interrupted: sql<{ project: number; error: string }>(
-		"UPDATE handoffs SET state = 'failed', error = $error WHERE state = 'sending' AND project = $project",
-	),
+	interrupted: sql<readonly [], HandoffRow>("SELECT * FROM handoffs WHERE state='sending'"),
 };
 
 /** The failure evidence a hand-off reads; `decisions.ts` writes it when it raises a failure question. */
@@ -135,43 +140,40 @@ export async function queueHandoff(ctx: Ctx, input: HandoffInput): Promise<Hando
 		at: ctx.now,
 	};
 	await ctx.db.run(Q.insert, row);
-	const app = ctx.app;
-	ctx.db.afterCommit(() => void deliverHandoffs(app).catch(() => undefined));
+	await enqueueJob(ctx.db, {
+		kind: "handoff",
+		key: row.nonce,
+		input: { id: row.id, nonce: row.nonce, project: row.project },
+		actor: ctx.actor.id,
+		acceptedAt: ctx.now,
+		effect: "uncertain",
+	});
 	return receipt(row);
 }
 
-const active = new WeakMap<App, Promise<number>>();
-const stopping = new WeakSet<App>();
+const HandoffJob = z.object({ id: z.string(), nonce: z.string(), project: z.number().int() });
 
-/** Sends what is queued, one at a time. A second call while one runs joins it. */
 export function deliverHandoffs(app: App): Promise<number> {
-	const running = active.get(app);
-	if (running !== undefined) return running;
-	if (stopping.has(app)) return Promise.resolve(0);
-	const work = deliver(app).finally(() => active.delete(app));
-	active.set(app, work);
-	return work;
+	return runKindJobs(app, "handoff", (claim, input) => executeHandoff(app, claim, input)).then(async (n) => {
+		await recoverHandoffs(app);
+		return n;
+	});
 }
+export const stopHandoffs = (app: App): void => stopKindJobs(app, "handoff");
+export const waitHandoffs = (app: App): Promise<void> => waitKindJobs(app, "handoff");
 
-export function stopHandoffs(app: App): void {
-	stopping.add(app);
-}
-
-export async function waitHandoffs(app: App): Promise<void> {
-	await active.get(app)?.catch(() => undefined);
-}
-
-/**
- * At start, a hand-off the last process was sending is failed, not sent again: it may have arrived, and a second
- * would start a second agent on the same failure.
- */
+/** A live instance's send is never inferred interrupted merely because another instance starts. */
 export async function recoverHandoffs(app: App): Promise<void> {
-	for (const { project } of await app.database.read((db) => db.all(Q.interruptedProjects))) {
+	for (const row of await app.database.read((db) => db.all(Q.interrupted))) {
+		const job = await app.database.read((db) => jobById(db, jobId("handoff", row.nonce)));
+		if (job?.state !== "uncertain") continue;
 		await app.database.write((db) =>
 			db.transaction(async () => {
-				await lockProject(db, project);
-				await db.run(Q.interrupted, {
-					project,
+				await lockProject(db, row.project);
+				await db.run(Q.finish, {
+					id: row.id,
+					nonce: row.nonce,
+					state: "failed",
 					error:
 						"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
 				});
@@ -179,33 +181,27 @@ export async function recoverHandoffs(app: App): Promise<void> {
 		);
 	}
 }
-
-async function deliver(app: App): Promise<number> {
-	let delivered = 0;
-	for (let n = 0; n < 20; n++) {
-		const claimed = await app.database.write(async (db) =>
-			db.transaction(async () => {
-				if (stopping.has(app)) return null;
-				const hint = await db.get(Q.next);
-				if (hint) await lockProject(db, hint.project);
-				const next = await db.get(Q.next);
-				if (next && next.project !== hint?.project) return null;
-				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
-				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
-			}),
-		);
-		if (!claimed) break;
-		const { row, project } = claimed;
-		const error = await send(app.config, project, row);
-		await app.database.write(async (db) =>
-			db.transaction(async () => {
-				await lockProject(db, row.project);
-				return await db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error });
-			}),
-		);
-		delivered++;
-	}
-	return delivered;
+export async function executeHandoff(app: App, claim: JobClaim, input: unknown): Promise<void> {
+	const request = HandoffJob.parse(input);
+	const claimed = await app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, request.project);
+			await fenceJob(db, claim, app.now());
+			const row = await db.get(Q.one, { id: request.id, nonce: request.nonce });
+			if (!row || row.state !== "queued") return null;
+			await db.run(Q.claim, { id: row.id, nonce: row.nonce });
+			return { row, project: (await projectById(db, row.project))?.key };
+		}),
+	);
+	if (!claimed) return;
+	const error = await send(app.config, claimed.project, claimed.row);
+	await app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, request.project);
+			await fenceJob(db, claim, app.now());
+			await db.run(Q.finish, { id: request.id, nonce: request.nonce, state: error ? "failed" : "sent", error });
+		}),
+	);
 }
 
 /** Posts one hand-off and answers why it failed, or null when the endpoint took it. */

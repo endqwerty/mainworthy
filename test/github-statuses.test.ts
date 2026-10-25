@@ -220,8 +220,8 @@ test("busy commits coalesce decisions and withdrawals and overlapping jobs relea
 		return finish.promise;
 	});
 	const delivery = deliverCommitStatuses(fixture.app, fake.port);
-	expect(deliverCommitStatuses(fixture.app, fake.port)).toBe(delivery);
 	await entered.promise;
+	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	if (!request) throw new Error("expected a status post");
 	try {
 		const q = await question(fixture);
@@ -1207,21 +1207,33 @@ test("an interrupted sixteenth attempt stops once and a counted report with unch
 	}
 });
 
-test("a failed completion write stops status delivery without continuing on another lease", async () => {
+test("a failed status completion records a retry without posting again before backoff", async () => {
 	const fixture = await setup();
 	await report(fixture, "pass");
-	const fake = remote();
+	let posted = false;
+	let failed = false;
+	const fake = remote(() => {
+		posted = true;
+		return response();
+	});
 	const write = fixture.app.database.write.bind(fixture.app.database);
-	let scopes = 0;
 	const probe = spyOn(fixture.app.database, "write").mockImplementation(async (fn, options) => {
-		scopes++;
-		if (scopes === 3) throw new Error("completion connection lost");
-		return await write(fn, options);
+		if (posted && !failed) {
+			failed = true;
+			throw new Error("completion connection lost");
+		}
+		return write(fn, options);
 	});
 	try {
-		await expect(deliverCommitStatuses(fixture.app, fake.port)).rejects.toThrow("completion connection lost");
+		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(fake.requests).toHaveLength(1);
-		expect(scopes).toBe(3);
+		expect(
+			await fixture.app.database.read((db) =>
+				db.allDynamic("SELECT state,attempts FROM background_jobs WHERE kind='commit-statuses'"),
+			),
+		).toEqual([{ state: "ready", attempts: 1 }]);
+		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+		expect(fake.requests).toHaveLength(1);
 	} finally {
 		probe.mockRestore();
 	}

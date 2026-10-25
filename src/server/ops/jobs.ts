@@ -6,12 +6,16 @@ import { JobReply } from "../../core/replies.ts";
 import { recoverDisputes as reconcileDisputes, sweepExpired } from "../decisions/decisions.ts";
 import { expiredDecisions } from "../decisions/questions.ts";
 import { acceptedBatches, batchById } from "../evidence/evidence.ts";
+import { executeHandoff, recoverHandoffs } from "../handoffs/handoffs.ts";
 import { actorById, lockActors, ruleActorId } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { AcceptedRefusal } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runJob } from "../kernel/jobs.ts";
+import { executeCommitStatuses } from "../statuses/statuses.ts";
+import { executeTrackerRequest } from "../trackers/requests.ts";
 import { defineServiceOp } from "./registry.ts";
+import { executeTrackerPolls } from "./tracker-holds.ts";
 import { applyAccepted } from "./writes.ts";
 
 /**
@@ -129,8 +133,20 @@ export const jobOp = defineServiceOp({
 			(await runJob(
 				app,
 				owner,
-				async (claim) => {
+				async (claim, payload) => {
 					switch (claim.kind) {
+						case "commit-statuses":
+							await executeCommitStatuses(app, claim);
+							break;
+						case "tracker-polls":
+							await executeTrackerPolls(app, claim);
+							break;
+						case "handoff":
+							await executeHandoff(app, claim, payload);
+							break;
+						case "tracker-request":
+							await executeTrackerRequest(app, claim, payload);
+							break;
 						case "recover-reports":
 							await recoverAccepted(app, claim);
 							break;
@@ -148,6 +164,7 @@ export const jobOp = defineServiceOp({
 			))
 		)
 			ran++;
+		await recoverHandoffs(app);
 		return { ran };
 	},
 });
@@ -156,10 +173,17 @@ export async function enqueuePeriodicJobs(app: App): Promise<void> {
 	await app.database.write((db) =>
 		db.transaction(async () => {
 			const actor = await ruleActorId(db);
-			for (const kind of ["recover-reports", "recover-disputes", "expire-decisions"])
+			for (const kind of [
+				"recover-reports",
+				"recover-disputes",
+				"expire-decisions",
+				"commit-statuses",
+				"tracker-polls",
+			])
 				await enqueueJob(db, {
 					kind,
-					key: String(Math.floor(app.now() / 60_000)),
+					key: "periodic",
+					recurring: true,
 					input: {},
 					actor,
 					acceptedAt: app.now(),

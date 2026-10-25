@@ -25,6 +25,7 @@ export type JobClaim = Job & { state: "running"; owner: string; token: string; l
 // Longer than the 120-second transaction bound. The HTTP dispatcher will set its request deadline above this.
 export const JOB_LEASE_MS = 300_000;
 export const jobBackoff = (attempt: number): number => Math.min(60_000 * 2 ** (attempt - 1), 3_600_000);
+export const jobId = (kind: string, key: string): string => JSON.stringify([kind, key]);
 const Q = {
 	enqueue: sql<{
 		id: string;
@@ -35,13 +36,15 @@ const Q = {
 		effect: string;
 		max: number;
 		due: number;
+		recurring: boolean;
 	}>(`
  INSERT INTO background_jobs(id,kind,input,actor,accepted_at,effect,max_attempts,next_at)
- VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due) ON CONFLICT(id) DO NOTHING`),
+ VALUES($id,$kind,$input,$actor,$at,$effect,$max,$due) ON CONFLICT(id) DO UPDATE SET state='ready',attempts=0,next_at=excluded.next_at,actor=excluded.actor,accepted_at=excluded.accepted_at,started=false,error=NULL
+ WHERE $recurring AND background_jobs.state='succeeded'`),
 	one: sql<{ id: string }, Job>("SELECT * FROM background_jobs WHERE id=$id"),
-	next: sql<{ now: number; id: string | null }, Job>(`
+	next: sql<{ now: number; id: string | null; kind: string | null }, Job>(`
  SELECT * FROM background_jobs WHERE (state='ready' AND next_at <= $now OR state='running' AND lease_until <= $now)
- AND ($id::text IS NULL OR id=$id) ORDER BY next_at,accepted_at,id FOR UPDATE SKIP LOCKED LIMIT 1`),
+ AND ($id::text IS NULL OR id=$id) AND ($kind::text IS NULL OR kind=$kind) ORDER BY next_at,accepted_at,id FOR UPDATE SKIP LOCKED LIMIT 1`),
 	claim: sql<{ id: string; owner: string; token: string; until: number }, JobClaim>(`
  UPDATE background_jobs SET state='running',owner=$owner,token=$token,lease_until=$until,attempts=attempts+1,started=false
  WHERE id=$id RETURNING *`),
@@ -67,9 +70,10 @@ export async function enqueueJob(
 		effect?: Job["effect"];
 		maxAttempts?: number;
 		dueAt?: number;
+		recurring?: boolean;
 	},
 ): Promise<string> {
-	const id = JSON.stringify([job.kind, job.key]);
+	const id = jobId(job.kind, job.key);
 	await db.run(Q.enqueue, {
 		id,
 		kind: job.kind,
@@ -79,17 +83,23 @@ export async function enqueueJob(
 		effect: job.effect ?? "repeatable",
 		max: job.maxAttempts ?? 5,
 		due: job.dueAt ?? job.acceptedAt,
+		recurring: job.recurring ?? false,
 	});
 	return id;
 }
 export const jobById = (db: ReadDb, id: string): Promise<Job | null> => db.get(Q.one, { id });
 
 /** Takes only job locks. No actor or project lock may be taken on this transaction afterwards. */
-export async function claimJob(app: App, owner: string, id: string | null = null): Promise<JobClaim | null> {
+export async function claimJob(
+	app: App,
+	owner: string,
+	id: string | null = null,
+	kind: string | null = null,
+): Promise<JobClaim | null> {
 	return app.database.write((db) =>
 		db.transaction(async () => {
 			for (;;) {
-				const row = await db.get(Q.next, { now: app.now(), id });
+				const row = await db.get(Q.next, { now: app.now(), id, kind });
 				if (!row) return null;
 				if (
 					(row.state === "running" && row.effect === "uncertain" && row.started) ||
@@ -140,8 +150,14 @@ export async function finishJob(app: App, claim: JobClaim, error: boolean): Prom
 }
 export type JobHandler = (claim: JobClaim, input: JobInput) => Promise<void>;
 /** Both runners and the HTTP operation enter here. A duplicate dispatch of a live/completed job does nothing. */
-export async function runJob(app: App, owner: string, handler: JobHandler, id: string | null = null): Promise<boolean> {
-	const claim = await claimJob(app, owner, id);
+export async function runJob(
+	app: App,
+	owner: string,
+	handler: JobHandler,
+	id: string | null = null,
+	kind: string | null = null,
+): Promise<boolean> {
+	const claim = await claimJob(app, owner, id, kind);
 	if (!claim) return false;
 	try {
 		await app.database.write((db) =>
@@ -157,4 +173,49 @@ export async function runJob(app: App, owner: string, handler: JobHandler, id: s
 		await finishJob(app, claim, true);
 	}
 	return true;
+}
+
+const running = new WeakMap<App, Map<string, Set<Promise<number>>>>();
+const stopped = new WeakMap<App, Set<string>>();
+/** Local bookkeeping is only for shutdown. PostgreSQL, never this map, decides ownership. */
+export function runKindJobs(app: App, kind: string, handler: JobHandler): Promise<number> {
+	const kinds = running.get(app) ?? new Map<string, Set<Promise<number>>>();
+	running.set(app, kinds);
+	const pending = kinds.get(kind) ?? new Set<Promise<number>>();
+	kinds.set(kind, pending);
+	const work = (async () => {
+		let n = 0;
+		const owner = randomUUID();
+		while (!stopped.get(app)?.has(kind) && n < 20 && (await runJob(app, owner, handler, null, kind))) n++;
+		return n;
+	})();
+	pending.add(work);
+	void work.finally(() => pending.delete(work)).catch(() => undefined);
+	return work;
+}
+export const kindJobsStopped = (app: App, kind: string): boolean => stopped.get(app)?.has(kind) ?? false;
+export function stopKindJobs(app: App, kind: string): void {
+	const kinds = stopped.get(app) ?? new Set<string>();
+	kinds.add(kind);
+	stopped.set(app, kinds);
+}
+export async function waitKindJobs(app: App, kind: string): Promise<void> {
+	await Promise.allSettled(running.get(app)?.get(kind) ?? []);
+}
+
+export async function runPeriodicJob(
+	app: App,
+	kind: string,
+	handler: (claim: JobClaim) => Promise<number>,
+): Promise<number> {
+	const id = await app.database.write((db) =>
+		db.transaction(() =>
+			enqueueJob(db, { kind, key: "periodic", input: {}, actor: null, acceptedAt: app.now(), recurring: true }),
+		),
+	);
+	let result = 0;
+	await runKindJobs(app, kind, async (claim) => {
+		if (claim.id === id) result += await handler(claim);
+	});
+	return result;
 }

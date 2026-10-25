@@ -6,39 +6,34 @@ import { lockActors, ruleActor } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import { allProjects, lockProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
+import {
+	fenceJob,
+	type JobClaim,
+	kindJobsStopped,
+	runPeriodicJob,
+	stopKindJobs,
+	waitKindJobs,
+} from "../kernel/jobs.ts";
 import { configuredTrackers } from "../trackers/config.ts";
 import { finishTrackerPoll, trackerPoll, trackerPollError } from "../trackers/polls.ts";
 import { TrackerError, type TrackerPort, type TrackerReadFailure } from "../trackers/port.ts";
 
 const Defect = z.object({ is: z.literal("defect"), ref: z.string() });
-const active = new WeakMap<App, Promise<number>>();
-const stopping = new WeakSet<App>();
-
 export function pollDefectHolds(app: App, supplied?: TrackerPort): Promise<number> {
-	const running = active.get(app);
-	if (running !== undefined) return running;
-	if (stopping.has(app)) return Promise.resolve(0);
-	const work = poll(app, supplied).finally(() => active.delete(app));
-	active.set(app, work);
-	return work;
+	return runPeriodicJob(app, "tracker-polls", (claim) => executeTrackerPolls(app, claim, supplied));
 }
+export const stopTrackerPolls = (app: App): void => stopKindJobs(app, "tracker-polls");
+export const waitTrackerPolls = (app: App): Promise<void> => waitKindJobs(app, "tracker-polls");
 
-export function stopTrackerPolls(app: App): void {
-	stopping.add(app);
-}
-
-export async function waitTrackerPolls(app: App): Promise<void> {
-	await active.get(app)?.catch(() => undefined);
-}
-
-async function poll(app: App, supplied?: TrackerPort): Promise<number> {
+export async function executeTrackerPolls(app: App, claim: JobClaim, supplied?: TrackerPort): Promise<number> {
 	const failedIssues = new Map<string, Set<number>>();
 	const candidates = (
 		await Array.fromAsync(await app.database.read((db) => allProjects(db)), async (project) =>
 			app.database.write((db) =>
 				db.transaction(async () => {
 					await lockProject(db, project.id);
-					if (stopping.has(app)) return [];
+					await fenceJob(db, claim, app.now());
+					if (kindJobsStopped(app, "tracker-polls")) return [];
 					const candidates = [];
 					const trackers = configuredTrackers(app.config, project.key);
 					if (trackers.length === 0) return [];
@@ -70,7 +65,7 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 	for (const candidate of candidates) {
 		const { decision, ref, project, tracker, key, schedule, failures } = candidate;
 		const currentTracker = await app.database.read(async (db) => {
-			if (stopping.has(app)) return null;
+			if (kindJobsStopped(app, "tracker-polls")) return null;
 			const current = (await liveDefectDecisions(db, project.id)).find((row) => row.id === decision.id);
 			if (!current || current.answer !== decision.answer) return null;
 			return configuredTrackers(app.config, project.key).find((row) => row.destination === tracker.destination) ?? null;
@@ -94,7 +89,9 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 				await db.transaction(async () => {
 					await lockActors(db, [(await ruleActor(db)).id]);
 					const currentProject = await lockProject(db, project.id);
+					await fenceJob(db, claim, app.now());
 					if (!currentProject || currentProject.key !== project.key) return null;
+					await fenceJob(db, claim, app.now());
 					if (!configuredTrackers(app.config, project.key).some((row) => row.destination === tracker.destination))
 						return null;
 					const current = (await liveDefectDecisions(db, project.id)).find((row) => row.id === decision.id);

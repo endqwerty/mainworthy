@@ -8,8 +8,9 @@ import { type Instance, start } from "../src/app/start.ts";
 import type { HandoffReceipt } from "../src/core/handoff.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import { deliverHandoffs, type HandoffPayload, recoverHandoffs } from "../src/server/handoffs/handoffs.ts";
-import { defaultConfig } from "../src/server/kernel/app.ts";
+import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { JOB_LEASE_MS, runJob } from "../src/server/kernel/jobs.ts";
 import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -167,17 +168,22 @@ test("a failure the policy answered by rule, as this repository's CI policy does
 	});
 });
 
-test("a hand-off the server was sending when it stopped is failed at start, not sent again", async () => {
+test("an expired started hand-off is failed without sending again", async () => {
 	const { url, received } = agent();
 	const { h, q } = await failing(url);
 	await h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
-	await h.app.database.write(
-		async (db) =>
-			await db.transaction(async () => {
-				await db.run(sql<readonly SqlValue[], Record<string, unknown>>("UPDATE handoffs SET state = 'sending'"), []);
-			}),
+	await runJob(
+		h.app,
+		"crashed",
+		async () => {
+			await h.app.database.write((db) =>
+				db.transaction(() => db.run(sql<readonly []>("UPDATE handoffs SET state='sending'"))),
+			);
+			h.advance(JOB_LEASE_MS);
+		},
+		null,
+		"handoff",
 	);
-	await recoverHandoffs(h.app);
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(0);
 	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
@@ -186,6 +192,47 @@ test("a hand-off the server was sending when it stopped is failed at start, not 
 			"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
 	});
 });
+
+for (const expired of [false, true])
+	test(`another instance ${expired ? "recovers an expired" : "leaves a live"} hand-off claim`, async () => {
+		const entered = Promise.withResolvers<void>();
+		const response = Promise.withResolvers<void>();
+		let posts = 0;
+		endpoint = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch() {
+				posts++;
+				entered.resolve();
+				await response.promise;
+				return new Response(null, { status: 200 });
+			},
+		});
+		const { h, q } = await failing(`http://127.0.0.1:${endpoint.port}/hook`);
+		await h.call("handoff", { question: q, cmd: "handoff-two-instances" });
+		const peer = await openApp(h.app.config, { memory: true, now: h.app.now });
+		const first = deliverHandoffs(h.app);
+		try {
+			await entered.promise;
+			await recoverHandoffs(peer);
+			expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({ state: "sending" });
+			if (expired) h.advance(JOB_LEASE_MS);
+			await deliverHandoffs(peer);
+			expect(posts).toBe(1);
+			expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+				state: expired ? "failed" : "sending",
+			});
+			response.resolve();
+			await first;
+			expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+				state: expired ? "failed" : "sent",
+			});
+		} finally {
+			response.resolve();
+			await first;
+			await peer.close();
+		}
+	});
 
 test("only a failure question, on a configured project, by someone who may answer, is handed off", async () => {
 	const { url } = agent();
