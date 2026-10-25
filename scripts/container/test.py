@@ -60,10 +60,15 @@ assert app_config["environment"]["MAINWORTHY_LOCKDOWN"] == "1" and not app_confi
 )
 assert config["services"]["tailscale"]["environment"]["TS_USERSPACE"] == "true"
 assert config["networks"]["database"]["internal"] is True
+assert not config["networks"]["database"].get("enable_ipv6")
 assert set(config["services"]["postgres"]["networks"]) == {"database"}
+assert config["services"]["postgres"]["networks"]["database"]["aliases"] == [
+    "mainworthy-database"
+]
+assert "database" in app_config["networks"]
 assert not config["services"]["postgres"].get("ports")
 assert app_config["environment"]["MAINWORTHY_DATABASE_URL"].endswith(
-    "@postgres:5432/mainworthy"
+    "@mainworthy-database:5432/mainworthy"
 )
 assert any(
     mount["source"] == "mainworthy-data" and mount["target"] == "/data"
