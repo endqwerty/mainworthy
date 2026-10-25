@@ -80,3 +80,50 @@ for (const next of [true, false]) {
 		30_000,
 	);
 }
+
+for (const next of [true, false]) {
+	test.skipIf(!browserAvailable)(
+		`${next ? "next" : "previous"} folder shortcuts keep archived, tag and text filters`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{ op: "create", outline: "Match Alpha", folder: "Alpha", tags: ["keep", "smoke"] },
+					{ op: "create", outline: "Match Beta", folder: "Beta", tags: ["keep", "smoke"] },
+					{ op: "create", outline: "Match wrong tag", folder: "Beta", tags: ["keep"] },
+					{ op: "create", outline: "Other title", folder: "Beta", tags: ["keep", "smoke"] },
+					{ op: "create", outline: "Match active", folder: "Beta", tags: ["keep", "smoke"] },
+				],
+			});
+			await server.api("propose", { edits: [{ op: "state", cases: ["C-1", "C-2", "C-3", "C-4"], to: "archived" }] });
+			const from = next ? "Alpha" : "Beta";
+			const to = next ? "Beta" : "Alpha";
+			const h = await openPage(server, {
+				path: `/p/scratch/suite/c/${next ? 1 : 2}?folder=${from}&state=archived&tag=keep&tag=smoke&text=Match`,
+			});
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: `Match ${from}`, exact: true }).waitFor();
+				await page.keyboard.press(next ? "]" : "Alt+[");
+				await page.waitForURL((url) => url.searchParams.get("folder") === to);
+				const params = new URL(page.url()).searchParams;
+				expect(params.get("state")).toBe("archived");
+				expect(params.getAll("tag")).toEqual(["keep", "smoke"]);
+				expect(params.get("text")).toBe("Match");
+				await page.locator("#ltitle").filter({ hasText: "Archived" }).waitFor();
+				expect(
+					await eventually(
+						() => page.locator("#list .row .id").allTextContents(),
+						(refs) => refs.join() === (next ? "C-2" : "C-1"),
+					),
+				).toEqual([next ? "C-2" : "C-1"]);
+				await page.getByRole("button", { name: `Match ${to}`, exact: true }).waitFor();
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		20_000,
+	);
+}

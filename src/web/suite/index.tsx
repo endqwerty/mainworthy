@@ -2409,7 +2409,10 @@ export function SuiteScreen() {
 		folder: (direction) => {
 			const at = folders.findIndex((item) => item.path === route.folder);
 			const folder = folders[(at + direction + folders.length) % folders.length];
-			if (folder) navigate(routeUrl({ project, screen: "suite", folder: folder.path }));
+			if (!folder) return;
+			const params = new URLSearchParams(location.search);
+			params.set("folder", folder.path);
+			navigate(`${routeUrl({ project, screen: "suite" })}?${params}`);
 		},
 		newFolder: () => setCreatingFolder(true),
 		zoom: () => document.getElementById("app")?.classList.toggle("zoom"),
