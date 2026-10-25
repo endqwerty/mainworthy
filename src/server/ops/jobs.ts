@@ -213,10 +213,10 @@ export function jobOperation(ports: { trackerPort?: TrackerPort; statusPort?: St
 									);
 								break;
 							case "expire-sessions":
-								await sweepSessions(app);
+								await sweepSessions(app, claim);
 								break;
 							case "sign-in-retention":
-								await sweepSignInRecords(app);
+								await sweepSignInRecords(app, claim);
 								break;
 							case "assertion-indexes":
 								await rebuildIndexes(app, claim);

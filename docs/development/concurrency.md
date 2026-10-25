@@ -186,3 +186,7 @@ Report/dispute recovery and decision expiry record durable change hints before t
 Startup snapshots the reports already accepted and queues immediately due recovery jobs for those batch ids.
 The ordinary report job retains its grace period, so reports accepted after startup keep their normal request
 application path. A restart does not delay its recovered work behind the grace period of the dead request.
+
+Session expiry and sign-in-record retention take the identity lock and affected actor locks before fencing
+their job claim in the same transaction. They then read the clock again for expiry and retention writes.
+A worker that loses its lease during either lock wait cannot commit over its successor.
