@@ -20,6 +20,7 @@ import type { App } from "../kernel/app.ts";
 import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { AcceptedRefusal } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runJob } from "../kernel/jobs.ts";
+import { executeMail } from "../kernel/smtp.ts";
 import type { StatusPort } from "../statuses/port.ts";
 import { executeCommitStatuses } from "../statuses/statuses.ts";
 import type { TrackerPort } from "../trackers/port.ts";
@@ -162,6 +163,9 @@ export function jobOperation(ports: { trackerPort?: TrackerPort; statusPort?: St
 								break;
 							case "tracker-request":
 								await executeTrackerRequest(app, claim, payload, ports.trackerPort);
+								break;
+							case "mail":
+								await executeMail(app, claim, payload);
 								break;
 							case "blob-prune":
 								await pruneBlobs(app, claim);

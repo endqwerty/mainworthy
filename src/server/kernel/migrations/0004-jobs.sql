@@ -1,7 +1,9 @@
 CREATE TABLE background_jobs (
  id text PRIMARY KEY,
+ queue_order bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
  kind text NOT NULL,
  input text NOT NULL,
+ private_input boolean NOT NULL DEFAULT false,
  actor bigint,
  accepted_at bigint NOT NULL,
  effect text NOT NULL CHECK (effect IN ('repeatable','uncertain')),
@@ -16,7 +18,7 @@ CREATE TABLE background_jobs (
  error text,
  CHECK ((state = 'running') = (owner IS NOT NULL AND token IS NOT NULL AND lease_until IS NOT NULL))
 );
-CREATE INDEX background_jobs_due ON background_jobs(next_at,accepted_at,id) WHERE state IN ('ready','running');
+CREATE INDEX background_jobs_due ON background_jobs(next_at,accepted_at,queue_order) WHERE state IN ('ready','running');
 
 CREATE TABLE blob_objects (
  hash text PRIMARY KEY CHECK (hash ~ '^[a-f0-9]{64}$'),

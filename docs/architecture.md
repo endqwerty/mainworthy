@@ -134,7 +134,7 @@ across the two phases. [Project writes and authority](development/concurrency.md
 instance-write rules, and bounded waits that return retryable `busy`.
 
 A write outside a write scope does not compile. A write statement without an active transaction fails.
-`afterCommit` effects run after a confirmed commit; rolled-back savepoints discard their effects.
+`beforeCommit` writes run on the same transaction before COMMIT; mail uses this to keep enqueue atomic through synchronous callers. `afterCommit` effects run after a confirmed commit. Rolled-back savepoints discard both kinds of effect.
 A lost connection fails the operation and is never replaced mid-operation. Migrations use a separate
 advisory lock and dedicated connection. There are no reader threads, checkpoint workers or database-file locks.
 
@@ -148,11 +148,11 @@ wait for those jobs to finish. Accepted reports remain pending until their reque
 `FOR UPDATE SKIP LOCKED`, commits its owner and random claim token, then works. Handlers lock actors and projects
 before fencing their final writes on that token. A lost or expired claim cannot finish over its successor. Repeatable
 work retries with bounded backoff; a started hand-off or issue creation becomes uncertain after lease loss. The
-process maps track shutdown only. Recurring jobs retain the existing status-post allowances and tracker backoff.
+process maps track shutdown only. A separate one-connection bookkeeping pool keeps enqueue, claim and completion independent of domain writers; handlers still use ordinary domain transactions. Recurring jobs retain the existing status-post allowances and tracker backoff.
 
 The registry's `job` operation is available only on the separate job service. HTTP verifies the Google OIDC
 signature, issuer, audience, validity and service account email; the public service refuses that operation even for
-an admin. The local runner invokes the same registry operation. Cloud Tasks dispatch is step 3 of issue #821.
+an admin. The local runner invokes the same registry operation. Cloud Tasks dispatch is step 3 of issue #821. Outgoing mail is a repeatable job with at-least-once delivery and a stable Message-ID. Its reply buffers and socket deadline belong to each attempt. Private message input is removed when the job succeeds or exhausts retries, and SMTP credentials remain process configuration.
 
 Blob I/O is asynchronous. Every put, including reuse, commits a hash's last-put time before writing bytes, on a
 separate small metadata pool so it cannot wait behind its own domain transaction. A prune locks that row, checks its
