@@ -6,6 +6,7 @@ import { attachmentOp, attachOp } from "./attachments.ts";
 import { auditOp } from "./audit.ts";
 import { csvImportOp } from "./csv.ts";
 import { handoffOp, handoffStatusOp } from "./handoffs.ts";
+import { jobOp } from "./jobs.ts";
 import { credentialOp, invitationOp, sessionOp } from "./people.ts";
 import {
 	checkOp,
@@ -26,6 +27,7 @@ import { workOp } from "./work.ts";
 import { announceOp, changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
 const list: AnyOp[] = [
+	jobOp,
 	attachOp,
 	attachmentOp,
 	// produce evidence

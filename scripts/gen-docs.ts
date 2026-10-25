@@ -218,7 +218,10 @@ function operations(): string {
 							? "no capability: any person or agent that is signed in, for what is their own"
 							: needs(op.needs).map(code).join(" or "),
 					],
-					["Effect", op.effect === "write" ? "writes" : "reads"],
+					[
+						"Effect",
+						op.effect === "service" ? "runs jobs on the job service" : op.effect === "write" ? "writes" : "reads",
+					],
 					["Agent tool", op.mcp === null ? "no" : "yes"],
 				],
 			),

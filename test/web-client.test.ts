@@ -16,7 +16,9 @@ import {
 import { signOut } from "../src/web/lib/signin.ts";
 
 test("the client's list of instance operations is the registry's, so each is sent to the path that serves it", () => {
-	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
+	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance" && op.effect !== "service").map(
+		(op) => op.name,
+	);
 	expect<string[]>([...INSTANCE_OPS].sort()).toEqual(registered.sort());
 });
 

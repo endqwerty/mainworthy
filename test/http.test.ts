@@ -1673,7 +1673,9 @@ describe("a pipeline's token", () => {
 				if (["attach", "report", "gate", "change", "announce", "work"].includes(op.name)) continue;
 				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
-				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
+				expect(`${preset} ${op.name}: ${reply.status}`).toBe(
+					`${preset} ${op.name}: ${op.effect === "service" ? 401 : 403}`,
+				);
 			}
 			expect(await cases(instance, preset)).toEqual({ n: 0 });
 			// Its grant is on one project: the same token is nobody on another, and is told there is no such project.
@@ -2419,7 +2421,8 @@ describe("the surface", () => {
 		for (const op of OP_LIST) {
 			const path = op.scope === "project" ? `/api/p/scratch/${op.name}` : `/api/${op.name}`;
 			const reply = await post(instance, path, { definitely: "not valid input for anything", refs: 7 });
-			expect([200, 400]).toContain(reply.status); // reached the operation: it ran or refused the input; never 404
+			if (op.effect === "service") expect(reply.status).toBe(401);
+			else expect([200, 400]).toContain(reply.status);
 		}
 		expect((await post(instance, "/api/p/scratch/nope", {})).body).toMatchObject({
 			ok: false,
@@ -2472,7 +2475,7 @@ describe("the surface", () => {
 		}
 	});
 
-	test("every operation validates real replies against Zod and the served OpenAPI schema", async () => {
+	test("every public operation validates real replies against Zod and the served OpenAPI schema", async () => {
 		await using instance = await boot("local");
 		const sweep = await replySweep(instance, "scratch");
 		const { checked } = sweep;
@@ -2710,7 +2713,11 @@ describe("the surface", () => {
 		await sweepAttachmentReplies(checked);
 		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
 		await sweepQuarantineReplies(checked);
-		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
+		expect([...sweep.seen].sort()).toEqual(
+			OP_LIST.filter((op) => op.effect !== "service")
+				.map((op) => op.name)
+				.sort(),
+		);
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
 	}, 60_000);
 
@@ -2999,7 +3006,7 @@ describe("the surface", () => {
 			await empty.checked("find", { in: area });
 		await empty.checked("get", { refs: [] }, {}, "invalid");
 		await empty.checked("inbox");
-		for (const op of OP_LIST) await checked(op.name, [], {}, "invalid");
+		for (const op of OP_LIST) await checked(op.name, [], {}, op.effect === "service" ? "unauthenticated" : "invalid");
 		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
 		await sweepCsvImportReplies(checked, "SWEEP-CSV-2");
@@ -3011,7 +3018,11 @@ describe("the surface", () => {
 		await sweepQuarantineReplies(checked);
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
 		expect(total).toBeGreaterThanOrEqual(236);
-		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
+		expect([...sweep.seen].sort()).toEqual(
+			OP_LIST.filter((op) => op.effect !== "service")
+				.map((op) => op.name)
+				.sort(),
+		);
 		console.log(
 			`reply sweep: ${total} real HTTP replies; ${sweep.counts.error + empty.counts.error} errors; Zod and Ajv`,
 		);

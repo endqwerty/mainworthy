@@ -842,7 +842,10 @@ export const AuditReply = z.strictObject({
 		.optional(),
 });
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
+export const JobReply = z.object({ ran: z.number().int().nonnegative() });
+
 export const REPLIES = {
+	job: JobReply,
 	attach: Attachment,
 	attachment: AttachmentReply,
 	audit: AuditReply,

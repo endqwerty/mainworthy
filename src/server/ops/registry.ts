@@ -92,8 +92,26 @@ export type InstanceCtx<D extends ReadDb = WriteDb> = {
 	context: string | null;
 };
 
+export type ServiceOp<I, O> = Base<I, O> & {
+	scope: "instance";
+	effect: "service";
+	run: (app: App, input: I) => Promise<O>;
+};
+export const defineServiceOp = <I, O>(op: ServiceOp<I, O>): ServiceOp<I, O> => op;
+
+/** Trusted in-process callers and authenticated service HTTP requests share this execution path. */
+export async function invokeService<I, O>(app: App, op: ServiceOp<I, O>, input: unknown): Promise<Reply> {
+	const parsed = op.input.safeParse(input);
+	if (!parsed.success) return fail("invalid", "invalid job request");
+	try {
+		return { ok: true, result: await op.run(app, parsed.data), seq: null };
+	} catch (error) {
+		return failure(op.name, error);
+	}
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: the registry holds operations of every input and output type; each is typed where it is declared.
-export type AnyOp = ProjectOp<any, any> | InstanceOp<any, any>;
+export type AnyOp = ProjectOp<any, any> | InstanceOp<any, any> | ServiceOp<any, any>;
 
 export const defineOp = <I, O>(op: ProjectOp<I, O>): ProjectOp<I, O> => op;
 export const defineInstanceOp = <I, O>(op: InstanceOp<I, O>): InstanceOp<I, O> => op;
@@ -246,6 +264,7 @@ async function executeInSnapshot(
 ): Promise<Reply> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
+	if (op.effect === "service") return fail("forbidden", "this operation is only available to the job service");
 	// An operation of the instance has one address. Named under a project it is refused, whichever project and
 	// whether or not it exists: answered there, it would look as if it were about that project, and a client
 	// written against the wrong address would work until the day the two differ.
@@ -520,6 +539,8 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, 
 
 /** Runs writes with actor and project transaction locks, and reads in repeatable snapshots. */
 export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	if (ops[call.op]?.effect === "service")
+		return fail("forbidden", "this operation is only available to the job service");
 	const misplaced = misplacedTime(ops[call.op], call);
 	if (misplaced) return misplaced;
 	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
