@@ -2,8 +2,8 @@
 import { join } from "node:path";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
-import { trackedBlobs } from "./blob-objects.ts";
-import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
+import { enrollBlobs, trackedBlobs } from "./blob-objects.ts";
+import { type BlobStore, diskBlobHashes, diskBlobs, memoryBlobs } from "./blobs.ts";
 import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
 import { Database, type WriteDb } from "./db.ts";
 import type { JobService } from "./job-auth.ts";
@@ -135,6 +135,7 @@ export async function openApp(config: Config, options: { memory?: boolean; now?:
 	const database = await Database.open({ url: config.databaseUrl });
 	try {
 		await migrate(database);
+		if (!options.memory) await enrollBlobs(database, await diskBlobHashes(config.dataDir), (options.now ?? Date.now)());
 	} catch (error) {
 		await database.close();
 		throw error;

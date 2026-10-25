@@ -31,6 +31,7 @@ const A = "a".repeat(40),
 	B = "b".repeat(40);
 
 test("the same revision preserves edits; a new revision swaps grants and drains only its retired demo", async () => {
+	const settings = { env: { MAINWORTHY_JOB_RUNNER: "0" } };
 	await withInstance(async ({ instance, client }) => {
 		const { app } = instance;
 		app.config.commit = A;
@@ -106,7 +107,7 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 			)[0],
 		).toEqual({ n: 0 });
 		expect((await client.call("find", { text: "A foreground write" })).items).toHaveLength(1);
-	});
+	}, settings);
 }, 30_000);
 
 test("interrupted swap/seed resumes its marked revision, duplicate actors do not swap twice, and drain resumes", async () => {

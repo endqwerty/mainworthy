@@ -5,6 +5,8 @@ import { Database, LOCK_WAIT_MS, type ReadDb, sql, type WriteDb } from "./db.ts"
 // Twice the measured transaction bound. An upload may not retain an uncommitted attachment beyond that bound.
 export const BLOB_GRACE_MS = 2 * LOCK_WAIT_MS;
 const Q = {
+	enroll: sql<{ hashes: string[]; at: number }>(`INSERT INTO blob_objects(hash,put_at)
+ SELECT unnest($hashes::text[]),$at ORDER BY 1 ON CONFLICT(hash) DO NOTHING`),
 	put: sql<{ hash: string; at: number }>(`INSERT INTO blob_objects(hash,put_at) VALUES($hash,$at)
  ON CONFLICT(hash) DO UPDATE SET put_at=GREATEST(blob_objects.put_at,excluded.put_at)`),
 	candidates: sql<{ before: number }, { hash: string }>(
@@ -23,6 +25,12 @@ export const lockBlob = (db: WriteDb, hash: string): Promise<{ hash: string; put
 export const checkedBlob = (db: WriteDb, hash: string, now: number): Promise<unknown> =>
 	db.run(Q.checked, { hash, now });
 export const forgetBlob = (db: WriteDb, hash: string): Promise<unknown> => db.run(Q.remove, { hash });
+
+/** Startup gives untracked files a full grace period, without renewing previously enrolled objects. */
+export async function enrollBlobs(database: Database, hashes: string[], at: number): Promise<void> {
+	if (hashes.length === 0) return;
+	await database.write((db) => db.transaction(() => db.run(Q.enroll, { hashes, at })));
+}
 
 /** A put commits its age before touching bytes, including when it reuses an existing object. */
 export function trackedBlobs(

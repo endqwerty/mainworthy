@@ -12,6 +12,16 @@ export type BlobStore = {
 };
 const validHash = (hash: string) => /^[a-f0-9]{64}$/.test(hash);
 const missing = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ENOENT";
+export async function diskBlobHashes(dataDir: string): Promise<string[]> {
+	try {
+		return (await readdir(join(dataDir, "blobs"), { withFileTypes: true }))
+			.filter((entry) => entry.isFile() && validHash(entry.name))
+			.map((entry) => entry.name);
+	} catch (error) {
+		if (missing(error)) return [];
+		throw error;
+	}
+}
 export function diskBlobs(dataDir: string): BlobStore {
 	const directory = join(dataDir, "blobs");
 	const get = async (hash: string): Promise<Uint8Array | null> => {
