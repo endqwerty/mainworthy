@@ -1069,6 +1069,16 @@ test("the app names its database by an alias only the internal database network 
 	).not.toEqual(wanted);
 });
 
+test("a test's own git repositories never sign their commits", () => {
+	// This Mac signs commits through 1Password, so a test commit that signs waits on a prompt nobody approves
+	// (2026-10-24). Every test that commits passes commit.gpgsign=false to git.
+	const committing = [...new Glob("{test,src}/**/*.test.ts").scanSync(".")].filter((file) =>
+		/\(\s*(?:\w+,\s*)?"commit",\s*"-/.test(readFileSync(file, "utf8")),
+	);
+	expect(committing.length).toBeGreaterThan(3);
+	expect(committing.filter((file) => !readFileSync(file, "utf8").includes("commit.gpgsign=false"))).toEqual([]);
+});
+
 test("every workflow pins every action to a full commit with a release version comment", () => {
 	const job = z.object({
 		uses: z.string().optional(),

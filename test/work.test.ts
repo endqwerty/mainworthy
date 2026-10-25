@@ -585,7 +585,9 @@ test("the check's time is read from its report and judged against the spread bet
 async function repository(): Promise<string> {
 	const repo = directory();
 	const git = (...args: string[]) =>
-		run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: repo });
+		run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+			cwd: repo,
+		});
 	await git("init", "-q", "-b", "main");
 	writeFileSync(join(repo, "a.txt"), "one\n");
 	await git("add", ".");
@@ -781,7 +783,10 @@ async function clonePair(): Promise<{
 	const origin = directory();
 	const clone = directory();
 	const git = async (cwd: string, ...args: string[]): Promise<string> => {
-		const done = await run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd });
+		const done = await run(
+			["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args],
+			{ cwd },
+		);
 		if (done.status !== 0) throw new Error(`git ${args.join(" ")}: ${done.err}`);
 		return done.out.trim();
 	};
