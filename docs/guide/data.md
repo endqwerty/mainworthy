@@ -14,7 +14,7 @@ creates upgrade copies, runs reader or checkpoint threads, or locks a local data
 A copied app volume alone is not a database backup. Secure and back up both PostgreSQL and local attachments.
 
 Startup installs the PostgreSQL baseline under a migration advisory lock, then recovers pending work.
-During startup, `/healthz` answers HTTP 200 with `ok: false` and `state: "upgrading"`.
+During startup, `/healthz` answers HTTP 503 with `ok: false` and `state: "upgrading"`.
 Other requests receive HTTP 503 with `Retry-After: 5` until ready. Readiness requires `ok: true`.
 
 The PostgreSQL conversion starts with an empty database. Existing SQLite records do not move automatically into PostgreSQL.

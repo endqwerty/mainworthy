@@ -25,7 +25,12 @@ export const healthCommand: AdapterCommand = {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
 			const body: unknown = await response.json().catch(() => null);
 			upgrading = UpgradingHealth.safeParse(body).success;
-			if (response.ok && typeof body === "object" && body !== null && "ok" in body && (body.ok === true || upgrading)) {
+			if (
+				typeof body === "object" &&
+				body !== null &&
+				"ok" in body &&
+				((response.ok && body.ok === true) || upgrading)
+			) {
 				const api = ApiHealth.safeParse(body);
 				const progress = UpgradingHealth.safeParse(body);
 				apiVersion = api.success ? api.data.apiVersion : progress.success ? progress.data.apiVersion : null;
