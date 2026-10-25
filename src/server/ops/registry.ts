@@ -383,8 +383,8 @@ async function executeInSnapshot(
 			}
 			const ctx = makeCtx(app, db, project, actor, true, call.at);
 			if (call.reference) ctx.reference = call.reference;
-			const publish = () => {
-				app.publish({
+			const record = async () => {
+				await app.recordChange(db, {
 					project: found.key,
 					seq: ctx.seq,
 					op: op.name,
@@ -407,10 +407,10 @@ async function executeInSnapshot(
 							bound = true;
 						}
 						await stampSeq(ctx);
+						await record();
 						await db.commit();
 						if (typeof step.value === "object")
 							accepted = { ok: true, result: present(step.value.pending), seq: ctx.seq };
-						publish();
 						await nextTick();
 						await db.begin();
 						await lockCallActors(db, actor, op.name, input);
@@ -441,8 +441,8 @@ async function executeInSnapshot(
 			if (cmd && bound) await finishCommand(ctx, { id: cmd, outcome: result });
 			else if (cmd) await recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
 			await stampSeq(ctx);
+			await record();
 			await db.commit();
-			publish();
 			return { ok: true, result: present(result), seq: ctx.seq };
 		} catch (error) {
 			if (error instanceof AcceptedRefusal) {

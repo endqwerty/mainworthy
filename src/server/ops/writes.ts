@@ -281,7 +281,7 @@ export async function* processBatchSteps(
 			actor: ctx.actor.name,
 			touched: [...ctx.touched],
 		};
-		ctx.db.afterCommit(() => ctx.app.publish(event));
+		await ctx.app.recordChange(ctx.db, event);
 		throw new AcceptedRefusal();
 	}
 	const target = await mustTarget(ctx.db, batch.target);

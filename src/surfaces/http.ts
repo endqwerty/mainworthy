@@ -8,6 +8,7 @@ import {
 	callerProjectCapabilities,
 	credentialSummary,
 	type Facts,
+	resolveCaller,
 	type Session,
 	type SignedIn,
 	signInWithToken,
@@ -15,13 +16,14 @@ import {
 	TOKEN_MAX,
 } from "../server/identity/identity.ts";
 import { headerAddress } from "../server/kernel/address.ts";
-import type { App, ChangeEvent, Config } from "../server/kernel/app.ts";
+import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
 import { isBusy } from "../server/kernel/db.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invoke, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
+import { changeStream } from "./events.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { type Relay, uiSurface } from "./ui.ts";
@@ -679,62 +681,11 @@ async function events(
 			403,
 		);
 	}
-	const encoder = new TextEncoder();
-	let unsubscribe = (): void => {};
-	let beat: ReturnType<typeof setInterval> | undefined;
-	let close = (): void => {};
-	const cleanup = () => {
-		unsubscribe();
-		clearInterval(beat);
-		req.signal.removeEventListener("abort", close);
-		closing.removeEventListener("abort", close);
-	};
-	const stream = new ReadableStream<Uint8Array>({
-		start(controller) {
-			close = () => {
-				cleanup();
-				try {
-					controller.close();
-				} catch {}
-			};
-			const send = (text: string) => {
-				try {
-					controller.enqueue(encoder.encode(text));
-				} catch {
-					cleanup();
-				}
-			};
-			send("retry: 2000\n\n");
-			// Who may read is asked again before anything is sent, not only when the stream opens: a token that was
-			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
-			const stillAllowed = async (): Promise<boolean> => {
-				try {
-					if ((await mayRead(app, session, project)) === "yes") return true;
-				} catch {
-					console.error("[mainworthy] change stream authorization failed");
-				}
-				close();
-				return false;
-			};
-			unsubscribe = app.subscribe((event: ChangeEvent) => {
-				if (event.project === project)
-					void stillAllowed().then((allowed) => {
-						if (allowed) send(`data: ${JSON.stringify(event)}\n\n`);
-					});
-			});
-			beat = setInterval(() => {
-				void stillAllowed().then((allowed) => {
-					if (allowed) send(": keep-alive\n\n");
-				});
-			}, 20_000);
-			req.signal.addEventListener("abort", close, { once: true });
-			closing.addEventListener("abort", close, { once: true });
-			if (req.signal.aborted || closing.aborted) close();
-		},
-		cancel: cleanup,
-	});
-	return new Response(stream, {
-		headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
+	return changeStream(app, req, project, closing, async (db, id) => {
+		const actor = session.reference
+			? (await resolveCaller(app, db, session.reference(), id))?.actor
+			: await session.actor(id);
+		return actor?.can.includes("read") === true;
 	});
 }
 

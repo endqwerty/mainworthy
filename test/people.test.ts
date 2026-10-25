@@ -11,6 +11,7 @@ import { PersonalTokenCreated, PersonalTokenRow } from "../src/core/people.ts";
 import { bootstrap } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { runArchive } from "../src/server/ops/archives.ts";
 import {
 	authenticator,
 	bearer,
@@ -27,6 +28,7 @@ import {
 	PUBLIC,
 	type Sent,
 	said,
+	scratch,
 	sha256,
 	signIn,
 	T0,
@@ -573,7 +575,7 @@ test("TOTP secret replies are not recorded, archives exclude them, and import cl
 	expect(await w.rows("SELECT id FROM credentials")).toEqual([]);
 });
 
-test("TOTP delays legacy password NFC rehash until the second step succeeds", async () => {
+test("TOTP upgrades a verified legacy password before issuing a pending proof with no password hashes", async () => {
 	const w = await world();
 	const typed = "cafe\u0301 password for TOTP";
 	const cookie = await joined(w, "totp-nfc", typed);
@@ -585,9 +587,15 @@ test("TOTP delays legacy password NFC rehash until the second step succeeds", as
 	);
 	const entered = await w.post<SecondStep>("/api/login", { name: "totp-nfc", password: typed });
 	expect(must(entered).signedIn).toBe(false);
-	expect(
-		(await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'"))[0]?.data === oldHash,
-	).toBe(true);
+	const pending = JSON.stringify(await w.rows("SELECT payload FROM identity_ceremonies WHERE kind = 'totp'"));
+	expect(pending).not.toContain("$argon2");
+	expect(pending).not.toContain(oldHash);
+	expect(pending).not.toContain("totp-nfc");
+	const upgraded =
+		(await w.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'"))[0]?.data ?? "";
+	expect(upgraded).not.toBe(oldHash);
+	expect(pending).not.toContain(upgraded);
+	expect(await Bun.password.verify(typed.normalize("NFC"), upgraded)).toBe(true);
 	const signed = await w.post(
 		"/api/login",
 		{ challenge: must(entered).secondFactor.challenge, code: appCode(enrolled.secret, w.clock.now()) },
@@ -1451,8 +1459,11 @@ describe("a name and a password", () => {
 				bearer(personal.token),
 			);
 			await proposalQueued;
-			expect(await w.status(bearer(personal.token))).toBe(200);
+			const statusQueued = waitingAtGate(w.instance, 1);
+			const status = w.status(bearer(personal.token));
+			await statusQueued;
 			await gate.release();
+			expect(await status).toBe(401);
 			expect((await accepting).status).toBe(200);
 			expect(said(await proposal)).toBe("401 unauthenticated");
 			expect(await w.rows("SELECT id FROM cases")).toEqual([]);
@@ -1829,13 +1840,18 @@ describe("an upgrade and an import", () => {
 		expect(recovered.status).toBe(200);
 		const before = { actor: (await credentials(w))[0]?.actor, credential: (await credentials(w))[0]?.id };
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
+		const path = `${scratch()}/instance.jsonl`;
+		await Bun.write(path, archive);
 		const gate = holdGate(w.instance);
 		try {
 			let waiting = waitingAtGate(w.instance, 1);
-			const importing = fetch(`${w.instance.url}/api/import`, {
-				method: "POST",
-				headers: { cookie: recovered.cookie },
-				body: archive,
+			const importing = runArchive(w.instance.app, {
+				op: "import",
+				path,
+				now: w.clock.now(),
+				mode: w.instance.app.config.mode,
+				owner: w.instance.app.config.owner,
+				ownerToken: w.instance.app.config.ownerToken,
 			});
 			await waiting;
 			// Behind the import: the owner the archive brings has the actor id the owner had, and is given a
@@ -1855,7 +1871,7 @@ describe("an upgrade and an import", () => {
 			const signingIn = signIn(w, OWNER, FIRST);
 			await waiting;
 			await gate.release();
-			expect((await importing).status).toBe(200);
+			expect((await importing).ok).toBe(true);
 			await taken;
 			const refused = await signingIn;
 			expect(`${refused.status} ${refused.setCookies.length} ${refused.text}`).toBe(`401 0 ${REFUSED}`);
@@ -2338,4 +2354,70 @@ describe("a person's own command-line token", () => {
 		).toBe("200");
 		expect(said(await w.op("credential", { do: "token.revoke", id: 1 }))).toBe("400 invalid");
 	});
+});
+
+test("TOTP enrolment and password second steps cross Apps and the pending password is only a digest", async () => {
+	const first = await world();
+	const cookie = await joined(first, "shared-totp", FIRST);
+	const second = await world({ dataDir: first.dataDir, clock: first.clock });
+	const setup = await first.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
+	expect(
+		(
+			await second.op(
+				"credential",
+				{ do: "totp.confirm", challenge: setup.challenge, code: appCode(setup.secret, first.clock.now()) },
+				{ cookie },
+			)
+		).status,
+	).toBe(200);
+	first.clock.advance(30_000);
+	const step = await secondStep(first, "shared-totp");
+	const password = (await first.rows<{ data: string }>("SELECT data FROM credentials WHERE kind = 'password'"))[0]
+		?.data;
+	expect(password).toBeDefined();
+	const payloads = await second.rows<{ payload: string }>(
+		"SELECT payload FROM identity_ceremonies WHERE kind = 'totp'",
+	);
+	expect(JSON.stringify(payloads)).not.toContain(password ?? "missing");
+	expect(JSON.stringify(payloads)).toContain(sha256(password ?? "missing"));
+	const proof = { challenge: step.challenge, code: appCode(setup.secret, first.clock.now()) };
+	const answers = await Promise.all([first, second].map((w) => w.post("/api/login", proof, { cookie: step.cookie })));
+	expect(answers.map((answer) => answer.status).sort()).toEqual([200, 401]);
+});
+
+test("forgetting an actor leaves no name in pending TOTP enrolment or sign-in proofs", async () => {
+	const w = await world();
+	const name = "erase-pending-totp";
+	const cookie = await joined(w, name, FIRST);
+	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
+	expect(
+		(
+			await w.op(
+				"credential",
+				{ do: "totp.confirm", challenge: setup.challenge, code: appCode(setup.secret, w.clock.now()) },
+				{ cookie },
+			)
+		).status,
+	).toBe(200);
+	w.clock.advance(30_000);
+	const pending = await secondStep(w, name);
+	await w.ok("admin", { do: "actor.forget", name });
+	const stored = JSON.stringify(await w.rows("SELECT payload FROM identity_ceremonies WHERE kind = 'totp'"));
+	expect(stored).not.toContain(name);
+	expect(stored).not.toContain("$argon2");
+	expect(
+		(
+			await w.post(
+				"/api/login",
+				{ challenge: pending.challenge, code: appCode(setup.secret, w.clock.now()) },
+				{ cookie: pending.cookie },
+			)
+		).status,
+	).toBe(401);
+	const other = await joined(w, "erase-pending-enrol", FIRST);
+	await w.ok("credential", { do: "totp.begin" }, { cookie: other });
+	await w.ok("admin", { do: "actor.forget", name: "erase-pending-enrol" });
+	expect(JSON.stringify(await w.rows("SELECT payload FROM identity_ceremonies WHERE kind = 'totp'"))).not.toContain(
+		"erase-pending-enrol",
+	);
 });

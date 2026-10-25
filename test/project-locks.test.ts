@@ -658,7 +658,7 @@ for (const revoked of ["token", "session", "grant"] as const) {
 			if (signed.kind !== "opening") throw new Error("no token sign-in");
 			const session = await signed.signedIn;
 			if (!session) throw new Error("session refused");
-			reference = { via: "cookie", hash: hashToken(session.cookie), activity: 0, idleMs: h.app.config.sessionIdleMs };
+			reference = { via: "cookie", hash: hashToken(session.cookie), idleMs: h.app.config.sessionIdleMs };
 			sessionId = (await findSession(h.app, reference.hash))?.id ?? 0;
 		}
 		const beforeCommit = barrier();
@@ -765,7 +765,7 @@ for (const revoked of ["token", "session", "grant", "imported", "forgotten"] as 
 			if (signed.kind !== "opening") throw new Error("sign-in refused");
 			const session = await signed.signedIn;
 			if (!session) throw new Error("no session");
-			reference = { via: "cookie", hash: hashToken(session.cookie), activity: 0, idleMs: h.app.config.sessionIdleMs };
+			reference = { via: "cookie", hash: hashToken(session.cookie), idleMs: h.app.config.sessionIdleMs };
 			sessionId = (await findSession(h.app, reference.hash))?.id ?? 0;
 		}
 		const crashed = defineOp({
@@ -1166,8 +1166,7 @@ test("a last-use note cannot write an address onto a token whose id was reused",
 		project: 0,
 		label: "old",
 	});
-	const { noteUse, flushUses } = await import("../src/server/identity/uses.ts");
-	noteUse(h.app, "token", token.id, h.app.now(), "192.0.2.10", hashToken(token.secret));
+	const { noteUse } = await import("../src/server/identity/uses.ts");
 	await h.app.database.write((db) =>
 		db.transaction(() =>
 			db.run(sql<{ id: number; hash: string }>("UPDATE tokens SET hash = $hash WHERE id = $id"), {
@@ -1176,7 +1175,7 @@ test("a last-use note cannot write an address onto a token whose id was reused",
 			}),
 		),
 	);
-	await flushUses(h.app);
+	await noteUse(h.app, "token", token.id, h.app.now(), "192.0.2.10", hashToken(token.secret));
 	expect(
 		await h.app.database.read((db) =>
 			db.allDynamic("SELECT last_used_addr,last_used_at FROM tokens WHERE id = $1", [token.id]),
@@ -1566,75 +1565,84 @@ import { issueTotp, newTotpSecret, secretHash, totpCode } from "../src/server/id
 import { authenticator } from "./people-support.ts";
 
 for (const method of ["password", "totp"] as const) {
-	test(`${method} sign-in retries when a name resolves to an unlocked actor inside commit`, async () => {
-		h = await harness();
-		const person = await h.actor("signer", "human", []);
-		const password = "correct horse battery staple";
-		const hash = await hashPassword(password, { memoryCost: 1024, timeCost: 1 });
-		h.app.config.passwordCost = { memoryCost: 1024, timeCost: 1 };
-		const secret = newTotpSecret();
-		const factor = await h.app.database.write((db) =>
-			db.transaction(async () => {
-				await insertPassword(db, { actor: person.id, hash, at: h.app.now() });
-				return await insertTotp(db, {
-					actor: person.id,
-					data: JSON.stringify({ secret, lastStep: -1, recovery: [] }),
-					at: h.app.now(),
-				});
-			}),
-		);
-		const ceremony = "totp-browser";
-		const challenge = issueTotp(h.app, {
-			kind: "sign-in",
-			name: person.name,
-			password: hash,
-			rehashed: null,
-			factor,
-			context: CONTEXT.browser(secretHash(ceremony)),
-		});
-		// Password sign-in must reach its password branch rather than start a second-factor ceremony.
-		if (method === "password")
-			await h.app.database.write((db) =>
+	test(
+		method === "password"
+			? "password sign-in retries when a name resolves to an unlocked actor inside commit"
+			: "TOTP sign-in refuses credentials moved away from its bound actor inside commit",
+		async () => {
+			h = await harness();
+			const person = await h.actor("signer", "human", []);
+			const password = "correct horse battery staple";
+			const hash = await hashPassword(password, { memoryCost: 1024, timeCost: 1 });
+			h.app.config.passwordCost = { memoryCost: 1024, timeCost: 1 };
+			const secret = newTotpSecret();
+			const factor = await h.app.database.write((db) =>
 				db.transaction(async () => {
-					await db.run(sql<{ id: number }>("DELETE FROM credentials WHERE id = $id"), { id: factor });
-				}),
-			);
-		const paused = pauseNextBegin();
-		const pending =
-			method === "password"
-				? signInWithPassword(h.app, { name: person.name, password }, { userAgent: null, address: null })
-				: signInWithTotp(
-						h.app,
-						{ challenge: challenge.challenge, ceremony, code: totpCode(secret, Math.floor(h.app.now() / 30_000)) },
-						{ userAgent: null, address: null },
-					);
-		const outcome = pending.then(
-			(value) => ({ value, error: null }),
-			(error: unknown) => ({ value: null, error }),
-		);
-		try {
-			await paused.reached;
-			// An instance restore can replace the actor behind a name while preserving credential data.
-			await h.app.database.write((db) =>
-				db.transaction(async () => {
-					await lockActors(db, [h.owner.id, person.id], true);
-					await db.run(sql<{ id: number }>("UPDATE actors SET name = 'former-signer' WHERE id = $id"), {
-						id: person.id,
-					});
-					await db.run(sql<{ id: number }>("UPDATE actors SET name = 'signer' WHERE id = $id"), { id: h.owner.id });
-					await db.run(sql<{ from: number; to: number }>("UPDATE credentials SET actor = $to WHERE actor = $from"), {
-						from: person.id,
-						to: h.owner.id,
+					await insertPassword(db, { actor: person.id, hash, at: h.app.now() });
+					return await insertTotp(db, {
+						actor: person.id,
+						data: JSON.stringify({ secret, lastStep: -1, recovery: [] }),
+						at: h.app.now(),
 					});
 				}),
 			);
-		} finally {
-			paused.release();
-			paused.restore();
-		}
-		expect((await outcome).error).toBeInstanceOf(Busy);
-		expect(await h.app.database.read((db) => db.allDynamic("SELECT id FROM sessions"))).toEqual([]);
-	});
+			const ceremony = "totp-browser";
+			const challenge = await issueTotp(h.app, {
+				kind: "sign-in",
+				actor: person.id,
+				password: hash,
+				factor,
+				context: CONTEXT.browser(secretHash(ceremony)),
+			});
+			// Password sign-in must reach its password branch rather than start a second-factor ceremony.
+			if (method === "password")
+				await h.app.database.write((db) =>
+					db.transaction(async () => {
+						await db.run(sql<{ id: number }>("DELETE FROM credentials WHERE id = $id"), { id: factor });
+					}),
+				);
+			const paused = pauseNextBegin();
+			const pending =
+				method === "password"
+					? signInWithPassword(h.app, { name: person.name, password }, { userAgent: null, address: null })
+					: signInWithTotp(
+							h.app,
+							{ challenge: challenge.challenge, ceremony, code: totpCode(secret, Math.floor(h.app.now() / 30_000)) },
+							{ userAgent: null, address: null },
+						);
+			const outcome = pending.then(
+				(value) => ({ value, error: null }),
+				(error: unknown) => ({ value: null, error }),
+			);
+			try {
+				await paused.reached;
+				// An instance restore can replace the actor behind a name while preserving credential data.
+				await h.app.database.write((db) =>
+					db.transaction(async () => {
+						await lockActors(db, [h.owner.id, person.id], true);
+						await db.run(sql<{ id: number }>("UPDATE actors SET name = 'former-signer' WHERE id = $id"), {
+							id: person.id,
+						});
+						await db.run(sql<{ id: number }>("UPDATE actors SET name = 'signer' WHERE id = $id"), { id: h.owner.id });
+						await db.run(sql<{ from: number; to: number }>("UPDATE credentials SET actor = $to WHERE actor = $from"), {
+							from: person.id,
+							to: h.owner.id,
+						});
+					}),
+				);
+			} finally {
+				paused.release();
+				paused.restore();
+			}
+			const result = await outcome;
+			if (method === "password") expect(result.error).toBeInstanceOf(Busy);
+			else {
+				expect(result.error).toBeNull();
+				expect(result.value).toEqual({ ok: false, why: "changed-meanwhile" });
+			}
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT id FROM sessions"))).toEqual([]);
+		},
+	);
 }
 
 test("passkey sign-in retries when the credential resolves to an unlocked actor inside commit", async () => {
@@ -1666,7 +1674,7 @@ test("passkey sign-in retries when the credential resolves to an unlocked actor 
 	if (!accepted.ok) throw new Error("passkey invitation refused");
 	const person = await h.app.database.read((db) => actorByName(db, "signer", 0));
 	if (!person) throw new Error("no signer");
-	const begun = passkeySignInOptions(h.app, null);
+	const begun = await passkeySignInOptions(h.app, null);
 	if (!begun || !("options" in begun)) throw new Error("passkey sign-in unavailable");
 	const paused = pauseNextBegin();
 	const pending = signInWithPasskey(
@@ -2222,7 +2230,7 @@ for (const method of ["password", "legacy password", "totp", "passkey", "oidc"] 
 					{ userAgent: null, address: null },
 				);
 				if (!joined.ok) throw new Error("registration refused");
-				const begun = passkeySignInOptions(h.app, null);
+				const begun = await passkeySignInOptions(h.app, null);
 				if (!begun || !("options" in begun)) throw new Error("sign-in unavailable");
 				signIn = () =>
 					signInWithPasskey(
@@ -2274,11 +2282,10 @@ for (const method of ["password", "legacy password", "totp", "passkey", "oidc"] 
 						),
 					);
 					const ceremony = "sign-in-browser";
-					const challenge = issueTotp(h.app, {
+					const challenge = await issueTotp(h.app, {
 						kind: "sign-in",
-						name: signer.name,
+						actor: signer.id,
 						password: hash,
-						rehashed: null,
 						factor,
 						context: CONTEXT.browser(secretHash(ceremony)),
 					});

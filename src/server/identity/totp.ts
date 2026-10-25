@@ -6,6 +6,8 @@ import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import qrcode from "qrcode-generator";
 import { z } from "zod";
 import type { App } from "../kernel/app.ts";
+import type { ReadDb, WriteDb } from "../kernel/db.ts";
+import { Ceremonies, ceremonyWrite } from "./ceremonies.ts";
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const encode = (bytes: Uint8Array): string => {
@@ -97,41 +99,54 @@ export function provisioning(secret: string, account: string) {
 	return { secret, uri, qr: { size: size + 8, path: path.join("") } };
 }
 
-type Pending =
-	| { kind: "enrol"; actor: number; name: string; context: string; secret: string }
-	| { kind: "sign-in"; name: string; password: string; rehashed: string | null; factor: number; context: string };
-const pending = new WeakMap<App, Map<string, { value: Pending; expiresAt: number }>>();
+const Pending = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("enrol"),
+		actor: z.number().int(),
+		context: z.string(),
+		secret: z.string(),
+	}),
+	z.object({
+		kind: z.literal("sign-in"),
+		actor: z.number().int(),
+		password: z.string().regex(/^[0-9a-f]{64}$/),
+		factor: z.number().int(),
+		context: z.string(),
+	}),
+]);
+type Pending = z.infer<typeof Pending>;
+type PendingInput =
+	| Extract<Pending, { kind: "enrol" }>
+	| (Omit<Extract<Pending, { kind: "sign-in" }>, "password"> & { password: string });
+const Payload = z.object({ value: Pending, deadline: z.number() });
+const pending = new Ceremonies("totp", (value) => Payload.parse(value));
 export const TOTP_PENDING_MS = 5 * 60_000;
-export function issueTotp(app: App, value: Pending): { challenge: string; expiresAt: number } {
-	let map = pending.get(app);
-	if (!map) {
-		map = new Map();
-		pending.set(app, map);
-	}
-	for (const [key, held] of map) if (app.now() >= held.expiresAt) map.delete(key);
-	while (map.size >= 10_000) {
-		const oldest = map.keys().next().value;
-		if (oldest === undefined) break;
-		map.delete(oldest);
-	}
+export async function issueTotp(
+	app: App,
+	value: PendingInput,
+	db?: WriteDb,
+): Promise<{ challenge: string; expiresAt: number }> {
 	const challenge = Buffer.from(randomBytes(32)).toString("base64url");
 	const expiresAt = app.now() + TOTP_PENDING_MS;
-	map.set(secretHash(challenge), { value, expiresAt });
+	const stored = value.kind === "sign-in" ? { ...value, password: secretHash(value.password) } : value;
+	await ceremonyWrite(app, db, (lease) =>
+		pending.put(lease, secretHash(challenge), { value: stored, deadline: expiresAt }, value.context, app.now()),
+	);
 	return { challenge, expiresAt };
 }
-export function findTotp<K extends Pending["kind"]>(
+export async function findTotp<K extends Pending["kind"]>(
 	app: App,
 	challenge: string,
 	kind: K,
-): Extract<Pending, { kind: K }> | null {
-	const held = pending.get(app)?.get(secretHash(challenge));
-	return held && held.expiresAt > app.now() && isKind(held.value, kind) ? held.value : null;
+	db?: ReadDb,
+): Promise<Extract<Pending, { kind: K }> | null> {
+	const held = db
+		? await pending.get(db, secretHash(challenge), app.now())
+		: await app.database.admissionRead((read) => pending.get(read, secretHash(challenge), app.now()));
+	return held && isKind(held.value, kind) ? held.value : null;
 }
-const isKind = <K extends Pending["kind"]>(value: Pending, kind: K): value is Extract<Pending, { kind: K }> =>
+const isKind = <K extends Pending["kind"]>(value: PendingInput, kind: K): value is Extract<Pending, { kind: K }> =>
 	value.kind === kind;
-export const spendTotp = (app: App, challenge: string): void => {
-	pending.get(app)?.delete(secretHash(challenge));
-};
-export const clearTotp = (app: App): void => {
-	pending.delete(app);
-};
+export async function spendTotp(app: App, challenge: string, db: WriteDb): Promise<boolean> {
+	return await pending.take(db, secretHash(challenge), app.now());
+}

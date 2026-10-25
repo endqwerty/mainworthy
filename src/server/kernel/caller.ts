@@ -7,7 +7,6 @@ export const CallerReference = z.discriminatedUnion("via", [
 	z.object({
 		via: z.literal("cookie"),
 		hash,
-		activity: z.number().finite(),
 		idleMs: z.number().nonnegative().finite(),
 	}),
 	z.object({ via: z.literal("local"), owner: z.string() }),

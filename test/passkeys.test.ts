@@ -1062,3 +1062,25 @@ describe("a ceremony belongs to where it began", () => {
 		expect(lines).toEqual(["[mainworthy] sign-in refused: signature"]);
 	});
 });
+
+test("passkey registration and sign-in can finish on another App and racing answers open one session", async () => {
+	const first = await world();
+	const cookie = await joined(first, "robin", PASSWORD);
+	const second = await world({ dataDir: first.dataDir, clock: first.clock });
+	const options = await first.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
+	const device = authenticator();
+	expect(
+		(
+			await second.op(
+				"credential",
+				{ do: "passkey.add", passkey: device.register(options), label: "shared" },
+				{ cookie },
+			)
+		).status,
+	).toBe(200);
+	const before = await sessionCount(first);
+	const proof = device.assert(await challenge(first));
+	const answers = await Promise.all([withPasskey(first, proof), withPasskey(second, proof)]);
+	expect(answers.map((answer) => answer.status).sort()).toEqual([200, 401]);
+	expect(await sessionCount(second)).toBe(before + 1);
+});

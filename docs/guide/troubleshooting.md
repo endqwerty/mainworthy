@@ -66,7 +66,7 @@ operation is sent after a failed health probe.
 
 ### `limited: too many attempts`
 
-Anonymous passkey/provider starts have a separate allowance of 300 per public IPv4 address or IPv6 /56 per minute.
+Anonymous passkey/provider starts have a separate allowance of 300 per public IPv4 address or IPv6 /56 per minute. Each ceremony kind also has a shared capacity of 10,000 pending records. When full, new starts return `503 busy`; existing proofs still finish, and capacity returns as records expire or are consumed.
 If that source allowance is exhausted, wait for `Retry-After` before starting again. These waits do not escalate or extend on retry.
 They never cause password refusals, and valid answers to pending ceremonies still finish. A working invitation still opens its form.
 

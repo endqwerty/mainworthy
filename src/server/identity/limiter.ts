@@ -3,9 +3,9 @@
 // requests, tokens or rows; only the helpers at the end, which make the keys, know what a token looks like and
 // which addresses are counted. How an address is written is `kernel/address.ts`'s to say.
 //
-// It is in memory because a failed attempt must cost nothing: one that queued at the write gate would let a
-// flood of wrong guesses stall every writer. One process serves an instance, so memory is the whole state, and a
-// restart forgets it.
+// `attempts.ts` persists these transitions in PostgreSQL. The bounded in-memory implementation below is the
+// reference model used by the rule tests; the anonymous-start limiter also supplies each App's cheap ceiling.
+// Shared accounting uses its own small pool, so failed attempts do not occupy domain writer connections.
 //
 // The rule, for each key on its own:
 //   - A failure counts for 15 minutes. Four failures inside 15 minutes cost nothing.
@@ -16,8 +16,8 @@
 //     later. Until then it keeps the length of its block, so the next failure doubles it again.
 //   - A success clears the keys the caller names, at once.
 //
-// How a surface uses it, here `admit` with a bearer token, where `limiter` is the one its `App` holds. A session
-// cookie is never counted, so it never comes this way.
+// The pure model of bearer admission follows. The real surface awaits the shared accounting in `attempts.ts`.
+// A session cookie is never counted, so it never comes this way.
 //
 //   const address = addressKey(facts.address); // null: unknown, or a proxy's own address, which is never counted
 //   const prefix = prefixKey(secret); // null: a secret with nothing to tell it from another
@@ -95,7 +95,7 @@ export type Limiter = {
 };
 
 /** What is remembered about one key. `lastFailure` is the time of its newest failure. */
-type Entry =
+export type Entry =
 	/** Fewer than five failures inside the window: `recent` is their times, oldest first. */
 	| { readonly kind: "counting"; readonly lastFailure: number; readonly recent: readonly number[] }
 	/** The fifth failure or a later one: a block of `blockMs`, from `lastFailure` to `until`. */
@@ -144,10 +144,11 @@ export function createStartLimiter(): (key: string | null, now: number) => Limit
 }
 
 /** The moment a key is forgotten when no further failure comes. */
-const forgottenAt = (entry: Entry): number => (entry.kind === "counting" ? entry.lastFailure : entry.until) + WINDOW_MS;
+export const forgottenAt = (entry: Entry): number =>
+	(entry.kind === "counting" ? entry.lastFailure : entry.until) + WINDOW_MS;
 
 /** The milliseconds a key is still blocked for; 0 when it is free. */
-function blockLeft(entry: Entry | undefined, now: number): number {
+export function blockLeft(entry: Entry | undefined, now: number): number {
 	if (entry?.kind !== "tripped") return 0;
 	// A block holds only between the failure that set it and its end. With the upper limit alone, a clock that
 	// was set back an hour would turn a block of one second into a block of an hour.
@@ -155,7 +156,7 @@ function blockLeft(entry: Entry | undefined, now: number): number {
 }
 
 /** What a key is after one more failure. `entry` is undefined for a key that is unknown or forgotten. */
-function afterFailure(entry: Entry | undefined, now: number, blockVersion: number): Entry {
+export function afterFailure(entry: Entry | undefined, now: number, blockVersion: number): Entry {
 	if (entry?.kind === "tripped") {
 		const blockMs = Math.min(entry.blockMs * 2, LONGEST_BLOCK_MS);
 		return { kind: "tripped", lastFailure: now, blockMs, until: now + blockMs, blockVersion };
@@ -166,8 +167,7 @@ function afterFailure(entry: Entry | undefined, now: number, blockVersion: numbe
 }
 
 /**
- * A limiter with nothing in it. The caller holds it: there is one for each `App`, so two instances in one
- * process, as in the tests, do not count each other's failures.
+ * A bounded in-memory reference implementation. Authentication uses the shared implementation in `attempts.ts`.
  *
  * `maxKeys` bounds the memory: when a failure brings a new key and the limiter is full, the keys whose time has
  * passed are dropped, and if it is still full the key with the oldest last failure is dropped.

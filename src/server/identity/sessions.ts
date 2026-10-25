@@ -15,7 +15,6 @@ import { OpError } from "../kernel/errors.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
 import { lockActors, lockIdentity, lockSessionHash, lockTokenHash } from "./locks.ts";
-import { lastAddress, notedUse } from "./uses.ts";
 
 /**
  * Why a session ended. `ended`: somebody ended it, from a list or by taking away what it rested on (a password
@@ -212,20 +211,12 @@ export async function dateSessionProof(app: App, db: WriteDb, input: ProofContex
 
 /**
  * Whether a session is inside both lifetimes at `now`: before its absolute end, and used less than the idle
- * lifetime ago. "Used" is the newer of the row and what is noted in memory and not yet written (`uses.ts`). A
+ * lifetime ago. The stored use may lag real activity by at most a minute (`uses.ts`). A
  * use dated after `now` (the clock was set back) counts as a use now, not as time still to come.
  */
-function inLifetime(
-	app: App,
-	session: Times,
-	now: number,
-	options: { activity?: number; idleMs?: number } = {},
-): boolean {
+function inLifetime(app: App, session: Times, now: number, options: { idleMs?: number } = {}): boolean {
 	if (now >= session.expires_at) return false;
-	const seen = Math.min(
-		now,
-		Math.max(session.last_seen_at, notedUse(app, "session", session.id) ?? 0, options.activity ?? 0),
-	);
+	const seen = Math.min(now, session.last_seen_at);
 	return now - seen < (options.idleMs ?? app.config.sessionIdleMs);
 }
 
@@ -304,7 +295,7 @@ export async function openSessionOnCredential(
 export async function findSession(
 	app: App,
 	hash: string,
-	options: { db?: ReadDb; activity?: number; idleMs?: number } = {},
+	options: { db?: ReadDb; idleMs?: number } = {},
 ): Promise<{
 	id: number;
 	actor: { id: number; org: number; kind: ActorKind; name: string; disabled_at: null };
@@ -381,8 +372,7 @@ export async function endSessionById(db: WriteDb, id: number, at: number): Promi
 
 /**
  * The sessions of an actor that are alive now, as `findSession` judges one: what each rests on still works and
- * it is inside both lifetimes. When and from where each was last used is the newer of the row and what is noted
- * and not yet written.
+ * it is inside both lifetimes. Last-use fields come from the shared row.
  */
 export async function listSessions(app: App, db: ReadDb, actor: number) {
 	const now = app.now();
@@ -395,14 +385,14 @@ export async function listSessions(app: App, db: ReadDb, actor: number) {
 			userAgent: row.user_agent,
 			createdAt: row.created_at,
 			createdFrom: row.created_addr,
-			lastUsedAt: Math.min(now, Math.max(row.last_seen_at, notedUse(app, "session", row.id) ?? 0)),
-			lastUsedFrom: lastAddress(app, "session", row.id, { at: row.last_seen_at, addr: row.last_seen_addr }),
+			lastUsedAt: Math.min(now, row.last_seen_at),
+			lastUsedFrom: row.last_seen_addr,
 			expiresAt: row.expires_at,
 		}));
 }
 
 /**
- * What the minute timer does to sessions. Under the gate, after what was noted has been written.
+ * What the periodic job does to sessions, under their actors' locks.
  *
  * It records the end of a token in its sessions, including revocations from earlier builds, at the token's
  * original end. It also ends every session that is past its idle or its absolute lifetime. Until then such a
@@ -437,7 +427,7 @@ export async function sweepSessions(app: App): Promise<{ expired: number; delete
 					if (row.why === "expired") expired += ended;
 				}
 				for (const row of overdue) {
-					// The row says idle, and a use noted since the last flush says otherwise.
+					// Recheck the stored use after waiting for the actor lock.
 					if (inLifetime(app, row, now)) continue;
 					expired += (await db.run(Q.endById, { id: row.id, at: now, why: "expired" })).changes;
 				}
