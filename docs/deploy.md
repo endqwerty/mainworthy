@@ -1156,9 +1156,10 @@ Nothing schedules these backups yet. Keep tested backups outside the server.
 ### Health while upgrading
 
 `mainworthy serve` opens its startup listener before applying the PostgreSQL baseline and recovery.
-`GET /healthz` returns HTTP 200 with `ok: false, state: "upgrading"` until startup finishes.
-`mainworthy health` exits 0 during that state; it proves liveness, not readiness. Other routes answer 503
-with `Retry-After: 5`. Startup failure closes the listener.
+`GET /healthz` returns HTTP 503 with `ok: false, state: "upgrading"` and `Retry-After: 5` until startup
+finishes, so a probe that reads only the status, such as Cloud Run's startup probe, does not call the revision
+ready. `mainworthy health` reads the body and exits 0 during that state; it proves liveness, not readiness.
+Other routes answer 503 with `Retry-After: 5`. Startup failure closes the listener.
 
 The deployer must require `ok: true` and its pinned commit before declaring success. Do not replace a
 candidate while its startup is still in progress. The external deployment scheduler and its deadline are

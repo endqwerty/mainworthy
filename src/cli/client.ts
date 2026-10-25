@@ -204,19 +204,21 @@ export class Client {
 				`the server answered ${response.status} to /healthz${origin ? `; redirect to origin ${origin}; set --url to ${origin}` : "; a redirect without a valid Location header"}`,
 			);
 		}
-		if (!response.ok)
-			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${displayUrl(this.url)}`);
 		let body: unknown;
 		try {
 			body = await response.json();
 		} catch {
+			body = null;
+		}
+		if (UpgradingHealth.safeParse(body).success)
+			throw new CliError("connection", `the server at ${displayUrl(this.url)} is upgrading; try again shortly`);
+		if (!response.ok)
+			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${displayUrl(this.url)}`);
+		if (body === null)
 			throw new CliError(
 				"connection",
 				`the server answered ${response.status} to /healthz with invalid JSON at ${displayUrl(this.url)}`,
 			);
-		}
-		if (UpgradingHealth.safeParse(body).success)
-			throw new CliError("connection", `the server at ${displayUrl(this.url)} is upgrading; try again shortly`);
 		const health = ApiHealth.safeParse(body);
 		if (!health.success || health.data.apiVersion !== API_VERSION)
 			throw new CliError(

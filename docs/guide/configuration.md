@@ -215,7 +215,7 @@ healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 
 `mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
 
-During startup, health answers HTTP 200 with `ok: false, state: "upgrading"`. The health command exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Startup failure closes the listener.
+During startup, health answers HTTP 503 with `ok: false, state: "upgrading"`, so a probe that reads only the status waits. The health command reads the body, exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Startup failure closes the listener.
 
 `commit` identifies the server's build when the commit was supplied. To include the commit, build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`. Then `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without a supplied commit, the answer is `null`.
 

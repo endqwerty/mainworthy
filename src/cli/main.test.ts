@@ -13,7 +13,9 @@ import { QuestionItem, type ReportInput } from "../core/ops.ts";
 import { Proofs } from "../core/replies.ts";
 import { SlotWork } from "../core/runs.ts";
 import { API_VERSION } from "../core/version.ts";
+import { defaultConfig } from "../server/kernel/app.ts";
 import { OP_LIST } from "../server/ops/index.ts";
+import { upgradingListener } from "../surfaces/http.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
 import { printGate } from "./commands/gate.ts";
 import { printReceipt } from "./commands/report.ts";
@@ -1500,6 +1502,26 @@ test("health prints the first 12 characters of the commit the server reports, an
 		},
 		{ env: { MAINWORTHY_COMMIT: sha } },
 	);
+});
+
+test("an upgrading server is not ready to Cloud Run's probe, but health and the CLI still name it upgrading", async () => {
+	const listener = upgradingListener(defaultConfig({ MAINWORTHY_PORT: "0" }));
+	try {
+		const url = listener.url.origin;
+		// Cloud Run's startup probe reads only the status, so a revision still migrating must not answer 200.
+		const reply = await fetch(`${url}/healthz`);
+		expect(reply.status).toBe(503);
+		expect(await reply.json()).toMatchObject({ ok: false, state: "upgrading", apiVersion: API_VERSION });
+		await withInstance(async ({ run }) => {
+			const health = await run(["health", "--url", url]);
+			expect([health.code, health.stdout]).toEqual([0, `upgrading: Mainworthy 0.1.0 at ${url}\n`]);
+			const find = await run(["find", "--in", "cases", "--url", url]);
+			expect(find.code).not.toBe(0);
+			expect(find.stderr).toContain(`the server at ${url} is upgrading; try again shortly`);
+		});
+	} finally {
+		await listener.stop(true);
+	}
 });
 
 test("health stays compatible with a server that reports no commit", async () => {

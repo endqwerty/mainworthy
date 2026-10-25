@@ -832,13 +832,12 @@ export function upgradingListener(config: Config, patience: Patience = PATIENCE)
 			withHeaders(
 				req,
 				new URL(req.url).pathname === "/healthz"
-					? jsonResponse({
-							ok: false,
-							state: "upgrading",
-							version: VERSION,
-							apiVersion: API_VERSION,
-							commit: config.commit,
-						})
+					? // 503: a probe that reads only the status (Cloud Run's) must not call a migrating revision ready.
+						jsonResponse(
+							{ ok: false, state: "upgrading", version: VERSION, apiVersion: API_VERSION, commit: config.commit },
+							503,
+							{ "retry-after": "5" },
+						)
 					: jsonResponse(
 							{ ok: false, error: { code: "upgrading", message: "Mainworthy is upgrading; try again shortly." } },
 							503,
