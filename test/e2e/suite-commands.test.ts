@@ -68,6 +68,8 @@ for (const action of ["folder", "restore"] as const) {
 			});
 			await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 			await twoVersions(server);
+			// The page rereads after each write; act once it shows the second version, as a person would.
+			await harness.page.getByRole("button", { name: "Second title", exact: true }).waitFor();
 			const reply = harness.page.waitForResponse((response) => response.url().endsWith("/propose"));
 			await submit(harness, action);
 			await reply;
