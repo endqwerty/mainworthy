@@ -153,5 +153,11 @@ if ! grep -Fxq 'Error: dial [***]:5432 or ***. Terraform 1.17.0 returned 400: de
   echo 'Diagnostic punctuation or failure context was lost.' >&2
   failures=1
 fi
+export PLAN_ERROR='dial tcp 10.20.30.40:5432 from host:192.0.2.12 via 0.0.0.0:8080'
+if run_ci workflow_dispatch; then echo 'A connection error must fail CI.' >&2; exit 1; fi
+if ! grep -Fxq 'Error: dial tcp ***:5432 from host:*** via ***:8080' "$scratch/public.log"; then
+  echo 'An IPv4 address beside a port or a colon reached the error log.' >&2
+  failures=1
+fi
 test "$failures" = 0
 echo 'PASS: identifiers are masked, Terraform logs are private, and failed plans, drift, PRs and stale pushes never apply.'
