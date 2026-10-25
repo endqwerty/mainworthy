@@ -4,6 +4,102 @@ Mainworthy runs as one app process connected to PostgreSQL 18. The app volume ho
 archive staging; PostgreSQL has its own volume. `compose.yaml` runs both. Running elsewhere is possible but
 not yet supported, as amended in [decision 0026](decisions/0026-the-apps-offer-one-instance.md).
 
+## Prepare Google Cloud infrastructure
+
+The move to Cloud Run uses [application Terraform](../infra/) in `us-west1`. It does not switch public traffic.
+[The ownership decision](decisions/2026-10-25-cloud-infrastructure-and-release-ownership.md) separates infrastructure
+from image/traffic releases. [The cost table](cloud-costs.md) records prices before the first apply.
+
+1. Have the owner apply the reviewed private foundation patch in Cloud Shell. It creates the app state bucket,
+   enables APIs, pins this repository's `infra.yml` on `main`, and grants separate CI writer and reader identities.
+   Apply its stage A, wait for IAM propagation, then stage B. Wait again before running app infrastructure CI.
+   The owner keeps organisation, billing and project identifiers in the private foundation.
+2. Set these GitHub repository variables from the private foundation's outputs. The values below are placeholders.
+   Store no account key, credential JSON, secret value or project identifier in this repository.
+
+   | Variable | Example or source |
+   | --- | --- |
+   | `GCP_PRODUCTION_PROJECT` | `example-production` |
+   | `GCP_PREVIEW_PROJECT` | `example-preview` |
+   | `GCP_ATTACHMENTS_BUCKET` | `example-attachments` |
+   | `GCP_TERRAFORM_STATE_BUCKET` | `example-app-tfstate`, the foundation's app state bucket |
+   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Foundation's complete provider name; keep the value outside the repository |
+   | `GCP_INFRA_DEPLOY_ACCOUNT` | Foundation's deploy service account; push only |
+   | `GCP_INFRA_PLAN_ACCOUNT` | Foundation's infrastructure reader; manual dispatch only |
+   | `GCP_JOB_RUNTIME` | Unset or `null` for bootstrap. Later a JSON object with `image` and `sql_proxy_image`, both digest references |
+
+3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
+   the saved plan. GitHub's concurrency group serializes runs; the GCS backend locks writes. The first run creates
+   both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime accounts,
+   IAM SQL users, secret containers and the Tasks queue. It does not create the job service without real images.
+4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
+   -detailed-exitcode` because it cannot create lock objects. Exit 0 means no change, 2 means drift, and 1 is an
+   error. Drift fails the job and needs review. Dispatch never applies. No PR event can federate, including one
+   from this repository. A manual run on another branch skips the job and the pool also refuses it.
+
+Plans run only in CI after merge or a manual dispatch of main's workflow. Local author checks use no Google
+login and run only `fmt`, `init -backend=false`, and `validate`. Put `TF_DATA_DIR` in task scratch outside the
+checkout when initializing locally, so repository privacy tests do not read downloaded provider binaries.
+Keep the committed provider lockfile and use Terraform 1.17.0. Run `bash infra/ci.test.sh` to check CI command
+ordering and failure paths with a local stand-in for Terraform, without credentials.
+
+### Enable the private job service
+
+Complete these gates before enabling `GCP_JOB_RUNTIME`:
+
+1. Step 4 publishes the tested app image to the provisioned registry. Select an immutable app digest and an
+   immutable Cloud SQL Auth Proxy digest. The proxy uses `--auto-iam-authn --private-ip` on loopback; its configured
+   startup and memory bounds must pass on Cloud Run. Do not use a generic placeholder image.
+2. The owner adds Secret Manager versions outside Terraform for `mainworthy-job-key` and `mainworthy-owner-token`.
+   The job key is base64 of 32 random bytes and must be shared by both services. Keep old versions for recovery;
+   replacing that key makes old encrypted job inputs unreadable. The owner token is shared by both processes so
+   neither prints a generated bootstrap credential in logs. Only Secret Manager references reach Cloud Run.
+   `mainworthy-database-password` is an empty reserved container for an operator's database credential. Neither
+   runtime receives it: their proxy uses IAM authentication and no database password.
+3. Grant the two IAM SQL users access to one shared database-owner role outside Terraform, using an owner-run
+   database session that reaches the private instance. `google_sql_user` creates IAM login users, not PostgreSQL
+   object grants. Both startup paths migrate, so they must create and use objects as that same role. Revoke public
+   database creation/connect privileges as appropriate; keep preview users and databases out of production.
+   Record the SQL grants in the deployment change. No password or token belongs in a Terraform variable or state.
+4. Prove the bucket mount's publish-by-rename, immediate cross-instance reads, concurrent same-hash upload,
+   interrupted pending file, hash and prune checks from the accepted record. Metadata caching is disabled.
+   If FUSE fails, implement the API BlobStore before enabling runtime. Prove that `/data/blobs` is shared while
+   archive staging remains ephemeral. A validated resource configuration proves none of those storage semantics.
+5. Set `GCP_JOB_RUNTIME` to a JSON object such as
+   `{"image":"us-west1-docker.pkg.dev/example-production/mainworthy/app@sha256:<digest>","sql_proxy_image":"example/proxy@sha256:<digest>"}`.
+   Replace both `<digest>` placeholders with full digests. A reviewed main push touching `infra/` applies this
+   configuration and creates the private job service, its invoker binding, and the minute Scheduler job. Manual
+   dispatch only previews that change. Never remove the runtime value to pause work; it would request deletion.
+
+The job service accepts Google OIDC for its deterministic Run URL, from the jobs service account only. It keeps
+Cloud Run's invoker IAM check on, and the app verifies the token again at `POST /api/job`. Scheduler sends
+`{"do":"tick"}` every minute. The Tasks queue fixes the destination, method, content type, audience and identity;
+only the app account may enqueue. The Cloud Tasks dispatcher still needs to send the registry's run body, give
+it a 600-second dispatch deadline and reconcile a lost dispatch from durable jobs. Scheduler's service timeout
+and attempt deadline are 600 seconds. Retries and expired claims must pass the real queue checks before cutover.
+A periodic tick can recover jobs even when dispatch fails, but it is not a latency guarantee.
+
+Both service-level and revision-level job instance maxima are one. Each current process can use six database
+connections after setting read and write pools to one. Two job revisions plus migration and operator fit a
+14-connection budget. Adding two public-service revisions would make 26, above the instance's default 25.
+Step 5 must reduce the pools that job mode does not need and prove headroom, including brief instance overshoot,
+before deploying the public app. Preview apps and their per-PR database/user lifecycle remain in
+[issue #894](https://github.com/endqwerty/mainworthy/issues/894); the preview SQL instance is reserved now.
+
+### Finish deployment and cutover
+
+Step 5 adds the public app service to Terraform with its Cloudflare proof, probes and verified connection budget.
+It releases both services by patching only app image and traffic, under the same `mainworthy-infrastructure`
+concurrency group as infrastructure CI. Terraform ignores those two job-service release fields and owns every
+other field. Preserve the proxy, secrets, mount and networking during image updates. A release followed by a
+manual infrastructure run must report no change. An infrastructure update must preserve the released image and
+traffic. Updating the bootstrap image variable alone does not release a new image after creation.
+
+Keep the build-once image, `/healthz` commit, continuous-request deploy, Cloud Run revision rollback, compatible
+schema, backup/restore and client-address proof checks in the accepted record. Drop the home-server fallback,
+parallel-host operation and switch-back rehearsal. Once those checks pass, move Cloudflare to Cloud Run and
+retire the old deployment. Until then the existing deployment instructions below describe the current host.
+
 ## PostgreSQL cutover at merge
 
 Merging this engine change makes the owner's instance restart on an empty PostgreSQL database.
