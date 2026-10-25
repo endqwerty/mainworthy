@@ -153,10 +153,11 @@ resource "google_cloud_run_v2_service" "jobs" {
         cpu_idle          = true
         startup_cpu_boost = false
       }
+      # --health-check serves /startup on the proxy's default HTTP port, 9090.
       startup_probe {
         http_get {
           path = "/startup"
-          port = 9801
+          port = 9090
         }
         period_seconds    = 5
         failure_threshold = 48
@@ -167,7 +168,7 @@ resource "google_cloud_run_v2_service" "jobs" {
       gcs {
         bucket        = google_storage_bucket.attachments.name
         read_only     = false
-        mount_options = ["stat-cache-ttl=0", "type-cache-ttl=0", "uid=10001", "file-mode=0600", "dir-mode=0700"]
+        mount_options = ["metadata-cache-ttl-secs=0", "uid=10001", "file-mode=0600", "dir-mode=0700"]
       }
     }
   }
