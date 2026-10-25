@@ -125,7 +125,7 @@ If the server has not recorded it yet, the save may still be on its way. The pag
 save again, and the server records it once, however many copies arrive.
 In either case, the editor sends any text you typed after that save when you leave the editor.
 After a reload or reopening a closed tab, you can select text while the server replies.
-Later text stays on the version that save made.
+Later text stays on the version that save made, including spaces typed while recovery waits.
 A tab closed before the reply arrives sends nothing more. The draft stays on this device.
 When you open the draft again, the page asks the server about the save.
 

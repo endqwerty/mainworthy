@@ -8,8 +8,17 @@ test.skipIf(!browserAvailable)(
 	async () => {
 		const server = await startServer();
 		const browser = await openPage(server);
+		const recovery = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
 		try {
 			const { page } = browser;
+			await browser.context.route("**/api/p/scratch/get", async (route) => {
+				if (z.object({ version: z.number().optional() }).parse(route.request().postDataJSON()).version !== undefined) {
+					recovery.resolve();
+					await release.promise;
+				}
+				await route.continue();
+			});
 			await page.keyboard.press("c");
 			await page.keyboard.type("Coupon capture");
 			await page.keyboard.press("Enter");
@@ -25,7 +34,13 @@ test.skipIf(!browserAvailable)(
 					: null,
 			);
 			expect(selection).toEqual({ start: 30, end: 30, focused: true });
-			await page.keyboard.type(" discount after reload");
+			await recovery.promise;
+			await page.keyboard.type(" discount after ");
+			expect(await step.inputValue()).toBe("The coupon should preserve the discount after ");
+			release.resolve();
+			await page.waitForURL("**/suite/c/1");
+			expect(await step.inputValue()).toBe("The coupon should preserve the discount after ");
+			await page.keyboard.type("reload");
 			await page.keyboard.press("Escape");
 			const stored = await eventually(
 				() => server.api("find", { in: "cases" }),
@@ -44,6 +59,7 @@ test.skipIf(!browserAvailable)(
 			]);
 			expect(browser.errors).toEqual([]);
 		} finally {
+			release.resolve();
 			await browser.close();
 			await server.stop();
 		}
