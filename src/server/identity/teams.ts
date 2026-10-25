@@ -111,11 +111,12 @@ export async function manageTeams(
 	input: TeamInput,
 	context: string | null = null,
 ) {
-	await lockCallActors(db, by, "admin", input);
+	const checkActors = await lockCallActors(db, by, "admin", input);
 	if ((input.do === "team.grant.set" || input.do === "team.grant.remove") && input.project !== undefined) {
 		const project = await findProject(db, input.project);
 		if (!project || !(await lockProject(db, project.id))) throw notFound(`project ${input.project}`);
 	}
+	await checkActors();
 	const keys = new Map((await allProjects(db)).map((project) => [project.id, project.key]));
 	const projectKey = (id: number): string => (id === 0 ? "*" : (keys.get(id) ?? `project ${id}`));
 	const displayGrants = async (team: number) =>

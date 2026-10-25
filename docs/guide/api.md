@@ -62,7 +62,7 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | An authentication or anonymous-start allowance has been exhausted. Failed attempts can be wrong tokens from this address or for a token that starts as this one does, wrong passwords or authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. Anonymous starts have separate, non-escalating limits of 300 successful starts per public IPv4 address or IPv6 /56 per minute. The `Retry-After` header says how many seconds to wait. |
-| `busy` | 503 | A writer could not acquire a lock or connection within its bound, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. |
+| `busy` | 503 | A writer could not acquire a lock or connection within its bound, its affected actors changed while waiting, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
 A `busy` reply rolls back the current transaction. If the command had not committed acceptance,

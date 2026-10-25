@@ -201,7 +201,9 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 	await db.begin();
 	try {
 		const initial = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
-		if (initial) await lockCallActors(db, initial, call.op, call.input);
+		const parsed = ops[call.op]?.input.safeParse(call.input ?? {});
+		const input = parsed?.success ? parsed.data : {};
+		const checkActors = initial ? await lockCallActors(db, initial, call.op, input) : null;
 		const current = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
 		if (current && current.id !== initial?.id) throw new Busy();
 		if (ops[call.op]?.scope === "project" && call.project) {
@@ -209,26 +211,22 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 		}
 		if (
 			ops[call.op]?.scope === "instance" &&
-			typeof call.input === "object" &&
-			call.input !== null &&
-			"project" in call.input &&
-			typeof call.input.project === "string"
+			typeof input === "object" &&
+			input !== null &&
+			"project" in input &&
+			typeof input.project === "string"
 		) {
-			await lockNamedProject(db, call.input.project);
+			await lockNamedProject(db, input.project);
 		}
-		if (call.op === "admin" && typeof call.input === "object" && call.input !== null && "do" in call.input) {
-			if (call.input.do === "actor.forget") await lockAllProjects(db);
-			else if (call.input.do === "project.demo" && "key" in call.input && typeof call.input.key === "string") {
-				await lockNamedProject(db, call.input.key);
+		if (call.op === "admin" && typeof input === "object" && input !== null && "do" in input) {
+			if (input.do === "actor.forget") await lockAllProjects(db);
+			else if (input.do === "project.demo" && "key" in input && typeof input.key === "string") {
+				await lockNamedProject(db, input.key);
 			}
 		}
-		if (
-			typeof call.input === "object" &&
-			call.input !== null &&
-			"cmd" in call.input &&
-			typeof call.input.cmd === "string"
-		)
-			await lockCommand(db, call.input.cmd);
+		if (typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string")
+			await lockCommand(db, input.cmd);
+		await checkActors?.();
 		const reply = await executeInSnapshot(app, db, ops, call);
 		if (db.inTransaction) {
 			if (reply.ok) await db.commit();
