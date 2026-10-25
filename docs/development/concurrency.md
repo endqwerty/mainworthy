@@ -30,9 +30,11 @@ for that project. Database triggers increment `actors.auth_version` inside the t
 grants, memberships, organisation authority, credentials, tokens, or sessions.
 
 Ordinary project data writes, report acceptance/application, recovery, and delivery bookkeeping never take
-the identity lock. They take shared actor locks followed by their project row. Last-use flushing also stays
-outside the identity lock: it changes activity fields only, locks its actors before updating tokens or
-sessions, and checks that their owners still belong to its locked set. None of these transactions changes
+the identity lock. They take shared actor locks followed by their project row. Token activity also stays
+outside the identity lock: it takes a shared actor lock before updating the exact token hash, then checks
+that its owner is unchanged. Session activity uses the session hash resolver, which takes the identity lock
+and its actor before updating the exact hash. Both paths recheck that the credential remains live, so they
+cannot restore an address after erasure or follow a replaced owner. None of these transactions changes
 identity or upgrades an actor lock. Their foreign-key checks can lock other actors after their project,
 but `FOR KEY SHARE` is compatible with authority's `FOR NO KEY UPDATE`. Different projects still write
 concurrently. An identity writer waiting for a busy actor or project holds the identity lock and queues

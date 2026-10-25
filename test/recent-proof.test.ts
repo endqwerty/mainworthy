@@ -1,10 +1,10 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
+import * as identity from "../src/server/identity/identity.ts";
 import { waitMail } from "../src/server/identity/identity.ts";
 import { totpCode } from "../src/server/identity/totp.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import type { Database } from "../src/server/kernel/db.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { pgRun } from "./identity-db.ts";
 import { fakeSmtp } from "./mail-support.ts";
@@ -34,20 +34,19 @@ const refused = (reply: { status: number; body: unknown }) => {
 	expect(reply.body).toMatchObject({ ok: false, error: { code: "recent_proof_required" } });
 };
 
-/** Pause after admission persists activity, before the request can read authority and queue its domain write. */
+/** Pause after admission, whether its stored activity required an update or was already current. */
 async function admitted<T>(w: World, start: () => Promise<T>) {
-	const database = w.instance.app.database;
-	const write = database.write.bind(database);
+	const admit = identity.admit;
 	const reached = Promise.withResolvers<void>();
 	const resume = Promise.withResolvers<void>();
-	const intercept: Database["write"] = async (fn, options) => {
-		database.write = write;
-		const result = await write(fn, options);
+	const intercept = spyOn(identity, "admit").mockImplementation(async (...args) => {
+		if (args[0] !== w.instance.app) return admit(...args);
+		intercept.mockRestore();
+		const result = await admit(...args);
 		reached.resolve();
 		await resume.promise;
 		return result;
-	};
-	database.write = intercept;
+	});
 	const pending = start();
 	await reached.promise;
 	return { pending, release: () => resume.resolve() };

@@ -1,9 +1,16 @@
 // A use is durable before the request returns. The stored timestamp limits each row to one update per minute.
 import type { App } from "../kernel/app.ts";
 import { sql } from "../kernel/db.ts";
+import { lockSessionHash, lockTokenHash } from "./locks.ts";
 
 type Kind = "token" | "session";
 const Q = {
+	tokenDue: sql<{ id: number; hash: string; at: number }, { id: number }>(
+		"SELECT id FROM tokens WHERE id = $id AND hash = $hash AND (last_used_at IS NULL OR last_used_at < $at - 60000)",
+	),
+	sessionDue: sql<{ id: number; hash: string; at: number }, { id: number }>(
+		"SELECT id FROM sessions WHERE id = $id AND hash = $hash AND last_seen_at < $at - 60000",
+	),
 	token: sql<{ id: number; hash: string; at: number; addr: string | null }>(`
  UPDATE tokens SET last_used_at = $at, last_used_addr = coalesce($addr::text, last_used_addr)
  WHERE id = $id AND hash = $hash AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $at)
@@ -28,7 +35,17 @@ export async function noteUse(
 	addr: string | null,
 	hash: string,
 ): Promise<void> {
-	await app.database.write((db) => db.transaction(() => db.run(Q[kind], { id, hash, at, addr })));
+	if (
+		!(await app.database.admissionRead((db) => db.get(kind === "token" ? Q.tokenDue : Q.sessionDue, { id, hash, at })))
+	)
+		return;
+	await app.database.write((db) =>
+		db.transaction(async () => {
+			if (kind === "token") await lockTokenHash(db, hash);
+			else await lockSessionHash(db, hash);
+			await db.run(Q[kind], { id, hash, at, addr });
+		}),
+	);
 }
 
 // The startup job and import surface retain these hooks until their lifecycle is replaced by jobs (stack 4b).

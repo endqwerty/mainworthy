@@ -2,7 +2,7 @@
 
 This policy explains what Mainworthy keeps, why we keep it, how we handle it and your rights over your data. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
-*Last updated: October 16, 2026*
+*Last updated: October 25, 2026*
 
 This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app. The owner of the Mainworthy project runs both. "We" and "us" refer to that owner. Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there. Ask that person about their policy. Most of this page describes what the software itself keeps on every instance.
 

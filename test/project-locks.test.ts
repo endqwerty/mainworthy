@@ -3,6 +3,7 @@ import { z } from "zod";
 import { lookupPlans } from "../bench/lock-waits.ts";
 import type { ReportInput } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
+import { lockSignInActor } from "../src/server/identity/locks.ts";
 import type { Ctx } from "../src/server/kernel/ctx.ts";
 import { createProject } from "../src/server/ops/admin.ts";
 import { defineInstanceOp, defineOp, type InstanceOp, invoke, type Reply } from "../src/server/ops/registry.ts";
@@ -2496,3 +2497,72 @@ test("HTTP returns a successful pending receipt after report acceptance hits a l
 	expect(await recoverAccepted(h.app)).toBe(2);
 	expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 2 }]);
 });
+for (const kind of ["token", "session"] as const) {
+	test(`durable ${kind} activity locks its owner before taking credential rows`, async () => {
+		h = await harness();
+		const token = await createToken(h.app, {
+			actor: "activity-person",
+			kind: "human",
+			can: ["read"],
+			project: 0,
+			label: "activity",
+		});
+		let id = token.id;
+		let hash = hashToken(token.secret);
+		if (kind === "session") {
+			const { signInWithToken } = await import("../src/server/identity/identity.ts");
+			const opening = await signInWithToken(h.app, token.secret, { userAgent: null, address: null });
+			if (opening.kind !== "opening") throw new Error("no session");
+			const signed = await opening.signedIn;
+			if (!signed) throw new Error("no session");
+			hash = hashToken(signed.cookie);
+			const session = await h.app.database.read((db) =>
+				db.allDynamic<{ id: number }>("SELECT id FROM sessions WHERE hash = $1", [hash]),
+			);
+			if (!session[0]) throw new Error("missing session");
+			id = session[0].id;
+		}
+		h.advance(60_001);
+		const entered = barrier();
+		const release = barrier();
+		const holding = h.app.database.write((db) =>
+			db.transaction(async () => {
+				if (kind === "session") await lockIdentity(db);
+				else {
+					const [person] = await db.allDynamic<{ id: number }>("SELECT id FROM actors WHERE name = 'activity-person'");
+					if (!person) throw new Error("missing activity owner");
+					await lockSignInActor(db, person.id);
+				}
+				entered.resolve();
+				await release.promise;
+			}),
+		);
+		await entered.promise;
+		const { noteUse } = await import("../src/server/identity/uses.ts");
+		const activity = noteUse(h.app, kind, id, h.app.now(), "192.0.2.50", hash);
+		try {
+			await blocked();
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					if (kind === "session")
+						await db.allDynamic("SELECT id FROM actors WHERE name = 'activity-person' FOR UPDATE NOWAIT");
+					await db.allDynamic(
+						`SELECT id FROM ${kind === "token" ? "tokens" : "sessions"} WHERE id = $1 FOR UPDATE NOWAIT`,
+						[id],
+					);
+				}),
+			);
+		} finally {
+			release.resolve();
+			await Promise.all([holding, activity]);
+		}
+		const column = kind === "token" ? "last_used_addr" : "last_seen_addr";
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic(`SELECT ${column} AS address FROM ${kind === "token" ? "tokens" : "sessions"} WHERE id = $1`, [
+					id,
+				]),
+			),
+		).toEqual([{ address: "192.0.2.50" }]);
+	});
+}

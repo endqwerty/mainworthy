@@ -430,7 +430,9 @@ async function sessionFor(app: App, owner: Actor, req: Request, server: Listener
 	if (incompatible) return incompatible;
 	// The address the connection came from decides, in local mode, whether the request started on this machine,
 	// and in every mode where the request is counted as coming from.
-	const admission = await admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null));
+	const admission = await admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null), () =>
+		server.timeout(req, 0),
+	);
 	if (admission.kind === "refused") return unauthenticated();
 	if (admission.kind === "limited") return limited(admission.retryAfter);
 	const { session } = admission;
@@ -626,6 +628,7 @@ async function login(
 	const opening = await signInWithToken(app, body.data.token, {
 		userAgent: req.headers.get("user-agent"),
 		address: clientAddress(req, server, app.config),
+		proven: () => server.timeout(req, 0),
 	});
 	if (opening.kind === "refused") return unauthenticated();
 	if (opening.kind === "limited") return limited(opening.retryAfter);
