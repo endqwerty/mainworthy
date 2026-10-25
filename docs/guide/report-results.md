@@ -59,11 +59,25 @@ that does neither leaves the approval in place. See [planned runs](./runs.md#clo
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
-If the server answers `busy`, retry the unchanged report with the same command id. The CLI exits with code 4
-and does not retry automatically. A report can already be accepted when that reply arrives. Acceptance keeps
-its runs pending until application or cancellation. Revoking the admitting token, ending the browser session,
-or removing the required grant before application refuses the report and removes its pending marks. You can
-submit the evidence again under a new command id with a credential that currently permits it.
+If the server answers `busy` before acceptance, retry the unchanged report with the same command id.
+The CLI exits with code 4 and does not retry automatically. After acceptance commits, a lock timeout or
+deadlock during application returns success with a pending receipt instead. The receipt names the accepted
+batch and says `pending: report accepted; waiting for application`. Its result ids are empty, and its counts
+and basis are zero because application rolled back. The CLI exits with code 0 for this successful acceptance.
+Read `mainworthy gate` for the current verdict. Startup recovery or a same-id retry applies the batch.
+The pending reply is not the final stored receipt. A same-id retry after recovery returns the applied receipt.
+The browser cockpit and iPhone app keep the original command and note while the result is unconfirmed.
+Retrying checks that command before recording another result.
+
+The CLI and MCP generate a command id per report when none was supplied. Transport retries keep that id,
+which also prevents duplication if a successful reply is lost. A new invocation or tool call gets a new id.
+To retry across invocations, supply the same `cmd` in the report JSON. Resending a successful case or manual
+report without the same id records a new fact.
+
+Acceptance keeps qualifying runs pending until application or cancellation. Revoking the admitting token,
+ending the browser session, or removing the required grant before application refuses the report and removes
+its pending marks. You can submit the evidence again under a new command id with a credential that currently
+permits it.
 
 ## Upload a native report
 

@@ -247,7 +247,10 @@ async function alsoWaiting(ctx: Ctx, batch: BatchRow, target: TargetRow, runs: r
  * Step two: apply a staged batch. In one transaction: results with their basis, the runs they fill, one question
  * per cause of failure, unlinked tests, and each run's new verdict.
  */
-export async function* processBatchSteps(ctx: Ctx, batchId: number): AsyncGenerator<Pause, ReportReceipt, void> {
+export async function* processBatchSteps(
+	ctx: Ctx,
+	batchId: number,
+): AsyncGenerator<Pause<ReportReceipt>, ReportReceipt, void> {
 	const batch = await batchById(ctx.db, batchId);
 	if (!batch) throw notFound(`batch ${batchId}`);
 	ctx.now = batch.at;
@@ -432,10 +435,36 @@ export async function applyAccepted(ctx: Ctx, batch: BatchRow): Promise<ReportRe
  * applied, in slices the server may answer reads between. A crash in between loses nothing: the batch is applied
  * on the next start, or by the client's retry.
  */
-export async function* reportSteps(ctx: Ctx, input: ReportInput): AsyncGenerator<Pause, ReportReceipt, void> {
+export async function* reportSteps(
+	ctx: Ctx,
+	input: ReportInput,
+): AsyncGenerator<Pause<ReportReceipt>, ReportReceipt, void> {
 	const { batch, fresh } = await acceptReport(ctx, input);
 	if (!fresh && batch.receipt !== null) return { ...json<ReportReceipt>(batch.receipt), fresh: false };
-	if (fresh) yield COMMIT;
+	const target = await mustTarget(ctx.db, batch.target);
+	const runs = await runsFor(ctx, target, batch.run, ctx.actor.kind);
+	const gated = runs.find((run) => run.origin === "change") ?? runs.find((run) => run.id === batch.run);
+	const pending: ReportReceipt = {
+		batch: batch.id,
+		fresh,
+		target: target.commit_sha
+			? `${target.commit_sha.slice(0, 7)}${target.branch ? ` (${target.branch})` : ""}`
+			: target.what,
+		counts: { total: 0, pass: 0, fail: 0, skip: 0, error: 0, blocked: 0 },
+		basis: { exact: 0, assumed: 0, unresolved: 0 },
+		questions: [],
+		unlinked: 0,
+		flips: 0,
+		rejected: [],
+		declined: [],
+		results: [],
+		gate: {
+			...(gated ? await gateOf(ctx, gated) : nothingCounted()),
+			verdict: "pending",
+			reason: "pending: report accepted; waiting for application",
+		},
+	};
+	yield { commit: COMMIT, pending };
 	return yield* processBatchSteps(ctx, batch.id);
 }
 

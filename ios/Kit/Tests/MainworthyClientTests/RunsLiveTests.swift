@@ -158,7 +158,7 @@ struct RunsValueTests {
 	}
 }
 
-@Suite("A report's refusal")
+@Suite("A report's receipt")
 struct RunReceiptTests {
 	struct Receipt: Transport {
 		let result: String
@@ -179,8 +179,7 @@ struct RunReceiptTests {
 			(
 				#"{"rejected":[],"declined":[{"reason":"version not admitted"}],"results":[10]}"#,
 				"version not admitted"
-			),
-			(#"{"rejected":[],"declined":[],"results":[]}"#, "The result was not recorded.")
+			)
 		])
 	func refused(receipt: String, sentence: String) async throws {
 		let server = Server(
@@ -195,6 +194,35 @@ struct RunReceiptTests {
 		let client = server.project("shop", identity: "shop-identity")
 		let submission = try await client.prepareReport(execution, outcome: .pass)
 		#expect(try await client.report(submission) == .refused(sentence))
+	}
+
+	@Test("an accepted pending receipt retains its command through recovery")
+	func pendingReceipt() async throws {
+		let script = Script(
+			.json(#"{"ok":true,"result":{"rejected":[],"declined":[],"results":[],"gate":{"verdict":"pending","reason":"pending: report accepted; waiting for application"}}}"#),
+			.json(#"{"ok":true,"result":{"state":"begun","op":"report"}}"#),
+			.json(#"{"ok":true,"result":{"state":"done","op":"report","reply":{"rejected":[],"declined":[],"results":[10]}}}"#))
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: script)
+		let slot = RunSlot(try JSONDecoder().decode(Wire.RunSlot.self, from: Data(
+			#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
+		let execution = RunExecution(run: "R-1", slot: slot, content: CaseContent(title: "Open"))
+		let client = server.project("shop", identity: "shop-identity")
+		let submission = try await client.prepareReport(execution, outcome: .pass, note: "Pending note")
+		await #expect(throws: ClientError.unreachable("The report was accepted; its result is not confirmed yet. Retry to ask again.")) {
+			try await client.report(submission)
+		}
+		await #expect(throws: ClientError.unreachable("The report is still being recorded. Retry to ask again.")) {
+			try await client.report(submission, recovering: true)
+		}
+		#expect(try await client.report(submission, recovering: true) == .recorded(10))
+		#expect(script.asked.count == 3)
+		#expect(script.asked.filter { $0.url?.path.hasSuffix("/report") == true }.count == 1)
+		for request in script.asked {
+			let body = try JSONDecoder().decode(JSONValue.self, from: #require(request.httpBody))
+			#expect(body.object?["cmd"] == .string(submission.command))
+		}
+		#expect(submission.note == "Pending note")
 	}
 
 	@Test("a reply for a different version is never offered as the pinned case")

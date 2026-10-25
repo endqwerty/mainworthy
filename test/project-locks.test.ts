@@ -1,11 +1,11 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 import { lookupPlans } from "../bench/lock-waits.ts";
 import type { ReportInput } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
 import type { Ctx } from "../src/server/kernel/ctx.ts";
 import { createProject } from "../src/server/ops/admin.ts";
-import { defineInstanceOp, defineOp, type InstanceOp, invoke } from "../src/server/ops/registry.ts";
+import { defineInstanceOp, defineOp, type InstanceOp, invoke, type Reply } from "../src/server/ops/registry.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -634,7 +634,6 @@ test("command ids are unique across projects while writes overlap", async () => 
 import { actorByName, removeGrant, signInWithToken } from "../src/server/identity/identity.ts";
 import { endSessionById, findSession } from "../src/server/identity/sessions.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
-import { COMMIT } from "../src/server/ops/registry.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 
 for (const revoked of ["token", "session", "grant"] as const) {
@@ -674,7 +673,7 @@ for (const revoked of ["token", "session", "grant"] as const) {
 				for (;;) {
 					const step = await iterator.next();
 					if (step.done) return step.value;
-					if (step.value === COMMIT) {
+					if (step.value !== undefined) {
 						beforeCommit.resolve();
 						await commit.promise;
 					}
@@ -778,7 +777,7 @@ for (const revoked of ["token", "session", "grant", "imported", "forgotten"] as 
 					const step = await iterator.next();
 					if (step.done) return step.value;
 					yield step.value;
-					if (step.value === COMMIT) throw new Error("deliberate interruption after acceptance");
+					if (step.value !== undefined) throw new Error("deliberate interruption after acceptance");
 				}
 			},
 		});
@@ -889,73 +888,92 @@ test("organisation authority changes increment every member in the same transact
 	);
 });
 
-test("busy after report acceptance preserves its command and admission for a same-id retry", async () => {
-	h = await harness();
-	const short = await Database.open({ url: h.app.config.databaseUrl, lockWaitMs: 30 });
-	const entered = barrier();
-	const commit = barrier();
-	const acquired = barrier();
-	const release = barrier();
-	const op = defineOp({
-		...reportOp,
-		effect: "write",
-		async *steps(ctx: Ctx, input: ReportInput) {
-			const iterator = reportSteps(ctx, input);
-			for (;;) {
-				const step = await iterator.next();
-				if (step.done) return step.value;
-				if (step.value === COMMIT) {
-					entered.resolve();
-					await commit.promise;
+for (const cmd of [undefined, "accepted-busy-report"]) {
+	test(`busy after report acceptance returns pending and retry/recovery stores one case result ${cmd ? "with" : "without"} cmd`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Accepted once" } }] });
+		const short = await Database.open({ url: h.app.config.databaseUrl, lockWaitMs: 30 });
+		const entered = barrier();
+		const commit = barrier();
+		const acquired = barrier();
+		const release = barrier();
+		const op = defineOp({
+			...reportOp,
+			effect: "write",
+			async *steps(ctx: Ctx, input: ReportInput) {
+				const iterator = reportSteps(ctx, input);
+				for (;;) {
+					const step = await iterator.next();
+					if (step.done) return step.value;
+					if (step.value !== undefined) {
+						entered.resolve();
+						await commit.promise;
+					}
+					yield step.value;
 				}
-				yield step.value;
-			}
-		},
-	});
-	const call = {
-		op: "report",
-		project: "scratch",
-		input: { ...ciReport({ commit: "d".repeat(40), n: 1 }), cmd: "accepted-busy-report" },
-		actor: async () => h.owner,
-	};
-	const pending = invoke({ ...h.app, database: short }, { ...OPS, report: op }, call);
-	await entered.promise;
-	const holder = h.app.database.write((db) =>
-		db.transaction(async () => {
-			await lockActors(db, [h.owner.id], true);
-			acquired.resolve();
-			await release.promise;
-		}),
-	);
-	try {
-		await blocked();
-		commit.resolve();
-		await acquired.promise;
-		expect(await pending).toMatchObject({ ok: false, error: { code: "busy" } });
-		expect(
-			await h.app.database.read((db) =>
-				db.allDynamic("SELECT outcome FROM commands WHERE id = 'accepted-busy-report'"),
-			),
-		).toEqual([{ outcome: "" }]);
+			},
+		});
+		const call = {
+			op: "report",
+			project: "scratch",
+			input: {
+				target: { commit: "d".repeat(40) },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+				...(cmd ? { cmd } : {}),
+			},
+			actor: async () => h.owner,
+		};
+		const pending = invoke({ ...h.app, database: short }, { ...OPS, report: op }, call);
+		await entered.promise;
+		const holder = h.app.database.write((db) =>
+			db.transaction(async () => {
+				await lockActors(db, [h.owner.id], true);
+				acquired.resolve();
+				await release.promise;
+			}),
+		);
+		let reply: Reply;
+		try {
+			await blocked();
+			commit.resolve();
+			await acquired.promise;
+			reply = await pending;
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
+				{ state: "accepted" },
+			]);
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 0 }]);
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT outcome FROM commands"))).toEqual(
+				cmd ? [{ outcome: "" }] : [],
+			);
+		} finally {
+			commit.resolve();
+			release.resolve();
+			await holder;
+			await pending;
+			await short.close();
+		}
+		// A caller retries a busy reply unchanged; a successful acceptance needs no resubmission.
+		if (!reply.ok && reply.error.code === "busy") expect((await invoke(h.app, OPS, call)).ok).toBe(true);
+		if (reply.ok) expect(await h.call("gate", { commit: "d".repeat(40) })).toMatchObject({ verdict: "pending" });
+		if (cmd) expect((await invoke(h.app, OPS, call)).ok).toBe(true);
+		await recoverAccepted(h.app);
+		expect(await recoverAccepted(h.app)).toBe(0);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 1 }]);
 		expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
-			{ state: "accepted" },
+			{ state: "processed" },
 		]);
-		expect(
-			await h.app.database.read((db) => db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batch_admissions")),
-		).toEqual([{ n: 1 }]);
-	} finally {
-		commit.resolve();
-		release.resolve();
-		await holder;
-		await pending;
-		await short.close();
-	}
-	expect((await invoke(h.app, OPS, call)).ok).toBe(true);
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
-		{ state: "processed" },
-	]);
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT * FROM batch_admissions"))).toEqual([]);
-});
+		expect(reply).toMatchObject({
+			ok: true,
+			result: { batch: expect.any(Number), fresh: true, results: [], gate: { verdict: "pending" } },
+		});
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT * FROM batch_admissions"))).toEqual([]);
+		if (cmd) {
+			const retry = await invoke(h.app, OPS, call);
+			expect(retry).toMatchObject({ ok: true, result: { results: [expect.any(Number)] } });
+			expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 1 }]);
+		}
+	});
+}
 
 test("a changed authority version still permits a live report credential with current capability", async () => {
 	h = await harness();
@@ -976,7 +994,7 @@ test("a changed authority version still permits a live report credential with cu
 				const step = await iterator.next();
 				if (step.done) return step.value;
 				yield step.value;
-				if (step.value === COMMIT) throw new Error("deliberate interruption after acceptance");
+				if (step.value !== undefined) throw new Error("deliberate interruption after acceptance");
 			}
 		},
 	});
@@ -1103,7 +1121,7 @@ test("cancelled automated evidence can be resubmitted with a new credential and 
 				const step = await iterator.next();
 				if (step.done) return step.value;
 				yield step.value;
-				if (step.value === COMMIT) throw new Error("deliberate interruption after acceptance");
+				if (step.value !== undefined) throw new Error("deliberate interruption after acceptance");
 			}
 		},
 	});
@@ -2306,3 +2324,168 @@ for (const method of ["password", "legacy password", "totp", "passkey", "oidc"] 
 		}
 	});
 }
+
+test("busy during report application rolls back partial results and leaves acceptance for recovery", async () => {
+	h = await harness();
+	await h.call("admin", { do: "project.create", key: "held" });
+	const held = await h.app.database.read((db) =>
+		db.allDynamic<{ id: number }>("SELECT id FROM projects WHERE key = 'held'"),
+	);
+	const other = held[0];
+	if (!other) throw new Error("missing held project");
+	const acquired = barrier();
+	const release = barrier();
+	const holder = h.app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, other.id);
+			acquired.resolve();
+			await release.promise;
+		}),
+	);
+	await acquired.promise;
+	const short = await Database.open({ url: h.app.config.databaseUrl, lockWaitMs: 30 });
+	let partial = 0;
+	const op = defineOp({
+		...reportOp,
+		effect: "write",
+		async *steps(ctx: Ctx, input: ReportInput) {
+			for await (const pause of reportSteps(ctx, input)) {
+				if (pause === undefined) {
+					partial = (await ctx.db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM results"))[0]?.n ?? 0;
+					if (partial > 0) await lockProject(ctx.db, other.id);
+				}
+				yield pause;
+			}
+			throw new Error("application must encounter the held lock");
+		},
+	});
+	try {
+		const reply = await invoke(
+			{ ...h.app, database: short },
+			{ ...OPS, report: op },
+			{
+				op: "report",
+				project: "scratch",
+				actor: async () => h.owner,
+				input: { ...ciReport({ commit: "partial-busy", n: 201 }), cmd: "partial-busy-report" },
+			},
+		);
+		expect(partial).toBeGreaterThan(0);
+		expect(reply).toMatchObject({
+			ok: true,
+			result: { results: [], counts: { total: 0 }, gate: { verdict: "pending" } },
+		});
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 0 }]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT outcome FROM commands"))).toEqual([{ outcome: "" }]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT state, receipt FROM batches"))).toEqual([
+			{ state: "accepted", receipt: null },
+		]);
+	} finally {
+		release.resolve();
+		await holder;
+		await short.close();
+	}
+	expect(await recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(0);
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 201 }]);
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
+		{ state: "processed" },
+	]);
+});
+
+test("HTTP returns a successful pending receipt after report acceptance hits a lock timeout", async () => {
+	h = await harness();
+	await h.call("propose", { edits: [{ op: "create", body: { title: "HTTP accepted" } }] });
+	await h.call("admin", { do: "project.create", key: "held" });
+	const other = (
+		await h.app.database.read((db) => db.allDynamic<{ id: number }>("SELECT id FROM projects WHERE key = 'held'"))
+	)[0];
+	if (!other || !("steps" in reportOp)) throw new Error("missing report fixture");
+	const acquired = barrier();
+	const release = barrier();
+	const holder = h.app.database.write((db) =>
+		db.transaction(async () => {
+			await lockProject(db, other.id);
+			acquired.resolve();
+			await release.promise;
+		}),
+	);
+	await acquired.promise;
+	const steps = reportOp.steps;
+	const paused = spyOn(reportOp, "steps").mockImplementation(async function* (ctx, input) {
+		const iterator = steps(ctx, input);
+		const first = await iterator.next();
+		if (first.done) return first.value;
+		yield first.value;
+		await lockProject(ctx.db, other.id);
+		return yield* iterator;
+	});
+	const short = await Database.open({ url: h.app.config.databaseUrl, lockWaitMs: 30 });
+	const { serve } = await import("../src/surfaces/http.ts");
+	const listener = serve({ ...h.app, database: short }, h.owner);
+	try {
+		const response = await fetch(`http://127.0.0.1:${listener.port}/api/p/scratch/report`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				target: { commit: "http-accepted-busy" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			}),
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			seq: 3,
+			result: {
+				batch: expect.any(Number),
+				fresh: true,
+				counts: { total: 0 },
+				results: [],
+				gate: { verdict: "pending", reason: "pending: report accepted; waiting for application" },
+			},
+		});
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT state, receipt FROM batches"))).toEqual([
+			{ state: "accepted", receipt: null },
+		]);
+		const { runCli } = await import("../src/cli/dispatch.ts");
+		const { inThisProcess } = await import("../src/cli/test-support.ts");
+		const cli = await inThisProcess(
+			"accepted report CLI",
+			() =>
+				runCli(
+					[
+						"report",
+						"--url",
+						`http://127.0.0.1:${listener.port}`,
+						"--project",
+						"scratch",
+						"--json",
+						JSON.stringify({
+							target: { session: "CLI accepted busy" },
+							results: [{ test: { case: "C-1" }, outcome: "pass" }],
+						}),
+					],
+					null,
+					{},
+				),
+			{ environment: {}, cwd: process.cwd(), input: "" },
+		);
+		expect(cli.code).toBe(0);
+		expect(cli.stderr).toBe("");
+		expect(JSON.parse(cli.stdout)).toMatchObject({
+			results: [],
+			gate: {
+				verdict: "pending",
+				reason: "pending: report accepted; waiting for application",
+			},
+		});
+	} finally {
+		paused.mockRestore();
+		release.resolve();
+		await holder;
+		await listener.stop(true);
+		await short.close();
+	}
+	expect(await recoverAccepted(h.app)).toBe(2);
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 2 }]);
+});

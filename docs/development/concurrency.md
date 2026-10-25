@@ -107,7 +107,12 @@ binds the id durably, and application or cancellation completes it in the same t
 
 `LOCK_WAIT_MS` in `src/server/kernel/db.ts` bounds write connection acquisition and PostgreSQL lock,
 statement, transaction, and idle-in-transaction waits. PostgreSQL lock timeout, deadlock, serialization
-failure, and statement or transaction timeout map to the shared `busy` error with HTTP 503. A lost connection
+failure, and statement or transaction timeout map to the shared `busy` error with HTTP 503 before acceptance.
+A report's durable checkpoint carries a pending receipt. After that commit, the registry rolls back a busy
+application and returns the successful pending receipt with the acceptance sequence. It leaves the command
+unfinished and the final batch receipt unset, so recovery can finish both atomically. This also covers waits
+while reacquiring actors and the project. CLI and MCP forwarding assign a command id before transport retries
+so a lost successful response cannot duplicate a logical report. A lost connection
 without such a PostgreSQL error remains uncertain and is never retried on another connection inside the
 operation. Migration locks use a dedicated connection and retain their checked unlock and disposal paths.
 

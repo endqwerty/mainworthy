@@ -476,7 +476,9 @@ extension ProjectClient {
 					command: submission.command, delivery: delivery)
 			}
 			if let why = reply.rejected.first?.reason ?? reply.declined.first?.reason { return .refused(why) }
-			guard let saved = reply.results.first, saved > 0 else { return .refused("The result was not recorded.") }
+			guard let saved = reply.results.first, saved > 0 else {
+				throw ClientError.unreachable("The report was accepted; its result is not confirmed yet. Retry to ask again.")
+			}
 			return .recorded(saved)
 		} catch {
 			if case ClientError.refused(let code, _) = error, code != "internal",

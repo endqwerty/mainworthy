@@ -49,7 +49,7 @@ test("HTTP report replay waits for its pending command and recovers the identica
 		for (let step = await iterator.next(); ; step = await iterator.next()) {
 			if (step.done) return step.value;
 			yield step.value;
-			if (step.value === COMMIT) {
+			if (step.value !== undefined) {
 				held.release();
 				await release.promise;
 			}
