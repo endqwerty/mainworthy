@@ -62,15 +62,49 @@ def redact(line, values):
     return line
 
 
+ACTIONS = {
+    ("create",): "create", ("update",): "update", ("delete",): "destroy", ("read",): "read",
+    ("delete", "create"): "replace", ("create", "delete"): "replace", ("forget",): "forget",
+}
+
+
+def changed(before, after, unknown):
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    names = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+    if isinstance(unknown, dict):
+        names |= {name for name, value in unknown.items() if value}
+    return sorted(names)
+
+
+def plan_changes(path, values):
+    for resource in json.loads(Path(path).read_text()).get("resource_changes", []):
+        change = resource.get("change", {})
+        verb = ACTIONS.get(tuple(change.get("actions", [])))
+        if verb is None:
+            if "importing" not in change:
+                continue
+            verb = "import"
+        elif "importing" in change:
+            verb = f"import and {verb}"
+        names = changed(change.get("before"), change.get("after"), change.get("after_unknown")) if "update" in verb else []
+        line = f"{verb} {resource.get('address', '?')}" + (f" ({', '.join(names)})" if names else "")
+        print(redact(line, values))
+
+
 values = identifiers()
-if sys.argv[1] == "mask":
+if sys.argv[1] == "changes":
+    plan_changes(sys.argv[2], values)
+elif sys.argv[1] == "mask":
     for value in values:
         escaped = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::add-mask::{escaped}")
 else:
     failed = sys.argv[2] != "0"
     for line in Path(sys.argv[1]).read_text(errors="replace").splitlines():
-        if re.fullmatch(r"Plan: \d+ to add, \d+ to change, \d+ to destroy\.?", line):
+        if re.fullmatch(r"Plan: (?:\d+ to import, )?\d+ to add, \d+ to change, \d+ to destroy(?:, \d+ to forget)?\.?", line):
+            print(line)
+        elif re.fullmatch(r"Apply complete! Resources: (?:\d+ imported, )?\d+ added, \d+ changed, \d+ destroyed\.?", line):
             print(line)
         elif line.startswith("No changes."):
             print("No changes.")
