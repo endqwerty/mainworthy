@@ -165,7 +165,7 @@ resource "google_cloud_run_v2_service" "jobs" {
       gcs {
         bucket        = google_storage_bucket.attachments.name
         read_only     = false
-        mount_options = ["stat-cache-ttl=0", "type-cache-ttl=0"]
+        mount_options = ["stat-cache-ttl=0", "type-cache-ttl=0", "uid=10001", "file-mode=0600", "dir-mode=0700"]
       }
     }
   }

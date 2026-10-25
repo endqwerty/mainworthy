@@ -9,8 +9,13 @@ cat > "$scratch/terraform" <<'MOCK'
 printf '%s\n' "$*" >> "$CALLS"
 if [ "$1" = plan ]; then exit "${PLAN_EXIT:-0}"; fi
 MOCK
-chmod +x "$scratch/terraform"
-export PATH="$scratch:$PATH" CALLS="$scratch/calls" STATE_BUCKET=example-state
+cat > "$scratch/git" <<'MOCK'
+#!/usr/bin/env bash
+if [ "$*" != 'ls-remote origin refs/heads/main' ]; then exit 1; fi
+printf '%s\trefs/heads/main\n' "${REMOTE_SHA:-example-main}"
+MOCK
+chmod +x "$scratch/terraform" "$scratch/git"
+export PATH="$scratch:$PATH" CALLS="$scratch/calls" STATE_BUCKET=example-state GITHUB_SHA=example-main
 run_ci() { bash "$suite/ci.sh" "$1"; }
 run_ci push
 cat > "$scratch/expected" <<'EXPECTED'
@@ -43,6 +48,10 @@ set -e
 test "$rc" = 2
 if rg -q '^apply ' "$CALLS"; then echo 'Drift must never apply.' >&2; exit 1; fi
 : > "$CALLS"
+export PLAN_EXIT=0 REMOTE_SHA=example-new-main
+if run_ci push; then echo 'A stale push must not apply.' >&2; exit 1; fi
+if rg -q '^apply ' "$CALLS"; then echo 'A stale push must not apply.' >&2; exit 1; fi
+: > "$CALLS"
 if run_ci pull_request; then echo 'PR events must be refused.' >&2; exit 1; fi
 test ! -s "$CALLS"
-echo 'PASS: push applies only a successful saved plan; manual drift never writes; PRs are refused.'
+echo 'PASS: push applies only a successful saved plan; manual drift never writes; PRs and stale pushes are refused.'
