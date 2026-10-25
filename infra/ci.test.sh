@@ -34,7 +34,10 @@ if [ "$1" = show ]; then
     "before": {"deletion_policy": null, "network": "example-private-project"},
     "after": {"deletion_policy": "ABANDON", "network": "example-private-project"},
     "importing": {"id": "projects/example-private-project/global/networks/mainworthy"}}},
-  {"address": "google_compute_network.app[\"preview\"]", "change": {"actions": ["no-op"], "before": {}, "after": {}}}
+  {"address": "google_compute_network.app[\"preview\"]", "change": {"actions": ["no-op"], "before": {}, "after": {}}},
+  {"address": "terraform_data.projects[\"example-private-project\"]", "change": {"actions": ["create"], "before": null, "after": {}}},
+  {"address": "terraform_data.renamed[\"prod-example-private-project\"]", "change": {"actions": ["forget", "create"], "before": {}, "after": {}}},
+  {"address": "terraform_data.odd", "change": {"actions": ["delete", "unexpected"], "before": {}, "after": {}}}
 ]}
 PLAN
   exit 0
@@ -85,6 +88,9 @@ create google_sql_database.app
 update google_storage_bucket.attachments (labels)
 import google_service_networking_connection.sql["production"]
 import and update google_service_networking_connection.sql["preview"] (deletion_policy)
+create terraform_data.projects[*]
+forget and create terraform_data.renamed[*]
+change (delete, unexpected) terraform_data.odd
 Apply complete! Resources: 3 added, 1 changed, 0 destroyed.
 EXPECTED
 diff -u "$scratch/expected" "$scratch/public.log"
