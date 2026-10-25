@@ -66,15 +66,8 @@ async function timeOne(rev: string, options: Options, log: (line: string) => voi
 		if (options.install) await read(["bun", "install", "--frozen-lockfile"], { cwd: tree });
 		log(`running ${options.command.join(" ")} on ${rev}`);
 		const done = await run(options.command, { cwd: tree });
-		// Historical checks exit 1 on time alone, after reporting every functional stage's result.
-		const legacyTimingFailure =
-			done.status === 1 &&
-			/\nOVER BUDGET: the tests took [^\r\n]+$/.test(done.out.trimEnd()) &&
-			!/\bFAILED\b/.test(done.out + done.err) &&
-			["typecheck", "lint", "tests: parallel", "tests: quiet"].every((name) =>
-				new RegExp(`^${name}\\s+[\\d.]+ s\\s+ok\\s*$`, "m").test(done.out),
-			);
-		if (done.status !== 0 && !legacyTimingFailure)
+		// A check that failed is no timing, whatever it printed: budgets only warn now (decision 0097).
+		if (done.status !== 0)
 			throw new Error(
 				`${rev}: ${options.command.join(" ")} failed (exit ${done.status}):\n${(done.out + done.err).slice(-600)}`,
 			);
