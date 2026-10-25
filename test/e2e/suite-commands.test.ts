@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
+import { Policy } from "../../src/core/kinds.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
@@ -146,4 +147,240 @@ for (const action of ["folder", "restore"] as const) {
 			}
 		});
 	}
+}
+
+for (const loss of ["reply", "unsent"] as const) {
+	test.skipIf(!browserAvailable)(`a retained restore settles when leaving its case after a lost ${loss}`, async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Other first" } }] });
+		await server.api("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Other second" } }] });
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page, context } = harness;
+			await begin(harness, "restore");
+			const requests: unknown[] = [];
+			const commands: unknown[] = [];
+			await context.route("**/api/p/scratch/command", async (route) => {
+				commands.push(route.request().postDataJSON());
+				await route.continue();
+			});
+			await context.route("**/api/p/scratch/propose", async (route) => {
+				requests.push(route.request().postDataJSON());
+				if (requests.length > 1) return route.continue();
+				if (loss === "reply") await route.fetch();
+				await route.abort("failed");
+			});
+			await page.keyboard.press("u");
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await page.getByRole("option").filter({ hasText: "Other second" }).click();
+			await page.locator("#detail .ctitle").filter({ hasText: "Other second" }).waitFor();
+			await page
+				.locator("#stat")
+				.filter({ hasText: /C-1.*(recorded|not recorded)/ })
+				.waitFor();
+			const original = Request.parse(requests[0]);
+			expect(commands).toEqual([{ cmd: original.cmd }]);
+			expect(requests).toEqual([original]);
+			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "Previous version restored as a new version." }).waitFor();
+			expect(Request.parse(requests[1]).edits).toEqual([{ op: "restore", case: "C-2", to: 1 }]);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject(
+				loss === "reply" ? { title: "First title", version: 3 } : { title: "Second title", version: 2 },
+			);
+			expect((await server.api("get", { refs: ["C-2"] }))[0]).toMatchObject({ title: "Other first", version: 3 });
+		} finally {
+			await harness.close();
+			await server.stop();
+		}
+	});
+
+	for (const leave of ["parent", "Escape"] as const) {
+		test.skipIf(!browserAvailable)(`a retained folder settles on ${leave} after a lost ${loss}`, async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{ op: "folder", name: "Left" },
+					{ op: "folder", name: "Right" },
+				],
+			});
+			const harness = await openPage(server, { path: "/p/scratch/suite?folder=Left" });
+			try {
+				const { page, context } = harness;
+				await page.locator("#ltitle").filter({ hasText: "Left" }).waitFor();
+				await page.keyboard.type("nf");
+				const field = page.getByRole("textbox", { name: "New folder name" });
+				await field.fill("Child");
+				const requests: unknown[] = [];
+				const commands: unknown[] = [];
+				await context.route("**/api/p/scratch/command", async (route) => {
+					commands.push(route.request().postDataJSON());
+					await route.continue();
+				});
+				await context.route("**/api/p/scratch/propose", async (route) => {
+					requests.push(route.request().postDataJSON());
+					if (requests.length > 1) return route.continue();
+					if (loss === "reply") await route.fetch();
+					await route.abort("failed");
+				});
+				await page.keyboard.press("Enter");
+				await page
+					.locator("#stat")
+					.filter({ hasText: /check it and retry/ })
+					.waitFor();
+				if (leave === "Escape") await page.keyboard.press("Escape");
+				else await page.locator("#tree .fo").filter({ hasText: "Right" }).click();
+				await page
+					.locator("#stat")
+					.filter({ hasText: /Left\/Child.*(recorded|not recorded)/ })
+					.waitFor();
+				const original = Request.parse(requests[0]);
+				expect(commands).toEqual([{ cmd: original.cmd }]);
+				expect(requests).toEqual([original]);
+				await field.waitFor({ state: "hidden" });
+				if (leave === "Escape") await page.locator("#tree .fo").filter({ hasText: "Right" }).click();
+				await page.keyboard.type("nf");
+				await field.fill("Fresh");
+				await page.keyboard.press("Enter");
+				await field.waitFor({ state: "hidden" });
+				expect(Request.parse(requests[1]).edits).toEqual([{ op: "folder", name: "Fresh", parent: "Right" }]);
+				expect((await server.api("find", { in: "folders" })).items.map((folder) => folder.path).sort()).toEqual(
+					["Left", "Right", "Right/Fresh", ...(loss === "reply" ? ["Left/Child"] : [])].sort(),
+				);
+			} finally {
+				await harness.close();
+				await server.stop();
+			}
+		});
+	}
+}
+
+for (const action of ["folder", "restore"] as const) {
+	test.skipIf(!browserAvailable)(`a final ${action} refusal does not promise a retained retry`, async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		if (action === "folder") await server.api("propose", { edits: [{ op: "folder", name: "New folder" }] });
+		else {
+			const policy = Policy.extend({ version: z.number() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
+			const proposed = await server.api("propose", {
+				edits: [
+					{
+						op: "policy",
+						base: policy.version,
+						settings: {
+							...policy.settings,
+							fields: { risk: { kind: "text", label: "Risk", required: true } },
+						},
+					},
+				],
+			});
+			const question = (await server.api("inbox", { kind: "adopt" })).items.find((row) => row.q === proposed.question);
+			if (!question) throw new Error("Policy question missing");
+			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
+		}
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page, context } = harness;
+			await begin(harness, action);
+			const requests: unknown[] = [];
+			const commands: unknown[] = [];
+			await context.route("**/api/p/scratch/command", async (route) => {
+				commands.push(route.request().postDataJSON());
+				await route.continue();
+			});
+			await context.route("**/api/p/scratch/propose", async (route) => {
+				requests.push(route.request().postDataJSON());
+				await route.continue();
+			});
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const response = page.waitForResponse((reply) => reply.url().endsWith("/propose"));
+				await submit(harness, action);
+				const refusal = z
+					.object({ ok: z.literal(false), error: z.object({ message: z.string() }) })
+					.parse(await (await response).json());
+				await page.locator("#stat").filter({ hasText: refusal.error.message }).waitFor();
+				expect(await page.locator("#stat").textContent()).toBe(refusal.error.message);
+			}
+			expect(commands).toEqual([]);
+			expect(Request.parse(requests[1]).cmd).not.toBe(Request.parse(requests[0]).cmd);
+		} finally {
+			await harness.close();
+			await server.stop();
+		}
+	});
+}
+
+for (const action of ["folder", "restore"] as const) {
+	test.skipIf(!browserAvailable)(`a ${action} retry lookup cannot resend after leaving its context`, async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", {
+			edits: [
+				{ op: "folder", name: "Right" },
+				{ op: "create", body: { title: "Other case" } },
+			],
+		});
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		let release = () => {};
+		try {
+			const { page, context } = harness;
+			await begin(harness, action);
+			const requests: unknown[] = [];
+			await context.route("**/api/p/scratch/propose", async (route) => {
+				requests.push(route.request().postDataJSON());
+				if (requests.length === 1) await route.abort("failed");
+				else await route.continue();
+			});
+			let started = () => {};
+			const held = new Promise<void>((resolve) => {
+				started = resolve;
+			});
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let commands = 0;
+			await context.route("**/api/p/scratch/command", async (route) => {
+				if (++commands > 1) return route.continue();
+				const response = await route.fetch();
+				started();
+				await gate;
+				await route.fulfill({ response });
+			});
+			await submit(harness, action);
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await submit(harness, action);
+			await held;
+			if (action === "folder") await page.locator("#tree .fo").filter({ hasText: "Right" }).click();
+			else await page.getByRole("option").filter({ hasText: "Other case" }).click();
+			await page
+				.locator("#stat")
+				.filter({ hasText: /not recorded when checked/ })
+				.waitFor();
+			const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
+			release();
+			await response;
+			await page.evaluate(
+				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+			);
+			expect(commands).toBe(2);
+			expect(requests).toHaveLength(1);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Second title", version: 2 });
+			expect((await server.api("find", { in: "folders" })).items.map((row) => row.path).sort()).toEqual([
+				"Right",
+				"Unsorted",
+			]);
+		} finally {
+			release();
+			await harness.close();
+			await server.stop();
+		}
+	});
 }
