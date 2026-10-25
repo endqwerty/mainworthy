@@ -13,8 +13,14 @@ def identifiers():
         if name.startswith(("TF_VAR_", "GCP_")) or name == "STATE_BUCKET":
             if value and value != "null":
                 values.add(value)
-                # Mask JSON leaves and path components, including the WIF project number.
-                values.update(re.findall(r"[\w.@:-]+", value))
+    provider = os.environ.get("GCP_WORKLOAD_IDENTITY_PROVIDER", "")
+    number = re.match(r"projects/(\d+)/", provider)
+    if number:
+        values.add(number[1])
+    for name in ("GCP_INFRA_DEPLOY_ACCOUNT", "GCP_INFRA_PLAN_ACCOUNT"):
+        account = re.fullmatch(r"[^@]+@([a-z][a-z0-9-]*)\.iam\.gserviceaccount\.com", os.environ.get(name, ""))
+        if account:
+            values.add(account[1])
     project = os.environ.get("TF_VAR_production_project", "")
     if project:
         for account in ("app", "jobs"):

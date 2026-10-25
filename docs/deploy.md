@@ -40,8 +40,9 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
 
 The entry workflow passes repository variables to `infra-execute.yml` as reusable-workflow secrets. Actions
 therefore masks their values before printing any step environment. The first script step also registers masks
-for identifier components and derived runtime service-account emails. The private foundation must permit this
-exact called workflow in its WIF condition, while keeping `infra.yml` on `main` as the caller.
+for runtime image references, the WIF project number, seed project ids and derived runtime service-account emails.
+The private foundation must permit this exact called workflow in its WIF condition,
+while keeping `infra.yml` on `main` as the caller.
 Terraform output and saved plans stay in a restricted directory under `RUNNER_TEMP`, removed when the script
 exits and never uploaded. Public logs show only plan counts, `No changes.`, and redacted error headers on failure.
 Resource attributes and diagnostic context stay out of the log. Error headers redact configured identifiers,
