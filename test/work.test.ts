@@ -408,12 +408,6 @@ test("a closing word is allowed on a line of its own, and nowhere else", () => {
 	expect(closing("    Closes #12\n").closes).toEqual([]);
 });
 
-test("the description needs no Principles line; one is prose", () => {
-	// Issue #904: the line checked spelling, not judgment, and nobody asked for the gate.
-	expect(problems(facts({ body: "## Why\n\nCloses #12\n" }))).toEqual([]);
-	expect(problems(facts({ body: "## Why\n\nCloses #12\n\nPrinciples: good design\n" }))).toEqual([]);
-});
-
 test("the milestone of the pull request is the milestone of its issue; in a stack nothing is linked yet", () => {
 	expect(problems(facts({ milestone: null }))).toEqual(['The pull request has no milestone; its issue has "M3".']);
 	expect(problems(facts({ milestone: "M1" }))[0]).toContain('milestone "M1"; its issue has "M3"');

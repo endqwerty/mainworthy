@@ -39,8 +39,8 @@ owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
 | Job | Runs when | What it does |
 | --- | --- | --- |
 | `scope` | always | compares the changed paths with `scripts/ci-scope.ts` and decides which jobs and test files run |
-| `static` | code, scripts or configuration changed | `bun run typecheck` and `bun run lint` |
-| `tests` | always, in a matrix from `scope` | six shards of functional tests and one runner for the serial performance phase. Each shard uploads its JUnit report as `results-<shard>-attempt-<n>`. |
+| `static` | code, scripts or configuration changed | `bun run typecheck`, `bun run lint` and `bun scripts/async-port.ts --check` |
+| `tests` | always, in a matrix from `scope` | 14 shards of functional tests and one runner for the serial performance phase. Each shard uploads its JUnit report as `results-<shard>-attempt-<n>`. |
 | `image` | a file the Dockerfile copies changed | builds the container, starts it, and checks `/healthz`, the docs, a diagram, a screenshot and the skill archive |
 | `ios` | the app, its scripts or the server changed | on macOS, `bun scripts/ios.ts test` against this commit's server, then `bun scripts/ios.ts build` |
 | `description` | every pull request | `bun scripts/work.ts pr-body <number>`. After you fix a description or a milestone, run this job again. |

@@ -94,8 +94,8 @@ the [command line reference](../guide/cli.md).
 | Command | What it does |
 | --- | --- |
 | `bun test <file>` | runs one test file |
-| `bun run test` | runs every test, with output as it comes |
-| `bun run check` | type-checks, lints and runs every test. It takes about two minutes. [The check and the tests](tests.md) explains its output. |
+| `bun run test` | runs functional tests, with output as it comes. Performance tests run separately. |
+| `bun run check` | runs the type-check, lint, async-port guard and functional tests, including browser tests. [The check and the tests](tests.md) explains its output. |
 | `bun run typecheck`, `bun run lint`, `bun run format` | `tsc --noEmit`, `biome check .` and `biome check --write .` |
 | `bun scripts/ci-scope.ts` | prints what CI would run for this branch |
 | `bun scripts/gen-docs.ts` | rewrites the generated tables in `docs/guide` from the code |
@@ -123,11 +123,11 @@ Each of these has a test or a script behind it, except where the table says othe
 | --- | --- |
 | a person can see | a new `.changes/<issue-or-unique-id>-<slug>.md` fragment and the relevant `docs/guide` page |
 | an operation, a command, a preset, a capability or an answer key | the generated docs: run `bun scripts/gen-docs.ts` |
-| a design choice | a decision record in `docs/decisions/YYYY-MM-DD-<slug>.md` |
+| a design choice that is hard to reverse, would surprise a later reader and came from a real trade-off | a decision record in `docs/decisions/YYYY-MM-DD-<slug>.md` (review judgment) |
 | a feature | the demo in `src/cli/demo/`, unless that is truly unreasonable (the owner's review, nothing runs) |
 | a dependency | the licence notices: run `bun scripts/licences.ts` |
 | a reply field the iPhone app reads | `scripts/ios/contract.ts`, then `bun scripts/ios.ts gen` |
 | the tests, by adding or splitting files | `scripts/test-timings.json` ([The check and the tests](tests.md#refresh-the-test-timings)) |
-| the schema | a new migration, never an edit to a shipped one |
+| the schema | `src/server/kernel/schema.sql`, its catalog snapshot and a behaviour test; state stored-data and archive compatibility |
 
 [Write a changelog fragment or decision](change-the-code.md#record-a-visible-change) describes the metadata and assembly commands.

@@ -81,64 +81,61 @@ for (const kind of ["edit", "new"])
 		);
 
 for (const same of [false, true])
-	for (const seal of [false, true])
-		check(
-			`R4A-1 conflict visibly refuses later ${same ? "title" : "step"} input with seal ${seal}`,
-			async () => {
-				const server = await startServer();
-				await cases(server, 1);
-				const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-				try {
-					const { page } = h;
-					await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
-					await page.keyboard.press("e");
-					await title(page).fill("My title");
-					await server.api("propose", {
-						edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Their title" } }],
-					});
+	check(
+		`a conflict refuses later ${same ? "title" : "step"} input and sealing until resolution`,
+		async () => {
+			const server = await startServer();
+			await cases(server, 1);
+			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await title(page).fill("My title");
+				await server.api("propose", {
+					edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Their title" } }],
+				});
+				await page.keyboard.press("Escape");
+				await page.locator(".conflict-card").waitFor();
+				const field = same ? title(page) : page.getByRole("textbox", { name: "Step 2", exact: true });
+				await field.click();
+				await field.press("End");
+				await page.keyboard.type(" with more words");
+				expect(await field.inputValue()).toBe(same ? "My title" : "Step 2");
+				await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
+				await page.keyboard.press("Escape");
+				await page.locator("#bar").filter({ hasText: "Resolve the conflict first" }).waitFor();
+				expect(await page.locator(".conflict-card").isVisible()).toBe(true);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+				await page.getByRole("button", { name: "Use my title", exact: true }).click();
+				await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => rows[0]?.version === 3,
+				);
+				const expected = same ? "My title" : "Step 2";
+				const held = await page.evaluate(() =>
+					Object.entries(localStorage)
+						.filter(([k]) => k.includes(":draft:"))
+						.map(([, v]) => v)
+						.join(" "),
+				);
+				const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(JSON.stringify(saved).includes(expected) || held.includes(expected)).toBe(true);
+				if (held.includes(expected)) {
 					await page.keyboard.press("Escape");
-					await page.locator(".conflict-card").waitFor();
-					const field = same ? title(page) : page.getByRole("textbox", { name: "Step 2", exact: true });
-					await field.click();
-					await field.press("End");
-					await page.keyboard.type(" with more words");
-					expect(await field.inputValue()).toBe(same ? "My title" : "Step 2");
-					await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
-					if (seal) {
-						await page.keyboard.press("Escape");
-						await page.locator("#bar").filter({ hasText: "Resolve the conflict first" }).waitFor();
-						expect(await page.locator(".conflict-card").isVisible()).toBe(true);
-						expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
-					}
-					await page.getByRole("button", { name: "Use my title", exact: true }).click();
-					await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
 					await eventually(
 						() => server.api("get", { refs: ["C-1"] }),
-						(rows) => rows[0]?.version === 3,
+						(rows) => JSON.stringify(rows).includes(expected),
 					);
-					const expected = same ? "My title" : "Step 2";
-					const held = await page.evaluate(() =>
-						Object.entries(localStorage)
-							.filter(([k]) => k.includes(":draft:"))
-							.map(([, v]) => v)
-							.join(" "),
-					);
-					const saved = (await server.api("get", { refs: ["C-1"] }))[0];
-					expect(JSON.stringify(saved).includes(expected) || held.includes(expected)).toBe(true);
-					if (held.includes(expected)) {
-						await page.keyboard.press("Escape");
-						await eventually(
-							() => server.api("get", { refs: ["C-1"] }),
-							(rows) => JSON.stringify(rows).includes(expected),
-						);
-					}
-				} finally {
-					await h.close();
-					await server.stop();
 				}
-			},
-			30000,
-		);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
 
 check(
 	"R4A-2 duplicated tabs have distinct owners and transfer the complete draft deliberately",

@@ -18,6 +18,7 @@ design. Read it before you change identity, sessions, runs or policy.
 | `src/server/identity/` | actors, tokens, sessions, passwords, passkeys, TOTP, OIDC, invitations, teams and the sign-in limiter |
 | `src/server/policy/` | the clause table that says who answers each kind of question |
 | `src/server/trackers/`, `src/server/statuses/` | defect issues on GitHub or Jira, and commit statuses on GitHub |
+| `src/server/handoffs/` | delivery of failure questions to coding agents and the delivery receipts |
 | `src/server/transfer/` | archive export and import, and audit export |
 | `src/server/ops/` | the registry (`index.ts`, `registry.ts`), `invoke`, recovery jobs and tracker holds |
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, sign-in routes, the docs site, the web UI's files and the headers on every reply. Adapters only, no product logic. |
@@ -46,7 +47,8 @@ what each may import besides itself and `src/core`:
 | `server/decisions` | `identity`, `policy`, `suite`, `evidence`, `runs` |
 | `server/statuses` | `evidence`, `runs` |
 | `server/trackers` | `evidence`, `suite` |
-| `server/transfer` | `suite` |
+| `server/transfer` | `suite`, `evidence`, `decisions` |
+| `server/handoffs` | `evidence`, `decisions` |
 | `server/runs` | `suite`, `evidence` |
 | `server/evidence` | `suite` |
 | `server/suite` | `policy` |

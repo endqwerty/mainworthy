@@ -12,7 +12,7 @@ To add an operation, follow these steps:
 
 1. Write the input and reply schemas in `src/core`, so the browser and the server share them.
 2. Define the operation with `defineOp` (project scope) or `defineInstanceOp` (instance scope) from
-   `src/server/ops/registry.ts`. Give it a `name`, a one-line `summary` longer than 20 characters, the Zod `input`
+   `src/server/ops/registry.ts`. Give it a `name`, a clear one-line `summary`, the Zod `input`
    and `output`, the capability it `needs`, its `effect` (`read` or `write`) and either `run` or, for long work,
    `steps`. Set `mcp` to a description written for a model if it is an agent tool, or to `null`.
 3. Compose domain functions in the operation. Do not write another module's tables from `src/server/ops`.
@@ -23,10 +23,11 @@ To add an operation, follow these steps:
 6. Run `bun scripts/gen-docs.ts` to regenerate the CLI and API reference in `docs/guide`.
 7. Write the behaviour tests and check the operation on a real surface: the CLI, HTTP or the web UI.
 
-`test/architecture.test.ts` ("the registry") fails on a duplicate name, a short summary, an eleventh MCP tool, a
-reply missing from `REPLIES`, an input field named like a password and an operation named like a shortcut
-(`createCase`, `closeRun`). `test/docs.test.ts` fails when the architecture table or a generated block no longer
-matches the registry. Pipeline tokens hold `read` and `record` at most, whatever the grant says, so a new write
+`test/architecture.test.ts` ("the registry") fails on a duplicate name, a reply missing from
+`REPLIES`, an input field named like a password and an operation named like a shortcut
+(`createCase`, `closeRun`). The MCP listing test in `src/surfaces/mcp.test.ts` reports a tool-count budget with a
+baseline of ten through `budget()`. `test/docs.test.ts` fails when the architecture table or a generated block
+no longer matches the registry. Pipeline tokens hold `read` and `record` at most, whatever the grant says, so a new write
 that a pipeline must call needs `record`.
 
 ## Add a migration

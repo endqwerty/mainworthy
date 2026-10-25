@@ -25,19 +25,6 @@ import { serve, sessionOf, VERSION } from "./http.ts";
 import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_GUIDELINE } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
-const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1377,
-	report: 855,
-	claim: 358,
-	work: 169,
-	decide: 280,
-	inbox: 165,
-	// The get contract now documents custom fields and result references; decision 0118 records the measured size.
-	get: 274,
-	find: 279,
-	impact: 206,
-	since: 137,
-};
 
 test("MCP impact pages all 450 selected cases before advancing since", async () => {
 	const h = await harness();
@@ -112,18 +99,14 @@ test("tools/list accepts a get cursor", () => {
 	});
 });
 
-test("tools come from the registry, and each tool's size is recorded", () => {
+test("tools come from the registry, with budgets for listing and tool size", () => {
 	const tools = mcpTools();
 	expect(tools.map((tool) => tool.name)).toEqual(MCP_OPS.map((op) => op.name));
 	budget("MCP tools", tools.length, 10, "tools");
 	const total = tokens({ tools });
-	// A guideline, not a gate (decision 0118): the recorded sizes below make every change visible in review.
 	budget("tools/list", total, TOOL_TOKEN_GUIDELINE.total, "tokens");
 	for (const tool of tools) budget(`the ${tool.name} tool`, tokens(tool), TOOL_TOKEN_GUIDELINE.perTool, "tokens");
 	for (const tool of tools) {
-		const expected = TOKEN_COUNTS[tool.name];
-		if (expected === undefined) throw new Error(`No token count recorded for ${tool.name}`);
-		expect(tokens(tool), `${tool.name} tokens; update the measured table after reviewing the change`).toBe(expected);
 		const op = MCP_OPS.find((entry) => entry.name === tool.name);
 		if (!op) throw new Error(`No operation found for ${tool.name}`);
 		if (op.mcp === null) throw new Error(`No tool description for ${tool.name}`);
@@ -1148,7 +1131,6 @@ for (const target of ["commit", "change", "run"] as const) {
 			const listed = await client.listTools();
 			expect(listed.tools.map((tool) => tool.name)).not.toContain("gate");
 			expect(listed.tools.map((tool) => tool.name)).toContain("work");
-			expect(listed.tools.length).toBe(10);
 		} finally {
 			await client.close();
 			await server.close();

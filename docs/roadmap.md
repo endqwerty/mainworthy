@@ -19,18 +19,22 @@ keeps the current work order and the per-issue lists. Update both when the plan 
 - Phase 0 was not done as planned: no hands-on audit (decision 0009, answer 13: no
   trial accounts) and no measured baselines against the incumbents. That gap is the
   reason the MVP is a preview and not a first usable version (#39).
-- The instance runs from the same build as a container backed by PostgreSQL 18. The Cloud
-  layer and PostgreSQL are deferred (#57).
+
+The storage port to PostgreSQL 18 landed on 2026-10-24 in
+[PR #901](https://github.com/endqwerty/mainworthy/pull/901). Cloud Run/Cloud SQL deployment,
+shared-state jobs, backups and cutover evidence remain in
+[issue #821](https://github.com/endqwerty/mainworthy/issues/821). Source completion does not
+prove the live instance or a restore works.
 
 Scope is software QA across the process spectrum, loose to regulated, with
 the full CI/CD flow in every profile (decision 0003).
 
-## From the MVP to 1.0 (updated 2026-10-14)
+## From the MVP to 1.0 (updated 2026-10-24)
 
 On 2026-10-13 the milestone `Backlog to 1.0` became seven milestones, M1 to M7,
 in three phases. Their titles stay unchanged so existing board filters do not break.
 A milestone has no date. It ends when its acceptance criteria and required evidence
-are met. The 2026-10-14 audit in [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
+are met. [Issue #64](https://github.com/endqwerty/mainworthy/issues/64)
 sets the current work order. Milestone numbers do not require independent work to
 wait for a device check or an owner decision.
 
@@ -41,7 +45,7 @@ wait for a device check or an owner decision.
 | 2: the first usable version | M3 An exact gate that reaches the pull request | Each assigned issue has a fixture for its effect on the gate, including branch heads, scope, empty reports, disputes and failure signatures, and outbound GitHub checks publish the verdict |
 | | M4 Agents | Reviews belong to the exact change and patch, replies have registry schemas, delegation and edit limits preserve authority, and agent jobs meet budgets measured in two clients |
 | | M5 The rest of the workflow | The remaining case, execution, reporting, traceability and data-movement work meets its criteria, and each of the three team profiles runs its workflow end to end with policy switches only |
-| 3: 1.0 | M6 Teams and organisations | Assigned organisation features meet their criteria, and PostgreSQL and a hosted tier each have an owner-approved decision based on demonstrated need |
+| 3: 1.0 | M6 Teams and organisations | Assigned organisation features meet their criteria, and a hosted tier has an owner-approved decision based on demonstrated need; PostgreSQL storage has landed |
 | | M7 Before 1.0 | The friction comparison, accessibility audit and trademark search have recorded results, distribution requirements are addressed, and the owner declares 1.0 |
 
 The native MVP has shipped. The separate `iOS app` milestone tracks the remaining
@@ -49,12 +53,14 @@ app work and distribution evidence. TestFlight upload tooling does not prove tha
 installation works. Edit-overlap resolution shipped in the app on 2026-10-15. The
 app also saves eligible queue answers on the device and sends them when it
 reconnects. Linking a test and creating a case still need a connection. Native
-passkeys are the next candidate feature. App instance selection and licence screens are deferred
+passkey sign-in has shipped; [real-device verification](https://github.com/endqwerty/mainworthy/issues/205) remains. App instance selection and licence screens are deferred
 owner choices; distribution requirements remain separate obligations.
 
 The check warns above 130 s; CI shards warn above 180 s. Elapsed time is advisory by the
 owner's decision 0097. Under 120 s remains the local goal, and
-[issue #77](https://github.com/endqwerty/mainworthy/issues/77) tracks a future timing gate.
+[issue #77](https://github.com/endqwerty/mainworthy/issues/77) tracks actionable failures and lower PR feedback cost.
+Individual budgets warn above baseline and fail above ten times baseline for review.
+This work does not add a new elapsed-time gate.
 Runner, CLI-start and reader-startup reductions have shipped. Existing native reply
 tests, case field values and policy presets also narrow the work left to do.
 
@@ -63,25 +69,18 @@ tests, case field values and policy presets also narrow the work left to do.
 Follow [issue #64, "Start next"](https://github.com/endqwerty/mainworthy/issues/64#start-next)
 for the individual issues, their order and dependencies:
 
-1. Preserve drafts during takeover and competing-window edits. Fix stored-reply
-   erasure in parallel when ownership is separate.
-2. Finish decision receipts and suggestions, including bulk Queue undo, then
-   sustained-change paging.
-3. Start off-host backups and a restore drill alongside exact-commit deployment
-   gating. Neither waits for the check-time decision.
-4. Finish credential retention, shared-browser cleanup and measured proxy
-   configuration. Account-erasure controls follow the stored-reply fix.
-5. Then prioritize exact gate evidence and the change and patch that an agent
-   reviewed. Bring reply schemas forward when CI compatibility needs them.
-   Outbound GitHub checks precede optional private report fetching.
+1. Reduce test maintenance and repeated pull-request work in
+   [#77](https://github.com/endqwerty/mainworthy/issues/77): remove redundant assertions,
+   repeated fixtures and unused setup while keeping meaningful failure evidence.
+2. Fix the bounded command-identity, hidden-selection, navigation, native lease and fixture-readiness
+   defects listed in issue #64.
+3. Finish the PostgreSQL hosting transition in
+   [#821](https://github.com/endqwerty/mainworthy/issues/821), including shared state, deployment
+   gating, off-host backups and a recorded restore drill. Demo cleanup remains
+   [#914](https://github.com/endqwerty/mainworthy/issues/914).
 
-Checked against the code on 2026-10-18, parts of this list have shipped: draft
-takeover protection and kept copies of competing edits, removal of a forgotten
-person's name from stored replies, bulk undo in the queue, paging of `since` under
-sustained changes, erasure of revoked credentials and the admin's forget action,
-reply schemas for every operation, and optional GitHub commit statuses for the
-gate. Measured proxy configuration is not done. The rest of each item was not
-checked here, and issue #64 keeps its state.
+Issue #64 and each feature issue distinguish shipped source from remaining work. Optional features
+need a concrete workflow; they are not all prerequisites for this reliability and developer-experience cleanup.
 
 In parallel, confirm TestFlight installation, settle the private contact, and
 gather sign-in and phone evidence on real devices. Public-source research for the
@@ -93,9 +92,8 @@ the existing workflow; M6 needs concrete organisational demand; M7 records the
 evidence for the owner's 1.0 decision. Source review alone proves no runtime,
 device, deployment or compliance result.
 
-The [private project board](https://github.com/users/endqwerty/projects/2) could not
-be read during this update because the token lacks `read:project`. Its membership,
-views and status automation are not verified here. Use issue #64 for the work order.
+The [project board](https://github.com/users/endqwerty/projects/2) tracks issue and pull-request status.
+Issue #64 keeps the work order; the issue body owns acceptance criteria and evidence.
 
 This replaces phases 3 and 4 below. Their contents went to M3 and M5 (runs, ingest,
 traceability, gates, importers, reports) and M2 (deployment, backup and restore). One
@@ -220,9 +218,9 @@ storage and any cache pass the same job suite.
 
 ## Standing rules across phases
 
-- Every phase that changes behaviour adds tests and runs the check on the
-  real surface; performance and latency tests are part of the check from
-  phase 2.
+- Every phase that changes behaviour tests the changed contract and checks the
+  real surface. Functional tests run in `bun run check`; performance and latency
+  measurements run separately with `bun run performance`.
 - Research continues: each phase ends with the job suite run on the real
   product against the baselines in `docs/ux/jobs.md`, and with a review of
   the result against the three team profiles.

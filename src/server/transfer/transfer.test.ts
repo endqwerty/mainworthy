@@ -1561,14 +1561,9 @@ describe("Mainworthy instance archives", () => {
 	});
 
 	test("unknown prototype-named tables and columns are named and refused", async () => {
-		await refuse(
-			rehash((await archive(await source())).replace('"tables":{', '"tables":{"__proto__":0,')),
-			/unknown.*table.*__proto__/i,
-		);
-		await refuse(
-			rehash((await archive(await source())).replace('"r":{', '"r":{"__proto__":"unknown",')),
-			/unknown.*column.*__proto__/i,
-		);
+		const text = await archive(await source());
+		await refuse(rehash(text.replace('"tables":{', '"tables":{"__proto__":0,')), /unknown.*table.*__proto__/i);
+		await refuse(rehash(text.replace('"r":{', '"r":{"__proto__":"unknown",')), /unknown.*column.*__proto__/i);
 	});
 
 	test("emits complete lines in approximately 64 KiB chunks within a read transaction", async () => {
@@ -1724,18 +1719,16 @@ describe("Mainworthy instance archives", () => {
 	});
 
 	test("newer and older schemas are refused with a clear message", async () => {
+		const text = await archive(await source());
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
-		expect(await archive(await source())).toContain(`"schema":${ARCHIVE_VERSION},`);
+		expect(text).toContain(`"schema":${ARCHIVE_VERSION},`);
 		expect(ARCHIVE_VERSION).toBe(43);
 		await refuse(
-			(await archive(await source())).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
+			text.replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
 		);
-		await refuse(
-			(await archive(await source())).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'),
-			/schema.*older|older.*schema/,
-		);
+		await refuse(text.replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'), /schema.*older|older.*schema/);
 	});
 
 	test("sessions never travel, and an import empties them before the tokens they refer to", async () => {
@@ -1882,25 +1875,18 @@ describe("Mainworthy instance archives", () => {
 	});
 
 	test("trailing input, empty input and attempts to import excluded data are refused", async () => {
-		await refuse(`${await archive(await source())}{"end":true}\n`, /after.*footer|trailing/);
+		const text = await archive(await source());
+		await refuse(`${text}{"end":true}\n`, /after.*footer|trailing/);
 		await refuse("", /header|empty/);
-		await refuse(
-			(await archive(await source())).replace('"key":"instance-note"', '"key":"schema_version"'),
-			/schema_version/,
-		);
-		await refuse((await archive(await source())).replace('"t":"meta"', '"t":"tokens"'), /tokens/);
-		await refuse((await archive(await source())).replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
+		await refuse(text.replace('"key":"instance-note"', '"key":"schema_version"'), /schema_version/);
+		await refuse(text.replace('"t":"meta"', '"t":"tokens"'), /tokens/);
+		await refuse(text.replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
 	});
 
 	test("a missing head version or invalid search body rolls back index rebuilding", async () => {
-		await refuse(
-			rehash((await archive(await source())).replace('"head":2', '"head":99')),
-			/head.*version|version.*head/,
-		);
-		await refuse(
-			rehash((await archive(await source())).replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')),
-			/search|body|pre/,
-		);
+		const text = await archive(await source());
+		await refuse(rehash(text.replace('"head":2', '"head":99')), /head.*version|version.*head/);
+		await refuse(rehash(text.replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')), /search|body|pre/);
 	});
 
 	test("50,000 result rows are exported and imported, with timing and complete data checks", async () => {
