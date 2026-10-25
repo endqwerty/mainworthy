@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { InboxReply } from "../src/core/ops.ts";
 import { openApp } from "../src/server/kernel/app.ts";
+import { lockProject } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
@@ -37,6 +38,7 @@ test("two agents asking together take different next slots", async () => {
 	const held = h.app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				await lockProject(db, 1);
 				entered.resolve();
 				await release.promise;
 			}),
@@ -56,8 +58,12 @@ test("two agents asking together take different next slots", async () => {
 		if (!reply.ok) throw new Error(JSON.stringify(reply.error));
 		return reply.result as Taken;
 	});
-	expect([one?.case, two?.case]).toEqual(["C-1", "C-2"]);
-	expect((await slots()).map((s) => (s.work.kind === "held" ? s.work.actor : "free"))).toEqual(["one", "two"]);
+	expect([one?.case, two?.case].sort()).toEqual(["C-1", "C-2"]);
+	expect(one?.work).toMatchObject({ kind: "held", actor: "one" });
+	expect(two?.work).toMatchObject({ kind: "held", actor: "two" });
+	const heldSlots = await slots();
+	expect(heldSlots.find((slot) => slot.id === one?.slot)?.work).toEqual(one?.work);
+	expect(heldSlots.find((slot) => slot.id === two?.slot)?.work).toEqual(two?.work);
 	expect(await run()).toMatchObject({ inProgress: 2 });
 	expect(await take({}, a)).toEqual({ run: "R-1", slot: null, case: null, work: { kind: "free" } });
 });
