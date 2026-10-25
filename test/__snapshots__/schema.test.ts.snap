@@ -107,6 +107,12 @@ column change_ends.landing_branch: text NULL
 column change_ends.landing_commit: text NULL
 column change_ends.landing_repo: text NULL
 column change_ends.receipt: bigint NULL
+column change_events.at: bigint NOT NULL
+column change_events.op: text NOT NULL
+column change_events.project: bigint NOT NULL
+column change_events.revision: text NOT NULL DEFAULT (gen_random_uuid())::text
+column change_events.seq: bigint NOT NULL
+column change_events.touched: text NOT NULL
 column changes.base_sha: text NULL
 column changes.branch: text NULL
 column changes.files: text NOT NULL DEFAULT '[]'::text
@@ -235,6 +241,21 @@ column handoffs.project: bigint NOT NULL
 column handoffs.question: bigint NOT NULL
 column handoffs.queue_order: bigint NOT NULL IDENTITY d
 column handoffs.state: text NOT NULL
+column identity_ceremonies.deadline: bigint NOT NULL
+column identity_ceremonies.generation: text NOT NULL
+column identity_ceremonies.key: text NOT NULL
+column identity_ceremonies.kind: text NOT NULL
+column identity_ceremonies.owner: text NOT NULL
+column identity_ceremonies.payload: text NOT NULL
+column identity_ceremony_epoch.generation: text NOT NULL
+column identity_ceremony_epoch.singleton: boolean NOT NULL DEFAULT true
+column identity_limits.entry: text NOT NULL
+column identity_limits.expires_at: bigint NOT NULL
+column identity_limits.key: text NOT NULL
+column identity_limits.version: bigint NOT NULL
+column identity_starts.count: bigint NOT NULL
+column identity_starts.key: text NOT NULL
+column identity_starts.since: bigint NOT NULL
 column invitations.actor: bigint NOT NULL
 column invitations.created_at: bigint NOT NULL
 column invitations.created_by: bigint NOT NULL
@@ -744,6 +765,14 @@ constraint change_ends.change_ends_ended_check: CHECK ((ended = ANY (ARRAY['merg
 constraint change_ends.change_ends_ended_not_null: NOT NULL ended
 constraint change_ends.change_ends_pkey: PRIMARY KEY (change)
 constraint change_ends.change_ends_receipt_fkey: FOREIGN KEY (receipt) REFERENCES merge_receipts(id) DEFERRABLE
+constraint change_events.change_events_at_not_null: NOT NULL at
+constraint change_events.change_events_op_not_null: NOT NULL op
+constraint change_events.change_events_pkey: PRIMARY KEY (project, seq)
+constraint change_events.change_events_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) ON DELETE CASCADE DEFERRABLE
+constraint change_events.change_events_project_not_null: NOT NULL project
+constraint change_events.change_events_revision_not_null: NOT NULL revision
+constraint change_events.change_events_seq_not_null: NOT NULL seq
+constraint change_events.change_events_touched_not_null: NOT NULL touched
 constraint changes.changes_files_not_null: NOT NULL files
 constraint changes.changes_id_not_null: NOT NULL id
 constraint changes.changes_key_not_null: NOT NULL key
@@ -899,6 +928,26 @@ constraint handoffs.handoffs_question_not_null: NOT NULL question
 constraint handoffs.handoffs_queue_order_not_null: NOT NULL queue_order
 constraint handoffs.handoffs_state_check: CHECK ((state = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text])))
 constraint handoffs.handoffs_state_not_null: NOT NULL state
+constraint identity_ceremonies.identity_ceremonies_deadline_not_null: NOT NULL deadline
+constraint identity_ceremonies.identity_ceremonies_generation_not_null: NOT NULL generation
+constraint identity_ceremonies.identity_ceremonies_key_not_null: NOT NULL key
+constraint identity_ceremonies.identity_ceremonies_kind_not_null: NOT NULL kind
+constraint identity_ceremonies.identity_ceremonies_owner_not_null: NOT NULL owner
+constraint identity_ceremonies.identity_ceremonies_payload_not_null: NOT NULL payload
+constraint identity_ceremonies.identity_ceremonies_pkey: PRIMARY KEY (kind, key)
+constraint identity_ceremony_epoch.identity_ceremony_epoch_generation_not_: NOT NULL generation
+constraint identity_ceremony_epoch.identity_ceremony_epoch_pkey: PRIMARY KEY (singleton)
+constraint identity_ceremony_epoch.identity_ceremony_epoch_singleton_check: CHECK (singleton)
+constraint identity_ceremony_epoch.identity_ceremony_epoch_singleton_not_n: NOT NULL singleton
+constraint identity_limits.identity_limits_entry_not_null: NOT NULL entry
+constraint identity_limits.identity_limits_expires_at_not_null: NOT NULL expires_at
+constraint identity_limits.identity_limits_key_not_null: NOT NULL key
+constraint identity_limits.identity_limits_pkey: PRIMARY KEY (key)
+constraint identity_limits.identity_limits_version_not_null: NOT NULL version
+constraint identity_starts.identity_starts_count_not_null: NOT NULL count
+constraint identity_starts.identity_starts_key_not_null: NOT NULL key
+constraint identity_starts.identity_starts_pkey: PRIMARY KEY (key)
+constraint identity_starts.identity_starts_since_not_null: NOT NULL since
 constraint invitations.invitations_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
 constraint invitations.invitations_actor_not_null: NOT NULL actor
 constraint invitations.invitations_created_at_not_null: NOT NULL created_at
@@ -1369,7 +1418,6 @@ BEGIN
  END IF;
  RETURN NEW;
 END $function$
-
 function authority_changed: CREATE OR REPLACE FUNCTION public.authority_changed()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1404,7 +1452,6 @@ BEGIN
  END IF;
  RETURN coalesce(NEW, OLD);
 END $function$
-
 function receipt_batch_fn: CREATE OR REPLACE FUNCTION public.receipt_batch_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1417,7 +1464,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_correction_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_delete_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1430,7 +1476,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN OLD;
 END;
 $function$
-
 function receipt_correction_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_insert_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1443,7 +1488,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_correction_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_update_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1456,7 +1500,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_correction_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_update_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1469,7 +1512,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_excuses_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_delete_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1480,7 +1522,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN OLD;
 END;
 $function$
-
 function receipt_excuses_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_insert_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1491,7 +1532,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_excuses_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_update_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1502,7 +1542,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_excuses_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_update_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1513,7 +1552,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_flips_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_delete_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1524,7 +1562,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN OLD;
 END;
 $function$
-
 function receipt_flips_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_insert_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1535,7 +1572,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_flips_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_update_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1546,7 +1582,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_flips_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_update_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1557,7 +1592,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_quarantine_insert_fn: CREATE OR REPLACE FUNCTION public.receipt_quarantine_insert_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1573,7 +1607,6 @@ INSERT INTO merge_receipt_dirty(run,bucket)
  RETURN NEW;
 END;
 $function$
-
 function receipt_quarantine_presence_fn: CREATE OR REPLACE FUNCTION public.receipt_quarantine_presence_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1586,7 +1619,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN OLD;
 END;
 $function$
-
 function receipt_result_excuses_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_delete_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1597,7 +1629,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN OLD;
 END;
 $function$
-
 function receipt_result_excuses_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_insert_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1608,7 +1639,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_result_excuses_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_update_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1619,7 +1649,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_result_excuses_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_update_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1630,7 +1659,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_result_fn: CREATE OR REPLACE FUNCTION public.receipt_result_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1643,7 +1671,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_run_delete_fn: CREATE OR REPLACE FUNCTION public.receipt_run_delete_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1654,7 +1681,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE E
  RETURN OLD;
 END;
 $function$
-
 function receipt_run_insert_fn: CREATE OR REPLACE FUNCTION public.receipt_run_insert_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1665,7 +1691,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE E
  RETURN NEW;
 END;
 $function$
-
 function receipt_run_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_run_update_new_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1678,7 +1703,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE E
  RETURN NEW;
 END;
 $function$
-
 function receipt_run_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_run_update_old_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1691,7 +1715,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE E
  RETURN NEW;
 END;
 $function$
-
 function receipt_target_fn: CREATE OR REPLACE FUNCTION public.receipt_target_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1704,7 +1727,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function receipt_test_fn: CREATE OR REPLACE FUNCTION public.receipt_test_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1717,7 +1739,6 @@ INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_
  RETURN NEW;
 END;
 $function$
-
 function search_docs_vector_fn: CREATE OR REPLACE FUNCTION public.search_docs_vector_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1767,7 +1788,6 @@ BEGIN
  RETURN NEW;
 END;
 $function$
-
 index actors_org_name_key: CREATE UNIQUE INDEX actors_org_name_key ON public.actors USING btree (org, name)
 index actors_pkey: CREATE UNIQUE INDEX actors_pkey ON public.actors USING btree (id)
 index answers_pkey: CREATE UNIQUE INDEX answers_pkey ON public.answers USING btree (id)
@@ -1809,6 +1829,8 @@ index cases_state: CREATE INDEX cases_state ON public.cases USING btree (project
 index change_ends_landing: CREATE INDEX change_ends_landing ON public.change_ends USING btree (landing_commit, landing_repo, landing_branch) WHERE (ended = 'merged'::text)
 index change_ends_pkey: CREATE UNIQUE INDEX change_ends_pkey ON public.change_ends USING btree (change)
 index change_ends_receipt: CREATE INDEX change_ends_receipt ON public.change_ends USING btree (receipt)
+index change_events_pkey: CREATE UNIQUE INDEX change_events_pkey ON public.change_events USING btree (project, seq)
+index change_events_retention: CREATE INDEX change_events_retention ON public.change_events USING btree (at)
 index changes_base: CREATE INDEX changes_base ON public.changes USING btree (project, base_sha, repo)
 index changes_pkey: CREATE UNIQUE INDEX changes_pkey ON public.changes USING btree (id)
 index changes_project_key_key: CREATE UNIQUE INDEX changes_project_key_key ON public.changes USING btree (project, key)
@@ -1858,6 +1880,13 @@ index handoffs_pkey: CREATE UNIQUE INDEX handoffs_pkey ON public.handoffs USING 
 index handoffs_project: CREATE INDEX handoffs_project ON public.handoffs USING btree (project)
 index handoffs_question: CREATE INDEX handoffs_question ON public.handoffs USING btree (question, at)
 index handoffs_queue: CREATE INDEX handoffs_queue ON public.handoffs USING btree (state, at)
+index identity_ceremonies_expiry: CREATE INDEX identity_ceremonies_expiry ON public.identity_ceremonies USING btree (kind, deadline)
+index identity_ceremonies_owner: CREATE INDEX identity_ceremonies_owner ON public.identity_ceremonies USING btree (kind, owner)
+index identity_ceremonies_pkey: CREATE UNIQUE INDEX identity_ceremonies_pkey ON public.identity_ceremonies USING btree (kind, key)
+index identity_ceremony_epoch_pkey: CREATE UNIQUE INDEX identity_ceremony_epoch_pkey ON public.identity_ceremony_epoch USING btree (singleton)
+index identity_limits_expiry: CREATE INDEX identity_limits_expiry ON public.identity_limits USING btree (expires_at)
+index identity_limits_pkey: CREATE UNIQUE INDEX identity_limits_pkey ON public.identity_limits USING btree (key)
+index identity_starts_pkey: CREATE UNIQUE INDEX identity_starts_pkey ON public.identity_starts USING btree (key)
 index invitations_actor: CREATE INDEX invitations_actor ON public.invitations USING btree (actor)
 index invitations_hash_key: CREATE UNIQUE INDEX invitations_hash_key ON public.invitations USING btree (hash)
 index invitations_pkey: CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
@@ -2000,81 +2029,86 @@ index tracker_requests_queue: CREATE INDEX tracker_requests_queue ON public.trac
 index tracker_requests_result_reset: CREATE INDEX tracker_requests_result_reset ON public.tracker_requests USING btree (result)
 index versions_decision_reset: CREATE INDEX versions_decision_reset ON public.versions USING btree (decision)
 index versions_pkey: CREATE UNIQUE INDEX versions_pkey ON public.versions USING btree (case_id, no)
-table actors: 
-table answers: 
-table artifacts: 
-table assertion_index: 
-table assertion_roots: 
-table assertion_seen: 
-table assertion_spreads: 
-table attachments: 
-table batch_admissions: 
-table batches: 
-table builds: 
-table case_aliases: 
-table case_tags: 
-table cases: 
-table change_ends: 
-table changes: 
-table commands: 
-table commit_status_delivery: 
-table commit_statuses: 
-table counters: 
-table covers: 
-table credentials: 
-table decisions: 
-table demo_projects: 
-table depends_on: 
-table deployments: 
-table excuses: 
-table findings: 
-table flips: 
-table folders: 
-table grants: 
-table handoffs: 
-table invitations: 
-table mail_contacts: 
-table merge_receipt_dirty: 
-table merge_receipt_heads: 
-table merge_receipt_members: 
-table merge_receipt_nodes: 
-table merge_receipt_payloads: 
-table merge_receipt_snapshots: 
-table merge_receipts: 
-table meta: 
-table orgs: 
-table passkey_users: 
-table placements: 
-table policies: 
-table projects: 
-table proposals: 
-table quarantines: 
-table question_refs: 
-table questions: 
-table requirements: 
-table result_excuses: 
-table result_tries: 
-table results: 
-table reviews: 
-table run_tests: 
-table runs: 
-table scope_moves: 
-table search_docs: 
-table sessions: 
-table signatures: 
-table slot_leases: 
-table slot_results: 
-table slots: 
-table targets: 
-table team_events: 
-table team_grants: 
-table team_members: 
-table teams: 
-table tests: 
-table tokens: 
-table tracker_polls: 
-table tracker_requests: 
-table versions: 
+table actors:
+table answers:
+table artifacts:
+table assertion_index:
+table assertion_roots:
+table assertion_seen:
+table assertion_spreads:
+table attachments:
+table batch_admissions:
+table batches:
+table builds:
+table case_aliases:
+table case_tags:
+table cases:
+table change_ends:
+table change_events:
+table changes:
+table commands:
+table commit_status_delivery:
+table commit_statuses:
+table counters:
+table covers:
+table credentials:
+table decisions:
+table demo_projects:
+table depends_on:
+table deployments:
+table excuses:
+table findings:
+table flips:
+table folders:
+table grants:
+table handoffs:
+table identity_ceremonies:
+table identity_ceremony_epoch:
+table identity_limits:
+table identity_starts:
+table invitations:
+table mail_contacts:
+table merge_receipt_dirty:
+table merge_receipt_heads:
+table merge_receipt_members:
+table merge_receipt_nodes:
+table merge_receipt_payloads:
+table merge_receipt_snapshots:
+table merge_receipts:
+table meta:
+table orgs:
+table passkey_users:
+table placements:
+table policies:
+table projects:
+table proposals:
+table quarantines:
+table question_refs:
+table questions:
+table requirements:
+table result_excuses:
+table result_tries:
+table results:
+table reviews:
+table run_tests:
+table runs:
+table scope_moves:
+table search_docs:
+table sessions:
+table signatures:
+table slot_leases:
+table slot_results:
+table slots:
+table targets:
+table team_events:
+table team_grants:
+table team_members:
+table teams:
+table tests:
+table tokens:
+table tracker_polls:
+table tracker_requests:
+table versions:
 trigger actors.authority_actor: CREATE TRIGGER authority_actor BEFORE UPDATE ON public.actors FOR EACH ROW EXECUTE FUNCTION authority_actor_changed()
 trigger batches.receipt_batch: CREATE TRIGGER receipt_batch AFTER UPDATE OF job ON public.batches FOR EACH ROW EXECUTE FUNCTION receipt_batch_fn()
 trigger credentials.authority_credential: CREATE TRIGGER authority_credential BEFORE INSERT OR DELETE OR UPDATE OF actor, revoked_at, data ON public.credentials FOR EACH ROW EXECUTE FUNCTION authority_changed()

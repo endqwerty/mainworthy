@@ -943,6 +943,7 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
 			INSERT INTO slot_leases VALUES (602, 71, 1, 30001);
+			INSERT INTO change_events (project,seq,op,touched,at) VALUES (23,1,'test','[]',1);
 			INSERT INTO change_ends (change, ended, at) VALUES (503, 'merged', 1);
    INSERT INTO merge_receipt_payloads (id,project,hash,body) VALUES (1,23,'payload','{}');
    INSERT INTO merge_receipt_nodes (id,project,hash,level,count) VALUES (1,23,'node',0,1);
@@ -998,6 +999,7 @@ describe("Mainworthy instance archives", () => {
 			"merge_receipts",
 			"slot_leases",
 			"change_ends",
+			"change_events",
 			"tracker_requests",
 			"tracker_polls",
 			"handoffs",
@@ -1832,11 +1834,16 @@ describe("Mainworthy instance archives", () => {
 			"assertion_spreads",
 			"batch_admissions",
 			"change_ends",
+			"change_events",
 			"commit_status_delivery",
 			"commit_statuses",
 			"credentials",
 			"demo_projects",
 			"handoffs",
+			"identity_ceremonies",
+			"identity_ceremony_epoch",
+			"identity_limits",
+			"identity_starts",
 			"invitations",
 			"merge_receipt_dirty",
 			"merge_receipt_heads",

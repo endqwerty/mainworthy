@@ -37,7 +37,7 @@ test("PostgreSQL 18 baseline catalog matches the reviewed snapshot", async () =>
 		(await db.unsafe<{ version: string }[]>("SELECT current_setting('server_version') AS version"))[0]?.version,
 	).toMatch(/^18\./);
 	expect(
-		(await schemaCatalog(db)).map((row) => `${row.kind} ${row.name}: ${row.definition}`).join("\n"),
+		(await schemaCatalog(db)).map((row) => `${row.kind} ${row.name}: ${row.definition}`.trimEnd()).join("\n"),
 	).toMatchSnapshot();
 });
 
@@ -424,7 +424,7 @@ test("the schema port --check accounts for every reviewed hand edit", async () =
 	expect(stdout).toContain("13 justified hand edits only.");
 });
 
-test("the project-lock migration upgrades the immutable baseline without replacing its rows", async () => {
+test("the migration chain upgrades the immutable baseline without replacing its rows", async () => {
 	const fixture = await testDatabase({ schema: "empty" });
 	const target = await Database.open({ url: fixture.url });
 	try {
@@ -446,7 +446,7 @@ test("the project-lock migration upgrades the immutable baseline without replaci
 		expect(await target.read((db) => db.allDynamic("SELECT id, name, auth_version FROM actors"))).toEqual([
 			{ id: 1, name: "robin", auth_version: 0 },
 		]);
-		expect(await target.read(schemaVersion)).toBe(2);
+		expect(await target.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		await migrate(target);
 		expect(await target.read((db) => db.allDynamic("SELECT id, name, auth_version FROM actors"))).toEqual([
 			{ id: 1, name: "robin", auth_version: 0 },

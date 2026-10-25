@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { type Database, migrationLock, type ReadDb, sql } from "./db.ts";
 import projectLocks from "./migrations/0002-project-locks.sql" with { type: "text" };
+import sharedIdentity from "./migrations/0003-shared-identity.sql" with { type: "text" };
 import baseline from "./schema.sql" with { type: "text" };
 
 // PostgreSQL starts a new schema lineage; archive 43 follows the final SQLite archive format (42).
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const ARCHIVE_VERSION = 43;
-export const migrationHash = createHash("sha256").update(projectLocks).digest("hex");
+export const migrationHash = createHash("sha256").update(projectLocks).update(sharedIdentity).digest("hex");
 const hash = createHash("sha256").update(baseline).digest("hex");
 
 export function baselineSchema(): { sql: string; hash: string } {
@@ -49,10 +50,15 @@ export async function migrate(database: Database): Promise<void> {
 					await db.exec(projectLocks);
 					await db.exec("UPDATE meta SET value = '2' WHERE key = 'schema_version'");
 				}
+				if (version < 3) {
+					await db.exec(sharedIdentity);
+					await db.exec("UPDATE meta SET value = '3' WHERE key = 'schema_version'");
+				}
 				return;
 			}
 			await db.exec(baseline);
 			await db.exec(projectLocks);
+			await db.exec(sharedIdentity);
 			for (const [key, value] of Object.entries({
 				schema_version: String(SCHEMA_VERSION),
 				baseline_hash: hash,
