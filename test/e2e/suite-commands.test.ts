@@ -61,8 +61,24 @@ for (const action of ["folder", "restore"] as const) {
 		let harness: PageHarness | null = null;
 		try {
 			await twoVersions(server);
-			harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			harness = await openPage(server, {
+				path: "/p/scratch/suite/c/1",
+				// Keep the old project loaded so the command, rather than a stream refresh, discovers replacement.
+				setup: async (page) => {
+					await page.addInitScript(() => {
+						Reflect.set(
+							window,
+							"EventSource",
+							class {
+								close(): void {}
+							},
+						);
+					});
+				},
+			});
 			await begin(harness, action);
+			if (action === "restore")
+				await harness.page.locator("#detail .ctitle").filter({ hasText: "Second title" }).waitFor();
 			await instance.app.database.write(async (db) => {
 				await db.transaction(async () => removeProject(db, "scratch"));
 			});
