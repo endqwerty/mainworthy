@@ -34,7 +34,7 @@ for (const contract of ["missing", "mismatch", ...(legacyBundle ? ["historical"]
 						await route.continue({ headers });
 					});
 					page.on("response", (response) => {
-						if (response.url().endsWith("/propose")) refused.push(response.status());
+						if (/\/(?:get|propose)$/.test(response.url())) refused.push(response.status());
 					});
 				},
 			});
@@ -737,7 +737,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"mixed archive states refuse and an unread pick must be opened before restoring",
+	"mixed archive states refuse and an off-list pick is read before restoring",
 	async () => {
 		const server = await startServer();
 		await server.api("propose", {
@@ -758,7 +758,7 @@ test.skipIf(!browserAvailable)(
 			await page.goBack();
 			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
 			await page.keyboard.press("ControlOrMeta+k");
-			await page.getByRole("option", { name: /Archive\/restore unavailable/ }).waitFor();
+			await page.getByRole("option", { name: /Archive or restore selected/ }).waitFor();
 			await page.keyboard.press("Escape");
 			await page.keyboard.press("#");
 			await page.locator("#stat").filter({ hasText: "Select only active or only archived cases." }).waitFor();
@@ -773,11 +773,6 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).click();
 			await page.getByRole("button", { name: "Active pick", exact: true }).waitFor();
 			await page.keyboard.press("x");
-			await page.keyboard.press("#");
-			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
-			await page.goBack();
-			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
 			await page.keyboard.press("#");
 			await eventually(
 				() => server.api("get", { refs: ["C-1", "C-2"] }),
@@ -796,7 +791,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"an off-list pick cannot undo another person's restore using its saved state",
+	"an off-list pick reads another person's restore before archiving and undoing",
 	async () => {
 		const server = await startServer();
 		await server.api("propose", {
@@ -818,23 +813,24 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("ControlOrMeta+k");
 			if (process.env.MAINWORTHY_PICKED_UNREAD_SCREENSHOT) {
 				await page
-					.getByRole("option", { name: /Archive selected|Restore selected|unavailable/ })
+					.getByRole("option", { name: /Archive selected|Restore selected|Archive or restore selected/ })
 					.scrollIntoViewIfNeeded();
 				await page.screenshot({ path: process.env.MAINWORTHY_PICKED_UNREAD_SCREENSHOT });
 			}
-			await page.getByRole("option", { name: /Archive\/restore unavailable/ }).waitFor();
+			await page.getByRole("option", { name: /Archive or restore selected/ }).waitFor();
 			await page.keyboard.press("Escape");
 			await page.keyboard.press("#");
-			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("active");
+			await page.locator("#stat").filter({ hasText: "1 case changed." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
 			expect(
 				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
-			).toHaveLength(2);
+			).toHaveLength(3);
 			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "Undone." }).waitFor();
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("active");
 			expect(
 				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
-			).toHaveLength(2);
+			).toHaveLength(4);
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
@@ -845,7 +841,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"a case picked before its detail loads asks to wait rather than claiming a mixed selection",
+	"archive waits for a picked case to load before restoring",
 	async () => {
 		const server = await startServer();
 		await server.api("propose", {
@@ -859,14 +855,14 @@ test.skipIf(!browserAvailable)(
 		const held = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		let requested = false;
+		let requests = 0;
 		const h = await openPage(server, {
 			path: "/p/scratch/suite/c/1?folder=B",
 			setup: async (_page, context) => {
 				await context.route("**/api/p/scratch/get", async (route) => {
 					const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
 					if (input.refs.includes("C-1")) {
-						requested = true;
+						requests++;
 						await held;
 					}
 					await route.continue();
@@ -876,14 +872,19 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = h;
 			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).waitFor();
-			await eventually(async () => requested, Boolean);
+			await eventually(
+				async () => requests,
+				(count) => count === 1,
+			);
 			await page.keyboard.press("x");
 			await page.keyboard.press("#");
-			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
+			await eventually(
+				async () => requests,
+				(count) => count === 2,
+			);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
 			release();
-			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
-			await page.keyboard.press("#");
+			await page.locator("#stat").filter({ hasText: "1 case changed." }).waitFor();
 			await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
 				(rows) => rows[0]?.state === "active",

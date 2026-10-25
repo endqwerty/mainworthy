@@ -94,7 +94,7 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>m</kbd> | Move selected to a folder |
 | <kbd>t</kbd> | Tag selected |
 | <kbd>Alt</kbd> <kbd>t</kbd> | Remove tag from selected cases |
-| <kbd>#</kbd> | Archive selected active cases, or restore selected archived cases. Mixed or unread selections are refused. |
+| <kbd>#</kbd> | Archive selected active cases, or restore selected archived cases. Mixed selections or cases whose state cannot be read are refused. |
 | <kbd>u</kbd> | Undo the last move, tag or archive. With nothing to undo, restores the version before. |
 | <kbd>Space</kbd> | Peek timeline |
 | <kbd>]</kbd> | Next folder, with the cursor on its first case |
@@ -105,7 +105,7 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>a</kbd> | Accept proposal |
 | <kbd>r</kbd> | Reject proposal |
 
-Filtering the list keeps your selection. Move and tag actions include selected cases hidden by the filter.
+Filtering the list keeps your selection. Move, tag, archive, and restore actions include selected cases hidden by the filter.
 Undo returns each moved case to its original folder, including hidden selections. If a hidden case cannot
 be read, the action changes nothing. Try again when the case is available.
 
