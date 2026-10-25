@@ -44,6 +44,8 @@ services:
       MAINWORTHY_LOCKDOWN: "1"
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:?Set the application network peer range}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:?Set the dedicated client header}
+      # Coolify generates and retains base64 of 32 random bytes, outside PostgreSQL.
+      MAINWORTHY_JOB_KEY: ${SERVICE_REALBASE64_32_JOBKEY}
       MAINWORTHY_DATABASE_URL: postgres://mainworthy:${SERVICE_PASSWORD_POSTGRES}@mainworthy-database:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}

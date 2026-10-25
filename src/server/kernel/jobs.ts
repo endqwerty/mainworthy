@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { App } from "./app.ts";
 import { json, type ReadDb, sql, type WriteDb } from "./db.ts";
+import { openJobInput, PrivateJobInputError, sealJobInput } from "./job-input.ts";
 
 export type JobInput = z.infer<ReturnType<typeof z.json>>;
 export type Job = {
@@ -79,13 +80,16 @@ export async function enqueueJob(
 		dueAt?: number;
 		recurring?: boolean;
 		privateInput?: boolean;
+		privateKey?: string | undefined;
 	},
 ): Promise<string> {
 	const id = jobId(job.kind, job.key);
+	const plain = JSON.stringify(job.input);
+	const input = job.privateInput ? await sealJobInput(job.privateKey, id, job.kind, plain) : plain;
 	await db.run(Q.enqueue, {
 		id,
 		kind: job.kind,
-		input: JSON.stringify(job.input),
+		input,
 		actor: job.actor,
 		at: job.acceptedAt,
 		effect: job.effect ?? "repeatable",
@@ -99,7 +103,7 @@ export async function enqueueJob(
 			at: job.acceptedAt,
 			actor: job.actor,
 			due: job.dueAt ?? job.acceptedAt,
-			input: JSON.stringify(job.input),
+			input,
 			privateInput: job.privateInput ?? false,
 		});
 	return id;
@@ -144,7 +148,7 @@ export class LostJobClaim extends Error {
 export async function fenceJob(db: WriteDb, claim: JobClaim, now: number): Promise<void> {
 	if (!(await db.get(Q.fence, { id: claim.id, token: claim.token, now }))) throw new LostJobClaim();
 }
-export async function finishJob(app: App, claim: JobClaim, error: boolean): Promise<boolean> {
+export async function finishJob(app: App, claim: JobClaim, error: boolean, detail?: string): Promise<boolean> {
 	return app.database.jobWrite((db) =>
 		db.transaction(
 			async () =>
@@ -161,7 +165,7 @@ export async function finishJob(app: App, claim: JobClaim, error: boolean): Prom
 									: "ready"
 							: "succeeded",
 						next: error ? app.now() + jobBackoff(claim.attempts) : app.now(),
-						error: error ? "Job failed; inspect the server log and retry policy." : null,
+						error: error ? (detail ?? "Job failed; inspect the server log and retry policy.") : null,
 					})
 				).changes > 0,
 		),
@@ -185,11 +189,14 @@ export async function runJob(
 				await db.run(Q.start, { id: claim.id, token: claim.token });
 			}),
 		);
-		await handler(claim, z.json().parse(json<unknown>(claim.input)));
+		const input = claim.private_input
+			? await openJobInput(app.config.jobKey, claim.id, claim.kind, claim.input)
+			: claim.input;
+		await handler(claim, z.json().parse(json<unknown>(input)));
 		await finishJob(app, claim, false);
 	} catch (error) {
 		if (!(error instanceof LostJobClaim)) console.error("[mainworthy] job failed", { id: claim.id, kind: claim.kind });
-		await finishJob(app, claim, true);
+		await finishJob(app, claim, true, error instanceof PrivateJobInputError ? error.message : undefined);
 	}
 	return true;
 }

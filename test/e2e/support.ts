@@ -114,6 +114,7 @@ export async function startServer({
 					MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
 					MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
 					MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
+					MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
 					MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
 					MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
 					MAINWORTHY_SMTP_TLS: mail ? "none" : "",

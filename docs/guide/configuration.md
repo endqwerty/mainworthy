@@ -61,6 +61,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_JOB_SERVICE` | `0` | Set to `1` on the separate job service. It serves only `/healthz` and `/api/job`; the public service refuses the job endpoint. Keep the host's invoker IAM check enabled for the configured service account. |
 | `MAINWORTHY_JOB_AUDIENCE` | none | Required on the job service. The HTTPS audience in the caller's Google OIDC token. |
 | `MAINWORTHY_JOB_ACCOUNT` | none | Required on the job service. The service account email that may invoke jobs. Tokens must have a valid Google signature, issuer, audience, expiry and verified account email. No shared job secret is used. |
+| `MAINWORTHY_JOB_KEY` | none | Base64 encoding of 32 random bytes, shared by every instance that queues or runs private jobs. Required to queue mail. An invalid value stops startup; a missing value refuses private enqueue. See [turn on mail](#turn-on-mail). |
 | `MAINWORTHY_JOB_RUNNER` | `1` | Set to `0` when HTTP requests dispatch jobs. The job service always disables the in-process runner. The runner polls durable rows on development and hosts with CPU between requests. |
 | `MAINWORTHY_DATABASE_URL` | required | PostgreSQL connection URL. `compose.yaml` starts PostgreSQL 18 and sets this for the app. |
 | `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
@@ -102,16 +103,20 @@ Changing the variable to a new name creates a second person with every capabilit
 
 To enable mail, configure the server's environment as follows:
 
-1. Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL`.
+1. Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM`, `MAINWORTHY_PUBLIC_URL` and `MAINWORTHY_JOB_KEY`.
 2. If your SMTP server requires authentication, set `MAINWORTHY_SMTP_USER` and `MAINWORTHY_SMTP_PASSWORD` together.
 3. Set `MAINWORTHY_SMTP_PORT` and `MAINWORTHY_SMTP_TLS` to the provider's values.
 4. Restart the server.
 
 The default is port 587 with required STARTTLS. SMTP authentication uses AUTH PLAIN. The Compose service passes these variables through.
 
+Set `MAINWORTHY_JOB_KEY` to a base64 encoding of 32 random bytes, generated once with `openssl rand -base64 32`. Keep it in the secret environment and use the same value on every public and job instance. Private job inputs use AES-256-GCM with a random nonce and authenticate the job id and kind. The database holds ciphertext, never the usable mail link. The key must stay outside PostgreSQL and its backups. Without the key, private enqueue fails and rolls back the transaction that issued the link. Instances without mail can still start. An invalid configured key stops startup without printing its value.
+
+Drain private jobs before replacing this key on every instance together. Keep the old key until the queue drains and keep it separately for backups that contain queued mail. A job encrypted with an old key fails decryption under a new key, records an error naming `MAINWORTHY_JOB_KEY`, and sends nothing on that attempt. It follows the bounded retry policy; restoring the old key before exhaustion lets it retry. Exhausted jobs erase their input, so request a new link. Plaintext jobs left by an earlier build are rejected too. There is no plaintext fallback or automatic re-encryption.
+
 With all mail variables unset, invitations remain links you copy and the sign-in page offers no password reset. Partial or malformed settings stop startup with a generic configuration message that does not repeat their values. These settings are never stored in the database or an archive, and are never returned by an API.
 
-Mail delivery starts after the identity transaction commits. At most 100 messages are in flight per process, and each SMTP exchange has a five-second deadline. A full queue or failed delivery writes a generic log line. No message body, recipient, username, password or transport error is logged. There is no durable queue or automatic retry. Restart loses queued mail and pending verification and reset links. [Access](./access.md#a-lost-password-or-passkey) describes verification, reset and admin recovery.
+Mail delivery starts after the identity transaction commits. The runner takes bounded batches of jobs, and each SMTP exchange has a five-second deadline. A failed delivery writes a generic log line. No message body, recipient, username, password or transport error is logged. Mail jobs and pending links survive restarts. Delivery retries at least once with a stable Message-ID; an interrupted delivery can send a duplicate. Completed or exhausted jobs erase their private input. [Access](./access.md#a-lost-password-or-passkey) describes verification, reset and admin recovery.
 
 ### Rename the owner
 

@@ -84,6 +84,7 @@ async function startFixture(
 async function schemaMail(instance: Instance) {
 	const smtp = await fakeSmtp();
 	instance.app.config.publicUrl ??= "https://mainworthy.example";
+	instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 	instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),

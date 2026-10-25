@@ -13,7 +13,15 @@ export function requireMail(app: App): string {
 	return url;
 }
 async function enqueue(app: App, db: WriteDb, message: Message, key: string): Promise<void> {
-	await enqueueJob(db, { kind: "mail", key, input: message, actor: null, acceptedAt: app.now(), privateInput: true });
+	await enqueueJob(db, {
+		kind: "mail",
+		key,
+		input: message,
+		actor: null,
+		acceptedAt: app.now(),
+		privateInput: true,
+		privateKey: app.config.jobKey,
+	});
 }
 /** The synchronous caller registers a write that COMMIT awaits on this very transaction. */
 export function queueMail(app: App, db: WriteDb, message: Message): void {
