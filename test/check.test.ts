@@ -1069,7 +1069,7 @@ test("the app names its database by an alias only the internal database network 
 	).not.toEqual(wanted);
 });
 
-test("every workflow pins external actions and local workflows to the reviewed commit", () => {
+test("workflows keep cloud identifiers secret and pin actions to the reviewed commit", () => {
 	const localWorkflow = /^\.\/\.github\/workflows\/[\w-]+\.ya?ml$/;
 	const job = z.object({
 		uses: z.string().optional(),
@@ -1077,6 +1077,9 @@ test("every workflow pins external actions and local workflows to the reviewed c
 	});
 	for (const file of new Glob(".github/workflows/*.{yml,yaml}").scanSync(".")) {
 		const source = readFileSync(file, "utf8");
+		expect(source, `${file}: private cloud settings belong in repository secrets`).not.toMatch(
+			/\bvars\s*(?:\.\s*GCP_|\[\s*["']GCP_)|\btoJSON\s*\(\s*vars\s*\)/i,
+		);
 		const { jobs } = z.object({ jobs: z.record(z.string(), job) }).parse(Bun.YAML.parse(source));
 		const actions = Object.values(jobs)
 			.flatMap((job) => [job.uses, ...job.steps.map((step) => step.uses)])

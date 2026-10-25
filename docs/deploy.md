@@ -14,10 +14,11 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    enables APIs, creates the two runtime accounts, pins this repository's `infra.yml` on `main`, and grants separate CI writer and reader identities.
    Apply its stage A, wait for IAM propagation, then stage B. Wait again before running app infrastructure CI.
    The owner keeps organisation, billing and project identifiers in the private foundation.
-2. Set these GitHub repository variables from the private foundation's outputs. The values below are placeholders.
+2. Have the owner set these Actions repository secrets from the private foundation's outputs, under
+   **Settings > Secrets and variables > Actions > Repository secrets**. The values below are placeholders.
    Store no account key, credential JSON, secret value or project identifier in this repository.
 
-   | Variable | Example or source |
+   | Secret | Example or source |
    | --- | --- |
    | `GCP_PRODUCTION_PROJECT` | `example-production` |
    | `GCP_PREVIEW_PROJECT` | `example-preview` |
@@ -38,16 +39,18 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    during an apply may see intermediate state; rerun it once the writer finishes. No PR event can federate, including one
    from this repository. A manual run on another branch skips the job and the pool also refuses it.
 
-The entry workflow passes repository variables to `infra-execute.yml` as reusable-workflow secrets. Actions
+The entry workflow passes these repository secrets to `infra-execute.yml` as reusable-workflow secrets. Actions
 therefore masks their values before printing any step environment. The first script step also registers masks
 for runtime image references, the WIF project number, seed project ids and derived runtime service-account emails.
 The private foundation must permit this exact called workflow in its WIF condition,
 while keeping `infra.yml` on `main` as the caller.
 Terraform output and saved plans stay in a restricted directory under `RUNNER_TEMP`, removed when the script
 exits and never uploaded. Public logs show only plan counts, `No changes.`, and redacted error headers on failure.
-Resource attributes and diagnostic context stay out of the log. Error headers redact configured identifiers,
-URLs, email addresses and project numbers. There are no Terraform outputs: no consumer needs them, and removing
-them prevents apply from printing cloud identifiers. Diagnose failures through the owner's private cloud access.
+Full resource diffs and multiline diagnostic context stay out of the log. Error headers redact configured identifiers,
+URLs, email addresses, project numbers, IPv4 and IPv6 addresses, and UUID-shaped identifiers.
+Error headers can still contain unforeseen non-secret attributes.
+There are no Terraform outputs because no consumer needs them. Removing them prevents apply from printing
+cloud identifiers. Diagnose failures through the owner's private cloud access.
 
 Plans run only in CI after merge or a manual dispatch of main's workflow. Local author checks use no Google
 login and run only `fmt`, `init -backend=false`, and `validate`. Put `TF_DATA_DIR` in task scratch outside the
