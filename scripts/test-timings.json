@@ -147,7 +147,7 @@
 		"test/result-location.test.ts": 1089,
 		"test/policy-fixture.test.ts": 1006,
 		"test/architecture.test.ts": 993,
-		"test/e2e/suite-folder-cursor.test.ts": 977,
+		"test/e2e/suite-folder-cursor.test.ts": 8174,
 		"test/e2e/result-location.test.ts": 975,
 		"test/e2e/queue-failure-evidence.test.ts": 940,
 		"test/report-storage.test.ts": 918,
