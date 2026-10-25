@@ -1094,8 +1094,11 @@ test("every PostgreSQL readiness probe asks over TCP, which the image's temporar
 		.filter(Boolean);
 	expect(files.length).toBeGreaterThan(3);
 	for (const file of files)
-		for (const probe of readFileSync(file, "utf8").matchAll(/\bpg_isready\b["',\s]*(\S*)/g))
-			expect(probe[1]?.replace(/["',]/g, ""), `${file}: ${probe[0]}`).toBe("-h");
+		for (const probe of readFileSync(file, "utf8").matchAll(/\bpg_isready\b["',\s]*(\S*)["',\s]+(\S*)/g))
+			expect(
+				[probe[1], probe[2]].map((word) => word?.replace(/["',]/g, "")),
+				`${file}: ${probe[0]}`,
+			).toEqual(["-h", "127.0.0.1"]);
 });
 
 test("image publication derives creation time from the commit", () => {
