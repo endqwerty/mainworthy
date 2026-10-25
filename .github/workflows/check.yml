@@ -121,13 +121,13 @@ jobs:
           docker run --detach --name postgres --network mainworthy-check \
             --env POSTGRES_HOST_AUTH_METHOD=trust \
             --env 'POSTGRES_INITDB_ARGS=--locale=C --encoding=UTF8' \
-            --health-cmd 'pg_isready -U postgres' --health-interval 2s \
+            --health-cmd 'pg_isready -h 127.0.0.1 -U postgres' --health-interval 2s \
             --health-timeout 5s --health-retries 30 postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
           for attempt in $(seq 1 60); do
-            if docker exec postgres pg_isready -U postgres; then break; fi
+            if docker exec postgres pg_isready -h 127.0.0.1 -U postgres; then break; fi
             sleep 1
           done
-          docker exec postgres pg_isready -U postgres
+          docker exec postgres pg_isready -h 127.0.0.1 -U postgres
           docker run --detach --name mainworthy --network mainworthy-check --publish 7357:7357 \
             --env MAINWORTHY_DATABASE_URL=postgres://postgres@postgres:5432/postgres mainworthy:check
           ready=false

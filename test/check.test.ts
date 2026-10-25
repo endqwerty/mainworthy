@@ -1087,6 +1087,17 @@ test("every workflow pins every action to a full commit with a release version c
 	}
 });
 
+test("every PostgreSQL readiness probe asks over TCP, which the image's temporary init server never answers", () => {
+	const files = Bun.spawnSync(["git", "grep", "-l", "pg_isready", "--", ".github", "scripts", "compose*.yaml"])
+		.stdout.toString()
+		.split("\n")
+		.filter(Boolean);
+	expect(files.length).toBeGreaterThan(3);
+	for (const file of files)
+		for (const probe of readFileSync(file, "utf8").matchAll(/\bpg_isready\b["',\s]*(\S*)/g))
+			expect(probe[1]?.replace(/["',]/g, ""), `${file}: ${probe[0]}`).toBe("-h");
+});
+
 test("image publication derives creation time from the commit", () => {
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const actionJob = z.object({ steps: z.array(z.object({ uses: z.string().optional(), run: z.string().optional() })) });
