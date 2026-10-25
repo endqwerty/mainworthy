@@ -135,5 +135,23 @@ if ! grep -Fxq 'Error: cannot use project *** or ***' "$scratch/public.log"; the
   echo 'L2: bare seed project ids reached the error log.' >&2
   failures=1
 fi
+for identifier in \
+  10.20.30.40 192.0.2.12 fd12:3456:789a::1 \
+  2001:db8:1234:5678:90ab:cdef:1234:5678 ::1 :: \
+  ::ffff:10.20.30.40 fe80::1%eth0 \
+  01234567-89ab-cdef-0123-456789abcdef ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB; do
+  export PLAN_ERROR="cannot reach $identifier; check firewall or request id"
+  if run_ci workflow_dispatch; then echo 'A diagnostic error must fail CI.' >&2; exit 1; fi
+  if ! grep -Fxq 'Error: cannot reach ***; check firewall or request id' "$scratch/public.log"; then
+    echo "An address or UUID reached the error log: $identifier" >&2
+    failures=1
+  fi
+done
+export PLAN_ERROR='dial [fd12:3456:789a::1]:5432 or 10.20.30.40. Terraform 1.17.0 returned 400: denied'
+if run_ci workflow_dispatch; then echo 'A connection error must fail CI.' >&2; exit 1; fi
+if ! grep -Fxq 'Error: dial [***]:5432 or ***. Terraform 1.17.0 returned 400: denied' "$scratch/public.log"; then
+  echo 'Diagnostic punctuation or failure context was lost.' >&2
+  failures=1
+fi
 test "$failures" = 0
 echo 'PASS: identifiers are masked, Terraform logs are private, and failed plans, drift, PRs and stale pushes never apply.'

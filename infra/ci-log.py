@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Publish only Terraform summaries and redacted error headers to public CI logs."""
+import ipaddress
 import json
 import os
 import re
@@ -32,6 +33,20 @@ def identifiers():
     return sorted(values, key=len, reverse=True)
 
 
+def redact_address(match):
+    candidate = match[0]
+    for suffix in ("", ".", ":"):
+        if suffix and not candidate.endswith(suffix):
+            continue
+        address = candidate[:-1] if suffix else candidate
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        return "***" + suffix
+    return candidate
+
+
 def redact(line, values):
     for value in values:
         line = line.replace(value, "***")
@@ -39,6 +54,8 @@ def redact(line, values):
     line = re.sub(r"(?:https?|gs)://[^\s\"'<>]+", "***", line)
     line = re.sub(r"[\w.+%-]+@[\w.-]+", "***", line)
     line = re.sub(r"[\w.-]+\.run\.app\b", "***", line)
+    line = re.sub(r"(?<![\w:.])[0-9a-fA-F:.]+(?:%[\w.-]+)?(?![\w:.])", redact_address, line)
+    line = re.sub(r"\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b", "***", line, flags=re.IGNORECASE)
     line = re.sub(r"\b\d{6,}\b", "***", line)
     return line
 
