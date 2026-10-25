@@ -3,7 +3,8 @@
 Read 2026-10-25. USD on-demand list prices, 730 hours per month, no committed-use discount or promotional credit.
 These are calculations from public prices, not a measured bill. Free allowances are shared with the billing
 account's other projects. The current Terraform creates no minimum-instance public service; its cost below is
-for step 5's planned app. A null `runtime` also leaves the job service and Scheduler uncreated.
+for step 5's planned app. The job service and its Scheduler job exist from step 4. The registry stores only the
+images Cloud Run pulls through it from GHCR, at Artifact Registry's storage price.
 
 | Resource | Monthly price or usage rate | Source |
 | --- | --- | --- |

@@ -27,12 +27,11 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Foundation's complete provider name; keep the value outside the repository |
    | `GCP_INFRA_DEPLOY_ACCOUNT` | Foundation's deploy service account; push only |
    | `GCP_INFRA_PLAN_ACCOUNT` | Foundation's infrastructure reader; manual dispatch only |
-   | `GCP_JOB_RUNTIME` | Unset or `null` for bootstrap. Later a JSON object with `image` and `sql_proxy_image`, both digest references |
 
 3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
    the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's writer concurrency group serializes applies; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
    both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime-account permissions,
-   IAM SQL users, secret containers and the Tasks queue. It does not create the job service without real images.
+   IAM SQL users, secret containers and the Tasks queue, then the private job service and its Scheduler job.
 4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
    -detailed-exitcode` because it cannot create lock objects. Exit 0 means no change, 2 means drift, and 1 is an
    error. Drift fails the job and needs review. Dispatch never applies and has its own concurrency group, so it cannot cancel a pending writer. A drift check
@@ -66,31 +65,37 @@ The required `check.yml` static job runs formatting, backend-free initialization
 test before merge, without Google credentials. Changes to `infra/` select that job and the repository checks
 that read infrastructure files.
 
-Complete these gates before enabling `GCP_JOB_RUNTIME`:
+The job service (step 4):
 
-1. Step 4 publishes the tested app image to the provisioned registry. Select an immutable app digest and an
-   immutable Cloud SQL Auth Proxy digest. The proxy uses `--auto-iam-authn --private-ip` on loopback; its configured
-   startup and memory bounds must pass on Cloud Run. Do not use a generic placeholder image.
-2. The owner adds Secret Manager versions outside Terraform for `mainworthy-job-key` and `mainworthy-owner-token`.
-   The job key is base64 of 32 random bytes and must be shared by both services. Keep old versions for recovery;
-   replacing that key makes old encrypted job inputs unreadable. The owner token is shared by both processes so
-   neither prints a generated bootstrap credential in logs. Only Secret Manager references reach Cloud Run.
-   `mainworthy-database-password` is an empty reserved container for an operator's database credential. Neither
-   runtime receives it: their proxy uses IAM authentication and no database password.
-3. Grant the two IAM SQL users access to one shared database-owner role outside Terraform, using an owner-run
-   database session that reaches the private instance. `google_sql_user` creates IAM login users, not PostgreSQL
-   object grants. Both startup paths migrate, so they must create and use objects as that same role. Revoke public
-   database creation/connect privileges as appropriate; keep preview users and databases out of production.
-   Record the SQL grants in the deployment change. No password or token belongs in a Terraform variable or state.
-4. Prove the bucket mount's publish-by-rename, immediate cross-instance reads, concurrent same-hash upload,
-   interrupted pending file, hash and prune checks from the accepted record. Metadata caching is disabled; the mount owner is the image's UID 10001, with owner-only file and directory modes.
-   If FUSE fails, implement the API BlobStore before enabling runtime. Prove that `/data/blobs` is shared while
-   archive staging remains ephemeral. A validated resource configuration proves none of those storage semantics.
-5. Set `GCP_JOB_RUNTIME` to a JSON object such as
-   `{"image":"us-west1-docker.pkg.dev/example-production/mainworthy/app@sha256:<digest>","sql_proxy_image":"example/proxy@sha256:<digest>"}`.
-   Replace both `<digest>` placeholders with full digests. A reviewed main push touching `infra/` applies this
-   configuration and creates the private job service, its invoker binding, and the minute Scheduler job. Manual
-   dispatch only previews that change. Never remove the runtime value to pause work; it would request deletion.
+1. **Its image is CI's.** `check.yml` builds and smoke-tests the image once and `publish` pushes it to GHCR. The
+   registry `mainworthy` is a remote repository of `https://ghcr.io`, so Cloud Run pulls that same digest through it
+   and no CI identity pushes to Google Cloud. `infra/jobs.tf` names the first app digest (main's tested image of
+   `a29e971d`) and the Cloud SQL Auth Proxy release by digest; both are public. Step 5's deploys replace the app
+   digest, which Terraform then ignores.
+2. **Two secret values come from the owner**, added in Cloud Shell before the first apply that creates the
+   service, since no CI identity may add secret versions:
+
+   ```sh
+   p=example-production   # the production project
+   openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add mainworthy-job-key --project="$p" --data-file=-
+   openssl rand -base64 48 | tr -d '\n/+=' | gcloud secrets versions add mainworthy-owner-token --project="$p" --data-file=-
+   ```
+
+   The job key encrypts private job inputs; replacing it makes queued private jobs unreadable, so keep old versions.
+   The owner token signs the owner in on first start; read it back with `gcloud secrets versions access latest
+   --secret=mainworthy-owner-token --project="$p"`. Neither value is printed, logged or in Terraform state.
+   `mainworthy-database-password` stays an empty container: the runtimes sign in to PostgreSQL through IAM.
+3. **Database privileges are Terraform's.** Both IAM users are members of `cloudsqlsuperuser` (`database_roles`),
+   which owns the `mainworthy` database, and every session starts as that role (`options=-c role=cloudsqlsuperuser`
+   in the database URL). Tables either service creates therefore belong to one role, and both may migrate. The
+   instance holds no other application's data. No hand-run SQL session is needed.
+4. **The bucket mount is checked before the cutover**, when attachments first arrive: publish-by-rename, immediate
+   cross-instance reads, concurrent same-hash uploads, an interrupted pending file, hashes and a prune beside an
+   upload. Metadata caching is off and the mount is owned by the image's UID 10001 with owner-only modes. If a
+   check fails, the Cloud Storage API `BlobStore` replaces the disk store before real data lands.
+5. **Check:** the service's ready revision runs the digest above. Cloud Run marks a revision ready only after its
+   startup probe gets `/healthz` ready (the database answers and migrations are done), and the image's
+   `MAINWORTHY_COMMIT` is that digest's commit. The public `/healthz` check comes with step 5's public service.
 
 The job service accepts Google OIDC for its deterministic Run URL, from the jobs service account only. It keeps
 Cloud Run's invoker IAM check on, and the app verifies the token again at `POST /api/job`. Scheduler sends

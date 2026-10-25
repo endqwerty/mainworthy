@@ -4,7 +4,10 @@ data "google_project" "production" {
 
 locals {
   job_url = "https://mainworthy-jobs-${data.google_project.production.number}.${local.region}.run.app"
-  runtime = var.runtime == null ? {} : { jobs = var.runtime }
+  # The job service's first image: main's tested image of a29e971d, as check.yml published it to GHCR. Step 5's
+  # deploys replace the app digest (see ignore_changes); the proxy is Google's release 2.26.3.
+  app_image       = "${local.region}-docker.pkg.dev/${var.production_project}/${google_artifact_registry_repository.images.repository_id}/endqwerty/mainworthy@sha256:f957828590816d413afda8b72ed2ad96e7e5d7a51b0c34895e636f64a6af9392"
+  sql_proxy_image = "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.26.3@sha256:f333a9c59890c3c67b8505166c5dbdcc0b29fca9173a2e09ca0446ab6997a736"
 }
 
 resource "google_cloud_tasks_queue" "jobs" {
@@ -53,9 +56,7 @@ resource "google_cloud_tasks_queue_iam_member" "enqueue" {
   member   = "serviceAccount:${data.google_service_account.runtime["app"].email}"
 }
 
-# No placeholder image: bootstrap builds the backing resources first. Step 4 supplies both tested digests.
 resource "google_cloud_run_v2_service" "jobs" {
-  for_each             = local.runtime
   project              = var.production_project
   name                 = "mainworthy-jobs"
   location             = local.region
@@ -85,7 +86,7 @@ resource "google_cloud_run_v2_service" "jobs" {
     }
     containers {
       name       = "app"
-      image      = each.value.image
+      image      = local.app_image
       depends_on = ["sql-proxy"]
       ports {
         container_port = 7357
@@ -106,7 +107,8 @@ resource "google_cloud_run_v2_service" "jobs" {
           MAINWORTHY_JOB_ACCOUNT   = data.google_service_account.runtime["jobs"].email
           MAINWORTHY_DB_POOL       = "1"
           MAINWORTHY_DB_WRITE_POOL = "1"
-          MAINWORTHY_DATABASE_URL  = "postgresql://${urlencode(google_sql_user.runtime["jobs"].name)}@127.0.0.1:5432/mainworthy?sslmode=disable"
+          # Sessions act as the database's owner role, so tables either service creates belong to that one role.
+          MAINWORTHY_DATABASE_URL = "postgresql://${urlencode(google_sql_user.runtime["jobs"].name)}@127.0.0.1:5432/mainworthy?sslmode=disable&options=-c%20role%3Dcloudsqlsuperuser"
         }
         content {
           name  = env.key
@@ -141,7 +143,7 @@ resource "google_cloud_run_v2_service" "jobs" {
     }
     containers {
       name  = "sql-proxy"
-      image = each.value.sql_proxy_image
+      image = local.sql_proxy_image
       args = [
         "--auto-iam-authn", "--private-ip", "--structured-logs", "--health-check", "--http-address=0.0.0.0",
         google_sql_database_instance.app["production"].connection_name,
@@ -180,16 +182,14 @@ resource "google_cloud_run_v2_service" "jobs" {
 }
 
 resource "google_cloud_run_v2_service_iam_binding" "jobs" {
-  for_each = local.runtime
   project  = var.production_project
   location = local.region
-  name     = google_cloud_run_v2_service.jobs[each.key].name
+  name     = google_cloud_run_v2_service.jobs.name
   role     = "roles/run.invoker"
   members  = ["serviceAccount:${data.google_service_account.runtime["jobs"].email}"]
 }
 
 resource "google_cloud_scheduler_job" "tick" {
-  for_each         = local.runtime
   project          = var.production_project
   region           = local.region
   name             = "mainworthy-tick"
