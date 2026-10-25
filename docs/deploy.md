@@ -14,7 +14,7 @@ There is no automatic SQLite-file conversion. Archive imports still require matc
 `compose.coolify.yaml` adds an interim PostgreSQL 18 service, reachable only on an internal database network,
 with a separate named `mainworthy-postgres` volume. Its password is `SERVICE_PASSWORD_POSTGRES`, which Coolify
 generates on the first deploy (32 letters and digits), stores, and reuses on every redeploy; it is listed under
-the resource's environment variables. The app receives its database URL from Compose and waits for database health.
+the resource's environment variables. The app receives its database URL from Compose and waits for database health. The URL names the database `mainworthy-database`, an alias only the internal network knows: Coolify also puts every service on its shared `coolify` network under its service name, and there Coolify's own database is `postgres` too.
 The existing `mainworthy-data:/data` mount stays exactly where it is. The SQLite file remains on that volume,
 untouched; the app uses it for neither reads nor writes.
 

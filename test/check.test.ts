@@ -998,6 +998,38 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(readFileSync("Dockerfile", "utf8")).toContain("ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT");
 });
 
+/** The host in the app's database URL, when it is an alias only the internal database network gives the database. */
+function coolifyDatabaseHost(text: string): { host: string; internalAlias: boolean } {
+	const compose = z
+		.object({
+			services: z.record(
+				z.string(),
+				z.object({
+					environment: z.record(z.string(), z.string()).optional(),
+					networks: z
+						.union([z.array(z.string()), z.record(z.string(), z.object({ aliases: z.array(z.string()) }).nullable())])
+						.optional(),
+				}),
+			),
+			networks: z.record(z.string(), z.object({ internal: z.boolean().optional() }).nullable()),
+		})
+		.parse(Bun.YAML.parse(text));
+	const url = compose.services.mainworthy?.environment?.MAINWORTHY_DATABASE_URL ?? "";
+	const host = /@([^:/]+):/.exec(url)?.[1] ?? "";
+	const networks = compose.services.postgres?.networks;
+	const aliases = networks && !Array.isArray(networks) ? (networks.database?.aliases ?? []) : [];
+	return { host, internalAlias: compose.networks.database?.internal === true && aliases.includes(host) };
+}
+
+test("the app names its database by an alias only the internal database network knows", () => {
+	// Coolify attaches every service to its shared network under its service name, where its own database is also
+	// `postgres`: the app resolved that name to an address there and never reached its database (2026-10-25).
+	expect(coolifyDatabaseHost(readFileSync("compose.coolify.yaml", "utf8"))).toEqual({
+		host: "mainworthy-database",
+		internalAlias: true,
+	});
+});
+
 test("every workflow pins every action to a full commit with a release version comment", () => {
 	const job = z.object({
 		uses: z.string().optional(),

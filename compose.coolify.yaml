@@ -24,7 +24,11 @@ services:
       retries: 30
     volumes:
       - mainworthy-postgres:/var/lib/postgresql
-    networks: [database]
+    # The app names the database by this alias, which only the internal network knows. Coolify also attaches every
+    # service to its shared `coolify` network under its service name, where Coolify's own database is `postgres` too.
+    networks:
+      database:
+        aliases: [mainworthy-database]
 
   mainworthy:
     build: .
@@ -40,7 +44,7 @@ services:
       MAINWORTHY_LOCKDOWN: "1"
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:?Set the application network peer range}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:?Set the dedicated client header}
-      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/mainworthy
+      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${SERVICE_PASSWORD_POSTGRES}@mainworthy-database:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
