@@ -7,7 +7,7 @@ output "sql_connections" {
 }
 
 output "runtime_accounts" {
-  value = { for key, account in google_service_account.runtime : key => account.email }
+  value = { for key, account in data.google_service_account.runtime : key => account.email }
 }
 
 output "job_url" {

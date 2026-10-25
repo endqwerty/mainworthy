@@ -11,7 +11,7 @@ The move to Cloud Run uses [application Terraform](../infra/) in `us-west1`. It 
 from image/traffic releases. [The cost table](cloud-costs.md) records prices before the first apply.
 
 1. Have the owner apply the reviewed private foundation patch in Cloud Shell. It creates the app state bucket,
-   enables APIs, pins this repository's `infra.yml` on `main`, and grants separate CI writer and reader identities.
+   enables APIs, creates the two runtime accounts, pins this repository's `infra.yml` on `main`, and grants separate CI writer and reader identities.
    Apply its stage A, wait for IAM propagation, then stage B. Wait again before running app infrastructure CI.
    The owner keeps organisation, billing and project identifiers in the private foundation.
 2. Set these GitHub repository variables from the private foundation's outputs. The values below are placeholders.
@@ -30,7 +30,7 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
 
 3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
    the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's writer concurrency group serializes applies; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
-   both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime accounts,
+   both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime-account permissions,
    IAM SQL users, secret containers and the Tasks queue. It does not create the job service without real images.
 4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
    -detailed-exitcode` because it cannot create lock objects. Exit 0 means no change, 2 means drift, and 1 is an

@@ -39,7 +39,7 @@ resource "google_cloud_tasks_queue" "jobs" {
       }
     }
     oidc_token {
-      service_account_email = google_service_account.runtime["jobs"].email
+      service_account_email = data.google_service_account.runtime["jobs"].email
       audience              = local.job_url
     }
   }
@@ -50,7 +50,7 @@ resource "google_cloud_tasks_queue_iam_member" "enqueue" {
   location = local.region
   name     = google_cloud_tasks_queue.jobs.name
   role     = "roles/cloudtasks.enqueuer"
-  member   = "serviceAccount:${google_service_account.runtime["app"].email}"
+  member   = "serviceAccount:${data.google_service_account.runtime["app"].email}"
 }
 
 # No placeholder image: bootstrap builds the backing resources first. Step 4 supplies both tested digests.
@@ -68,7 +68,7 @@ resource "google_cloud_run_v2_service" "jobs" {
     max_instance_count = 1
   }
   template {
-    service_account                  = google_service_account.runtime["jobs"].email
+    service_account                  = data.google_service_account.runtime["jobs"].email
     timeout                          = "600s"
     max_instance_request_concurrency = 1
     execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"
@@ -103,7 +103,7 @@ resource "google_cloud_run_v2_service" "jobs" {
           MAINWORTHY_JOB_SERVICE   = "1"
           MAINWORTHY_JOB_RUNNER    = "0"
           MAINWORTHY_JOB_AUDIENCE  = local.job_url
-          MAINWORTHY_JOB_ACCOUNT   = google_service_account.runtime["jobs"].email
+          MAINWORTHY_JOB_ACCOUNT   = data.google_service_account.runtime["jobs"].email
           MAINWORTHY_DB_POOL       = "1"
           MAINWORTHY_DB_WRITE_POOL = "1"
           MAINWORTHY_DATABASE_URL  = "postgresql://${urlencode(google_sql_user.runtime["jobs"].name)}@127.0.0.1:5432/mainworthy?sslmode=disable"
@@ -185,7 +185,7 @@ resource "google_cloud_run_v2_service_iam_binding" "jobs" {
   location = local.region
   name     = google_cloud_run_v2_service.jobs[each.key].name
   role     = "roles/run.invoker"
-  members  = ["serviceAccount:${google_service_account.runtime["jobs"].email}"]
+  members  = ["serviceAccount:${data.google_service_account.runtime["jobs"].email}"]
 }
 
 resource "google_cloud_scheduler_job" "tick" {
@@ -208,7 +208,7 @@ resource "google_cloud_scheduler_job" "tick" {
     headers     = { "Content-Type" = "application/json" }
     body        = base64encode(jsonencode({ do = "tick" }))
     oidc_token {
-      service_account_email = google_service_account.runtime["jobs"].email
+      service_account_email = data.google_service_account.runtime["jobs"].email
       audience              = local.job_url
     }
   }
