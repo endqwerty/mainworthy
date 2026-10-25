@@ -1999,7 +1999,7 @@ export function SuiteScreen() {
 		}
 	}
 	function withSelection(
-		action: (refs: string[], rows: Pick<CaseRow | CaseView, "ref" | "tags" | "folder">[]) => void,
+		action: (refs: string[], rows: Pick<CaseRow | CaseView, "ref" | "tags" | "folder" | "state">[]) => void,
 		refs = selection(),
 	): void {
 		if (!refs.length) return;
@@ -2171,20 +2171,22 @@ export function SuiteScreen() {
 		}, refs);
 	}
 	function archive(): void {
-		const refs = selection();
-		if (!refs.length) return;
-		if (restoring === null) {
-			setStatus(
-				selectionStates.has(undefined)
-					? "Open selected cases and wait for their state."
-					: "Select only active or only archived cases.",
+		withSelection((refs, rows) => {
+			const states = new Set(refs.map((ref) => rows.find((row) => row.ref === ref)?.state));
+			if (states.has(undefined) || states.size !== 1) {
+				setStatus(
+					states.has(undefined)
+						? "Could not read selected cases. Try again."
+						: "Select only active or only archived cases.",
+				);
+				return;
+			}
+			const restoring = states.has("archived");
+			void placement(
+				[{ op: "state", cases: refs, to: restoring ? "active" : "archived" }],
+				[{ op: "state", cases: refs, to: restoring ? "archived" : "active" }],
 			);
-			return;
-		}
-		void placement(
-			[{ op: "state", cases: refs, to: restoring ? "active" : "archived" }],
-			[{ op: "state", cases: refs, to: restoring ? "archived" : "active" }],
-		);
+		});
 	}
 	function tag(): void {
 		const value = tagText.trim().replace(/^#/, "");

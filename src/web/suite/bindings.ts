@@ -67,7 +67,7 @@ export function useSuiteBindings({
 		action("alt+t", "Remove tag from selected cases", removeTag),
 		action(
 			"#",
-			restoring === null ? "Archive/restore unavailable" : restoring ? "Restore selected" : "Archive selected",
+			restoring === null ? "Archive or restore selected" : restoring ? "Restore selected" : "Archive selected",
 			archive,
 		),
 		action("u", "Undo", undo),
