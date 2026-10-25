@@ -29,7 +29,7 @@ from image/traffic releases. [The cost table](cloud-costs.md) records prices bef
    | `GCP_JOB_RUNTIME` | Unset or `null` for bootstrap. Later a JSON object with `image` and `sql_proxy_image`, both digest references |
 
 3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
-   the saved plan. GitHub's concurrency group serializes runs; the GCS backend locks writes. The first run creates
+   the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's concurrency group serializes runs; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
    both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime accounts,
    IAM SQL users, secret containers and the Tasks queue. It does not create the job service without real images.
 4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
@@ -62,7 +62,7 @@ Complete these gates before enabling `GCP_JOB_RUNTIME`:
    database creation/connect privileges as appropriate; keep preview users and databases out of production.
    Record the SQL grants in the deployment change. No password or token belongs in a Terraform variable or state.
 4. Prove the bucket mount's publish-by-rename, immediate cross-instance reads, concurrent same-hash upload,
-   interrupted pending file, hash and prune checks from the accepted record. Metadata caching is disabled.
+   interrupted pending file, hash and prune checks from the accepted record. Metadata caching is disabled; the mount owner is the image's UID 10001, with owner-only file and directory modes.
    If FUSE fails, implement the API BlobStore before enabling runtime. Prove that `/data/blobs` is shared while
    archive staging remains ephemeral. A validated resource configuration proves none of those storage semantics.
 5. Set `GCP_JOB_RUNTIME` to a JSON object such as

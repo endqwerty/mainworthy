@@ -45,13 +45,20 @@ jobs:
       - name: Check CI failure paths without credentials
         run: bash ci.test.sh
       - name: Sign in with the event's restricted identity
+        id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ github.event_name == 'push' && vars.GCP_INFRA_DEPLOY_ACCOUNT || vars.GCP_INFRA_PLAN_ACCOUNT }}
           project_id: ${{ vars.GCP_PRODUCTION_PROJECT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+          create_credentials_file: false
+          export_environment_variables: false
       - name: Plan and apply on push, or read drift on dispatch
         env:
           STATE_BUCKET: ${{ vars.GCP_TERRAFORM_STATE_BUCKET }}
           EVENT_NAME: ${{ github.event_name }}
+          # SQL creation can outlast the GitHub OIDC token. The impersonated token covers the 45-minute job.
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: bash ci.sh "$EVENT_NAME"
