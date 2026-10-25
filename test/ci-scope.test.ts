@@ -117,7 +117,11 @@ test("a rename is the file it was and the file it is", () => {
 	const root = mkdtempSync(join(tmpdir(), "mainworthy-scope-"));
 	try {
 		const git = (...args: string[]) => {
-			const run = Bun.spawnSync(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
+			const run = Bun.spawnSync(["git", "-c", "commit.gpgsign=false", ...args], {
+				cwd: root,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
 			expect(run.exitCode, run.stderr.toString()).toBe(0);
 		};
 		git("init", "--quiet");

@@ -275,11 +275,14 @@ function historyFixture(assembled: boolean) {
 	const baseText = assembled ? assemble(history, entries) : history;
 	writeFileSync(join(scratch, "CHANGELOG.md"), baseText);
 	const git = (...args: string[]) => {
-		const run = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
-			cwd: scratch,
-			stdout: "pipe",
-			stderr: "pipe",
-		});
+		const run = Bun.spawnSync(
+			["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args],
+			{
+				cwd: scratch,
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
 		if (run.exitCode !== 0) throw new Error(run.stderr.toString());
 		return run.stdout.toString().trim();
 	};

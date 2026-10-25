@@ -22,7 +22,8 @@ test("on-disk hot paths preserve their results", async () => {
 	await withDiskWorkloads(async (workloads) => {
 		for (const workload of workloads) await checkWorkload(workload);
 	}, false);
-}, 20_000);
+	// The limit bounds building the 2,000-case dataset: 9 s on a quiet Mac, over 20 s beside other full checks.
+}, 60_000);
 
 test("quarantined reports remain correct after 3000 earlier trunk commits", async () => {
 	await withQuarantineWorkload(checkWorkload);
