@@ -19,6 +19,7 @@ import {
 	TransactionAborted,
 	type WriteDb,
 } from "./db.ts";
+import { SCHEMA_VERSION } from "./migrate.ts";
 
 let fixture: TestDatabase;
 let database: Database;
@@ -549,7 +550,7 @@ test("openApp migrates its URL asynchronously and owns only Database", async () 
 		expect("db" in app || "reader" in app || "gate" in app || "readers" in app).toBe(false);
 		expect(
 			await app.database.read((reader) => reader.allDynamic("SELECT value FROM meta WHERE key = 'schema_version'")),
-		).toEqual([{ value: "2" }]);
+		).toEqual([{ value: String(SCHEMA_VERSION) }]);
 	} finally {
 		await app.close();
 		await empty.close();

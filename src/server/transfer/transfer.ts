@@ -95,6 +95,11 @@ const Q = {
  */
 export const UNEXPORTED: readonly string[] = [
 	"batch_admissions",
+	"identity_ceremonies",
+	"identity_ceremony_epoch",
+	"identity_limits",
+	"identity_starts",
+	"change_events",
 	"assertion_seen",
 	"assertion_spreads",
 	"assertion_roots",
@@ -208,6 +213,10 @@ const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>
  * they are in. Removing a project leaves them; its grants, a team's included, are a project's and go with it.
  */
 const INSTANCE_TABLES = [
+	"identity_ceremonies",
+	"identity_ceremony_epoch",
+	"identity_limits",
+	"identity_starts",
 	"meta",
 	"orgs",
 	"actors",
@@ -497,7 +506,10 @@ export async function importArchive(
 			let rows = 0;
 			let position = 1;
 			let ended = false;
-			for (const name of UNEXPORTED) await db.runDynamic(`DELETE FROM ${identifier(name)}`);
+			for (const name of UNEXPORTED) {
+				if (name === "identity_limits" || name === "identity_starts") continue;
+				await db.runDynamic(`DELETE FROM ${identifier(name)}`);
+			}
 			await db.runDynamic("DELETE FROM search_docs");
 			for (const table of [...metadata].reverse())
 				await db.runDynamic(`DELETE FROM ${identifier(table.name)} ${where(table)}`);

@@ -512,8 +512,19 @@ export type OpenOptions = {
 };
 let migration: <T>(database: Database, fn: (db: WriteDb) => T | Promise<T>) => Promise<T>;
 export class Database {
+	private notifications: SQL | undefined;
+	/** Native LISTEN owns one dedicated connection, reconnecting independently of query leases. */
+	async listen(
+		channel: string,
+		onnotify: (payload: string) => void,
+		onlisten?: () => void,
+	): Promise<{ unlisten(): Promise<void> }> {
+		this.notifications ??= new SQL(this.options.url, { max: 1, bigint: true });
+		return await this.notifications.listen(channel, onnotify, onlisten);
+	}
 	private readonly readers: SQL;
 	private readonly writers: SQL;
+	private readonly admissions: SQL;
 	private readonly shutdown = new AbortController();
 
 	private count = 0;
@@ -527,6 +538,7 @@ export class Database {
 			bigint: true,
 			max: poolSize(options.writePool ?? process.env.MAINWORTHY_DB_WRITE_POOL, 4),
 		});
+		this.admissions = new SQL(options.url, { bigint: true, max: 2 });
 	}
 	static {
 		migration = async (database, fn) => {
@@ -587,7 +599,18 @@ export class Database {
 		lease.conn.release();
 	}
 	async read<T>(fn: (db: ReadDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
-		const lease = await this.lease(this.readers, options.signal);
+		return await this.snapshot(this.readers, fn, options);
+	}
+	/** Anonymous identity reads keep a snapshot without occupying a domain reader. */
+	async admissionRead<T>(fn: (db: ReadDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+		return await this.snapshot(this.admissions, fn, options);
+	}
+	private async snapshot<T>(
+		pool: SQL,
+		fn: (db: ReadDb) => T | Promise<T>,
+		options: { signal?: AbortSignal },
+	): Promise<T> {
+		const lease = await this.lease(pool, options.signal);
 		try {
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
 			lease.tx = { aborted: null, queues: [[]] };
@@ -620,8 +643,24 @@ export class Database {
 			this.activeWrites.delete(finished.promise);
 		}
 	}
-	private async writeLease<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal }): Promise<T> {
-		const lease = await this.lease(this.writers, options.signal).catch((error: unknown) => {
+	/** Small independent pool for anonymous sign-in accounting and ceremony allocation. */
+	async admission<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+		const finished = Promise.withResolvers<void>();
+		this.activeWrites.add(finished.promise);
+		try {
+			return await this.writeLease(fn, options, this.admissions);
+		} finally {
+			finished.resolve();
+			this.activeWrites.delete(finished.promise);
+		}
+	}
+
+	private async writeLease<T>(
+		fn: (db: WriteDb) => T | Promise<T>,
+		options: { signal?: AbortSignal },
+		pool = this.writers,
+	): Promise<T> {
+		const lease = await this.lease(pool, options.signal).catch((error: unknown) => {
 			if (options.signal?.aborted) throw options.signal.reason;
 			if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
 				throw new Busy(error);
@@ -697,9 +736,10 @@ export class Database {
 		}
 	}
 	async close(): Promise<void> {
+		await this.notifications?.close();
 		this.shutdown.abort(new Error("database is closed"));
 		await Promise.all(this.activeWrites);
-		await Promise.all([this.readers.close(), this.writers.close()]);
+		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close()]);
 	}
 }
 export async function migrationLock<T>(database: Database, fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
