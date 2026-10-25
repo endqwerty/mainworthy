@@ -95,7 +95,7 @@ type VisibleRow =
 const unsorted = "Unsorted";
 const nothingPlaced = "No cases changed. Nothing to undo.";
 type ProposalInput = Api["propose"]["input"] & { cmd: string; projectIdentity: string };
-type RetainedProposal = { input: ProposalInput; queued: boolean };
+type RetainedProposal<E extends Edit = Edit> = { input: ProposalInput & { edits: [E] }; queued: boolean };
 type PlacementUndo = {
 	preview: Edit[];
 	input: ProposalInput;
@@ -426,8 +426,66 @@ export function SuiteScreen() {
 	const [creatingFolder, setCreatingFolder] = useState(false);
 	const [folderText, setFolderText] = useState("");
 	const undo = useRef<PlacementUndo | null>(null);
-	const folderCreation = useRef<RetainedProposal | null>(null);
-	const versionRestore = useRef<RetainedProposal | null>(null);
+	const folderCreation = useRef<RetainedProposal<Extract<Edit, { op: "folder" }>> | null>(null);
+	const versionRestore = useRef<RetainedProposal<Extract<Edit, { op: "restore" }>> | null>(null);
+	const commandStatus = useRef(0);
+	const settleRetained = useCallback(
+		async (action: RetainedProposal, subject: string): Promise<void> => {
+			const status = ++commandStatus.current;
+			const navigation = navigationToken();
+			let message: string;
+			try {
+				const fate = await call("command", { cmd: action.input.cmd }, { project, owner });
+				if (fate.state === "done") {
+					const reply = ProposeReply.parse(fate.reply);
+					message =
+						reply.status === "adopted"
+							? `${subject} was recorded.`
+							: reply.status === "open"
+								? waitingStatus(`${subject} proposed`, reply.question)
+								: `${subject} was ${reply.status}.`;
+					void invalidateProject(project);
+				} else {
+					message = `${subject} ${fate.state === "begun" ? "is still running" : "was not recorded when checked"}. It will not be retried.`;
+				}
+			} catch (error) {
+				const reason = errorMessage(error, "Could not check the outcome.");
+				message = `${subject}: ${reason}${/[.!?]$/.test(reason) ? "" : "."} Outcome unknown. It will not be retried.`;
+			}
+			if (sessionCurrent(owner) && commandStatus.current === status && navigationToken() === navigation)
+				setStatus(message);
+		},
+		[project, owner, setStatus],
+	);
+	const abandonFolder = useCallback((): void => {
+		const action = folderCreation.current;
+		folderCreation.current = null;
+		setCreatingFolder(false);
+		setFolderText("");
+		if (action) {
+			const edit = action.input.edits[0];
+			const path = edit.parent ? `${edit.parent}/${edit.name}` : edit.name;
+			void settleRetained(action, `Folder "${path}"`);
+		}
+	}, [settleRetained]);
+	const abandonRestore = useCallback((): void => {
+		const action = versionRestore.current;
+		versionRestore.current = null;
+		if (action) void settleRetained(action, `Restore for ${action.input.edits[0].case}`);
+	}, [settleRetained]);
+	useLayoutEffect(() => {
+		const folder = folderCreation.current;
+		if (folder && (folder.input.edits[0].parent ?? null) !== route.folder) abandonFolder();
+		const restore = versionRestore.current;
+		if (restore && restore.input.edits[0].case !== selected) abandonRestore();
+	}, [route.folder, selected, abandonFolder, abandonRestore]);
+	useEffect(
+		() => () => {
+			abandonFolder();
+			abandonRestore();
+		},
+		[abandonFolder, abandonRestore],
+	);
 	const projectReplaced = useRef(false);
 	const viewport = useRef<HTMLDivElement>(null);
 	const filter = useRef<HTMLInputElement>(null);
@@ -2017,6 +2075,18 @@ export function SuiteScreen() {
 			},
 		};
 	}
+	async function submitRetained(
+		action: RetainedProposal,
+		retry: boolean,
+		current: () => boolean,
+	): Promise<Api["propose"]["reply"] | null> {
+		if (retry) {
+			const fate = await call("command", { cmd: action.input.cmd }, { project, owner });
+			if (!current()) return null;
+			if (fate.state === "done") return ProposeReply.parse(fate.reply);
+		}
+		return call("propose", action.input, { project, owner });
+	}
 	async function recoverProposal(input: ProposalInput): Promise<Api["propose"]["reply"]> {
 		const fate = await call("command", { cmd: input.cmd }, { project, owner });
 		return fate.state === "done" ? ProposeReply.parse(fate.reply) : call("propose", input, { project, owner });
@@ -2157,13 +2227,14 @@ export function SuiteScreen() {
 					projectIdentity,
 				},
 				queued: false,
-			} satisfies RetainedProposal);
+			} satisfies RetainedProposal<Extract<Edit, { op: "folder" }>>);
 		folderCreation.current = action;
+		commandStatus.current++;
 		action.queued = true;
 		setStatus("Creating folder.");
 		try {
-			const reply = await (retry ? recoverProposal(action.input) : call("propose", action.input, { project, owner }));
-			if (!sessionCurrent(owner)) return;
+			const reply = await submitRetained(action, retry, () => folderCreation.current === action);
+			if (!reply || !sessionCurrent(owner) || folderCreation.current !== action) return;
 			folderCreation.current = null;
 			setCreatingFolder(false);
 			setFolderText("");
@@ -2174,15 +2245,20 @@ export function SuiteScreen() {
 			);
 			void invalidateProject(project);
 		} catch (error) {
-			if (!sessionCurrent(owner)) return;
+			if (!sessionCurrent(owner) || folderCreation.current !== action) return;
 			if (obsoleteProject(error)) {
 				folderCreation.current = null;
 				projectReplaced.current = true;
 				setCreatingFolder(false);
 				setStatus("The project was replaced. Reload before creating folders.");
 			} else {
-				if (error instanceof ApiError && error.code !== "internal") folderCreation.current = null;
-				setStatus(`${errorMessage(error, "Folder could not be created")}. Press Enter to check it and retry.`);
+				if (error instanceof ApiError && error.code !== "internal") {
+					folderCreation.current = null;
+					setStatus(error.message);
+				} else {
+					const reason = errorMessage(error, "Folder could not be created");
+					setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Press Enter to check it and retry.`);
+				}
 			}
 		} finally {
 			action.queued = false;
@@ -2207,10 +2283,11 @@ export function SuiteScreen() {
 			};
 		}
 		const action = versionRestore.current;
+		commandStatus.current++;
 		action.queued = true;
 		try {
-			const reply = await (retry ? recoverProposal(action.input) : call("propose", action.input, { project, owner }));
-			if (!sessionCurrent(owner)) return;
+			const reply = await submitRetained(action, retry, () => versionRestore.current === action);
+			if (!reply || !sessionCurrent(owner) || versionRestore.current !== action) return;
 			versionRestore.current = null;
 			// Adopted with no case stamped: the case already holds that content, and nothing was recorded.
 			if (reply.status === "adopted" && reply.cases.length === 0)
@@ -2224,14 +2301,19 @@ export function SuiteScreen() {
 			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
 			void invalidateProject(project);
 		} catch (error) {
-			if (!sessionCurrent(owner)) return;
+			if (!sessionCurrent(owner) || versionRestore.current !== action) return;
 			if (obsoleteProject(error)) {
 				versionRestore.current = null;
 				projectReplaced.current = true;
 				setStatus(placementObsolete);
 			} else {
-				if (error instanceof ApiError && error.code !== "internal") versionRestore.current = null;
-				setStatus(`${errorMessage(error, "Undo failed")}. Press u to check it and retry.`);
+				if (error instanceof ApiError && error.code !== "internal") {
+					versionRestore.current = null;
+					setStatus(error.message);
+				} else {
+					const reason = errorMessage(error, "Undo failed");
+					setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Press u to check it and retry.`);
+				}
 			}
 		} finally {
 			action.queued = false;
@@ -2322,7 +2404,7 @@ export function SuiteScreen() {
 		newFolder: () => setCreatingFolder(true),
 		zoom: () => document.getElementById("app")?.classList.toggle("zoom"),
 		cancelTag: tagging ? () => setTagging(false) : null,
-		cancelFolder: creatingFolder ? () => setCreatingFolder(false) : null,
+		cancelFolder: creatingFolder ? abandonFolder : null,
 	});
 	const visibleItems: { index: number; start: number }[] = virtual
 		.getVirtualItems()
@@ -2576,7 +2658,7 @@ export function SuiteScreen() {
 							onKeyDown={(event) => {
 								if (event.key === "Escape") {
 									event.preventDefault();
-									setCreatingFolder(false);
+									abandonFolder();
 								}
 							}}
 						/>
