@@ -83,7 +83,9 @@ jobs:
           upgrade_deadline=$((SECONDS + 1800))
           while :; do
             health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
-            if [ "$health_status" != 200 ] || ! jq -e '.ok == false and .state == "upgrading"' health.json > /dev/null; then break; fi
+            # An upgrading server answers 503 (200 before #941) with this body.
+            case "$health_status" in 200|503) ;; *) break ;; esac
+            if ! jq -e '.ok == false and .state == "upgrading"' health.json > /dev/null 2>&1; then break; fi
             if [ "$SECONDS" -ge "$upgrade_deadline" ]; then
               echo "::error::The instance did not finish upgrading within 30 minutes. Replay this event after recovery."
               exit 1
