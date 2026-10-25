@@ -954,7 +954,14 @@ describe("an invitation", () => {
 				),
 		);
 		await gate.release();
-		const refused = await accepting;
+		const busy = await accepting;
+		expect(refusal(busy)).toBe("503 busy undefined");
+		expect(busy.setCookies).toEqual([]);
+		const refused = await w.post(
+			"/api/login",
+			{ invitation: code, password: SECOND, replace: "robin" },
+			{ cookie: robin },
+		);
 		expect(refusal(refused)).toBe('409 conflict {"signedInAs":"pat"}');
 		expect(refused.setCookies).toEqual([]);
 		// The session is Pat's now and still works, and the invitation is still good.

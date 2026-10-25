@@ -15,14 +15,16 @@ const Q = {
 	exclusive: sql<{ ids: readonly number[] }, { id: number; auth_version: number }>(
 		"SELECT id, auth_version FROM actors WHERE id = ANY($ids::bigint[]) ORDER BY id FOR UPDATE",
 	),
-	named: sql<{ names: readonly string[] }, { id: number }>(
-		"SELECT id FROM actors WHERE name = ANY($names::text[]) ORDER BY id",
+	named: sql<{ names: readonly string[] }, { id: number; name: string }>(
+		"SELECT id, name FROM actors WHERE name = ANY($names::text[]) ORDER BY id",
 	),
 	tokenHash: sql<{ hash: string }, { id: number }>("SELECT actor AS id FROM tokens WHERE hash = $hash"),
 	sessionHash: sql<{ hash: string }, { id: number }>("SELECT actor AS id FROM sessions WHERE hash = $hash"),
 	token: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM tokens WHERE id = $id"),
 	session: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM sessions WHERE id = $id"),
 	credential: sql<{ id: number }, { id: number }>("SELECT actor AS id FROM credentials WHERE id = $id"),
+	orgGuard: sql<readonly []>("SELECT id FROM orgs ORDER BY id LIMIT 1 FOR NO KEY UPDATE"),
+	teamNamed: sql<{ name: string }, { id: number }>("SELECT id FROM teams WHERE name = $name"),
 	guard: sql<{ name: string }, { id: number }>("SELECT id FROM teams WHERE name = $name ORDER BY id FOR NO KEY UPDATE"),
 	team: sql<{ name: string }, { id: number }>(
 		"SELECT m.actor AS id FROM team_members m JOIN teams t ON t.id = m.team WHERE t.name = $name ORDER BY m.actor",
@@ -61,14 +63,17 @@ export async function lockAllActors(db: WriteDb): Promise<void> {
 		true,
 	);
 }
-/** Resolve names only to discover lock keys; every authority decision happens after the wait. */
+/** Discover keys from parsed input. Recheck the returned footprint after later waits without taking new locks. */
 export async function lockCallActors(
 	db: WriteDb,
 	caller: Pick<Actor, "id">,
 	op: string,
 	input: unknown,
-): Promise<void> {
-	if (!["admin", "session", "credential", "invitation"].includes(op)) return await lockActors(db, [caller.id]);
+): Promise<() => Promise<void>> {
+	if (!["admin", "session", "credential", "invitation"].includes(op)) {
+		await lockActors(db, [caller.id]);
+		return async () => {};
+	}
 	const parsed = z.record(z.string(), z.unknown()).safeParse(input);
 	const data = parsed.success ? parsed.data : {};
 	const names = [
@@ -76,7 +81,15 @@ export async function lockCallActors(
 		...(op === "invitation" || data.do === "actor.forget" ? [data.name] : []),
 		...(typeof data.do === "string" && data.do.startsWith("team.member.") ? [data.person] : []),
 	].filter((value): value is string => typeof value === "string");
-	const affected = (await db.all(Q.named, { names })).map((row) => row.id);
+	const named = await db.all(Q.named, { names });
+	const affected = named.map((row) => row.id);
+	const teamName =
+		typeof data.team === "string"
+			? data.team
+			: op === "admin" && data.do === "team.create" && typeof data.name === "string"
+				? data.name
+				: null;
+	const teamHint = teamName === null ? [] : await db.all(Q.teamNamed, { name: teamName });
 	if (op === "credential" && data.actor === undefined) affected.push(caller.id);
 	const idQuery =
 		op === "session" ? Q.session : data.do === "token.revoke" ? Q.token : op === "credential" ? Q.credential : null;
@@ -88,18 +101,31 @@ export async function lockCallActors(
 		affected.push(...(await db.all(Q.team, { name: data.team })).map((row) => row.id));
 	const ids = [...new Set([caller.id, ...affected])].sort((a, b) => a - b);
 	for (const id of ids) await lockActors(db, [id], affected.includes(id));
-	if (typeof data.team === "string") {
-		await db.all(Q.guard, { name: data.team });
-		if (teamGrant && (await db.all(Q.team, { name: data.team })).some((row) => !affected.includes(row.id)))
-			throw new Busy();
-	}
+	if (names.some((name) => !named.some((row) => row.name === name)) || (teamName !== null && teamHint.length === 0))
+		await db.all(Q.orgGuard);
+	const guardedTeam = typeof data.team === "string" ? await db.all(Q.guard, { name: data.team }) : [];
 	if (data.do === "actor.forget")
 		await db.all(Q.guards, { ids: (await db.all(Q.actorTeams, { ids: affected })).map((row) => row.id) });
-	const rebound = (await db.all(Q.named, { names })).map((row) => row.id);
-	if (rebound.some((id) => !affected.includes(id))) throw new Busy();
-	if (typeof data.id === "number") {
-		if (idQuery && (await db.all(idQuery, { id: data.id })).some((row) => !affected.includes(row.id))) throw new Busy();
-	}
+	const check = async () => {
+		const rebound = (await db.all(Q.named, { names })).map((row) => row.id);
+		if (rebound.some((id) => !affected.includes(id))) throw new Busy();
+		if (typeof data.team === "string") {
+			if (
+				(await db.all(Q.teamNamed, { name: data.team })).some((row) => !guardedTeam.some((held) => held.id === row.id))
+			)
+				throw new Busy();
+			if (teamGrant && (await db.all(Q.team, { name: data.team })).some((row) => !affected.includes(row.id)))
+				throw new Busy();
+		}
+		if (
+			typeof data.id === "number" &&
+			idQuery &&
+			(await db.all(idQuery, { id: data.id })).some((row) => !affected.includes(row.id))
+		)
+			throw new Busy();
+	};
+	await check();
+	return check;
 }
 
 export async function keepBatchAdmission(ctx: Ctx, batch: number): Promise<void> {

@@ -9,8 +9,8 @@ If the row discovered before a lock wait was replaced, the writer returns `busy`
 A missing project name is guarded through the transaction so a new project cannot appear behind the check.
 
 Authority changes take `FOR UPDATE` on every affected actor. Lock actors by ascending id, at their final
-strength. Then take any team membership guards by id, project rows by id, and job rows. Ordinary project
-writers skip the membership guards. A team grant change discovers members, locks those actors, locks the
+strength. Then take organisation roster guards, team membership guards by id, project rows by id, and job
+rows. Ordinary project writers skip the membership guards. A team grant change discovers members, locks those actors, locks the
 team row with `FOR NO KEY UPDATE`, and checks membership again. A newly discovered member causes rollback
 and `busy`, so a retry discovers the complete set. Membership changes use the same actor and team locks.
 Organisation changes version every member. Database triggers increment `actors.auth_version` inside the
@@ -34,6 +34,14 @@ with projects in id order. It checks the complete grant footprint again after wa
 holder appeared or the project was renamed. Ready-state bookkeeping locks the project too. Each retired-demo
 cleanup slice keeps its authority and project locks until the slice commits, then yields. Startup refresh and
 cleanup remain paused.
+
+Actor creation takes its organisation guard before any project row. A newly inserted actor is private to
+that transaction until commit, and the roster guard excludes a competing insertion. Missing actor or team
+names reserve the same guard so they cannot appear between a footprint check and its use. Team creation
+also takes that guard. Operation inputs are parsed before discovering lock keys, so stripped fields cannot change lock strength. After project or command
+waits, the registry checks the discovered actor and team footprint again and returns `busy` if it grew.
+Sign-in commits also return `busy` if a person, credential or browser session resolves to an actor they did
+not lock.
 
 A report commits acceptance separately from application. The private `batch_admissions` table holds the
 exact admitted token or session reference and the actor's authority version. The actor and project locks

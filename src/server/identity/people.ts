@@ -13,7 +13,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
-import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf, takeStart } from "./attempts.ts";
 import { findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
@@ -399,6 +399,7 @@ export async function signInWithPassword(
 	return await commit(app, [person.id], async (db) => {
 		// The name is looked up again and must lead to a password with the very hash that was verified.
 		const now = await db.get(Q.personByName, { name: input.name });
+		if (now && now.id !== person.id) throw new Busy();
 		const current = now ? await livePassword(db, now.id) : null;
 		if (!now || !current || current.data !== stored.data) return no("changed-meanwhile");
 		const factor = await liveTotp(db, now.id);
@@ -732,6 +733,7 @@ export async function signInWithPasskey(
 	const entry = await commit(app, [first.row.actor], async (db) => {
 		const now = await judgeAssertion(app, db, answer, ceremony);
 		if (!now.ok) return now;
+		if (now.row.actor !== first.row.actor) throw new Busy();
 		const opened = await openOn(app, db, now.row, cookie, about);
 		if (!opened || !(await countPasskeyUse(db, now.row, now.shown, app.now()))) throw new Stop(no("changed-meanwhile"));
 		spendChallenge(app, now.challenge);
@@ -1098,9 +1100,14 @@ async function acceptByHash(
 	if (!first.ok) return first.why === "invitation" ? attempt.wrong(first) : first;
 	// Somebody other than `person` whom the browser's cookie signs in now, and whether the page said their name.
 	// Nothing of this is carried over the wait at the gate: it is asked here, and asked again in the commit.
-	const elsewhere = async (person: { id: number }, db?: ReadDb): Promise<{ name: string; agreed: boolean } | null> => {
+	const elsewhere = async (
+		person: { id: number },
+		db?: ReadDb,
+	): Promise<{ id: number; name: string; agreed: boolean } | null> => {
 		const holder = input.browser === null ? null : await holderOf(app, input.browser, db);
-		return holder && holder.id !== person.id ? { name: holder.name, agreed: input.replace === holder.name } : null;
+		return holder && holder.id !== person.id
+			? { id: holder.id, name: holder.name, agreed: input.replace === holder.name }
+			: null;
 	};
 	const unasked = (held: { name: string; agreed: boolean } | null): Accepted | null =>
 		held && !held.agreed ? { ok: false, why: "other-session", signedInAs: held.name } : null;
@@ -1121,12 +1128,13 @@ async function acceptByHash(
 		const now = await judge(db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
+		if (person.id !== first.person.id) throw new Busy();
 		const vouched = input.identity !== null && providerVouches(app);
 		if (!registration && !vouched && app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)))
 			return no("second-factor-required");
-		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
-		// holds the gate. The name is the one that person has now.
+		// Recheck the browser before writing. A new holder needs fresh lock discovery, even if its name was agreed.
 		const held = await elsewhere(person, db);
+		if (held && held.id !== replacing?.id) throw new Busy();
 		const refused = unasked(held);
 		if (refused) return refused;
 		const at = app.now();
@@ -1322,6 +1330,7 @@ async function openOidcSession(
 		const row = await oidcByHandle(db, oidcHandle(identity));
 		if (handoff && (!row || row.id !== handoff.credential || row.actor !== handoff.actor))
 			return no("changed-meanwhile");
+		if (row && row.actor !== hint?.actor) throw new Busy();
 		const person = row ? await db.get(Q.personById, { id: row.actor }) : null;
 		if (!row || !person) return no("unknown-identity");
 		if (app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)) && !providerVouches(app))
@@ -1365,6 +1374,7 @@ export async function signInWithTotp(
 		const held = findTotp(app, input.challenge, "sign-in");
 		if (!held || held !== initial) return no("challenge");
 		const person = await db.get(Q.personByName, { name: held.name });
+		if (person && person.id !== factorPerson?.id) throw new Busy();
 		const password = person ? await livePassword(db, person.id) : null;
 		const factor = person ? await liveTotp(db, person.id) : null;
 		if (!password || password.data !== held.password || !factor || factor.id !== held.factor)
