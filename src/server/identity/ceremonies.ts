@@ -4,6 +4,7 @@ import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 
 const ownerKey = (owner: string): string => createHash("sha256").update(owner).digest("hex");
 const Q = {
+	retention: sql<{ now: number }>("DELETE FROM identity_ceremonies WHERE deadline <= $now"),
 	ensure: sql<{ generation: string }>(
 		"INSERT INTO identity_ceremony_epoch (singleton, generation) VALUES (true, $generation) ON CONFLICT DO NOTHING",
 	),
@@ -105,4 +106,8 @@ export class Ceremonies<T extends { readonly deadline: number }> {
 	async clearOwner(db: WriteDb, owner: string): Promise<void> {
 		await db.run(Q.dropOwner, { kind: this.kind, owner: ownerKey(owner) });
 	}
+}
+
+export async function sweepCeremonies(db: WriteDb, now: number): Promise<void> {
+	await db.run(Q.retention, { now });
 }

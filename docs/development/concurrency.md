@@ -166,3 +166,23 @@ notification only after commit. Each App keeps one dedicated native Bun SQL list
 streams, which read ordered events by project sequence. A stream also catches up on every heartbeat, so a lost
 notification delays delivery but loses no committed state. Missing history or a replaced project prompts a full
 refresh. The stream checks authority again after its snapshot closes before sending anything.
+
+## Shared-state maintenance
+
+Password-reset requests read the contact and current password in their admission transaction. Their links
+carry the contact revision and password digest, which consumption rechecks under the identity lock. Issuance
+changes no authority and never waits for identity while holding an admission connection: sign-in commits may
+need that pool for limiter accounting while holding identity. Replacing the link and enqueuing its private
+mail job commit together. An enqueue failure
+rolls back the replacement, preserving the previous link; SMTP work starts only after commit.
+
+Periodic identity-state retention deletes expired ceremonies, failure counters and one-minute start windows
+through their owning modules on the admission pool. Periodic change-event retention deletes hints at least
+24 hours old under each project's row lock, preserving archive import's project-before-job order; the stream's
+existing missing-history path refreshes the full project. Both cleanup jobs fence
+their claim in the same transaction as deletion, after their data locks, so losing a claim rolls deletion back.
+Report/dispute recovery and decision expiry record durable change hints before their domain transaction commits.
+
+Startup snapshots the reports already accepted and queues immediately due recovery jobs for those batch ids.
+The ordinary report job retains its grace period, so reports accepted after startup keep their normal request
+application path. A restart does not delay its recovered work behind the grace period of the dead request.

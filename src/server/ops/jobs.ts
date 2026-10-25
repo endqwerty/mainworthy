@@ -10,13 +10,15 @@ import { acceptedBatches, batchById } from "../evidence/evidence.ts";
 import { executeHandoff, recoverHandoffs } from "../handoffs/handoffs.ts";
 import {
 	actorById,
-	flushUses,
 	lockActors,
 	ruleActorId,
+	sweepAttempts,
+	sweepCeremonies,
 	sweepSessions,
 	sweepSignInRecords,
 } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
+import { sweepChanges } from "../kernel/changes.ts";
 import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { AcceptedRefusal } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runJob } from "../kernel/jobs.ts";
@@ -63,6 +65,13 @@ export async function recoverAccepted(app: App, claim?: JobClaim, batchId?: numb
 						throw error;
 					}
 					await stampSeq(ctx);
+					await app.recordChange(db, {
+						project: project.key,
+						seq: ctx.seq,
+						op: "report",
+						actor: ctx.actor.name,
+						touched: [...ctx.touched],
+					});
 					return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 				}),
 			);
@@ -74,7 +83,6 @@ export async function recoverAccepted(app: App, claim?: JobClaim, batchId?: numb
 		}
 		if (!done) continue;
 		applied++;
-		app.publish({ project: done.key, seq: done.seq, op: "report", actor: done.actor, touched: done.touched });
 	}
 	return applied;
 }
@@ -91,7 +99,16 @@ export async function recoverDisputes(app: App, claim?: JobClaim): Promise<numbe
 				if (claim) await fenceJob(db, claim, app.now());
 				const ctx = makeCtx(app, db, project, await actorById(db, await ruleActorId(db), id), true);
 				const n = await reconcileDisputes(ctx);
-				if (n > 0) await stampSeq(ctx);
+				if (n > 0) {
+					await stampSeq(ctx);
+					await app.recordChange(db, {
+						project: project.key,
+						seq: ctx.seq,
+						op: "recover-disputes",
+						actor: ctx.actor.name,
+						touched: [...ctx.touched],
+					});
+				}
 				return n;
 			}),
 		);
@@ -115,12 +132,18 @@ export async function sweep(app: App, as?: number, claim?: JobClaim): Promise<nu
 				const n = await sweepExpired(ctx, expired);
 				if (n === 0) return null;
 				await stampSeq(ctx);
+				await app.recordChange(db, {
+					project: project.key,
+					seq: ctx.seq,
+					op: "sweep",
+					actor: ctx.actor.name,
+					touched: [...ctx.touched],
+				});
 				return { n, key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 			}),
 		);
 		if (!done) continue;
 		reopened += done.n;
-		app.publish({ project: done.key, seq: done.seq, op: "sweep", actor: done.actor, touched: done.touched });
 	}
 	return reopened;
 }
@@ -170,8 +193,24 @@ export function jobOperation(ports: { trackerPort?: TrackerPort; statusPort?: St
 							case "blob-prune":
 								await pruneBlobs(app, claim);
 								break;
-							case "flush-uses":
-								await flushUses(app);
+							case "identity-state-retention":
+								await app.database.admission((db) =>
+									db.transaction(async () => {
+										await sweepCeremonies(db, app.now());
+										await sweepAttempts(db, app.now());
+										await fenceJob(db, claim, app.now());
+									}),
+								);
+								break;
+							case "change-event-retention":
+								for (const project of await app.database.read(allProjects))
+									await app.database.write((db) =>
+										db.transaction(async () => {
+											if (!(await lockProject(db, project.id))) return;
+											await sweepChanges(db, project.id, app.now());
+											await fenceJob(db, claim, app.now());
+										}),
+									);
 								break;
 							case "expire-sessions":
 								await sweepSessions(app);
@@ -226,7 +265,8 @@ export async function enqueuePeriodicJobs(app: App): Promise<void> {
 				"expire-decisions",
 				"commit-statuses",
 				"tracker-polls",
-				"flush-uses",
+				"identity-state-retention",
+				"change-event-retention",
 				"expire-sessions",
 				"sign-in-retention",
 				"blob-prune",

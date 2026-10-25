@@ -9,7 +9,7 @@ import { Ceremonies, ceremonyWrite } from "./ceremonies.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
 import { addressKey } from "./limiter.ts";
 import { lockActors, lockIdentity } from "./locks.ts";
-import { deliverMail, queueMail, requireMail } from "./mail.ts";
+import { queueMail, requireMail } from "./mail.ts";
 import { hashPassword, PasswordWorkBusy } from "./passwords.ts";
 import { endSessionsOf, newSessionSecret, requireRecentProof } from "./sessions.ts";
 
@@ -154,22 +154,27 @@ export async function requestReset(
 	if (allowed.kind === "blocked") return { retryAfter: allowed.retryAfterSeconds };
 	const failed = await limiter.failed(keys, app.now());
 	if (failed.kind === "blocked") return { retryAfter: failed.retryAfterSeconds };
-	const contact = await app.database.admissionRead(async (readDb) => await readDb.get(Q.byEmail, { email }));
-	if (contact) {
-		const code = await issue(app, {
-			kind: "reset",
-			contact,
-			password: passwordDigest(
-				await app.database.admissionRead(async (db) => (await livePassword(db, contact.actor))?.data ?? null),
-			),
-			expires: app.now() + 15 * 60_000,
-		});
-		deliverMail(app, {
-			to: email,
-			subject: "Reset your Mainworthy password",
-			text: `Reset the password for ${contact.name}:\n${url}/reset#${code}\n\nThis link works once for 15 minutes. It ends your existing sessions. If you use an authenticator, it is still required after resetting. If you did not ask for it, ignore this message.`,
-		});
-	}
+	await app.database.admission((db) =>
+		db.transaction(async () => {
+			const contact = await db.get(Q.byEmail, { email });
+			if (!contact) return;
+			const code = await issue(
+				app,
+				{
+					kind: "reset",
+					contact,
+					password: passwordDigest((await livePassword(db, contact.actor))?.data ?? null),
+					expires: app.now() + 15 * 60_000,
+				},
+				db,
+			);
+			queueMail(app, db, {
+				to: email,
+				subject: "Reset your Mainworthy password",
+				text: `Reset the password for ${contact.name}:\n${url}/reset#${code}\n\nThis link works once for 15 minutes. It ends your existing sessions. If you use an authenticator, it is still required after resetting. If you did not ask for it, ignore this message.`,
+			});
+		}),
+	);
 	return null;
 }
 export async function resetPassword(

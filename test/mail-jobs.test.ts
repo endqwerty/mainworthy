@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { queueMail, waitMail } from "../src/server/identity/identity.ts";
+import { queueMail, requestReset, resetPassword, waitMail } from "../src/server/identity/identity.ts";
 import { type App, openApp } from "../src/server/kernel/app.ts";
 import { JOB_LEASE_MS, type Job, jobBackoff, jobById, runJob } from "../src/server/kernel/jobs.ts";
 import { executeMail } from "../src/server/kernel/smtp.ts";
@@ -155,4 +155,125 @@ test("concurrent deliveries have separate SMTP reply buffers and recipients", as
 		["<first@example.com>", "first body"],
 		["<second@example.com>", "second body"],
 	]);
+});
+
+test.each(["statement failure", "connection loss"])(
+	"a %s between reset issuance and mail enqueue rolls both back and preserves the prior link",
+	async (fault) => {
+		await setup();
+		h.app.config.publicUrl = "https://example.com";
+		await h.app.database.write((db) =>
+			db.transaction(() =>
+				db.runDynamic(
+					"INSERT INTO mail_contacts(actor,email,verified_at,revision) VALUES ($1,'robin@example.com',$2,'verified-contact')",
+					[h.owner.id, h.app.now()],
+				),
+			),
+		);
+		await requestReset(h.app, "robin@example.com", null);
+		await waitMail(h.app);
+		const previous = /\/reset#([A-Za-z0-9_-]{43})/.exec(smtp.messages[0]?.text ?? "")?.[1];
+		if (!previous) throw new Error("missing previous reset link");
+		const before = await h.app.database.read((db) =>
+			db.allDynamic("SELECT key,payload FROM identity_ceremonies WHERE kind='mail' ORDER BY key"),
+		);
+		await h.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec(`
+		CREATE FUNCTION fail_reset_mail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+		IF NEW.kind = 'mail' THEN ${fault === "connection loss" ? "PERFORM pg_terminate_backend(pg_backend_pid());" : "RAISE EXCEPTION 'simulated mail enqueue crash';"} END IF;
+		RETURN NEW; END $$;
+		CREATE TRIGGER fail_reset_mail BEFORE INSERT ON background_jobs FOR EACH ROW EXECUTE FUNCTION fail_reset_mail();
+	`),
+			),
+		);
+		try {
+			await expect(requestReset(h.app, "robin@example.com", null)).rejects.toThrow();
+			await waitMail(h.app);
+			expect(smtp.messages).toHaveLength(1);
+			expect(
+				await h.app.database.read((db) =>
+					db.allDynamic("SELECT key,payload FROM identity_ceremonies WHERE kind='mail' ORDER BY key"),
+				),
+			).toEqual(before);
+			expect(
+				await h.app.database.read((db) => db.allDynamic("SELECT state FROM background_jobs WHERE kind='mail'")),
+			).toEqual([{ state: "succeeded" }]);
+		} finally {
+			await h.app.database.write((db) =>
+				db.transaction(() =>
+					db.exec("DROP TRIGGER fail_reset_mail ON background_jobs; DROP FUNCTION fail_reset_mail()"),
+				),
+			);
+		}
+		peer = await openApp(h.app.config, { memory: true, now: h.app.now });
+		expect(
+			await resetPassword(peer, {
+				code: previous,
+				password: "a sufficiently long replacement password",
+				address: null,
+			}),
+		).toBe("changed");
+		await waitMail(peer);
+		const sent = smtp.messages.length;
+		await requestReset(h.app, "robin@example.com", null);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT state FROM background_jobs WHERE kind='mail' AND state='ready'"),
+			),
+		).toEqual([{ state: "ready" }]);
+		await waitMail(peer);
+		expect(smtp.messages).toHaveLength(sent + 1);
+		const retry = /\/reset#([A-Za-z0-9_-]{43})/.exec(smtp.messages.at(-1)?.text ?? "")?.[1];
+		if (!retry) throw new Error("missing retried reset link");
+		expect(
+			await resetPassword(peer, {
+				code: retry,
+				password: "another sufficiently long replacement password",
+				address: null,
+			}),
+		).toBe("changed");
+	},
+);
+
+test("anonymous reset issuance completes while an identity writer holds its lock", async () => {
+	await setup();
+	h.app.config.publicUrl = "https://example.com";
+	await h.app.database.write((db) =>
+		db.transaction(() =>
+			db.runDynamic(
+				"INSERT INTO mail_contacts(actor,email,verified_at,revision) VALUES ($1,'robin@example.com',$2,'verified-contact')",
+				[h.owner.id, h.app.now()],
+			),
+		),
+	);
+	const { lockIdentity } = await import("../src/server/identity/identity.ts");
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const holding = h.app.database.write((db) =>
+		db.transaction(async () => {
+			await lockIdentity(db);
+			entered.resolve();
+			await release.promise;
+		}),
+	);
+	await entered.promise;
+	const reset = requestReset(h.app, "robin@example.com", null);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		expect(
+			await Promise.race([
+				reset,
+				new Promise((_, reject) => {
+					timer = setTimeout(() => reject(new Error("reset waited for an identity writer")), 1000);
+				}),
+			]),
+		).toBeNull();
+	} finally {
+		clearTimeout(timer);
+		release.resolve();
+		await Promise.all([holding, reset]);
+	}
+	await waitMail(h.app);
+	expect(smtp.messages).toHaveLength(1);
 });

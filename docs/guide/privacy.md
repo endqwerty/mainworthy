@@ -121,11 +121,12 @@ We keep information only for as long as it is needed:
 
 | What | How long |
 | --- | --- |
-| Failed sign-in attempts | Digest-keyed counters in PostgreSQL, used for at most 30 minutes after the last failure. Restarts preserve them; expired rows can remain until cleanup or eviction. |
-| A passkey sign-in or authenticator step in progress | Usable for 5 minutes across instances and restarts. Stored in PostgreSQL; expired records are removed when that ceremony kind next allocates. |
-| An email verification link | Usable once for 24 hours across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
-| A password reset link | Usable once for 15 minutes across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it. |
+| Failed sign-in attempts | Digest-keyed counters in PostgreSQL, used for at most 30 minutes after the last failure. Restarts preserve them; periodic cleanup removes expired rows, and capacity eviction can remove older rows sooner. |
+| A passkey sign-in or authenticator step in progress | Usable for 5 minutes across instances and restarts. Stored in PostgreSQL; expired records are removed by periodic cleanup or when that ceremony kind next allocates. |
+| An email verification link | Usable once for 24 hours across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it and periodic cleanup removes expired records. |
+| A password reset link | Usable once for 15 minutes across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it and periodic cleanup removes expired records. |
 | An outgoing mail message | Until its job succeeds or exhausts its bounded retries. Private job input is excluded from archives. |
+| Project change-stream hints | 24 hours. A returning stream with older or missing history refreshes the project. |
 | A recovery email address | Until you remove or replace it, or your account is forgotten |
 | A session's record | Deleted by the running server once the session has been ended for 30 days. See [sessions](#sessions). |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |
