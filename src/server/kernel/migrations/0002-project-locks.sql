@@ -35,7 +35,7 @@ BEGIN
   affected := ARRAY[NEW.actor, OLD.actor];
  END IF;
  FOR row_actor IN SELECT DISTINCT value FROM unnest(affected) AS changed(value) WHERE value IS NOT NULL ORDER BY value LOOP
-  PERFORM id FROM actors WHERE id = row_actor FOR UPDATE;
+  PERFORM id FROM actors WHERE id = row_actor FOR NO KEY UPDATE;
   UPDATE actors SET auth_version = auth_version + 1 WHERE id = row_actor;
  END LOOP;
  IF TG_TABLE_NAME = 'team_grants' THEN

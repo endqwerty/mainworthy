@@ -6,6 +6,7 @@ import type { App } from "../kernel/app.ts";
 import { CallerReference } from "../kernel/caller.ts";
 import { type Actor, type Ctx, lockProject, lockProjectKey, projectById } from "../kernel/ctx.ts";
 import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { notFound } from "../kernel/errors.ts";
 import { actorById, resolveCaller } from "./identity.ts";
 
 const Q = {
@@ -14,7 +15,7 @@ const Q = {
 		"SELECT id, auth_version FROM actors WHERE id = ANY($ids::bigint[]) ORDER BY id FOR SHARE",
 	),
 	exclusive: sql<{ ids: readonly number[] }, { id: number; auth_version: number }>(
-		"SELECT id, auth_version FROM actors WHERE id = ANY($ids::bigint[]) ORDER BY id FOR UPDATE",
+		"SELECT id, auth_version FROM actors WHERE id = ANY($ids::bigint[]) ORDER BY id FOR NO KEY UPDATE",
 	),
 	named: sql<{ names: readonly string[] }, { id: number; name: string }>(
 		"SELECT id, name FROM actors WHERE name = ANY($names::text[]) ORDER BY id",
@@ -61,6 +62,10 @@ export async function lockActors(db: WriteDb, ids: readonly number[], exclusive 
 	if (exclusive) await lockIdentity(db);
 	await db.all(exclusive ? Q.exclusive : Q.share, { ids: [...new Set(ids)].sort((a, b) => a - b) });
 }
+/** Single-actor sign-in never discovers another owner or acquires an identity or project lock. */
+export async function lockSignInActor(db: WriteDb, id: number): Promise<void> {
+	await db.all(Q.exclusive, { ids: [id] });
+}
 export async function lockAllActors(db: WriteDb): Promise<void> {
 	await lockIdentity(db);
 	await lockActors(
@@ -94,7 +99,11 @@ export async function lockCallActors(
 	const idQuery =
 		op === "session" ? Q.session : data.do === "token.revoke" ? Q.token : op === "credential" ? Q.credential : null;
 	if (typeof data.id === "number") {
-		if (idQuery) affected.push(...(await db.all(idQuery, { id: data.id })).map((row) => row.id));
+		if (idQuery) {
+			const owners = await db.all(idQuery, { id: data.id });
+			if (op === "session" && owners.length === 0) throw notFound(`session ${data.id}`);
+			affected.push(...owners.map((row) => row.id));
+		}
 	}
 	const teamGrant = typeof data.do === "string" && data.do.startsWith("team.grant.") && typeof data.team === "string";
 	if (teamGrant && typeof data.team === "string")
@@ -144,13 +153,13 @@ export async function batchAllowed(
 	return !!allowed && allowed.id === actor && mayRun(allowed, "record");
 }
 
-export async function lockTokenHash(db: WriteDb, hash: string): Promise<void> {
-	await lockIdentity(db);
+export async function lockTokenHash(db: WriteDb, hash: string): Promise<boolean> {
 	const row = await db.get(Q.tokenHash, { hash });
 	if (row) {
 		await lockActors(db, [row.id]);
 		if ((await db.get(Q.tokenHash, { hash }))?.id !== row.id) throw new Busy();
 	}
+	return row !== null;
 }
 export async function lockSessionHash(db: WriteDb, hash: string): Promise<void> {
 	await lockIdentity(db);

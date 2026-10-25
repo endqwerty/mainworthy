@@ -65,6 +65,8 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | `busy` | 503 | A writer could not acquire a lock or connection within its bound, a sign-in resolved to another actor while waiting, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
+Sign-in locks its existing actor and does not queue behind identity changes for unrelated actors. Ending a session whose id was absent when the request discovered its owner returns `not_found`, even if a sign-in creates that id during the request.
+
 A `busy` reply rolls back the current transaction. If the command had not committed acceptance,
 its command id is rolled back too. A same-id retry starts the request again. If a report already committed
 acceptance, its batch and command id remain pending, and a same-id retry resumes application. If the reply

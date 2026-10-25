@@ -87,11 +87,14 @@ for (let round = 0; round < rounds; round++) {
 				await until(async () => (await waiters()) >= 1);
 			}
 			let completed = 0;
+			let signinCompleted = false;
+			let tokenCreationCompleted = false;
 			const signin = (async () => {
 				const start = performance.now();
 				const opened = await signInWithToken(h.app, token.secret, { userAgent: null, address: null });
 				if (opened.kind !== "opening" || !(await opened.signedIn)) throw new Error("sign-in did not succeed");
 				completed++;
+				signinCompleted = true;
 				return performance.now() - start;
 			})();
 			const creating = (async () => {
@@ -104,9 +107,12 @@ for (let round = 0; round < rounds; round++) {
 					label: "concurrent",
 				});
 				completed++;
+				tokenCreationCompleted = true;
 				return { ms: performance.now() - start, made };
 			})();
-			await until(async () => completed === 2 || (queued && (await waiters()) >= 3));
+			await until(async () => completed === 2 || (queued && (await waiters()) >= (signinCompleted ? 2 : 3)));
+			const signinBeforeReportRelease = signinCompleted;
+			const tokenCreationBeforeReportRelease = tokenCreationCompleted;
 			const completedBeforeReportRelease = completed === 2;
 			resume.resolve();
 			const [reply, signinMs, created, granted] = await Promise.all([reporting, signin, creating, grant]);
@@ -128,6 +134,8 @@ for (let round = 0; round < rounds; round++) {
 					signinMs,
 					tokenCreationMs: created.ms,
 					completedBeforeReportRelease,
+					signinBeforeReportRelease,
+					tokenCreationBeforeReportRelease,
 					...rows[0],
 				}),
 			);

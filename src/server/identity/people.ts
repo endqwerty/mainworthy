@@ -53,7 +53,7 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer, startAddressKey } from "./limiter.ts";
-import { lockActors, lockIdentity } from "./locks.ts";
+import { lockActors, lockIdentity, lockSignInActor } from "./locks.ts";
 import {
 	beginOidc,
 	findNativeOidc,
@@ -279,11 +279,16 @@ class Stop extends Error {
 }
 
 /** Runs `work` under the gate in one transaction. A `Stop` thrown in it rolls everything back and is its answer. */
-async function commit<T>(app: App, actors: readonly number[], work: (db: WriteDb) => Promise<T>): Promise<T | Refused> {
+async function commit<T>(
+	app: App,
+	actors: { identity: readonly number[] } | { signIn: number | null },
+	work: (db: WriteDb) => Promise<T>,
+): Promise<T | Refused> {
 	return await app.database.write(async (db) => {
 		try {
 			return await db.transaction(async () => {
-				await lockActors(db, actors, true);
+				if ("identity" in actors) await lockActors(db, actors.identity, true);
+				else if (actors.signIn !== null) await lockSignInActor(db, actors.signIn);
 				return await work(db);
 			});
 		} catch (error) {
@@ -396,7 +401,7 @@ export async function signInWithPassword(
 	}
 	about.proven?.();
 	const cookie = newSessionSecret();
-	return await commit(app, [person.id], async (db) => {
+	return await commit(app, { signIn: person.id }, async (db) => {
 		// The name is looked up again and must lead to a password with the very hash that was verified.
 		const now = await db.get(Q.personByName, { name: input.name });
 		if (now && now.id !== person.id) throw new Busy();
@@ -549,7 +554,7 @@ export async function proveCredential(
 			async (readDb) => await judgeAssertion(app, readDb, proof.passkey, null, input),
 		);
 		if (!first.ok) return attempt.wrong(first);
-		return await commit(app, [person.id], async (db) => {
+		return await commit(app, { identity: [person.id] }, async (db) => {
 			if (!(await proofSession(app, input, db))) return no("context");
 			const now = await judgeAssertion(app, db, proof.passkey, null, input);
 			if (!now.ok) return attempt.wrong(now);
@@ -578,7 +583,7 @@ export async function proveCredential(
 			if (error instanceof PasswordWorkBusy) return no("busy");
 			throw error;
 		}
-		return await commit(app, [person.id], async (db) => {
+		return await commit(app, { identity: [person.id] }, async (db) => {
 			const current = await livePassword(db, person.id);
 			if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 				return no("changed-meanwhile");
@@ -595,7 +600,7 @@ export async function proveCredential(
 		attempt.limiter.failed(attempt.keys, app.now());
 		return no("wrong-code");
 	}
-	return await commit(app, [person.id], async (db) => {
+	return await commit(app, { identity: [person.id] }, async (db) => {
 		const current = await liveTotp(db, person.id);
 		if (!(await proofSession(app, input, db)) || current?.id !== row.id || current.data !== row.data)
 			return no("changed-meanwhile");
@@ -730,7 +735,7 @@ export async function signInWithPasskey(
 	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, [first.row.actor], async (db) => {
+	const entry = await commit(app, { signIn: first.row.actor }, async (db) => {
 		const now = await judgeAssertion(app, db, answer, ceremony);
 		if (!now.ok) return now;
 		if (now.row.actor !== first.row.actor) throw new Busy();
@@ -1128,60 +1133,64 @@ async function acceptByHash(
 	}
 	const cookie = newSessionSecret();
 	const replacing = input.browser === null ? null : await holderOf(app, input.browser);
-	return await commit(app, [first.person.id, ...(replacing ? [replacing.id] : [])], async (db): Promise<Accepted> => {
-		const now = await judge(db);
-		if (!now.ok) return now;
-		const { invitation, person, registration } = now;
-		if (person.id !== first.person.id) throw new Busy();
-		const vouched = input.identity !== null && providerVouches(app);
-		if (!registration && !vouched && app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)))
-			return no("second-factor-required");
-		// Recheck the browser before writing. A new holder needs fresh lock discovery, even if its name was agreed.
-		const held = await elsewhere(person, db);
-		if (held && held.id !== replacing?.id) throw new Busy();
-		const refused = unasked(held);
-		if (refused) return refused;
-		const at = app.now();
-		// By the hash of its code, and only while it is still good: of two acceptances one finds it spent.
-		if (!(await spendInvitation(db, hash, at))) throw new Stop(no("invitation"));
-		if (invitation.purpose === "recover") {
-			await revokeCredentialsOf(db, person.id, at);
-			await revokeTokensOf(db, person.id, at);
-			await endSessionsOf(db, person.id, at, "ended");
-			db.afterCommit(() => clearMailLinksOf(app, person.id));
-		} else if ((await liveCredentials(db, person.id)).length > 0) throw new Stop(no("has-credentials"));
-		let root: CredentialRow | null = null;
-		if (passwordHash !== null)
-			root = await credentialById(db, await insertPassword(db, { actor: person.id, hash: passwordHash, at }));
-		if (input.identity) {
-			if (await oidcByHandle(db, input.identity.handle)) throw new Stop(no("credential-exists"));
-			root = await insertOidc(db, { actor: person.id, ...input.identity, at });
-		}
-		if (registration)
-			root = await insertPasskey(db, {
-				actor: person.id,
-				passkey: registration.passkey,
-				label: input.label ?? "passkey",
-				at,
-			});
-		if (!root) throw new Stop(no("input"));
-		const opened = await openOn(app, db, root, cookie, about);
-		if (!opened) throw new Stop(no("changed-meanwhile"));
-		// What was just stored signed its person in, and says so: a list does not call it "never used".
-		for (const row of await liveCredentials(db, person.id)) await noteCredentialUse(db, row.id, at);
-		// The browser was somebody else's until now, and the page said whose. That session ends as a sign-out does.
-		if (input.browser !== null && held) await endSession(app, db, hashOf(input.browser), "signed-out");
-		if (registration) spendChallenge(app, registration.challenge);
-		await credentialNotice(
-			app,
-			db,
-			person.id,
-			invitation.purpose === "recover"
-				? "Your sign-in methods were replaced through account recovery"
-				: "Your sign-in methods were added",
-		);
-		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
-	});
+	return await commit(
+		app,
+		{ identity: [first.person.id, ...(replacing ? [replacing.id] : [])] },
+		async (db): Promise<Accepted> => {
+			const now = await judge(db);
+			if (!now.ok) return now;
+			const { invitation, person, registration } = now;
+			if (person.id !== first.person.id) throw new Busy();
+			const vouched = input.identity !== null && providerVouches(app);
+			if (!registration && !vouched && app.config.requireAdminMfa && (await hasAdminGrant(db, person.id)))
+				return no("second-factor-required");
+			// Recheck the browser before writing. A new holder needs fresh lock discovery, even if its name was agreed.
+			const held = await elsewhere(person, db);
+			if (held && held.id !== replacing?.id) throw new Busy();
+			const refused = unasked(held);
+			if (refused) return refused;
+			const at = app.now();
+			// By the hash of its code, and only while it is still good: of two acceptances one finds it spent.
+			if (!(await spendInvitation(db, hash, at))) throw new Stop(no("invitation"));
+			if (invitation.purpose === "recover") {
+				await revokeCredentialsOf(db, person.id, at);
+				await revokeTokensOf(db, person.id, at);
+				await endSessionsOf(db, person.id, at, "ended");
+				db.afterCommit(() => clearMailLinksOf(app, person.id));
+			} else if ((await liveCredentials(db, person.id)).length > 0) throw new Stop(no("has-credentials"));
+			let root: CredentialRow | null = null;
+			if (passwordHash !== null)
+				root = await credentialById(db, await insertPassword(db, { actor: person.id, hash: passwordHash, at }));
+			if (input.identity) {
+				if (await oidcByHandle(db, input.identity.handle)) throw new Stop(no("credential-exists"));
+				root = await insertOidc(db, { actor: person.id, ...input.identity, at });
+			}
+			if (registration)
+				root = await insertPasskey(db, {
+					actor: person.id,
+					passkey: registration.passkey,
+					label: input.label ?? "passkey",
+					at,
+				});
+			if (!root) throw new Stop(no("input"));
+			const opened = await openOn(app, db, root, cookie, about);
+			if (!opened) throw new Stop(no("changed-meanwhile"));
+			// What was just stored signed its person in, and says so: a list does not call it "never used".
+			for (const row of await liveCredentials(db, person.id)) await noteCredentialUse(db, row.id, at);
+			// The browser was somebody else's until now, and the page said whose. That session ends as a sign-out does.
+			if (input.browser !== null && held) await endSession(app, db, hashOf(input.browser), "signed-out");
+			if (registration) spendChallenge(app, registration.challenge);
+			await credentialNotice(
+				app,
+				db,
+				person.id,
+				invitation.purpose === "recover"
+					? "Your sign-in methods were replaced through account recovery"
+					: "Your sign-in methods were added",
+			);
+			return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
+		},
+	);
 }
 
 // ── An identity provider ───────────────────────────────────────────────────────────────────────────────────
@@ -1299,7 +1308,7 @@ export async function finishOidcSignIn(
 	}
 	if (purpose.purpose === "link") {
 		const linking = purpose;
-		return await commit(app, [linking.actor], async (db): Promise<OidcFinished> => {
+		return await commit(app, { identity: [linking.actor] }, async (db): Promise<OidcFinished> => {
 			// The browser that finishes is the session that began, and that session is still the person's.
 			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });
 			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
@@ -1325,7 +1334,7 @@ async function openOidcSession(
 	const cookie = newSessionSecret();
 	const initialIdentity = "identity" in input ? input.identity : findNativeOidc(app, input.native)?.identity;
 	const hint = initialIdentity ? await app.database.read((db) => oidcByHandle(db, oidcHandle(initialIdentity))) : null;
-	const entry = await commit(app, hint ? [hint.actor] : [], async (db): Promise<Entry> => {
+	const entry = await commit(app, { signIn: hint?.actor ?? null }, async (db): Promise<Entry> => {
 		const handoff = "native" in input ? takeNativeOidc(app, input.native) : null;
 		const identity = "identity" in input ? input.identity : handoff?.identity;
 		if (!identity) return no("challenge");
@@ -1374,7 +1383,7 @@ export async function signInWithTotp(
 	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
 	const cookie = newSessionSecret();
 	const factorPerson = await app.database.read((db) => db.get(Q.personByName, { name: initial.name }));
-	return await commit(app, factorPerson ? [factorPerson.id] : [], async (db) => {
+	return await commit(app, { signIn: factorPerson?.id ?? null }, async (db) => {
 		const held = findTotp(app, input.challenge, "sign-in");
 		if (!held || held !== initial) return no("challenge");
 		const person = await db.get(Q.personByName, { name: held.name });

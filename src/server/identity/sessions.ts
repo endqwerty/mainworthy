@@ -246,7 +246,7 @@ export async function openSession(
 	db: WriteDb,
 	input: { tokenHash: string; sessionHash: string; userAgent: string | null; address: string | null },
 ): Promise<{ id: number; expiresAt: number } | null> {
-	await lockTokenHash(db, input.tokenHash);
+	if (!(await lockTokenHash(db, input.tokenHash))) return null;
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
 	const made = await db.get(Q.insert, {
@@ -280,7 +280,6 @@ export async function openSessionOnCredential(
 		address: string | null;
 	},
 ): Promise<{ id: number; expiresAt: number } | null> {
-	await lockIdentity(db);
 	await lockActors(db, [input.credential.actor]);
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
