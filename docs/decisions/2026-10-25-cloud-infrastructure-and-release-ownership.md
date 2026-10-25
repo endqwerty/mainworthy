@@ -5,10 +5,20 @@
 - Issue: https://github.com/endqwerty/mainworthy/issues/821
 
 The public `infra/` configuration owns application resources in the production and preview projects. The private
-foundation owns project creation, API enables, CI identities, federation and the app's state bucket. The app's
+foundation owns project creation, API enables, CI identities, runtime accounts and their app-to-jobs grant, federation and the app's state bucket. The app's
 Terraform cannot administer the foundation or its own federation bindings. The foundation pins `infra.yml` on
 `main` before it grants the deploy account any role. Push runs can use the writer; manual runs can use only the
-reader. Pull requests get neither. This replaces the earlier record's proposal to plan credentialed PR code.
+reader. Pull requests get neither.
+
+The foundation creates the two runtime accounts before it grants CI access directly on each one. Public app
+Terraform reads those accounts and manages their SQL, secret, bucket and queue permissions. IAM resources do
+not expose `resource.name` to inherited conditions, so a project-level name condition cannot narrow `actAs` or
+account policy changes. Moving account creation into the foundation avoids project-wide impersonation and an
+extra owner apply after app bootstrap. The alternative was app-owned account creation followed by another
+foundation stage; it made the first queue/service creation depend on that extra handoff. The foundation also grants app permission to name jobs in a dispatch. Deploy may act as app
+and jobs, and can change neither account's IAM policy. Each account has one Terraform owner.
+
+This replaces the earlier record's proposal to plan credentialed PR code.
 
 Terraform owns the private job service's configuration. Step 5 owns only its application image and traffic,
 excluded explicitly from Terraform updates. The proxy image, identity, networking, secret references, mount,
