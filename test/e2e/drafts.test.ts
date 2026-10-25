@@ -68,6 +68,70 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"retrying a save of unknown fate keeps text typed during the command lookup",
+	async () => {
+		const server = await startServer();
+		const browser = await openPage(server);
+		const command = Promise.withResolvers<unknown>();
+		const releaseCommand = Promise.withResolvers<void>();
+		const resend = Promise.withResolvers<void>();
+		const releaseResend = Promise.withResolvers<void>();
+		try {
+			const { page } = browser;
+			let first = true;
+			await browser.context.route("**/api/p/scratch/propose", async (route) => {
+				if (first) {
+					first = false;
+					await route.abort();
+					return;
+				}
+				resend.resolve();
+				await releaseResend.promise;
+				await route.continue();
+			});
+			await browser.context.route("**/api/p/scratch/command", async (route) => {
+				const response = await route.fetch();
+				command.resolve(await response.json());
+				await releaseCommand.promise;
+				await route.fulfill({ response });
+			});
+			await page.keyboard.press("c");
+			await page.keyboard.type("Coupon capture");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("The coupon should preserve the");
+			await page.keyboard.press("Control+Enter");
+			await page.locator("#stat").filter({ hasText: "kept on this device" }).waitFor();
+			await page.keyboard.press("Control+Enter");
+			expect(await command.promise).toMatchObject({ ok: true, result: { state: "none" } });
+			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await step.focus();
+			await page.keyboard.type(" discount after ");
+			expect(await step.inputValue()).toBe("The coupon should preserve the discount after ");
+			releaseCommand.resolve();
+			await resend.promise;
+			expect(await step.inputValue()).toBe("The coupon should preserve the discount after ");
+			await page.keyboard.type("reload");
+			releaseResend.resolve();
+			await page.waitForURL("**/suite/c/1");
+			await page.keyboard.press("Escape");
+			const stored = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) =>
+					z.array(z.object({ action: z.string() })).parse(rows[0]?.steps)[0]?.action ===
+					"The coupon should preserve the discount after reload",
+			);
+			expect(stored[0]?.steps).toMatchObject([{ action: "The coupon should preserve the discount after reload" }]);
+		} finally {
+			releaseCommand.resolve();
+			releaseResend.resolve();
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"a refused seal keeps the typed text and retries under a fresh command",
 	async () => {
 		const server = await startServer();
