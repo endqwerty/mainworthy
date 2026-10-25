@@ -27,9 +27,6 @@ def identifiers():
         for account in ("app", "jobs"):
             email = f"mainworthy-{account}@{project}.iam.gserviceaccount.com"
             values.update((email, email.removesuffix(".gserviceaccount.com")))
-    runtime = json.loads(os.environ.get("TF_VAR_runtime", "null"))
-    if isinstance(runtime, dict):
-        values.update(value for value in runtime.values() if isinstance(value, str))
     return sorted(values, key=len, reverse=True)
 
 

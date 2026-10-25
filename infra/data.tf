@@ -1,9 +1,20 @@
+# CI builds and tests the image once and publishes it to GHCR (check.yml, `publish`). Cloud Run pulls that same digest
+# through this remote repository, so no CI identity pushes here.
 resource "google_artifact_registry_repository" "images" {
   project       = var.production_project
   location      = local.region
   repository_id = "mainworthy"
   format        = "DOCKER"
+  mode          = "REMOTE_REPOSITORY"
   labels        = local.labels
+  remote_repository_config {
+    description = "The public GHCR images CI publishes"
+    docker_repository {
+      custom_repository {
+        uri = "https://ghcr.io"
+      }
+    }
+  }
 }
 
 resource "google_sql_database_instance" "app" {

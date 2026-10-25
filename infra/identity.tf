@@ -23,6 +23,8 @@ resource "google_sql_user" "runtime" {
   instance = google_sql_database_instance.app["production"].name
   name     = trimsuffix(each.value.email, ".gserviceaccount.com")
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+  # cloudsqlsuperuser owns the mainworthy database; its members may create in it. The instance holds nothing else.
+  database_roles = ["cloudsqlsuperuser"]
 }
 
 # The complete policy removes Google's projectViewer and projectEditor convenience grants.
