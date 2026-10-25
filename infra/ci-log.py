@@ -55,6 +55,8 @@ def redact(line, values):
     line = re.sub(r"[\w.+%-]+@[\w.-]+", "***", line)
     line = re.sub(r"[\w.-]+\.run\.app\b", "***", line)
     line = re.sub(r"(?<![\w:.])[0-9a-fA-F:.]+(?:%[\w.-]+)?(?![\w:.])", redact_address, line)
+    # An IPv4 address beside a port or after a colon, which the pass above leaves whole.
+    line = re.sub(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)", redact_address, line)
     line = re.sub(r"\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b", "***", line, flags=re.IGNORECASE)
     line = re.sub(r"\b\d{6,}\b", "***", line)
     return line
