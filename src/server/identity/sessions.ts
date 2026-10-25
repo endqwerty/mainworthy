@@ -12,6 +12,7 @@ import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
 import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
+import { fenceJob, type JobClaim } from "../kernel/jobs.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
 import { lockActors, lockIdentity, lockSessionHash, lockTokenHash } from "./locks.ts";
@@ -399,15 +400,15 @@ export async function listSessions(app: App, db: ReadDb, actor: number) {
  * session is refused because the clock says so; afterwards it is refused whatever the clock says, so one that
  * is set back does not revive a session that had expired. Rows that ended more than thirty days ago are deleted.
  */
-export async function sweepSessions(app: App): Promise<{ expired: number; deleted: number }> {
-	const now = app.now();
+export async function sweepSessions(app: App, claim?: JobClaim): Promise<{ expired: number; deleted: number }> {
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
 				await lockIdentity(db);
+				const foundAt = app.now();
 				const candidates = [
-					...(await db.all(Q.retiredTokens, { now })),
-					...(await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })),
+					...(await db.all(Q.retiredTokens, { now: foundAt })),
+					...(await db.all(Q.overdue, { now: foundAt, idleBefore: foundAt - app.config.sessionIdleMs })),
 				];
 				const actors: number[] = [];
 				for (const candidate of candidates) {
@@ -415,6 +416,8 @@ export async function sweepSessions(app: App): Promise<{ expired: number; delete
 					if (actor !== null) actors.push(actor);
 				}
 				await lockActors(db, actors, true);
+				if (claim) await fenceJob(db, claim, app.now());
+				const now = app.now();
 				const retired = await db.all(Q.retiredTokens, { now });
 				const overdue = await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs });
 				for (const candidate of [...retired, ...overdue]) {

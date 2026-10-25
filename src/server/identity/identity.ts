@@ -39,6 +39,7 @@ import type { CallerReference } from "../kernel/caller.ts";
 import { type Actor, lockProject } from "../kernel/ctx.ts";
 import { Busy, isBusy, json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { fenceJob, type JobClaim } from "../kernel/jobs.ts";
 import { limiterOf } from "./attempts.ts";
 import { clearChallenges } from "./challenges.ts";
 import { credentialNotice, forgetContact } from "./contacts.ts";
@@ -1319,15 +1320,16 @@ export async function revokeTokensOf(db: WriteDb, actor: number, at: number): Pr
 }
 
 /** The minute job removes ended invitations and erases old token addresses, preserving token revocation. */
-export async function sweepSignInRecords(app: App): Promise<void> {
-	const now = app.now();
+export async function sweepSignInRecords(app: App, claim?: JobClaim): Promise<void> {
 	await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
 				await lockIdentity(db);
-				const hints = await db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
+				const hints = await db.all(Q.addressesToForget, { before: app.now() - 30 * 86_400_000 });
 				const affected = new Set(hints.map((row) => row.actor));
 				await lockActors(db, [...affected], true);
+				if (claim) await fenceJob(db, claim, app.now());
+				const now = app.now();
 				const tokens = await db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
 				if (tokens.some((row) => !affected.has(row.actor))) throw new Busy();
 				for (const token of tokens) await db.run(Q.forgetTokenAddress, { id: token.id });

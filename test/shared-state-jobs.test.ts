@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
+import { createToken, signInWithToken } from "../src/server/identity/identity.ts";
+import { lockIdentity } from "../src/server/identity/locks.ts";
 import { type App, openApp } from "../src/server/kernel/app.ts";
 import { lockProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { claimJob, JOB_LEASE_MS, type JobClaim, jobById } from "../src/server/kernel/jobs.ts";
 import { enqueuePeriodicJobs, enqueueStartupJobs, jobOp } from "../src/server/ops/jobs.ts";
 import { invokeService } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
@@ -192,3 +195,119 @@ test("two startups recover already accepted reports once without advancing later
 		),
 	).toEqual([{ state: "succeeded" }, { state: "succeeded" }]);
 });
+
+for (const kind of ["expire-sessions", "sign-in-retention"]) {
+	for (const replaced of [true, false]) {
+		test(`${kind} ${replaced ? "refuses an expired worker after its successor claims" : "uses the time after waiting for its actor lock"}`, async () => {
+			h = await harness();
+			peer = await openApp(h.app.config, { memory: true, now: h.app.now });
+			const secondary = peer;
+			const token = await createToken(h.app, {
+				actor: "reader",
+				kind: "human",
+				can: ["read"],
+				project: 0,
+				label: "retention",
+			});
+			const now = h.app.now();
+			if (kind === "expire-sessions") {
+				for (let i = 0; i < 2; i++) {
+					const opening = await signInWithToken(h.app, token.secret, { userAgent: null, address: null });
+					if (opening.kind !== "opening" || !(await opening.signedIn)) throw new Error("missing session");
+				}
+				await h.app.database.write((db) =>
+					db.transaction(() =>
+						db.runDynamic(
+							"UPDATE sessions SET expires_at=$1 + CASE WHEN id=(SELECT min(id) FROM sessions) THEN -1 ELSE 1 END",
+							[now],
+						),
+					),
+				);
+			} else {
+				await h.app.database.write((db) =>
+					db.transaction(async () => {
+						await db.runDynamic(
+							"UPDATE tokens SET revoked_at=$1 - 2592000001,last_used_addr='192.0.2.99' WHERE id=$2",
+							[now, token.id],
+						);
+						await db.runDynamic(
+							"INSERT INTO invitations(actor,hash,purpose,created_by,created_at,expires_at) SELECT actor,'retention','join',$1,$2,$2-2591999999 FROM tokens WHERE id=$3",
+							[h.owner.id, now, token.id],
+						);
+					}),
+				);
+			}
+			const rows = () =>
+				h.app.database.read(async (db) => ({
+					sessions: await db.allDynamic("SELECT id,ended_at,ended_why FROM sessions ORDER BY id"),
+					tokens: await db.allDynamic("SELECT id,last_used_addr FROM tokens ORDER BY id"),
+					invitations: await db.allDynamic("SELECT id FROM invitations ORDER BY id"),
+				}));
+			const before = await rows();
+			await enqueuePeriodicJobs(h.app);
+			const [job] = await h.app.database.read((db) =>
+				db.allDynamic<{ id: string }>("SELECT id FROM background_jobs WHERE kind=$1", [kind]),
+			);
+			if (!job) throw new Error("missing maintenance job");
+			const held = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			const holding = h.app.database.write((db) =>
+				db.transaction(async () => {
+					if (replaced) await lockIdentity(db);
+					else
+						await db.allDynamic(
+							"SELECT a.id FROM actors a JOIN tokens t ON t.actor=a.id WHERE t.id=$1 FOR SHARE OF a",
+							[token.id],
+						);
+					held.resolve();
+					await release.promise;
+				}),
+			);
+			await held.promise;
+			const running = invokeService(h.app, jobOp, { do: "run", id: job.id });
+			let successor: JobClaim | null = null;
+			try {
+				const deadline = Date.now() + 5000;
+				for (;;) {
+					const [row] = await secondary.database.read((db) =>
+						db.allDynamic<{ waiting: boolean }>(
+							"SELECT EXISTS(SELECT FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock') AS waiting",
+						),
+					);
+					if (row?.waiting) break;
+					if (Date.now() >= deadline) throw new Error("maintenance never waited for its domain lock");
+					await new Promise<void>((resolve) => setImmediate(resolve));
+				}
+				h.advance(replaced ? JOB_LEASE_MS + 1 : 1000);
+				if (replaced) {
+					successor = await claimJob(secondary, "successor", job.id);
+					expect(successor?.attempts).toBe(2);
+				}
+			} finally {
+				release.resolve();
+				await Promise.allSettled([holding, running]);
+			}
+			expect(await running).toEqual({ ok: true, result: { ran: 1 }, seq: null });
+			if (replaced) {
+				expect(await rows()).toEqual(before);
+				expect(await secondary.database.read((db) => jobById(db, job.id))).toMatchObject({
+					state: "running",
+					owner: "successor",
+					token: successor?.token,
+					attempts: 2,
+				});
+			} else {
+				if (kind === "expire-sessions")
+					expect((await rows()).sessions).toEqual([
+						{ id: 1, ended_at: h.app.now(), ended_why: "expired" },
+						{ id: 2, ended_at: h.app.now(), ended_why: "expired" },
+					]);
+				else {
+					expect((await rows()).tokens).toContainEqual({ id: token.id, last_used_addr: null });
+					expect((await rows()).invitations).toEqual([]);
+				}
+				expect(await secondary.database.read((db) => jobById(db, job.id))).toMatchObject({ state: "succeeded" });
+			}
+		});
+	}
+}
