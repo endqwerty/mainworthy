@@ -37,7 +37,7 @@ for event in push workflow_dispatch; do
   : > "$CALLS"
   export PLAN_EXIT=1
   if run_ci "$event"; then echo 'A failed plan must fail CI.' >&2; exit 1; fi
-  if rg -q '^apply ' "$CALLS"; then echo 'A failed plan must not apply.' >&2; exit 1; fi
+  if grep -q '^apply ' "$CALLS"; then echo 'A failed plan must not apply.' >&2; exit 1; fi
 done
 : > "$CALLS"
 export PLAN_EXIT=2
@@ -46,11 +46,11 @@ run_ci workflow_dispatch
 rc=$?
 set -e
 test "$rc" = 2
-if rg -q '^apply ' "$CALLS"; then echo 'Drift must never apply.' >&2; exit 1; fi
+if grep -q '^apply ' "$CALLS"; then echo 'Drift must never apply.' >&2; exit 1; fi
 : > "$CALLS"
 export PLAN_EXIT=0 REMOTE_SHA=example-new-main
 if run_ci push; then echo 'A stale push must not apply.' >&2; exit 1; fi
-if rg -q '^apply ' "$CALLS"; then echo 'A stale push must not apply.' >&2; exit 1; fi
+if grep -q '^apply ' "$CALLS"; then echo 'A stale push must not apply.' >&2; exit 1; fi
 : > "$CALLS"
 if run_ci pull_request; then echo 'PR events must be refused.' >&2; exit 1; fi
 test ! -s "$CALLS"
