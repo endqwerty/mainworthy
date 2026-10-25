@@ -455,7 +455,8 @@ test("CI recovers a connection failure and a lost report reply without recording
 			job: "tests",
 			results: [{ test: { key: "one" }, outcome: "pass" }],
 		});
-		expect([receipt.fresh, receipt.counts.total, bodies.length]).toEqual([false, 1, 2]);
+		// The generated command id replays the original reply, including its original fresh flag.
+		expect([receipt.fresh, receipt.counts.total, bodies.length]).toEqual([true, 1, 2]);
 		expect(bodies[1]).toBe(bodies[0]);
 		expect(
 			await instance.app.database.read(
@@ -1321,3 +1322,48 @@ exec "$REAL_CURL" "$@"
 		await rm(directory, { recursive: true, force: true });
 	}
 }, 20_000);
+
+test("CLI case reports retain generated command ids when the transport loses an applied reply", async () => {
+	await withInstance(async ({ client, instance }) => {
+		await client.call("propose", { edits: [{ op: "create", body: { title: "CLI report retry" } }] });
+		const bodies: { cmd?: string | undefined }[] = [];
+		let loseReply = true;
+		const retrying = new Client({
+			...client.options,
+			request: deploymentFetch({
+				attempts: 2,
+				pauseMs: 0,
+				timeoutMs: 1000,
+				fetch: async (url, init) => {
+					const response = await fetch(url, init);
+					if (new URL(url).pathname.endsWith("/report")) {
+						bodies.push(z.object({ cmd: z.string().optional() }).parse(JSON.parse(String(init?.body))));
+						if (loseReply) {
+							loseReply = false;
+							await response.arrayBuffer();
+							throw new Error("connection lost after report committed");
+						}
+					}
+					return response;
+				},
+			}),
+		});
+		const input = { target: { session: "CLI retry" }, results: [{ test: { case: "C-1" }, outcome: "pass" as const }] };
+		const first = await retrying.call("report", input);
+		expect(first.results).toHaveLength(1);
+		expect(await instance.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([
+			{ n: 1 },
+		]);
+		expect(bodies).toHaveLength(2);
+		expect(bodies[0]?.cmd).toEqual(expect.any(String));
+		expect(bodies[0]?.cmd).toBe(bodies[1]?.cmd);
+		await retrying.call("report", input);
+		expect(bodies[2]?.cmd).not.toBe(bodies[0]?.cmd);
+		await retrying.call("report", { ...input, cmd: "explicit-cli-report" });
+		await retrying.call("report", { ...input, cmd: "explicit-cli-report" });
+		expect(bodies.slice(3).map((body) => body.cmd)).toEqual(["explicit-cli-report", "explicit-cli-report"]);
+		expect(await instance.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([
+			{ n: 3 },
+		]);
+	});
+});

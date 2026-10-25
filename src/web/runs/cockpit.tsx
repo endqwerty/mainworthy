@@ -577,6 +577,13 @@ function ProjectRunCockpit({
 					},
 				],
 			};
+			const send = async (): Promise<ReportReceipt> => {
+				const receipt = await call("report", input, { project, owner });
+				if (!receipt.results.length && !receipt.rejected.length && !receipt.declined.length)
+					throw new Error("The report was accepted; its result is not confirmed yet.");
+				return receipt;
+			};
+
 			const complete = (receipt: ReportReceipt): RecordedResult => {
 				assertReportOwner();
 				uncertain.delete(slot.id);
@@ -608,7 +615,7 @@ function ProjectRunCockpit({
 			};
 			let receipt: ReportReceipt;
 			try {
-				receipt = await call("report", input, { project, owner });
+				receipt = await send();
 			} catch (error) {
 				assertReportOwner();
 				if (error instanceof ApiError && error.status !== null && error.code !== "internal" && error.code !== "busy")
@@ -624,7 +631,7 @@ function ProjectRunCockpit({
 						assertReportOwner();
 						if (fate.state !== "done")
 							return complete(
-								await call("report", input, { project, owner }).catch((error: unknown) => {
+								await send().catch((error: unknown) => {
 									if (
 										error instanceof ApiError &&
 										error.status !== null &&

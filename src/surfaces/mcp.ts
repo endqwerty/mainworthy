@@ -365,6 +365,7 @@ class AgentServer extends McpServer {
 				{ description: tool.description, annotations: tool.annotations, inputSchema: Arguments },
 				async (args) => {
 					const { project, ...input } = args;
+					if (tool.name === "report" && input.cmd === undefined) input.cmd = crypto.randomUUID();
 					let selected = project;
 					if (selected === undefined) {
 						const projects = await listProjects();

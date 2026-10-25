@@ -51,8 +51,8 @@ type Base<I, O> = {
  * what was accepted is committed (so every reader sees the gate turn pending) before it is applied.
  */
 export const COMMIT: unique symbol = Symbol("commit");
-/** What `steps` may yield: `COMMIT`, or nothing, which marks a point where other requests may be served. */
-export type Pause = typeof COMMIT | undefined;
+/** Yield nothing to serve other requests, or commit with an optional pending reply for busy application. */
+export type Pause<O = unknown> = typeof COMMIT | { commit: typeof COMMIT; pending: O } | undefined;
 
 type ProjectBase<I, O> = Base<I, O> & { scope: "project" };
 /** Project reads receive a snapshot; writes receive a reserved connection and transaction locks. */
@@ -61,7 +61,7 @@ export type ProjectOp<I, O> = ProjectBase<I, O> &
 		| { effect: "read"; run: (ctx: Ctx<ReadDb>, input: I) => O | Promise<O> }
 		| ({ effect: "write" } & (
 				| { run: (ctx: Ctx, input: I) => O | Promise<O> }
-				| { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> | AsyncGenerator<Pause, O, void> }
+				| { steps: (ctx: Ctx, input: I) => Generator<Pause<O>, O, void> | AsyncGenerator<Pause<O>, O, void> }
 		  ))
 	);
 /** An operation on the instance: projects, actors, tokens. */
@@ -350,6 +350,7 @@ async function executeInSnapshot(
 		}
 
 		if (!("begin" in db)) throw new Error("a write needs a reserved lease");
+		let accepted: Extract<Reply, { ok: true }> | undefined;
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
 			// transaction and never finished (the server stopped), or by this one when it commits its own.
@@ -400,13 +401,15 @@ async function executeInSnapshot(
 						result = step.value;
 						break;
 					}
-					if (step.value === COMMIT) {
+					if (step.value !== undefined) {
 						if (cmd && !bound) {
 							await beginCommand(ctx, { id: cmd, op: op.name, request });
 							bound = true;
 						}
 						await stampSeq(ctx);
 						await db.commit();
+						if (typeof step.value === "object")
+							accepted = { ok: true, result: present(step.value.pending), seq: ctx.seq };
 						publish();
 						await nextTick();
 						await db.begin();
@@ -447,6 +450,7 @@ async function executeInSnapshot(
 				return failure(op.name, error);
 			}
 			await db.rollback();
+			if (accepted && isBusy(error)) return accepted;
 			throw error;
 		}
 	} catch (error) {

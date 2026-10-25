@@ -240,12 +240,14 @@ for (const reply of ["missing gate", "unreadable", "lost", "unsent"]) {
 	);
 }
 
-for (const failure of ["internal", "session change", "begun", "busy"] as const) {
-	for (const stage of failure === "begun" || failure === "busy" ? ["first send"] : ["first send", "replay"]) {
+for (const failure of ["internal", "session change", "begun", "busy", "accepted pending"] as const) {
+	for (const stage of failure === "begun" || failure === "busy" || failure === "accepted pending"
+		? ["first send"]
+		: ["first send", "replay"]) {
 		test.skipIf(!browserAvailable)(
 			`a report recovers after ${failure} on ${stage} without a second result`,
 			async () => {
-				const server = await startServer({ mode: "server" });
+				const server = await startServer({ mode: "server", source: failure === "accepted pending" });
 				let browser: Awaited<ReturnType<typeof openPage>> | null = null;
 				try {
 					await server.api("propose", { edits: [{ op: "create", outline: "Review case\n  Open > Ready" }] });
@@ -281,6 +283,26 @@ for (const failure of ["internal", "session change", "begun", "busy"] as const) 
 								json: { ok: false, error: { code: "busy", message: "Report interrupted" } },
 							});
 						const response = await route.fetch();
+						if (failure === "accepted pending" && requests.length === 1) {
+							const reply = await response.json();
+							return route.fulfill({
+								response,
+								json: {
+									...reply,
+									result: {
+										...reply.result,
+										results: [],
+										counts: { total: 0, pass: 0, fail: 0, skip: 0, error: 0, blocked: 0 },
+										basis: { exact: 0, assumed: 0, unresolved: 0 },
+										gate: {
+											...reply.result.gate,
+											verdict: "pending",
+											reason: "pending: report accepted; waiting for application",
+										},
+									},
+								},
+							});
+						}
 						if (requests.length === (stage === "replay" ? 2 : 1)) {
 							if (other) {
 								await other.locator("#token").fill(server.token);

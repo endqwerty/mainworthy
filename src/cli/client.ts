@@ -270,6 +270,14 @@ export class Client {
 	 * request happened, which only a write to a demo project takes (`seed`).
 	 */
 	async forward(op: string, project: string | null, input: unknown, at?: number): Promise<Reply> {
+		if (
+			op === "report" &&
+			typeof input === "object" &&
+			input !== null &&
+			!Array.isArray(input) &&
+			(!("cmd" in input) || input.cmd === undefined)
+		)
+			input = { ...input, cmd: crypto.randomUUID() };
 		const path =
 			project === null
 				? `/api/${encodeURIComponent(op)}`

@@ -62,16 +62,26 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | An authentication or anonymous-start allowance has been exhausted. Failed attempts can be wrong tokens from this address or for a token that starts as this one does, wrong passwords or authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. Anonymous starts have separate, non-escalating limits of 300 successful starts per public IPv4 address or IPv6 /56 per minute. The `Retry-After` header says how many seconds to wait. |
-| `busy` | 503 | A writer could not acquire a lock or connection within its bound, a sign-in resolved to another actor while waiting, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. |
+| `busy` | 503 | A writer could not acquire a lock or connection within its bound, a sign-in resolved to another actor while waiting, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. A report that committed acceptance returns success with a pending receipt if application hits one of these failures. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
 Sign-in locks its existing actor and does not queue behind identity changes for unrelated actors. Ending a session whose id was absent when the request discovered its owner returns `not_found`, even if a sign-in creates that id during the request.
 
-A `busy` reply rolls back the current transaction. If the command had not committed acceptance,
-its command id is rolled back too. A same-id retry starts the request again. If a report already committed
-acceptance, its batch and command id remain pending, and a same-id retry resumes application. If the reply
-to a committed operation was lost, its outcome is still uncertain to the client. Query `command` or retry
-with the same id. Changing the content requires a new id.
+A `busy` reply rolls back the transaction and its unaccepted command id. A same-id retry starts the
+request again. Once a report commits acceptance, a lock timeout, deadlock, or other `busy` during
+application returns HTTP 200 with `ok: true`. The receipt names its durable `batch`, has empty `results`,
+zero applied counts and basis, and says `pending: report accepted; waiting for application` in `gate.reason`.
+Its `seq` is the acceptance sequence. The batch and any command remain pending until startup recovery
+or a same-id retry applies the batch.
+This pending receipt is not saved as the final receipt. Recovery applies the batch and completes its command
+with the applied receipt. Read `gate` for the current verdict. Do not resubmit a successful acceptance
+without a command id: another manual or case report is a new fact.
+
+If the reply to a committed operation was lost, its outcome is still uncertain to the client.
+Query `command` or retry with the same id. Changing the content requires a new id.
+The CLI and MCP generate a command id for each report that lacks one, before forwarding it.
+Their transport retries keep that id. A new CLI invocation or MCP tool call generates a new id.
+Use an explicit `cmd` when a retry must span invocations.
 
 The CLI reports `busy` and exits with code 4. It does not retry the write automatically. The web client
 keeps the request and its command id so a retry checks or resends that same request. A report's acceptance

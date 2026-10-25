@@ -1240,3 +1240,41 @@ test("MCP discovers and roundtrips a complete result trail", async () => {
 		await h.close();
 	}
 });
+
+test("MCP case reports keep one command id through forwarding retries and give new reports new ids", async () => {
+	const h = await harness();
+	const commands: unknown[] = [];
+	const server = mcpServer(
+		async (op, _project, input) => {
+			commands.push(z.object({ cmd: z.string().min(8).max(64).optional() }).parse(input).cmd);
+			await h.raw(op, input); // The first reply is lost; the forwarding transport repeats the same request.
+			return h.raw(op, input);
+		},
+		async () => ["scratch"],
+	);
+	const client = new Client({ name: "report-retry", version: "1" });
+	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	try {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "MCP report" } }] });
+		await server.connect(serverTransport);
+		await client.connect(clientTransport);
+		const input = { target: { session: "MCP retry" }, results: [{ test: { case: "C-1" }, outcome: "pass" }] };
+		for (const args of [
+			input,
+			input,
+			{ ...input, cmd: "explicit-mcp-report" },
+			{ ...input, cmd: "explicit-mcp-report" },
+		]) {
+			expect((await client.callTool({ name: "report", arguments: args })).isError).not.toBe(true);
+		}
+		expect(commands).toHaveLength(4);
+		expect(commands[0]).not.toBe(commands[1]);
+		expect(commands.slice(2)).toEqual(["explicit-mcp-report", "explicit-mcp-report"]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM results"))).toEqual([{ n: 3 }]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM batches"))).toEqual([{ n: 3 }]);
+	} finally {
+		await client.close();
+		await server.close();
+		await h.close();
+	}
+});
