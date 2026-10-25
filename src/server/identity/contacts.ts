@@ -6,7 +6,7 @@ import { conflict, forbidden, invalid } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
 import { addressKey } from "./limiter.ts";
-import { lockActors } from "./locks.ts";
+import { lockActors, lockIdentity } from "./locks.ts";
 import { deliverMail, queueMail, requireMail } from "./mail.ts";
 import { hashPassword, PasswordWorkBusy } from "./passwords.ts";
 import { endSessionsOf, newSessionSecret, requireRecentProof } from "./sessions.ts";
@@ -67,6 +67,7 @@ export function clearMailLinksOf(app: App, actor: number): void {
 	for (const [key, link] of held) if (link.contact.actor === actor) held.delete(key);
 }
 export async function forgetContact(db: WriteDb, actor: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.drop, { actor });
 }
 export async function getEmail(db: ReadDb, actor: number): Promise<{ email: string | null; verified: boolean }> {
@@ -78,6 +79,7 @@ export async function setEmail(
 	db: WriteDb,
 	input: { caller: Actor; person: Actor; context: string | null; email: string | null },
 ): Promise<{ email: string | null; verified: boolean }> {
+	await lockIdentity(db);
 	const { caller, person, email } = input;
 	if (person.kind !== "human") throw invalid("only a person has an email address");
 	if (person.id === caller.id) {

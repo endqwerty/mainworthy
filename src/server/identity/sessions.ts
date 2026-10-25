@@ -14,7 +14,7 @@ import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
-import { lockActors, lockSessionHash, lockTokenHash } from "./locks.ts";
+import { lockActors, lockIdentity, lockSessionHash, lockTokenHash } from "./locks.ts";
 import { lastAddress, notedUse } from "./uses.ts";
 
 /**
@@ -205,6 +205,7 @@ export async function requireRecentProof(app: App, db: ReadDb, input: ProofConte
 
 /** A verified credential and this exact session were checked in the writer's transaction. */
 export async function dateSessionProof(app: App, db: WriteDb, input: ProofContext): Promise<boolean> {
+	await lockIdentity(db);
 	const session = await proofSession(app, input, db);
 	return session !== null && (await db.run(Q.prove, { hash: session.hash, at: app.now() })).changes === 1;
 }
@@ -279,6 +280,7 @@ export async function openSessionOnCredential(
 		address: string | null;
 	},
 ): Promise<{ id: number; expiresAt: number } | null> {
+	await lockIdentity(db);
 	await lockActors(db, [input.credential.actor]);
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
@@ -347,11 +349,13 @@ export async function endSessionsOf(
  * Returns how many.
  */
 export async function endSessionsOn(db: WriteDb, credential: number, at: number): Promise<number> {
+	await lockIdentity(db);
 	return (await db.run(Q.endOn, { credential, at, why: "ended" })).changes;
 }
 
 /** Records a token's revocation in its sessions, inside the transaction that revokes it. */
 export async function endSessionsOnToken(db: WriteDb, token: number, at: number): Promise<number> {
+	await lockIdentity(db);
 	return (await db.run(Q.endOnToken, { token, at })).changes;
 }
 
@@ -360,6 +364,7 @@ export async function endSessionsOnToken(db: WriteDb, token: number, at: number)
  * one does not end the session whose own request changed it. False when the session did not rest on `from`.
  */
 export async function restSession(db: WriteDb, move: { session: number; from: number; to: number }): Promise<boolean> {
+	await lockIdentity(db);
 	return (await db.run(Q.rest, { id: move.session, from: move.from, to: move.to })).changes === 1;
 }
 
@@ -369,6 +374,7 @@ export const sessionOwner = async (db: ReadDb, id: number): Promise<number | nul
 
 /** Ends one session by its id, as a person does from a list. Under the gate. False when it had ended or is none. */
 export async function endSessionById(db: WriteDb, id: number, at: number): Promise<boolean> {
+	await lockIdentity(db);
 	const actor = await sessionOwner(db, id);
 	if (actor !== null) await lockActors(db, [actor], true);
 	return (await db.run(Q.endById, { id, at, why: "ended" })).changes > 0;
@@ -409,6 +415,7 @@ export async function sweepSessions(app: App): Promise<{ expired: number; delete
 	return await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				await lockIdentity(db);
 				const candidates = [
 					...(await db.all(Q.retiredTokens, { now })),
 					...(await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })),

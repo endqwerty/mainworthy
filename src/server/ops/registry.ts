@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import type { z } from "zod";
 import { mayRun, type Need, needs } from "../../core/kinds.ts";
 import { malformedText } from "../../core/text.ts";
-import { actorById, lockCallActors, resolveCaller } from "../identity/identity.ts";
+import { actorById, lockCallActors, lockIdentity, resolveCaller } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
 import {
@@ -200,10 +200,11 @@ function admitCaller(
 async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	await db.begin();
 	try {
+		if (ops[call.op]?.scope === "instance") await lockIdentity(db);
 		const initial = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
 		const parsed = ops[call.op]?.input.safeParse(call.input ?? {});
 		const input = parsed?.success ? parsed.data : {};
-		const checkActors = initial ? await lockCallActors(db, initial, call.op, input) : null;
+		if (initial) await lockCallActors(db, initial, call.op, input);
 		const current = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
 		if (current && current.id !== initial?.id) throw new Busy();
 		if (ops[call.op]?.scope === "project" && call.project) {
@@ -226,7 +227,6 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 		}
 		if (typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string")
 			await lockCommand(db, input.cmd);
-		await checkActors?.();
 		const reply = await executeInSnapshot(app, db, ops, call);
 		if (db.inTransaction) {
 			if (reply.ok) await db.commit();

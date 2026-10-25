@@ -5,7 +5,7 @@ import type { ReportInput } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
 import type { Ctx } from "../src/server/kernel/ctx.ts";
 import { createProject } from "../src/server/ops/admin.ts";
-import { defineInstanceOp, defineOp, invoke } from "../src/server/ops/registry.ts";
+import { defineInstanceOp, defineOp, type InstanceOp, invoke } from "../src/server/ops/registry.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -92,7 +92,7 @@ test("different projects overlap inside their write transactions, including the 
 });
 
 import { createToken, hashToken, moveProjectGrants, revokeToken } from "../src/server/identity/identity.ts";
-import { lockActors, lockProjectAuthority } from "../src/server/identity/locks.ts";
+import { lockActors, lockIdentity, lockProjectAuthority } from "../src/server/identity/locks.ts";
 import { lockProject, retireDemo } from "../src/server/kernel/ctx.ts";
 import { Busy, Database, isBusy, sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
@@ -366,7 +366,7 @@ test("a team's name does not lock an unrelated actor with the same name", async 
 	}
 });
 
-test("a project reset restarts when a grant holder appears during its project lock wait", async () => {
+test("a project reset discovers grant holders after the preceding identity writer commits", async () => {
 	h = await harness();
 	const member = await h.actor("member", "human", ["read"]);
 	const entered = barrier();
@@ -395,7 +395,7 @@ test("a project reset restarts when a grant holder appears during its project lo
 		release.resolve();
 		await granting;
 	}
-	expect(await resetting).toBe("busy");
+	expect(await resetting).toBe("allowed");
 	await h.app.database.write((db) => db.transaction(() => lockProjectAuthority(db, 1, h.owner.id)));
 });
 
@@ -432,7 +432,7 @@ test("same project writers serialize and allocate sequence in commit order", asy
 });
 
 for (const scope of ["project", "instance"] as const)
-	test(`a writer waiting on a replaced project restarts its ${scope} operation`, async () => {
+	test(`a ${scope} writer checks the project after its first conflicting lock wait`, async () => {
 		h = await harness();
 		await h.call("admin", { do: "project.demo", key: "scratch" });
 		const caller = await h.actor("global-pipeline", "ci", ["read", "record"]);
@@ -485,11 +485,16 @@ for (const scope of ["project", "instance"] as const)
 			release.resolve();
 			await resetting;
 		}
-		expect(await writing).toMatchObject({ ok: false, error: { code: "busy" } });
-		expect(ran).toBe(false);
-		expect(
-			await h.app.database.read((db) => db.allDynamic("SELECT id FROM commands WHERE id='replaced-project'")),
-		).toEqual([]);
+		if (scope === "project") {
+			expect(await writing).toMatchObject({ ok: false, error: { code: "busy" } });
+			expect(ran).toBe(false);
+			expect(
+				await h.app.database.read((db) => db.allDynamic("SELECT id FROM commands WHERE id='replaced-project'")),
+			).toEqual([]);
+		} else {
+			expect((await writing).ok).toBe(true);
+			expect(ran).toBe(true);
+		}
 		expect((await invoke(h.app, { probe: op }, call)).ok).toBe(true);
 	});
 
@@ -1025,7 +1030,7 @@ test("the HTTP operation envelope returns busy with status 503", async () => {
 	}
 });
 
-test("a team grant rolls back discovery when a new member committed during its guard wait", async () => {
+test("a team grant discovers members after the preceding identity writer commits", async () => {
 	h = await harness();
 	const member = await h.actor("member", "human", ["read"]);
 	await h.call("admin", { do: "team.create", name: "quality" });
@@ -1052,9 +1057,10 @@ test("a team grant rolls back discovery when a new member committed during its g
 		release.resolve();
 		await adding;
 	}
-	expect(await changing).toMatchObject({ ok: false, error: { code: "busy" } });
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT * FROM team_grants"))).toEqual([]);
-	expect((await h.raw("admin", { do: "team.grant.set", team: "quality", can: ["read", "record"] })).ok).toBe(true);
+	expect((await changing).ok).toBe(true);
+	expect(await h.app.database.read((db) => db.allDynamic("SELECT can FROM team_grants"))).toEqual([
+		{ can: '["read","record"]' },
+	]);
 });
 
 test("two admins changing each other acquire their complete actor set in the same order", async () => {
@@ -1220,7 +1226,7 @@ import { sqlState } from "../src/server/kernel/db.ts";
 import { provider } from "./oidc-support.ts";
 
 for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant.remove"] as const) {
-	test(`an actor discovered after the project wait returns busy for ${action} without a deadlock`, async () => {
+	test(`identity creation finishes before ${action} discovers actors and waits for its project`, async () => {
 		h = await harness();
 		const team = action.startsWith("team.");
 		const states: string[] = [];
@@ -1260,6 +1266,7 @@ for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant
 		const commitCreation = barrier();
 		const creating = h.app.database.write((db) =>
 			db.transaction(async () => {
+				await lockIdentity(db);
 				if (actor) await lockActors(db, [actor.id], true);
 				await db.allDynamic("SELECT id FROM orgs ORDER BY id FOR NO KEY UPDATE");
 				if (team && actor) {
@@ -1294,16 +1301,14 @@ for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant
 			await creating;
 			const current = await h.app.database.read((db) => actorByName(db, "late-actor", 0));
 			if (!current) throw new Error("late actor was not committed");
-			const actorHeld = barrier();
 			following = h.app.database.write((db) =>
 				db.transaction(async () => {
 					await lockActors(db, [current.id], true);
-					actorHeld.resolve();
 					await lockProject(db, 1);
 				}),
 			);
 			void following.catch(() => {});
-			await actorHeld.promise;
+			await blocked();
 		} finally {
 			commitCreation.resolve();
 			release.resolve();
@@ -1313,9 +1318,10 @@ for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant
 		const completions = await Promise.allSettled([holding, following]);
 		expect(completions.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
 		expect(states).toEqual([]);
-		expect(reply).toMatchObject({ ok: false, error: { code: "busy" } });
-		await expect(h.app.database.read((db) => db.allDynamic("SELECT * FROM grants WHERE project = 1"))).resolves.toEqual(
-			[],
+		expect(reply.ok).toBe(true);
+		const table = team ? "team_grants" : "grants";
+		expect(await h.app.database.read((db) => db.allDynamic(`SELECT can FROM ${table} WHERE project = 1`))).toEqual(
+			action.endsWith(".set") ? [{ can: '["read"]' }] : [],
 		);
 		const retry = await invoke(h.app, OPS, { op: "admin", project: null, input, actor: async () => h.owner });
 		expect(retry.ok).toBe(true);
@@ -1323,13 +1329,13 @@ for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant
 }
 
 for (const op of ["admin", "invitation"] as const) {
-	test(`new actors take the organisation guard before the project for ${op}`, async () => {
+	test(`new actors wait for identity before taking the project for ${op}`, async () => {
 		h = await harness();
 		const ready = barrier();
 		const release = barrier();
 		const holding = h.app.database.write((db) =>
 			db.transaction(async () => {
-				await db.allDynamic("SELECT id FROM orgs ORDER BY id FOR NO KEY UPDATE");
+				await lockIdentity(db);
 				ready.resolve();
 				await release.promise;
 			}),
@@ -1716,5 +1722,273 @@ for (const target of ["actor", "team"] as const) {
 		}
 		expect(await changing).toMatchObject({ ok: false, error: { code: "not_found" } });
 		expect((await invoke(h.app, OPS, { op: "admin", project: null, input, actor: async () => h.owner })).ok).toBe(true);
+	});
+}
+
+import { forgetActor } from "../src/server/identity/identity.ts";
+import { credentialOp, invitationOp, sessionOp } from "../src/server/ops/people.ts";
+
+function observeLockErrors() {
+	const states: string[] = [];
+	const write = h.app.database.write.bind(h.app.database);
+	async function observe<T>(query: () => Promise<T>): Promise<T> {
+		try {
+			return await query();
+		} catch (error) {
+			const state = sqlState(error);
+			if (state) states.push(state);
+			throw error;
+		}
+	}
+	h.app.database.write = (work, options) =>
+		write(async (db) => {
+			const all = db.all.bind(db);
+			const get = db.get.bind(db);
+			const one = db.one.bind(db);
+			const run = db.run.bind(db);
+			db.all = (statement, ...params) => observe(() => all(statement, ...params));
+			db.get = (statement, ...params) => observe(() => get(statement, ...params));
+			db.one = (statement, ...params) => observe(() => one(statement, ...params));
+			db.run = (statement, ...params) => observe(() => run(statement, ...params));
+			return work(db);
+		}, options);
+	return {
+		states,
+		restore: () => {
+			h.app.database.write = write;
+		},
+	};
+}
+
+function pauseIdentityOp<I, O>(
+	op: InstanceOp<I, O>,
+	reached: ReturnType<typeof barrier>,
+	resume: ReturnType<typeof barrier>,
+) {
+	if (op.effect !== "write") throw new Error("identity operations must write");
+	const run = op.run;
+	return defineInstanceOp<I, O>({
+		...op,
+		async run(env: Parameters<typeof run>[0], input: I) {
+			reached.resolve();
+			await resume.promise;
+			return await run(env, input);
+		},
+	});
+}
+
+for (const op of ["admin", "invitation"] as const) {
+	test(`a name forgotten during discovery cannot invert org and project locks for ${op}`, async () => {
+		h = await harness();
+		await h.actor("vanishing", "human", []);
+		const errors = observeLockErrors();
+		const forgotten = barrier();
+		const commitForget = barrier();
+		const forgetting = h.app.database.write((db) =>
+			db.transaction(async () => {
+				await forgetActor(h.app, db, "vanishing");
+				forgotten.resolve();
+				await commitForget.promise;
+			}),
+		);
+		await forgotten.promise;
+		const reached = barrier();
+		const resume = barrier();
+		const paused =
+			op === "admin" ? pauseIdentityOp(adminOp, reached, resume) : pauseIdentityOp(invitationOp, reached, resume);
+		const input =
+			op === "admin"
+				? { do: "token.create", actor: "vanishing", kind: "human", project: "scratch", can: ["read"] }
+				: { do: "create", name: "vanishing", project: "scratch", can: ["read"] };
+		const changing = invoke(h.app, { [op]: paused }, { op, project: null, input, actor: async () => h.owner });
+		let competing: Promise<unknown> | undefined;
+		try {
+			await blocked();
+			commitForget.resolve();
+			await forgetting;
+			await reached.promise;
+			competing = h.app.database.write((db) =>
+				db.transaction(async () => {
+					await createToken(
+						h.app,
+						{ actor: "other-new-person", kind: "human", project: 0, can: [], label: "other" },
+						null,
+						db,
+					);
+					await lockProject(db, 1);
+				}),
+			);
+			void competing.catch(() => {});
+			await blocked();
+		} finally {
+			commitForget.resolve();
+			resume.resolve();
+			await forgetting;
+		}
+		const reply = await changing;
+		const settled = await Promise.allSettled([competing]);
+		errors.restore();
+		expect(errors.states).not.toContain("40P01");
+		expect(settled.map((result) => result.status)).toEqual(["fulfilled"]);
+		expect(reply.ok).toBe(true);
+		expect(await h.app.database.read((db) => actorByName(db, "vanishing", 1))).toMatchObject({ can: ["read"] });
+	});
+}
+
+for (const kind of ["token", "credential", "session", "own-session"] as const) {
+	test(`an id appearing after discovery cannot acquire a late owner lock for ${kind}`, async () => {
+		h = await harness();
+		const caller = await h.actor("administrator", "human", ["admin"]);
+		const owner = kind === "own-session" ? caller : h.owner;
+		const token = await createToken(h.app, { actor: owner.name, kind: "human", can: [], project: 0, label: "browser" });
+		if (kind === "credential")
+			await h.app.database.write((db) =>
+				db.transaction(() => insertPassword(db, { actor: owner.id, hash: "unused", at: h.app.now() })),
+			);
+		const table = kind === "token" ? "tokens" : kind === "credential" ? "credentials" : "sessions";
+		const next = await h.app.database.read((db) =>
+			db.allDynamic<{ id: number }>(`SELECT coalesce(max(id), 0) + 1 AS id FROM ${table}`),
+		);
+		const id = next[0]?.id;
+		if (!id) throw new Error("missing next fixture id");
+		const errors = observeLockErrors();
+		const reached = barrier();
+		const resume = barrier();
+		const paused =
+			kind === "token"
+				? pauseIdentityOp(adminOp, reached, resume)
+				: kind === "credential"
+					? pauseIdentityOp(credentialOp, reached, resume)
+					: pauseIdentityOp(sessionOp, reached, resume);
+		const op = paused.name;
+		const input = { do: kind === "token" ? "token.revoke" : kind === "credential" ? "remove" : "end", id };
+		const changing = invoke(
+			h.app,
+			{ [op]: paused },
+			{ op, project: null, input, actor: async () => caller, context: async () => CONTEXT.local },
+		);
+		await reached.promise;
+		const competing = (async () => {
+			const made =
+				kind === "token"
+					? await createToken(h.app, { actor: owner.name, kind: "human", can: [], project: 0, label: "late" })
+					: await h.app.database.write((db) =>
+							db.transaction(async () =>
+								kind === "credential"
+									? {
+											id: (
+												await insertOidc(db, {
+													actor: owner.id,
+													handle: "https://provider.example#late",
+													label: "late",
+													at: h.app.now(),
+												})
+											).id,
+										}
+									: await openSession(h.app, db, {
+											tokenHash: hashToken(token.secret),
+											sessionHash: hashToken("late-session"),
+											userAgent: null,
+											address: null,
+										}),
+							),
+						);
+			if (made?.id !== id) throw new Error("the competing operation did not create the predicted fixture id");
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					await lockActors(db, [owner.id], kind !== "own-session");
+					await lockActors(db, [caller.id], true);
+				}),
+			);
+		})();
+		void competing.catch(() => {});
+		try {
+			await blocked();
+		} finally {
+			resume.resolve();
+		}
+		const reply = await changing;
+		const settled = await Promise.allSettled([competing]);
+		errors.restore();
+		expect(errors.states).not.toContain("40P01");
+		expect(settled.map((result) => result.status)).toEqual(["fulfilled"]);
+		if (kind === "token") expect(reply).toMatchObject({ ok: true, result: { revoked: false } });
+		else expect(reply).toMatchObject({ ok: false, error: { code: "not_found" } });
+		const column = kind === "token" || kind === "credential" ? "revoked_at" : "ended_at";
+		expect(
+			await h.app.database.read((db) => db.allDynamic(`SELECT ${column} FROM ${table} WHERE id = $1`, [id])),
+		).toEqual([{ [column]: null }]);
+	});
+}
+
+for (const rollback of [false, true]) {
+	test(`every instance writer waits before actor locking and identity ${rollback ? "rollback" : "commit"} permits project writes`, async () => {
+		h = await harness();
+		const held = barrier();
+		const release = barrier();
+		const sentinel = new Error("roll back the identity transaction");
+		const holding = h.app.database
+			.write((db) =>
+				db.transaction(async () => {
+					await lockIdentity(db);
+					held.resolve();
+					await release.promise;
+					if (rollback) throw sentinel;
+				}),
+			)
+			.catch((error: unknown) => {
+				if (error !== sentinel) throw error;
+			});
+		await held.promise;
+		let ran = false;
+		const instance = defineInstanceOp({
+			name: "future-identity-operation",
+			summary: "an instance writer outside the known identity operation names",
+			scope: "instance",
+			effect: "write",
+			needs: "admin",
+			mcp: null,
+			input: z.object({}),
+			output: z.boolean(),
+			run() {
+				ran = true;
+				return true;
+			},
+		});
+		const waiting = invoke(
+			h.app,
+			{ instance },
+			{ op: "instance", project: null, input: {}, actor: async () => h.owner },
+		);
+		try {
+			await blocked();
+			expect(ran).toBe(false);
+			// A queued identity request must not own its caller's row yet.
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					await db.allDynamic("SELECT id FROM actors WHERE id = $1 FOR UPDATE NOWAIT", [h.owner.id]);
+				}),
+			);
+			const project = defineOp({
+				...probeBase,
+				run(ctx: Ctx) {
+					return ctx.seq;
+				},
+			});
+			expect(
+				(
+					await invoke(
+						h.app,
+						{ project },
+						{ op: "project", project: "scratch", input: { index: 0 }, actor: async () => h.owner },
+					)
+				).ok,
+			).toBe(true);
+		} finally {
+			release.resolve();
+			await holding;
+			await waiting;
+		}
+		expect(await waiting).toMatchObject({ ok: true, result: true });
 	});
 }

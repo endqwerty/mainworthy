@@ -53,7 +53,7 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer, startAddressKey } from "./limiter.ts";
-import { lockActors } from "./locks.ts";
+import { lockActors, lockIdentity } from "./locks.ts";
 import {
 	beginOidc,
 	findNativeOidc,
@@ -804,6 +804,7 @@ export async function beginPasskey(
 	db: WriteDb,
 	input: { actor: number; context: string },
 ): Promise<RegistrationOptions> {
+	await lockIdentity(db);
 	await requireRecentProof(app, db, input, true);
 	const party = mustHavePasskeys(app);
 	const person = await mustBePerson(db, input.actor);
@@ -826,6 +827,7 @@ export async function addPasskey(
 	db: WriteDb,
 	input: { actor: number; context: string; answer: unknown; label: string },
 ): Promise<{ id: number; label: string }> {
+	await lockIdentity(db);
 	await requireRecentProof(app, db, input, true);
 	mustHavePasskeys(app);
 	const person = await mustBePerson(db, input.actor);
@@ -885,6 +887,7 @@ export async function removeCredential(
 	id: number,
 	proof: ProofContext,
 ): Promise<{ removed: true; sessionsEnded: number }> {
+	await lockIdentity(db);
 	const row = await credentialById(db, id);
 	if (!row || row.revoked_at !== null) throw notFound(`credential ${id}`);
 	await requireRecentProof(app, db, proof);
@@ -937,6 +940,7 @@ export async function createInvitation(
 	db: WriteDb,
 	input: { actor: number; by: number; purpose: InvitationPurpose; lastsMs: number; context: string | null },
 ): Promise<{ id: number; code: string; link: string; expiresAt: number }> {
+	await lockIdentity(db);
 	if (input.context !== null) await requireRecentProof(app, db, { actor: input.by, context: input.context });
 	const at = app.now();
 	await revokeInvitationsOf(db, input.actor, at);
@@ -1416,6 +1420,7 @@ export async function confirmTotp(
 	db: WriteDb,
 	input: { actor: number; session: number | null; context: string; challenge: string; code: string },
 ) {
+	await lockIdentity(db);
 	await requireRecentProof(app, db, input);
 	const person = await mustBePerson(db, input.actor);
 	const held = findTotp(app, input.challenge, "enrol");

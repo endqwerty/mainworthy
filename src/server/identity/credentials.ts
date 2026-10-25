@@ -9,7 +9,7 @@
 // so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
-import { lockActors, lockCredential } from "./locks.ts";
+import { lockActors, lockCredential, lockIdentity } from "./locks.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
 export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
@@ -108,6 +108,7 @@ export const livePassword = async (db: ReadDb, actor: number): Promise<Credentia
 
 /** Stores a password's hash as a new row. Throws when the person already has a password that works. */
 export async function insertPassword(db: WriteDb, input: { actor: number; hash: string; at: number }): Promise<number> {
+	await lockIdentity(db);
 	return (
 		await db.one(Q.insert, {
 			actor: input.actor,
@@ -121,10 +122,12 @@ export async function insertPassword(db: WriteDb, input: { actor: number; hash: 
 }
 
 export async function insertTotp(db: WriteDb, input: { actor: number; data: string; at: number }): Promise<number> {
+	await lockIdentity(db);
 	return (await db.one(Q.insert, { ...input, kind: "totp", handle: null, label: "Authenticator" })).id;
 }
 
 export async function updateTotp(db: WriteDb, row: CredentialRow, data: string, at: number): Promise<boolean> {
+	await lockIdentity(db);
 	return row.kind === "totp" && (await db.run(Q.counted, { id: row.id, was: row.data, data, at })).changes === 1;
 }
 
@@ -151,6 +154,7 @@ export async function insertOidc(
 	db: WriteDb,
 	input: { actor: number; handle: string; label: string; at: number },
 ): Promise<CredentialRow> {
+	await lockIdentity(db);
 	const { id } = await db.one(Q.insert, {
 		actor: input.actor,
 		kind: "oidc",
@@ -196,6 +200,7 @@ export async function insertPasskey(
 	db: WriteDb,
 	input: { actor: number; passkey: Passkey; label: string; at: number },
 ): Promise<CredentialRow> {
+	await lockIdentity(db);
 	const { id } = await db.one(Q.insert, {
 		actor: input.actor,
 		kind: "passkey",
@@ -219,6 +224,7 @@ export async function countPasskeyUse(
 	shown: { signCount: number; backupEligible: boolean; backedUp: boolean },
 	at: number,
 ): Promise<boolean> {
+	await lockIdentity(db);
 	const stored = storedPasskey(row);
 	if (!stored) return false;
 	const data = dataOf({ ...stored, publicKey: stored.key, ...shown });
@@ -227,6 +233,7 @@ export async function countPasskeyUse(
 
 /** Refreshes a legacy password's hash without changing the credential its existing sessions rest on. */
 export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: string, at: number): Promise<boolean> {
+	await lockIdentity(db);
 	return (
 		row.kind === "password" && (await db.run(Q.counted, { id: row.id, was: row.data, data: hash, at })).changes === 1
 	);
@@ -234,6 +241,7 @@ export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: stri
 
 /** Notes that a credential signed its person in. */
 export async function noteCredentialUse(db: WriteDb, id: number, at: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.used, { id, at });
 }
 
@@ -251,6 +259,7 @@ export const revokeCredentialsOf = async (db: WriteDb, actor: number, at: number
 
 /** Erases every credential's label and data, including revoked rows, while retaining credential ids. */
 export async function forgetCredentialsOf(db: WriteDb, actor: number, at: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.forgetOf, { actor, at });
 }
 
@@ -272,6 +281,7 @@ export const userHandleOf = async (db: ReadDb, actor: number): Promise<string | 
 
 /** The person's handle, made now if they had none. In a write transaction. */
 export async function ensureUserHandle(db: WriteDb, actor: number, at: number): Promise<string> {
+	await lockIdentity(db);
 	const held = await userHandleOf(db, actor);
 	if (held !== null) return held;
 	const handle = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url");
@@ -281,5 +291,6 @@ export async function ensureUserHandle(db: WriteDb, actor: number, at: number): 
 
 /** Removes a person's handle, when the person is forgotten: no passkey is filed under it any more. */
 export async function dropUserHandle(db: WriteDb, actor: number): Promise<void> {
+	await lockIdentity(db);
 	await db.run(Q.dropUserHandle, { actor });
 }
