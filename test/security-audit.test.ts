@@ -4,7 +4,16 @@
 // it lands on, a copy of the script the pull request changed.
 import { afterEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +21,7 @@ import {
 	brief,
 	type Commit,
 	codexArgs,
+	codexInvocation,
 	type Entry,
 	exportProblems,
 	GITHUB_COMMIT_LIMIT,
@@ -347,5 +357,48 @@ test("the launcher on the page runs main's script and exits with its status, in 
 		const r = launch(shell);
 		expect(`${shell}: ${r.stderr}`).toContain(`${shell}: fatal:`);
 		expect(`${shell}: ${r.status === 0 ? "passed" : "failed"}`).toBe(`${shell}: failed`);
+	}
+});
+
+test("the audit gives Codex its brief and an auth link without inherited instruction files", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "mw-audit-instructions-")));
+	roots.push(root);
+	const original = join(root, "user");
+	const audit = join(root, "audit");
+	mkdirSync(original);
+	mkdirSync(audit);
+	writeFileSync(join(original, "auth.json"), "test authentication");
+	writeFileSync(join(original, "AGENTS.md"), "GLOBAL_MARKER_900");
+	writeFileSync(join(original, "AGENTS.override.md"), "OVERRIDE_MARKER_900");
+	writeFileSync(join(original, "config.toml"), 'developer_instructions = "CONFIG_MARKER_900"');
+	writeFileSync(join(audit, "AGENTS.md"), "PROJECT_MARKER_900");
+	const invocation = codexInvocation(audit, join(audit, "findings.md"), "AUDIT_BRIEF_900", {
+		...process.env,
+		CODEX_HOME: original,
+	});
+	const home = invocation.env.CODEX_HOME;
+	expect(home).not.toBe(original);
+	expect(readdirSync(home)).toEqual(["auth.json"]);
+	expect(realpathSync(join(home, "auth.json"))).toBe(join(original, "auth.json"));
+	expect(invocation.args.at(-1)).toBe("AUDIT_BRIEF_900");
+	// This local CLI diagnostic renders the same instruction loading as exec without sending a request.
+	// CI need not have Codex or credentials installed; the home/brief assertions above always run.
+	if (Bun.which("codex")) {
+		const overrides = invocation.args.flatMap((arg, i, args) => (arg === "-c" ? [arg, args[i + 1] ?? ""] : []));
+		const render = (args: string[], env: NodeJS.ProcessEnv) =>
+			spawnSync("codex", ["debug", "prompt-input", ...args, "AUDIT_BRIEF_900"], {
+				cwd: audit,
+				env,
+				encoding: "utf8",
+			});
+		const control = render([], { ...process.env, CODEX_HOME: original });
+		expect(control.status).toBe(0);
+		expect(control.stdout).toContain("OVERRIDE_MARKER_900");
+		expect(control.stdout).toContain("PROJECT_MARKER_900");
+		const isolated = render(overrides, invocation.env);
+		expect(isolated.status).toBe(0);
+		expect(isolated.stdout).toContain("AUDIT_BRIEF_900");
+		for (const marker of ["GLOBAL_MARKER_900", "OVERRIDE_MARKER_900", "PROJECT_MARKER_900", "CONFIG_MARKER_900"])
+			expect(isolated.stdout).not.toContain(marker);
 	}
 });
