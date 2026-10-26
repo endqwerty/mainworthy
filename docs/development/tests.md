@@ -9,6 +9,42 @@ Tests need PostgreSQL 18. The fixture starts one checkout cluster on demand and 
 harness or server. Set `MAINWORTHY_TEST_PG` to use an existing PostgreSQL admin URL instead, as CI does.
 Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fallback remains.
 
+## Clean up checkout PostgreSQL
+
+Each checkout cluster records its absolute checkout path in `~/.cache/mainworthy/pg/<id>.json`.
+Starting a checkout cluster stops and deletes clusters whose recorded checkout no longer exists.
+An existing checkout keeps its cluster, including a stopped cluster. `bun scripts/work.ts scratch rm <directory>`
+also cleans up clusters for the deleted export and nested exports before returning.
+`stop-server` stops the current checkout cluster; `release` stops and deletes it.
+
+Cleanup takes the same per-cluster lock as startup, stops PostgreSQL before deleting its data, and removes
+metadata last. A later startup retries an interrupted deletion. An external `MAINWORTHY_TEST_PG` URL is never removed.
+
+### Recover older clusters
+
+Older metadata has no checkout path. Starting that checkout records its owner without replacing the cluster.
+Other clusters with unknown owners remain untouched, even when stopped. A stopped server alone does not prove
+that its checkout was deleted. This includes the stopped data directories from the shared-memory incident
+in [issue #935](https://github.com/endqwerty/mainworthy/issues/935).
+
+Run `bun scripts/pg.ts cleanup` to clean known abandoned clusters and list legacy metadata ids with unknown owners.
+If you know an old cluster's original absolute checkout path, supply it:
+
+```sh
+bun scripts/pg.ts cleanup /absolute/path/to/deleted-checkout
+```
+
+Cleanup hashes that path to match the metadata id and any marked `mw-pg-<id>-*` scratch directories.
+It removes them only while the checkout path is absent. This also recovers matching data directories that have
+lost their metadata. If the recorded PostgreSQL binaries were deleted, cleanup uses installed or configured
+PostgreSQL 18 binaries when it must stop a server. A stopped directory needs no executable.
+
+Recover original checkout paths from retained review logs or worktree records. The hash cannot recover a path.
+Without that evidence, retain the directory. Do not delete all stopped clusters or remove directories by pattern.
+
+The real-process regression is `test/pg-cleanup.test.ts`, selected by `bun run performance`.
+It runs in its own cache and starts PostgreSQL from exported checkouts.
+
 ## Run the tests
 
 | Command | What it runs |
