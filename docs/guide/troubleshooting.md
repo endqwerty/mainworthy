@@ -57,11 +57,11 @@ A command that cannot run prints its error code and message to standard error an
 
 No server answers at that address. Start one with `mainworthy serve`, or point the command at the right one with `--url` or `MAINWORTHY_URL`.
 
-### `connection: the server answered ... to /healthz`
+### `connection: the server answered ... to /health`
 
 The server or its proxy answered the health probe, so the command prints the HTTP status. For a redirect,
 use the HTTPS destination in `--url` or `MAINWORTHY_URL`. A 5xx response or invalid JSON can mean the proxy
-is waiting for a deployment. Check the instance. Once the instance serves `/healthz` again, retry the command. No token or
+is waiting for a deployment. Check the instance. Once the instance serves `/health` again, retry the command. No token or
 operation is sent after a failed health probe.
 
 ### `limited: too many attempts`

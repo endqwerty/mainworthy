@@ -57,11 +57,12 @@ resource "google_cloud_run_v2_service" "app" {
       }
       dynamic "env" {
         for_each = {
-          MAINWORTHY_HOST                  = "0.0.0.0"
-          MAINWORTHY_MODE                  = "server"
-          MAINWORTHY_DATA                  = "/data"
-          MAINWORTHY_PUBLIC_URL            = "https://mainworthy.com"
-          MAINWORTHY_CLIENT_ADDRESS_HEADER = "cf-connecting-ip"
+          MAINWORTHY_HOST       = "0.0.0.0"
+          MAINWORTHY_MODE       = "server"
+          MAINWORTHY_DATA       = "/data"
+          MAINWORTHY_PUBLIC_URL = "https://mainworthy.com"
+          # Set by the Cloudflare Worker in front (infra/edge), which overwrites any value a client sent.
+          MAINWORTHY_CLIENT_ADDRESS_HEADER = "x-mainworthy-client"
           # Jobs run in the Scheduler's minute request (and any sign-in's own), not on a timer.
           MAINWORTHY_JOB_RUNNER   = "0"
           MAINWORTHY_JOB_AUDIENCE = local.app_url

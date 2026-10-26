@@ -186,7 +186,7 @@ export class Client {
 	private async compatible(): Promise<void> {
 		let response: Response;
 		try {
-			response = await (this.options.request ?? fetch)(`${this.url}/healthz`, {
+			response = await (this.options.request ?? fetch)(`${this.url}/health`, {
 				redirect: "manual",
 				...(this.options.request ? {} : { signal: AbortSignal.timeout(5000) }),
 			});
@@ -201,7 +201,7 @@ export class Client {
 			const origin = location && URL.canParse(location, this.url) ? new URL(location, this.url).origin : null;
 			throw new CliError(
 				"connection",
-				`the server answered ${response.status} to /healthz${origin ? `; redirect to origin ${origin}; set --url to ${origin}` : "; a redirect without a valid Location header"}`,
+				`the server answered ${response.status} to /health${origin ? `; redirect to origin ${origin}; set --url to ${origin}` : "; a redirect without a valid Location header"}`,
 			);
 		}
 		let body: unknown;
@@ -213,11 +213,11 @@ export class Client {
 		if (UpgradingHealth.safeParse(body).success)
 			throw new CliError("connection", `the server at ${displayUrl(this.url)} is upgrading; try again shortly`);
 		if (!response.ok)
-			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${displayUrl(this.url)}`);
+			throw new CliError("connection", `the server answered ${response.status} to /health at ${displayUrl(this.url)}`);
 		if (body === null)
 			throw new CliError(
 				"connection",
-				`the server answered ${response.status} to /healthz with invalid JSON at ${displayUrl(this.url)}`,
+				`the server answered ${response.status} to /health with invalid JSON at ${displayUrl(this.url)}`,
 			);
 		const health = ApiHealth.safeParse(body);
 		if (!health.success || health.data.apiVersion !== API_VERSION)

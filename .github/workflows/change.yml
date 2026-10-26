@@ -82,7 +82,7 @@ jobs:
           # stuck upgrade still fails this job. This wall-clock wait is separate from the app's idle watchdog.
           upgrade_deadline=$((SECONDS + 1800))
           while :; do
-            health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
+            health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/health")
             # An upgrading server answers 503 (200 before #941) with this body.
             case "$health_status" in 200|503) ;; *) break ;; esac
             if ! jq -e '.ok == false and .state == "upgrading"' health.json > /dev/null 2>&1; then break; fi
@@ -93,7 +93,7 @@ jobs:
             sleep 10
           done
           if [ "$health_status" != 200 ]; then
-            echo "::error::The server answered $health_status to /healthz. Fix the cause, then replay this event with workflow_dispatch."
+            echo "::error::The server answered $health_status to /health. Fix the cause, then replay this event with workflow_dispatch."
             exit 1
           fi
           api_header=()

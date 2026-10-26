@@ -87,17 +87,27 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
 
 ### The cutover
 
-1. The bucket mount's checks, before attachments arrive: publish-by-rename, an object written on one instance read
-   at once on another, concurrent same-hash uploads, an interrupted pending file, hashes and a prune beside an
-   upload. If one fails, a Cloud Storage `BlobStore` replaces the disk store first.
-2. A Cloudflare Transform Rule on `mainworthy.com` sets the request header `x-mainworthy-proxy` to the proxy secret
-   (`gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`), overwriting any value a
-   client sent; Cloudflare also replaces any `CF-Connecting-IP` a visitor sent with the visitor's real address. Then
-   `mainworthy.com` points at the service.
-3. Check that public `/healthz` names the deployed commit, that direct requests to the `run.app` address with and
-   without a forged `cf-connecting-ip` are refused, and that the iPhone app's TestFlight job still uploads. Then the
-   Coolify instance and its autodeploy go. Until then it is best-effort: check it only after migration or startup
-   changes; after the cutover, check `/healthz`'s commit after every landing.
+Cloudflare's Free plan cannot rewrite the Host header in an Origin Rule, and the service answers only its own
+`run.app` host, so a Worker is the proxy in front of it: `infra/edge/worker.js`, on the route `mainworthy.com/*`. It
+forwards each request to the service with `x-mainworthy-proxy` set to the proxy secret and `x-mainworthy-client` set
+to Cloudflare's `CF-Connecting-IP`, overwriting whatever a client sent, and turns a `mainworthy.com` page's `Origin`
+into the service's own, which the app's same-origin check compares with the host it is reached at. Its two secrets,
+`ORIGIN` (the service's `run.app` address) and `PROXY_SECRET`, live in Cloudflare, not in this repository. DNS does
+not change: the route takes `mainworthy.com`'s proxied requests whatever its record points at.
+
+1. Deploy the Worker without a route and set `ORIGIN`. The owner sets `PROXY_SECRET` from
+   `gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`, in Cloudflare's dashboard
+   (Workers, `mainworthy-edge`, Settings, Variables and Secrets), never in chat.
+2. On the Worker's `workers.dev` address: `/health` names the deployed commit, a page loads, a sign-in works.
+3. Add the route `mainworthy.com/*`. Rollback is removing it, which sends requests back to the previous origin.
+4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address with
+   and without a forged address header are refused, and that the iPhone app's TestFlight job still uploads. Then the
+   Coolify instance and its autodeploy go.
+
+Cloud Run's front end answers `/healthz` itself with Google's 404, so everything that asks from outside uses
+`/health`; `/healthz` stays for the startup probe and containers. The bucket mount's two-instance checks (#946) wait
+for a second instance or for attachments in use: the service runs one instance, and a deploy overlaps two only for
+seconds.
 
 ## PostgreSQL cutover at merge
 

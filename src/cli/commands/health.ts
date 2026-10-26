@@ -5,7 +5,7 @@ import { displayUrl, line, printJson } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
 /**
- * The container's health check. It needs no token and reads no project: `/healthz` says the process is up and
+ * The container's health check. It needs no token and reads no project: `/health` says the process is up and
  * which version and, when it knows, which commit it is (an older server reports no commit). Without `--url` or `MAINWORTHY_URL` it asks the server on this machine at `MAINWORTHY_PORT`.
  */
 export const healthCommand: AdapterCommand = {
@@ -22,7 +22,7 @@ export const healthCommand: AdapterCommand = {
 		let apiVersion: number | null = null;
 		let upgrading = false;
 		try {
-			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
+			const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2500) });
 			const body: unknown = await response.json().catch(() => null);
 			upgrading = UpgradingHealth.safeParse(body).success;
 			if (

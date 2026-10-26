@@ -834,7 +834,7 @@ export function upgradingListener(config: Config, patience: Patience = PATIENCE)
 		fetch: (req) =>
 			withHeaders(
 				req,
-				new URL(req.url).pathname === "/healthz"
+				["/healthz", "/health"].includes(new URL(req.url).pathname)
 					? // 503: a probe that reads only the status (Cloud Run's) must not call a migrating revision ready.
 						jsonResponse(
 							{ ok: false, state: "upgrading", version: VERSION, apiVersion: API_VERSION, commit: config.commit },
@@ -932,6 +932,9 @@ export function serve(
 	const healthz = () =>
 		jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
 	const routes: Record<string, unknown> = {
+		// The public health answer. Cloud Run's front end swallows `/healthz` itself (Google's own 404, never the app), so
+		// everything that asks from outside uses this path; `/healthz` stays for the startup probe and containers.
+		"/health": healthz,
 		"/.well-known/apple-app-site-association": () =>
 			app.config.appleApps?.length
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })

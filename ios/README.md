@@ -120,7 +120,7 @@ app suits people who do not run their own instance.
 ### Sent on its own after a deploy
 
 The owner's Mac sends the app without being asked: a job there (the homelab repository,
-`services/mainworthy-testflight/`) reads `https://mainworthy.com/healthz` every five minutes. When the commit
+`services/mainworthy-testflight/`) reads `https://mainworthy.com/health` every five minutes. When the commit
 that instance runs passed the `gate` job of its push run on `main`, and `ios/`, `scripts/ios.ts` or
 `scripts/ios/` changed since the commit it last sent, it runs `bun scripts/ios.ts upload` in a checkout of that
 commit, after reading both again. So TestFlight gets the app of the server it talks to, from a commit that passed
