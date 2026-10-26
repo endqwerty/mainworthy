@@ -417,14 +417,17 @@ export function folderFor(file: string): string {
 	parts.pop();
 	if (parts.length > 0) return parts.slice(0, 3).join("/");
 	const fallback = file.split("/").filter(Boolean);
-	const name = fallback
-		.pop()
-		?.replace(/\.(?:[cm]?[jt]sx?|py|java|kts?|cs|go|rb|rs|php|swift|scala|exs?|feature|robot|sh|vue|svelte)$/i, "")
-		.replace(/\.(test|spec)$/i, "")
+	const leaf = fallback.pop() ?? "";
+	const source = leaf.replace(
+		/\.(?:[cm]?[jt]sx?|py|java|kts?|cs|go|rb|rs|php|swift|scala|exs?|feature|robot|sh|vue|svelte)$/,
+		"",
+	);
+	const name = (source === leaf ? leaf : source.replace(/\.(test|spec)$/i, ""))
+		.trim()
 		.slice(0, 120)
 		.replace(/[\uD800-\uDBFF]$/, "");
 	while (fallback[0] && /^(src|tests?|specs?|__tests__|lib|app)$/i.test(fallback[0])) fallback.shift();
-	return [...fallback, name].filter(Boolean).join("/") || "Automated";
+	return name ? [...fallback, name].join("/") : "Automated";
 }
 
 /**

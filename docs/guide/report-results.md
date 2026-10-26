@@ -305,8 +305,10 @@ unlinked-test question for each file. The `strict` preset starts with questions.
 With **Create a case for each test**, the folder normally comes from the test file's
 meaningful directories, such as `tests/checkout/coupon.spec.ts` to `checkout`.
 If removing conventional directories leaves none, Mainworthy uses the file name
-without a recognized source extension or `.test` or `.spec` suffix. Dotted class
-or module keys keep their full name. Long stems are shortened to fit the existing
+without a recognized lower-case source extension, then removes a trailing `.test`
+or `.spec` marker. Other keys stay whole, including dotted class names such as
+`com.example.ui.Feature` and `com.example.Test`. Empty or whitespace-only stems
+use `Automated`. Long stems are shortened to fit the existing
 120-character folder-name limit. It drops leading `src`, `test`,
 `tests`, `spec`, `specs`, `__tests__`, `lib`, and `app` directories but keeps `e2e`.
 For example, `test/e2e/docs.test.ts` becomes `e2e/docs`, and `test/policy.test.ts`
