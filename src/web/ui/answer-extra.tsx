@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { focusInto } from "../lib/focus.ts";
 import { useBindings } from "../lib/keys.ts";
 
 /** The extra text an answer needs, with the same keyboard flow on the Queue and a case. */
@@ -21,7 +22,7 @@ export function AnswerExtra({
 }) {
 	const input = useRef<HTMLInputElement>(null);
 	useEffect(() => {
-		input.current?.focus();
+		focusInto(input.current);
 	}, []);
 	useBindings(field === "reason" ? [{ key: "escape", label: "Cancel", handler: onCancel }] : []);
 	function submit(): void {

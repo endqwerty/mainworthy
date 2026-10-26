@@ -23,6 +23,15 @@ The test scans these states in light and dark themes:
 - Command palette, keyboard help, and the sign-out dialog.
 - Phone queue, question, case, menu, and palette.
 
+Phone acceptance for [issue #136](https://github.com/endqwerty/mainworthy/issues/136) is automated by
+`test/e2e/phone-focus.test.ts`. It reads Chromium's accessibility tree for all five list/detail screens, checks
+Tab and row activation, and checks keys-sheet focus return on desktop and phone. Playwright's iPhone 13
+and Pixel 7 profiles exercise the iOS Safari and Android Chrome viewports, portrait and landscape, and a
+viewport shortened by 300 pixels for keyboard and browser-bar space. The tests also run axe on those profiles.
+These are Chromium device emulations; they do not run Safari, VoiceOver, TalkBack, an OS keyboard, or a physical notch.
+The owner replaced this issue's manual device pass with this automation on 2026-10-26. Broader WCAG assessment
+limits below remain separate.
+
 The axe tags are `wcag2a`, `wcag2aa`, `wcag21aa`, and `wcag22aa`. Reported violations fail the test.
 Incomplete axe results are counted separately and require human review. Set `MAINWORTHY_A11Y_CAPTURE` to an
 existing scratch directory, or one the process can create, to save example screenshots and `manual-checks.json`.
@@ -30,8 +39,7 @@ The latter lists each incomplete result by state, theme, rule, and element.
 
 The same test makes up to two Tab passes until it reaches every control, checks the computed focus
 indicator, and checks an exposed point inside the control after intersecting ancestor scroll clips.
-Native radio groups use Tab for the selected radio and arrows within the group. The planner checks that arrow behavior. The phone may reveal a
-pane when focus enters it. Escape must dismiss the palette, keyboard sheet, and sign-out dialog.
+Native radio groups use Tab for the selected radio and arrows within the group. The planner checks that arrow behavior. The phone exposes only the shown pane; opening a row moves focus to its detail. Escape must dismiss the palette, keyboard sheet, and sign-out dialog.
 Every ordinary control must be reachable.
 Pointer-only overlay backdrops have keyboard alternatives through Escape and the visible close or menu controls.
 

@@ -44,8 +44,7 @@
 	font-size: 14px;
 	white-space: nowrap;
 }
-/* Both panes lie in the one cell. The covered one keeps its size and can take the focus: an action that opens
-   the editor puts the caret there, and the shell then shows it. */
+/* Both panes lie in one cell. The shell makes the covered pane inert and reveals explicit focus requests. */
 :root[data-layout="phone"] #list,
 :root[data-layout="phone"] #detail {
 	grid-row: 2;

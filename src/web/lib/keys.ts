@@ -6,6 +6,8 @@ export type Binding = {
 	label: string;
 	handler: () => void;
 	applies?: () => boolean;
+	/** Focus-dependent dispatch condition; the palette uses stable applicability instead. */
+	when?: () => boolean;
 	/** The shell's palette toggle and close keys still work while an overlay pauses screen keys. */
 	allowInOverlay?: boolean;
 	allowInInput?: boolean;
@@ -142,6 +144,7 @@ export function useKeyboard(options: { listOnly: boolean; overlayOpen: boolean }
 			const candidates = bindings().filter(
 				(binding) =>
 					(!binding.applies || binding.applies()) &&
+					(!binding.when || binding.when()) &&
 					(!latest.current.overlayOpen || binding.allowInOverlay) &&
 					(!latest.current.listOnly || binding.list) &&
 					(!input || key.startsWith("mod+") || key === "escape" || binding.allowInInput) &&

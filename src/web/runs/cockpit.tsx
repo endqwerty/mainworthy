@@ -8,6 +8,7 @@ import { workHeldByOther } from "../../core/runs.ts";
 import { ApiError, call, UnreadableReply } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { type DeviceSession, deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
+import { focusInto } from "../lib/focus.ts";
 import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
@@ -703,7 +704,7 @@ function ProjectRunCockpit({
 			return;
 		}
 		setNoting(current);
-		noteRef.current?.focus();
+		focusInto(noteRef.current);
 	}
 	function undo(): void {
 		if (!canCorrect || withdrawn.current.has(last.ready)) return;

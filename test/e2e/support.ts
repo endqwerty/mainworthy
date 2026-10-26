@@ -3,7 +3,15 @@ import { readFileSync, rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
+import {
+	type APIResponse,
+	type Browser,
+	type BrowserContext,
+	chromium,
+	devices,
+	type Page,
+	type Route,
+} from "playwright-core";
 import { z } from "zod";
 import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint } from "../../scripts/check-plan.ts";
 import { Client } from "../../src/cli/client.ts";
@@ -309,17 +317,22 @@ export async function openPage(
 		browser?: Browser;
 		/**
 		 * A phone is a window 390 wide whose pointer is a finger, so the page lays itself out for one
-		 * (`src/web/lib/layout.ts`); `tap` is its press. The desktop is a mouse at 1440 by 900.
+		 * (`src/web/lib/layout.ts`); `tap` is its press. The desktop is a mouse at 1440 by 900. ios and android use Playwright device profiles
+		 * in the shared Chromium browser; they do not change its engine.
 		 */
-		device?: "desktop" | "phone";
+		device?: "desktop" | "phone" | "ios" | "android";
 	} = {},
 ): Promise<PageHarness> {
 	const lent = browser ?? (await fileBrowser());
 	const ownedBrowser = lent ?? (await launchBrowser());
 	const context = await ownedBrowser.newContext({
-		...(device === "phone"
-			? { viewport: { width: 390, height: 844 }, hasTouch: true }
-			: { viewport: { width: 1440, height: 900 } }),
+		...(device === "ios"
+			? devices["iPhone 13"]
+			: device === "android"
+				? devices["Pixel 7"]
+				: device === "phone"
+					? { viewport: { width: 390, height: 844 }, hasTouch: true }
+					: { viewport: { width: 1440, height: 900 } }),
 		colorScheme: "light",
 	});
 	browserDiagnostics.context(context);

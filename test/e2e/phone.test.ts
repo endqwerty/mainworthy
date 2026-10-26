@@ -476,11 +476,17 @@ test.skipIf(!browserAvailable)(
 			for (const key of ["f", "d", "t", "i", "u", "Enter"]) await press(key);
 			expect(writes).toEqual([]);
 			expect(await inView(page)).toBe("list");
-			// Tab goes on into the detail. What takes the focus there is shown before Enter can press it.
-			for (let tabs = 0; tabs < 40 && (await inView(page)) === "list"; tabs++) await press("Tab");
+			// Tab stays in the shown pane. Opening a row moves the focus into its detail.
+			for (let tabs = 0; tabs < 40; tabs++) {
+				await press("Tab");
+				expect(await focusIn(page)).not.toBe("detail");
+			}
+			expect(await inView(page)).toBe("list");
+			await page.locator("#list [role=option]").first().tap();
 			expect(await inView(page)).toBe("detail");
 			expect(await focusIn(page)).toBe("detail");
 			expect(writes).toEqual([]);
+			await page.locator("#detail button").first().focus();
 			// A button of the detail has the focus. A tap moves the focus to what is tapped in this browser and
 			// not in Safari on a phone, so Back and Menu are pressed here without moving it. Covered, the button
 			// gives the focus up, and Enter and Space press nothing under what is shown.
@@ -490,7 +496,7 @@ test.skipIf(!browserAvailable)(
 			await frames(page);
 			expect([await inView(page), await focusIn(page)]).toEqual(["list", "elsewhere"]);
 			for (const key of ["Enter", "Space"]) await press(key);
-			for (let tabs = 0; tabs < 40 && (await inView(page)) === "list"; tabs++) await press("Tab");
+			await page.locator("#list [role=option]").first().tap();
 			expect(await focusIn(page)).toBe("detail");
 			await pressUnfocused(".top-menu");
 			await frames(page);

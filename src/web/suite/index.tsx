@@ -42,6 +42,7 @@ import {
 	removeDraft,
 	TagChanges,
 } from "../lib/drafts.ts";
+import { focusInto } from "../lib/focus.ts";
 import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
@@ -142,7 +143,7 @@ function sentBody(draft: Draft): CaseBody {
  * React calls each new one: a form that focused itself that way took the focus back from wherever the person was
  * typing whenever the screen rendered again, for as long as the form was open.
  */
-const focusOnce = (node: HTMLElement | null): void => node?.focus();
+const focusOnce = (node: HTMLElement | null): void => focusInto(node);
 
 export function SuiteScreen() {
 	const { project, session, route, setStatus, openPalette } = useApp();
@@ -697,7 +698,7 @@ export function SuiteScreen() {
 			`#detail [data-field="${next.caret.field === "capture-title" ? "title" : next.caret.field}"]`,
 		);
 		if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
-			target.focus();
+			focusInto(target);
 			target.setSelectionRange(next.caret.start, next.caret.end);
 		}
 	}
@@ -1828,7 +1829,7 @@ export function SuiteScreen() {
 	function leaveEditor(): void {
 		void sealDraft();
 		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-		viewport.current?.focus();
+		focusInto(viewport.current);
 	}
 	function create(): void {
 		const previous = draftRef.current;
@@ -2387,11 +2388,15 @@ export function SuiteScreen() {
 		return () => window.removeEventListener("mainworthy:drop", drop);
 	});
 	useSuiteBindings({
+		canEdit: Boolean(recordedView) && (!draft || ownedElsewhere),
+		canRecord: Boolean(
+			draft && !ownedElsewhere && !conflict && draft.sent === null && draft.submission.kind !== "waiting",
+		),
 		create,
 		edit: () => edit(),
 		next: () => stepCursor(1),
 		previous: () => stepCursor(-1),
-		filter: () => filter.current?.focus(),
+		filter: () => focusInto(filter.current),
 		seal: leaveEditor,
 		select: () => {
 			if (selected)
@@ -2459,7 +2464,7 @@ export function SuiteScreen() {
 								if (event.key === "Escape") {
 									event.preventDefault();
 									setText("");
-									viewport.current?.focus();
+									focusInto(viewport.current);
 								}
 							}}
 						/>

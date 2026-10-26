@@ -376,6 +376,20 @@ function Workbench({
 			});
 	}, []);
 	const [help, setHelp] = useState(false);
+	const helpOrigin = useRef<HTMLElement | null>(null);
+	const openHelp = useCallback((origin = document.activeElement): void => {
+		helpOrigin.current = origin instanceof HTMLElement ? origin : null;
+		setPalette(null);
+		setHelp(true);
+	}, []);
+	const closeHelp = useCallback((): void => {
+		setHelp(false);
+		const origin = helpOrigin.current;
+		helpOrigin.current = null;
+		queueMicrotask(() => {
+			if (origin?.isConnected) origin.focus();
+		});
+	}, []);
 	// A browser session is what there is to sign out of. In local mode the owner of the machine has none, and
 	// neither the button nor its key is there.
 	const account = info.via === "cookie";
@@ -546,8 +560,7 @@ function Workbench({
 				list: true,
 				desktopOnly: true,
 				handler: () => {
-					setPalette(null);
-					setHelp(true);
+					openHelp();
 				},
 			},
 			{
@@ -558,8 +571,8 @@ function Workbench({
 				hidden: true,
 				applies: () => palette !== null || help,
 				handler: () => {
-					closePalette();
-					setHelp(false);
+					if (help) closeHelp();
+					else closePalette();
 				},
 			},
 			// Registered only where there is a session to end, so the palette and the keys sheet do not offer it
@@ -573,6 +586,8 @@ function Workbench({
 			help,
 			openPalette,
 			closePalette,
+			openHelp,
+			closeHelp,
 			account,
 			leave,
 			phone,
@@ -858,7 +873,7 @@ function Workbench({
 						>
 							ⓘ <span>Docs</span>
 						</a>
-						<button type="button" aria-label="Keyboard shortcuts" onClick={() => setHelp(true)}>
+						<button type="button" aria-label="Keyboard shortcuts" onClick={(event) => openHelp(event.currentTarget)}>
 							? <span>Keys</span>
 						</button>
 						<button
@@ -906,10 +921,10 @@ function Workbench({
 						className="overlay-backdrop"
 						tabIndex={-1}
 						aria-label="Close keys"
-						onClick={() => setHelp(false)}
+						onClick={closeHelp}
 					/>
 					<section className="help" aria-label="Keyboard shortcuts">
-						<button className="help-close" type="button" ref={focusOnce} onClick={() => setHelp(false)}>
+						<button className="help-close" type="button" ref={focusOnce} onClick={closeHelp}>
 							Close <KeyCap>Esc</KeyCap>
 						</button>
 						<h2>Keys</h2>
