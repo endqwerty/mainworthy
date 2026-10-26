@@ -2388,7 +2388,8 @@ export function SuiteScreen() {
 		return () => window.removeEventListener("mainworthy:drop", drop);
 	});
 	useSuiteBindings({
-		canEdit: Boolean(recordedView) && (!draft || ownedElsewhere),
+		offerEdit: Boolean(recordedView) && (!draft || ownedElsewhere),
+		hasDraft: Boolean(draft),
 		canRecord: Boolean(draft && !ownedElsewhere && !conflict),
 		create,
 		edit: () => edit(),

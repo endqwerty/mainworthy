@@ -2,7 +2,8 @@ import { useBindings } from "../lib/keys.ts";
 
 const action = (key: string, label: string, handler: () => void, hidden = false) => ({ key, label, handler, hidden });
 export function useSuiteBindings({
-	canEdit,
+	offerEdit,
+	hasDraft,
 	canRecord,
 	create,
 	edit,
@@ -24,7 +25,8 @@ export function useSuiteBindings({
 	cancelTag,
 	cancelFolder,
 }: {
-	canEdit: boolean;
+	offerEdit: boolean;
+	hasDraft: boolean;
 	canRecord: boolean;
 	create: () => void;
 	edit: () => void;
@@ -55,14 +57,20 @@ export function useSuiteBindings({
 	useBindings([
 		// The three marked `list` do not act on the case the detail shows (`Binding.list`).
 		{ key: "c", label: "New case", list: true, handler: create },
-		{ key: "e", label: "Edit case", handler: edit, applies: () => canEdit },
-		{ key: "enter", label: "Edit case", handler: edit, hidden: true, applies: () => canEdit },
+		// Edit keys also explain pending or failed reads and return to an existing draft.
+		{ key: "e", label: "Edit case", handler: edit, hidden: !offerEdit },
+		action("enter", "Edit case", edit, true),
 		action("j", "Next case", next),
 		action("arrowdown", "Next case", next, true),
 		action("k", "Previous case", previous),
 		action("arrowup", "Previous case", previous, true),
 		{ key: "/", label: "Filter", list: true, handler: filter },
-		{ key: "escape", label: "Seal and leave editor", handler: seal, applies: () => canRecord },
+		{
+			key: "escape",
+			label: canRecord ? "Seal and leave editor" : "Leave editor",
+			handler: seal,
+			applies: () => hasDraft,
+		},
 		{ key: "mod+enter", label: "Record version", handler: seal, applies: () => canRecord },
 		action("x", "Select case", select),
 		action("m", "Move selected", move),

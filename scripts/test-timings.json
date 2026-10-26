@@ -19,7 +19,7 @@
     "test/http.test.ts": 27090,
     "src/server/transfer/transfer.test.ts": 25885,
     "test/e2e/latency-10000.test.ts": 24602,
-    "test/e2e/phone-actions.test.ts": 24067,
+    "test/e2e/phone-actions.test.ts": 24189,
     "test/e2e/cockpit-corrections.test.ts": 23146,
     "test/e2e/recovery.test.ts": 22908,
     "test/e2e/draft-ownership.test.ts": 22837,
