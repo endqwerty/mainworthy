@@ -43,6 +43,8 @@ const checkoutId = (path: string): string => createHash("sha256").update(path).d
 const id = checkoutId(checkout);
 const stateRoot = join(homedir(), ".cache", "mainworthy", "pg");
 const stateFile = join(stateRoot, `${id}.json`);
+// An inaccessible path is not evidence that its checkout or server disappeared.
+const present = (path: string): boolean => statSync(path, { throwIfNoEntry: false }) !== undefined;
 function stored(file = stateFile): Stored | null {
 	if (!existsSync(file)) return null;
 	const value: unknown = JSON.parse(readFileSync(file, "utf8"));
@@ -79,13 +81,13 @@ function controlBinaries(state: Pick<ClusterFiles, "bin">): string {
 }
 function running(state: ClusterFiles): boolean {
 	const data = join(state.directory, "data");
-	if (!existsSync(join(data, "postmaster.pid"))) return false;
+	if (!present(join(data, "postmaster.pid"))) return false;
 	const result = Bun.spawnSync([join(controlBinaries(state), "pg_ctl"), "-D", data, "status"], {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
 	if (result.exitCode === 0) return true;
-	if (result.exitCode === 3 || !existsSync(join(data, "postmaster.pid"))) return false;
+	if (result.exitCode === 3 || !present(join(data, "postmaster.pid"))) return false;
 	throw new Error(`cannot establish checkout PostgreSQL status: ${result.stderr.toString().trim()}`);
 }
 async function exclusive<T>(fn: () => Promise<T>, clusterId = id): Promise<T> {
@@ -154,7 +156,7 @@ function save(file: string, state: Stored): void {
 function validateDirectory(directory: string, clusterId: string): void {
 	if (!basename(directory).startsWith(`mw-pg-${clusterId}-`))
 		throw new Error("cluster directory does not match its id");
-	if (existsSync(directory)) {
+	if (present(directory)) {
 		const why = refusal(directory);
 		if (why !== null) throw new Error(why);
 	} else if (resolve(directory, "..") !== realpathSync(defaultRoot())) {
@@ -201,7 +203,7 @@ export async function cleanupClusters(
 			} catch {
 				// A legacy writer may be updating it. Re-read under its lock before judging it.
 			}
-			if (observed?.checkout && checkoutId(observed.checkout) === clusterId && existsSync(observed.checkout)) continue;
+			if (observed?.checkout && checkoutId(observed.checkout) === clusterId && present(observed.checkout)) continue;
 			if (observed && observed.checkout === null && !owners.has(clusterId)) {
 				retained.push(clusterId);
 				continue;
@@ -214,7 +216,7 @@ export async function cleanupClusters(
 					return;
 				}
 				if (checkoutId(owner) !== clusterId) throw new Error("checkout PostgreSQL owner does not match its id");
-				if (existsSync(owner)) {
+				if (present(owner)) {
 					if (state && state.checkout === null) save(file, { ...state, checkout: owner });
 					return;
 				}

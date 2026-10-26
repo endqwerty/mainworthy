@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { binaries } from "../scripts/pg.ts";
@@ -81,12 +81,21 @@ const pidOf = (directory: string) =>
 test("startup reaps deleted exports, keeps existing checkout clusters, and finishes interrupted deletion", async () => {
 	const f = await fixture();
 	try {
-		const deleted = f.exported(),
+		const protectedParent = make("protected-owner", f.cache);
+		const deleted = f.exported(protectedParent),
 			keeper = f.exported();
 		const orphan = await f.start(deleted),
 			existing = await f.start(keeper);
 		const pid = pidOf(orphan.directory);
 		expect(JSON.parse(readFileSync(f.metadata(deleted), "utf8")).checkout).toBe(deleted);
+		chmodSync(protectedParent, 0);
+		try {
+			await f.pg(keeper, "start");
+			await f.available(orphan);
+			expect(existsSync(f.metadata(deleted))).toBe(true);
+		} finally {
+			chmodSync(protectedParent, 0o700);
+		}
 		rmSync(deleted, { recursive: true });
 		await f.pg(keeper, "start");
 		f.gone(deleted, orphan, pid);

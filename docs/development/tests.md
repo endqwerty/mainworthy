@@ -21,7 +21,8 @@ Cleanup skips existing owners without waiting on their startup locks. Before del
 ownership and checkout existence under the same per-cluster lock as startup, stops PostgreSQL, and removes
 metadata last. A later startup retries an interrupted deletion. Automatic startup and scratch cleanup warn and
 retain an entry they cannot safely clean, so a damaged orphan does not block another checkout. Explicit
-`bun scripts/pg.ts cleanup` still fails on such an entry. An external `MAINWORTHY_TEST_PG` URL is never removed.
+`bun scripts/pg.ts cleanup` still fails on such an entry. Permission errors do not count as a missing checkout
+or a stopped server. An external `MAINWORTHY_TEST_PG` URL is never removed.
 
 ### Recover older clusters
 
