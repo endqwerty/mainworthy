@@ -28,7 +28,9 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -301,6 +303,19 @@ export const codexArgs = (directory: string, findings: string, text: string): st
 	text,
 ];
 
+/** A run has its own Codex home. Link the existing login; never copy credentials or user instructions. */
+export function codexInvocation(
+	directory: string,
+	findings: string,
+	text: string,
+	env: NodeJS.ProcessEnv = process.env,
+): { args: string[]; env: NodeJS.ProcessEnv & { CODEX_HOME: string } } {
+	const home = mkdtempSync(join(directory, "codex-home-"));
+	const auth = join(env.CODEX_HOME ?? join(homedir(), ".codex"), "auth.json");
+	if (existsSync(auth)) symlinkSync(auth, join(home, "auth.json"));
+	return { args: codexArgs(directory, findings, text), env: { ...env, CODEX_HOME: home } };
+}
+
 /** A new `<root>/mw-<name>-XXXXXX` with `scripts/work/scratch.ts`'s marker, so `scratch rm` deletes it. */
 export function makeScratch(name: string, root = join(homedir(), ".cache")): string {
 	mkdirSync(root, { recursive: true });
@@ -550,13 +565,19 @@ function main(argv: string[]): number {
 	if (itself.length > 0) console.log(`this change edits the audit itself: ${itself.join(", ")}`);
 
 	const log = openSync(join(directory, "log.txt"), "w");
-	const codex = spawnSync("codex", codexArgs(directory, findings, text), {
-		cwd: directory,
-		stdio: ["ignore", log, log],
-	});
-	closeSync(log);
-	console.log(`findings: ${findings}`);
-	return codex.status ?? 1;
+	const invocation = codexInvocation(directory, findings, text);
+	try {
+		const codex = spawnSync("codex", invocation.args, {
+			cwd: directory,
+			env: invocation.env,
+			stdio: ["ignore", log, log],
+		});
+		console.log(`findings: ${findings}`);
+		return codex.status ?? 1;
+	} finally {
+		closeSync(log);
+		rmSync(invocation.env.CODEX_HOME, { recursive: true, force: true });
+	}
 }
 
 if (import.meta.main) process.exit(main(process.argv.slice(2)));

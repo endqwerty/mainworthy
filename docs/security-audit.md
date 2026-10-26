@@ -51,9 +51,15 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   head's, one for one. The diff is made with no attributes, so `-diff` cannot hide a file's change.
 - **The sandbox.** Daybreak Blue (`gpt-daybreak-blue-latest`) runs at effort `high` (the `reviewer` row of
   `homelab route models --profile deep`) through `codex exec --sandbox read-only`, from the scratch directory and not
-  the export, with project instruction files off (`-c project_doc_max_bytes=0`) and standard input closed. Run in the
-  export, Codex took the head's own `AGENTS.md` as its instructions (probed 2026-10-21), so a change could tell its
-  auditor what to find; the brief also says the export's files are evidence, not instructions. The sandbox stops its
+  the export, with project instruction files off (`-c project_doc_max_bytes=0`) and standard input closed. Each run
+  sets `CODEX_HOME` to a private temporary directory containing only a symlink to the existing home's `auth.json`,
+  when present. It copies no credentials. Codex loads no `AGENTS.md`, `AGENTS.override.md` or config from the
+  original Codex home. The temporary home is removed when Codex exits. The brief supplies the audit instructions;
+  Codex's built-in and managed instructions and default skill discovery still apply. Project docs alone did not exclude global instructions
+  in Codex 0.164.0. The regression uses `codex debug prompt-input` to show a user-file marker in a control run and
+  its absence with the audit invocation, while the brief remains present. Run in the export, Codex took the head's
+  own `AGENTS.md` as its instructions (probed 2026-10-21), so a change could tell its auditor what to find;
+  the brief also says the export's files are evidence, not instructions. The sandbox stops its
   commands writing anywhere or reaching the network (checked 2026-10-21: `touch` answers "Operation not permitted",
   `curl` "Could not resolve host"). Do not run it as a T3 Code child task: a child inherits the thread's full access.
 - **What it is asked.** The brief names the head, the base, the export and the diff, says to read nothing else, and
@@ -61,7 +67,7 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   a public repository must not hold. The list is in the script, so the audit and this page cannot drift apart.
 - **What it returns.** Each issue with its file and line, a concrete case that goes wrong, its severity and a fix, in
   `findings.md`. The sandbox cannot write files, so that is the run's last message, written by Codex. A run cut off
-  keeps its session under `~/.codex/sessions`.
+  keeps its partial output in `log.txt`. Sessions in the temporary Codex home are removed with that home.
 - **What stays open, accepted by the owner (2026-10-21).** The sandbox does not stop the auditor's commands reading
   files outside the export, and what they read reaches the model provider as context. Codex 0.163 denies reads only
   through managed requirements, not for one run, and an outer `sandbox-exec` stops Codex applying its own
