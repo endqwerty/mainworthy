@@ -3,15 +3,17 @@ import { type Database, migrationLock, type ReadDb, sql } from "./db.ts";
 import projectLocks from "./migrations/0002-project-locks.sql" with { type: "text" };
 import sharedIdentity from "./migrations/0003-shared-identity.sql" with { type: "text" };
 import jobs from "./migrations/0004-jobs.sql" with { type: "text" };
+import reportSpans from "./migrations/0005-report-spans.sql" with { type: "text" };
 import baseline from "./schema.sql" with { type: "text" };
 
 // PostgreSQL starts a new schema lineage; archive 43 follows the final SQLite archive format (42).
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const ARCHIVE_VERSION = 43;
 export const migrationHash = createHash("sha256")
 	.update(projectLocks)
 	.update(sharedIdentity)
 	.update(jobs)
+	.update(reportSpans)
 	.digest("hex");
 const hash = createHash("sha256").update(baseline).digest("hex");
 
@@ -63,12 +65,17 @@ export async function migrate(database: Database): Promise<void> {
 					await db.exec(jobs);
 					await db.exec("UPDATE meta SET value = '4' WHERE key = 'schema_version'");
 				}
+				if (version < 5) {
+					await db.exec(reportSpans);
+					await db.exec("UPDATE meta SET value = '5' WHERE key = 'schema_version'");
+				}
 				return;
 			}
 			await db.exec(baseline);
 			await db.exec(projectLocks);
 			await db.exec(sharedIdentity);
 			await db.exec(jobs);
+			await db.exec(reportSpans);
 			for (const [key, value] of Object.entries({
 				schema_version: String(SCHEMA_VERSION),
 				baseline_hash: hash,

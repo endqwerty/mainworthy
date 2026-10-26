@@ -1,8 +1,9 @@
-import type { ResultIn } from "../../core/ops.ts";
+import type { ReportSpan, ResultIn } from "../../core/ops.ts";
 import { clip, reportJson } from "../../core/text.ts";
 
 export type ParsedResult = ResultIn & { attachmentPaths?: string[] };
-export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
+/** `span`: when the report's tests started and ended, when its format says so unambiguously (issue #722). */
+export type ParsedReport = { results: ParsedResult[]; warnings: string[]; span?: ReportSpan };
 
 /** Quote external identifiers for one diagnostic line, including terminal controls JSON leaves unescaped. */
 export function reportIdentifier(value: string): string {

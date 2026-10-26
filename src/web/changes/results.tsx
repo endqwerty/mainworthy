@@ -57,6 +57,15 @@ export function testTimeText(time: { ms: number; timed: number } | undefined, to
 	return `${spent(time.ms)} of test time${some}`;
 }
 
+/**
+ * A change run's reported test span, when the server gives one: from the earliest start to the latest end its counted
+ * reports named. The server leaves it out unless every one of them named both and nothing declared is still to come.
+ */
+export function reportedSpanText(span: { startedAt: number; endedAt: number } | null | undefined): string | null {
+	if (!span) return null;
+	return `Reported test span: ${spent(span.endedAt - span.startedAt)}, from the earliest start to the latest end its reports named.`;
+}
+
 type Of = { change: string } | { run: string };
 
 /**

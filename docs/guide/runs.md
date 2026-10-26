@@ -21,6 +21,9 @@ Below the verdict, the run's test time is the sum of the durations its counted r
 ran side by side add up, so it is time spent testing, not how long the build took. When some results reported
 no duration, it says how many did. `mainworthy find --in results` returns the same sum as `testTime`.
 The sum stops at 9,007,199,254,740,991 ms, including when older or restored results hold larger durations.
+When every report the gate counts named when its tests started and ended, and nothing declared is still to arrive,
+a **reported test span** follows: from the earliest start to the latest end those reports named, by their runners'
+clocks. It is not the build's duration: see [report when the tests ran](./report-results.md#report-when-the-tests-ran).
 
 From the command line, `mainworthy find --in runs` lists the same runs. Add `--origin planned` or
 `--origin change` for one kind, and `--state open` or `--state closed` for one state.

@@ -285,6 +285,8 @@ const fixtures: Record<string, Row[]> = {
 			counts: '{ "pass": 1 }',
 			staged: "[]",
 			receipt: null,
+			started_at: time - 90_000,
+			ended_at: time - 60_000,
 			at: time,
 			seq: 1,
 		},
@@ -1546,6 +1548,18 @@ describe("Mainworthy instance archives", () => {
 			key: "change-one",
 			head_observed_seq: null,
 		});
+	});
+
+	test("an archive from before report spans imports a batch with no span", async () => {
+		const to = await target();
+		const text = await archive(await source());
+		expect(text).toContain(`"started_at":${time - 90_000},"ended_at":${time - 60_000}`);
+		const old = rehash(text.replace(`,"started_at":${time - 90_000},"ended_at":${time - 60_000}`, ""));
+		expect(old).not.toContain('"started_at"');
+		await importArchive(to, linesOf(old));
+		expect(await to.allDynamic<Record<string, unknown>>("SELECT started_at, ended_at FROM batches", [])).toEqual([
+			{ started_at: null, ended_at: null },
+		]);
 	});
 
 	test("an archive without decision evidence imports legacy hashes as NULL", async () => {

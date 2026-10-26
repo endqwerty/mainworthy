@@ -115,7 +115,8 @@ The diagram follows the default policy, which requires counted evidence. A proje
 
 Each commit a report names on a change gets a change run of its own. Under "Results", "Runs, newest
 first" lists the change's runs: the commit, the verdict, its reason and how long ago the run was made.
-Choose a row to open that run in Runs, with every result its gate counted. "More runs" reads the next hundred.
+Choose a row to open that run in Runs, with every result its gate counted, its test time and, when every report
+named one, its [reported test span](./report-results.md#report-when-the-tests-ran). "More runs" reads the next hundred.
 
 From the command line:
 

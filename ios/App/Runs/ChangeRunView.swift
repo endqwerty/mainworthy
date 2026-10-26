@@ -61,6 +61,16 @@ struct ChangeRunView: View {
 							}
 						}
 					}
+					if let span = results.reportedSpan {
+						LabeledContent("Reported test span") {
+							VStack(alignment: .trailing) {
+								Text(spent(span.ms))
+								Text("From the earliest start to the latest end its reports named.")
+									.font(.caption)
+									.multilineTextAlignment(.trailing)
+							}
+						}
+					}
 				}
 				ChangeResultsPanel(results: results)
 			}

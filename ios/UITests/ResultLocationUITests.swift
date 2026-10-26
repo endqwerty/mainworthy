@@ -44,7 +44,9 @@ final class ResultLocationUITests: XCTestCase {
 		try shot("pr-failure")
 		app.navigationBars.buttons["Queue"].tap()
 		_ = try await post("/api/p/\(project)/change", ["change": "pr:653", "state": "merged", "landing": ["commit": commit, "branch": "main"]])
-		let trunk = try await post("/api/p/\(project)/report", ["target": ["repo": "acme/shop", "commit": commit, "branch": "main"], "results": results])
+		// The trunk job's runner named when it started and ended: 90 s apart (issue #722).
+		let span = ["startedAt": 1_790_000_000_000, "endedAt": 1_790_000_090_000]
+		let trunk = try await post("/api/p/\(project)/report", ["target": ["repo": "acme/shop", "commit": commit, "branch": "main"], "span": span, "results": results])
 		let gate = try XCTUnwrap(trunk["gate"] as? [String: Any])
 		let run = try XCTUnwrap(gate["run"] as? String)
 		XCTAssertTrue(failure.waitForExistence(timeout: 15))
@@ -81,6 +83,8 @@ final class ResultLocationUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Test time, 1.4 s"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["Commit, 1234567890ab"].exists)
 		XCTAssertTrue(app.staticTexts["1.4 s · robin"].exists)
+		let reported = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Reported test span, 2 min")).firstMatch
+		XCTAssertTrue(reported.exists)
 		try shot("trunk-run")
 		app.openTab("Cases")
 		let link = app.buttons["main · pr:653 Keep coupons"].firstMatch

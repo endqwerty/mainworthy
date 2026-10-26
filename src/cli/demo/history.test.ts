@@ -1,7 +1,7 @@
 // The demo's history: every day has something, in order, before today, and nothing in it comes back open.
 import { describe, expect, test } from "bun:test";
 import { demoCases } from "./cases.ts";
-import { DAY, dayStart, demoHistory, type HistoryEvent, REVIEW_CHANGE, todayAt } from "./history.ts";
+import { DAY, dayStart, demoHistory, type HistoryEvent, pipelineSpan, REVIEW_CHANGE, todayAt } from "./history.ts";
 
 // A Tuesday afternoon, so the fortnight before it holds two weekends.
 const SINCE = Date.UTC(2026, 9, 13, 15, 30);
@@ -206,4 +206,12 @@ test("today's moments stay on today, in their order, however early in the UTC da
 		"2026-10-21T00:53:25.904Z",
 		"2026-10-21T01:11:08.635Z",
 	]);
+});
+
+test("the shop pipeline's runner ends a minute before its upload, on four workers (issue #722)", () => {
+	const at = SINCE - 2 * DAY;
+	expect(pipelineSpan(at, [{ durationMs: 4000 }, { durationMs: 1001 }, {}])).toEqual({
+		startedAt: at - 60_000 - 1251,
+		endedAt: at - 60_000,
+	});
 });

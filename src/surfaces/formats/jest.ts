@@ -2,14 +2,19 @@ import { posix, win32 } from "node:path";
 import { z } from "zod";
 import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport, reportIdentifier, reportWarnings } from "./native.ts";
+import { spanOf } from "./span.ts";
 
 const Report = z.object({
 	rootDir: z.string().min(1).optional(),
 	wasInterrupted: z.boolean().optional(),
 	runExecError: z.unknown().optional(),
+	// Timing is read leniently: an odd value costs the span, never the results.
+	startTime: z.unknown().optional(),
 	testResults: z.array(
 		z.object({
 			name: z.string().min(1),
+			startTime: z.unknown().optional(),
+			endTime: z.unknown().optional(),
 			status: z.enum(["passed", "failed", "skipped", "focused"]),
 			message: z.string().optional(),
 			assertionResults: z.array(
@@ -110,5 +115,21 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 			);
 		}
 	}
-	return { results, warnings: warnings.finish() };
+	const span = jestSpan(report);
+	return { results, warnings: warnings.finish(), ...(span ? { span } : {}) };
+}
+
+/** From the run's start, or its first file's, to the last file's end: only when every file names both. */
+function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] {
+	const time = (value: unknown): number | undefined =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+	let start = time(report.startTime) ?? Number.POSITIVE_INFINITY;
+	let end = Number.NEGATIVE_INFINITY;
+	for (const file of report.testResults) {
+		const [from, to] = [time(file.startTime), time(file.endTime)];
+		if (from === undefined || to === undefined || to < from) return undefined;
+		start = Math.min(start, from);
+		end = Math.max(end, to);
+	}
+	return Number.isFinite(start) && Number.isFinite(end) ? spanOf(start, end - start) : undefined;
 }

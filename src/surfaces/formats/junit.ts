@@ -1,9 +1,12 @@
 import { caseAnnotation } from "../../core/case-annotation.ts";
-import type { ResultIn } from "../../core/ops.ts";
+import type { ReportSpan, ResultIn } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
 import { type ParsedResult, reportIdentifier } from "./native.ts";
+import { joinSpans, SPAN_UNUSABLE, spanOf, zonedTime } from "./span.ts";
 
-type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
+type Attributes = Partial<
+	Record<"name" | "file" | "classname" | "time" | "timestamp" | "status" | "message" | "value", string>
+>;
 type KeyDigest = { first: number; second: number; firstPower: number; secondPower: number; length: number };
 type DamageSpan = { from: number; to: number; problem: NonNullable<ResultIn["failure"]> };
 type CaseElement = {
@@ -36,7 +39,20 @@ type SuiteElement = {
 	file: string | undefined;
 	firstResult: number;
 	problem: NonNullable<ResultIn["failure"]> | null;
+	/** An outermost suite's own start and length; a nested suite runs inside its parent's and has none here. */
+	timing: SuiteTiming | null;
 };
+type SuiteTiming = ReportSpan | "absent" | "no zone" | "unusable";
+
+/** A suite's span from its `timestamp` and `time` (seconds): only a timestamp that names its zone is usable. */
+function suiteTiming(attrs: Attributes): SuiteTiming {
+	if (attrs.timestamp === undefined || attrs.time === undefined) return "absent";
+	const start = zonedTime(attrs.timestamp);
+	if (start === "no zone") return "no zone";
+	const seconds = attrs.time.trim() === "" ? Number.NaN : Number(attrs.time.trim().replace(",", "."));
+	const span = start === undefined || !(seconds >= 0) ? undefined : spanOf(start, seconds * 1000);
+	return span ?? "unusable";
+}
 type Element =
 	| CaseElement
 	| FailureElement
@@ -212,6 +228,7 @@ function attributes(
 			case "file":
 			case "classname":
 			case "time":
+			case "timestamp":
 			case "status":
 			case "message":
 			case "value":
@@ -366,7 +383,7 @@ function groupRetries(results: ParsedResult[], groups: RetryGroups): ParsedResul
 export function parseJUnit(
 	xml: string,
 	options?: { file?: string },
-): { results: ParsedResult[]; suites: number; warnings: string[] } {
+): { results: ParsedResult[]; suites: number; warnings: string[]; span?: ReportSpan } {
 	const results: ParsedResult[] = [];
 	const warnings: string[] = [];
 	const label = options?.file ? `${reportIdentifier(options.file)}: ` : "";
@@ -435,6 +452,9 @@ export function parseJUnit(
 		element.line = "";
 		element.overflow = false;
 	};
+	// The report's span: its outermost suites' spans joined, when every one of them that holds a result names one.
+	const spans: ReportSpan[] = [];
+	const untimed = new Set<Exclude<SuiteTiming, ReportSpan>>();
 	let ignoredDepth = 0;
 	let rootSeen = false;
 	let position = xml.charCodeAt(0) === 0xfeff ? 1 : 0;
@@ -453,6 +473,10 @@ export function parseJUnit(
 			case "suite":
 				if (element.problem !== null)
 					damagedSpans.push({ from: element.firstResult, to: results.length, problem: element.problem });
+				if (element.timing !== null && results.length > element.firstResult) {
+					if (typeof element.timing === "string") untimed.add(element.timing);
+					else spans.push(element.timing);
+				}
 				suiteStack.pop();
 				break;
 			case "case":
@@ -741,6 +765,7 @@ export function parseJUnit(
 					file: attrs.file ? normalisePath(attrs.file) : suite?.file,
 					firstResult: results.length,
 					problem: headerDamaged ? { message: "Malformed JUnit suite" } : null,
+					timing: suite === undefined ? suiteTiming(attrs) : null,
 				};
 				suiteStack.push(element);
 				suites++;
@@ -753,6 +778,7 @@ export function parseJUnit(
 				const file = attrs.file ? normalisePath(attrs.file) : suite?.file;
 				const prefix = keyPart(file || normalisePath(attrs.classname ?? ""));
 				const status = attrs.status?.toLowerCase();
+				if (suite === undefined) untimed.add("absent");
 				const key = testKey(prefix, suite, keyPart(stable.name), prefixDigests, start, warn);
 				const result: ParsedResult = {
 					test: {
@@ -839,5 +865,8 @@ export function parseJUnit(
 	applyDamage(results, damagedSpans);
 	if (omittedWarnings > 0)
 		warnings.push(`${label}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`);
-	return { results: groupRetries(results, retryGroups), suites, warnings };
+	if (untimed.has("no zone")) warnings.push(`${label}a suite's timestamp names no time zone; no reported span is kept`);
+	else if (untimed.has("unusable")) warnings.push(`${label}${SPAN_UNUSABLE}`);
+	const span = untimed.size === 0 ? joinSpans(spans) : undefined;
+	return { results: groupRetries(results, retryGroups), suites, warnings, ...(span ? { span } : {}) };
 }

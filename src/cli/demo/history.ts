@@ -34,6 +34,17 @@ export const REVIEW_CHANGE = {
 export const AGENT_MODEL = "claude-opus-5-5";
 
 /**
+ * When the shop pipeline's runner started and ended the tests of a report it uploads at `at` (issue #722): it ends a
+ * minute before the upload, on four workers, so it took a quarter of the results' summed durations. Drawn from
+ * nothing, so every random stream stays as it was.
+ */
+export function pipelineSpan(at: number, results: readonly { durationMs?: number | undefined }[]) {
+	const endedAt = at - MINUTE;
+	const summed = results.reduce((sum, result) => sum + (result.durationMs ?? 0), 0);
+	return { startedAt: endedAt - Math.ceil(summed / 4), endedAt };
+}
+
+/**
  * How a person answered a failure or a finding. None of these ends by the clock (`flaky` does, after a week), so
  * nothing in the history comes back open while somebody looks at the demo.
  */

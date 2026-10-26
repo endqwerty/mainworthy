@@ -1,6 +1,7 @@
 import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.ts";
 import { reportIdentifier } from "../../surfaces/formats/native.ts";
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
+import { joinSpans } from "../../surfaces/formats/span.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError, fileReadError } from "../errors.ts";
 import { displayUrl, line, printJson, warning } from "../output.ts";
@@ -127,6 +128,8 @@ export const reportCommand: AdapterCommand = {
 		const detected = detectedTarget();
 		const target = reportTarget(args, detected);
 		const results: ReportInput["results"] = [];
+		// One batch for every file: it has a span only when each file named one.
+		const spans: ReportInput["span"][] = [];
 		const format = ReportFormat.parse(args.value("format") ?? "auto");
 		const rootDir = reportRoot();
 		const attachmentBudget = { bytes: 0, files: 0 };
@@ -141,6 +144,7 @@ export const reportCommand: AdapterCommand = {
 			const parsed = parseReport(text, { file, format, rootDir });
 			const loaded = loadReportAttachments(parsed, file, args.value("attachments"), attachmentBudget);
 			results.push(...loaded.results);
+			spans.push(parsed.span);
 			skippedAttachments += loaded.skipped;
 			for (const message of loaded.warnings) warning(message);
 			for (const message of parsed.warnings) warning(message);
@@ -155,6 +159,7 @@ export const reportCommand: AdapterCommand = {
 		const shardMatch = shardText === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardText);
 		if (shardText !== undefined && !shardMatch)
 			throw new CliError("invalid", `--shard takes index/count, for example 2/6, not "${shardText}"`);
+		const span = joinSpans(spans);
 		const report = ReportInput.parse({
 			...(target ? { target } : {}),
 			...(args.has("run") ? { run: args.value("run") } : {}),
@@ -162,6 +167,7 @@ export const reportCommand: AdapterCommand = {
 			...(attempt !== null ? { attempt } : {}),
 			...(shardMatch ? { shard: { index: Number(shardMatch[1]), of: Number(shardMatch[2]) } } : {}),
 			...(detected.buildUrl ? { buildUrl: detected.buildUrl } : {}),
+			...(span ? { span } : {}),
 			results,
 			...(nothingRequired ? { nothingRequired: true } : {}),
 		});

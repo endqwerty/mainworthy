@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ResultStanding } from "../../core/runs.ts";
-import { ChangeResults, testTimeText, useCounted } from "../changes/results.tsx";
+import { ChangeResults, reportedSpanText, testTimeText, useCounted } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -282,6 +282,7 @@ function ChangeRunDetail({ run }: { run: Run }) {
 		counted?.testTime,
 		Object.values(counted?.tally ?? {}).reduce((sum, n) => sum + n, 0),
 	);
+	const span = reportedSpanText(counted?.reportedSpan);
 	const change = run.change;
 	return (
 		<div className="pane-scroll detail-body">
@@ -299,6 +300,7 @@ function ChangeRunDetail({ run }: { run: Run }) {
 				{tallyText(run.tally)}
 				{time && ` · ${time}`}
 			</p>
+			{span && <p className="dim">{span}</p>}
 			{"commit" in run.accepts && (
 				<p className="dim">
 					{run.location ? (

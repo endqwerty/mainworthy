@@ -232,6 +232,9 @@ public final class ChangeResults {
 	public var total: Int { tally.values.reduce(0, +) }
 	/// The summed duration of every row the gate counts, whatever is shown. None until the first read.
 	public var testTime: TestTime? { list.first?.testTime }
+	/// The earliest start to the latest end the counted reports named. None until the first read, or when the server
+	/// sent none.
+	public var reportedSpan: ReportedSpan? { list.first?.reportedSpan }
 	/// How many rows match what is shown, when the server said.
 	public var count: Int? { list.first?.count }
 	public var loading: ListLoading { list.loading }
