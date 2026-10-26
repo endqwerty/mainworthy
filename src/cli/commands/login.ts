@@ -29,7 +29,7 @@ export const loginCommand: AdapterCommand = {
 		"Sign in with a password and, when enrolled, an authenticator or recovery code. Print a personal CLI token once.",
 	usage: "login --name <name> --password-file <path> [--code-file <path>] [--label <label>] [--expires 30d] [--json]",
 	flags: [
-		{ name: "name", kind: "string", description: "Your sign-in name." },
+		{ name: "name", kind: "string", description: "Your sign-in name, or your email address." },
 		{
 			name: "password-file",
 			kind: "string",

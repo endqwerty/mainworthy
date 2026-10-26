@@ -52,7 +52,7 @@ signing in. The same link is under **You**, **About**. A build for another insta
 The app signs in to `mainworthy.com`. It does not ask for an address. Set a password or add a passkey in
 the web app under Settings, **Your sign-in**. The app does not accept tokens. Use tokens for scripts or pipelines.
 
-Sign-in changes need [recent credential proof](./access.md#a-name-and-a-password-or-a-passkey)
+Sign-in changes need [recent credential proof](./access.md#an-email-address-or-a-name-and-a-password-or-a-passkey)
 in the session making the change. Use web Settings for these changes; this iPhone
 build has no credential settings. If it receives `recent_proof_required`, it
 keeps you signed in and directs you to the web app.

@@ -372,24 +372,25 @@ async function checkPassword(
  * A password is checked whoever is named: for a name that has none, against a hash nobody's password matches
  * (`dummyHash`). So the unknown name, the forgotten person, the person without a password and the wrong
  * password all cost the same work and get the same answer, and all four are counted alike under the address
- * and the name: a person's own name, whether the name or the address was typed. While either is blocked the
- * password is not checked at all.
+ * and what was typed. While either is blocked the password is not checked at all. What was typed, not the
+ * person it names: a name blocked by guesses would otherwise make the refusal of its person's address differ
+ * from an unknown address's, and say whose it is. So a person's name and address are counted apart.
  */
 export async function signInWithPassword(
 	app: App,
 	input: { name: string; password: string },
 	about: About,
 ): Promise<Entry | { ok: true; secondFactor: { challenge: string; expiresAt: number }; ceremony: string }> {
+	const limiter = limiterOf(app);
+	const account = accountKey(input.name);
+	const keys = counted(addressKey(about.address), account);
+	const answer = await limiter.check(keys, app.now());
+	if (answer.kind === "blocked") return waiting(answer);
 	const person = await app.database.admissionRead(
 		async (readDb) =>
 			(await readDb.get(Q.personByName, { name: input.name })) ?? (await personByEmail(readDb, input.name)),
 	);
 	const name = person?.name ?? input.name;
-	const limiter = limiterOf(app);
-	const account = accountKey(name);
-	const keys = counted(addressKey(about.address), account);
-	const answer = await limiter.check(keys, app.now());
-	if (answer.kind === "blocked") return waiting(answer);
 	const stored = person
 		? await app.database.admissionRead(async (readDb) => await livePassword(readDb, person.id))
 		: null;
@@ -401,7 +402,7 @@ export async function signInWithPassword(
 		const checked = await checkPassword(app, {
 			password: input.password,
 			stored: stored?.data ?? nobodys,
-			name,
+			name: input.name,
 			address: about.address,
 		});
 		if (typeof checked !== "string") return checked;
