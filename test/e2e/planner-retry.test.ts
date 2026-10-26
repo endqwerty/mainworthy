@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { lockNamedProject } from "../../src/server/kernel/ctx.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
@@ -821,6 +822,7 @@ for (const reload of [false, true])
 				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
 				await instance.app.database.write(async (db) => {
 					await db.transaction(async () => {
+						await lockNamedProject(db, "scratch");
 						await removeProject(db, "scratch");
 					});
 				});
