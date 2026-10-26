@@ -818,14 +818,20 @@ describe("for any sequence of failures, successes and waits", () => {
 });
 
 describe("accountKey", () => {
-	test("a name is one key however it is capitalised or padded, and never more than a name's length", () => {
+	test("a name is one key however it is capitalised or padded, and no key is longer than a name's", () => {
 		expect(accountKey("robin")).toBe("account:robin");
 		expect(accountKey("Robin")).toBe("account:robin");
 		expect(accountKey("  ROBIN\t")).toBe("account:robin");
 		expect(accountKey("robin@example.com")).toBe("account:robin@example.com");
 		// What a stranger types does not decide how much memory a key takes.
-		expect(accountKey("x".repeat(5000))).toBe(`account:${"x".repeat(64)}`);
-		expect(accountKey(`${"a".repeat(64)}b`)).toBe(accountKey(`${"A".repeat(64)}c`));
+		expect(accountKey("x".repeat(5000))?.length).toBeLessThanOrEqual("account:#".length + 64);
+		expect(accountKey(`${"a".repeat(64)}b`)?.length).toBeLessThanOrEqual("account:#".length + 64);
+		expect(accountKey(`${"a".repeat(64)}b`)).toBe(accountKey(` ${"A".repeat(64)}B `));
+		// An email address may be longer than a name: two that differ only past a name's length are two keys, and
+		// neither is the key of a name.
+		const local = "a".repeat(64);
+		expect(accountKey(`${local}@example.com`)).not.toBe(accountKey(`${local}@example.org`));
+		expect(accountKey(`${local}@example.com`)).not.toBe(accountKey(local));
 		// Another name is another key, and no key is one a token or an address is counted under.
 		expect(accountKey("robin")).not.toBe(accountKey("robina"));
 		expect(accountKey("203.0.113.9")).not.toBe(addressKey("203.0.113.9"));

@@ -59,3 +59,26 @@ test("a name wins over another person's email address that reads the same", asyn
 	expect((await signIn(w, "robin@example.com", PASSWORD)).status).toBe(200);
 	expect((await signIn(w, "robin@example.com", "sam's own long password")).status).toBe(401);
 });
+
+test("two long addresses that differ only past a name's length are counted apart", async () => {
+	const w = await world({ proxied: true });
+	const local = "a".repeat(64);
+	const robin = await joined(w, "robin", PASSWORD);
+	const sam = await joined(w, "sam", "sam's own long password");
+	expect((await w.op("credential", { do: "email.set", email: `${local}@example.com` }, { cookie: robin })).status).toBe(
+		200,
+	);
+	expect((await w.op("credential", { do: "email.set", email: `${local}@example.org` }, { cookie: sam })).status).toBe(
+		200,
+	);
+	// Guesses at robin's address until it is blocked, each from another client, so only its own count can block.
+	let blocked = false;
+	for (let attempt = 0; attempt < 40 && !blocked; attempt++)
+		blocked =
+			(await signIn(w, `${local}@example.com`, "not the password at all", from(`198.51.100.${attempt + 1}`))).status ===
+			429;
+	expect(blocked).toBe(true);
+	// sam's address is not blocked by them, and sam signing in clears nothing of robin's.
+	expect((await signIn(w, `${local}@example.org`, "sam's own long password", from("203.0.113.7"))).status).toBe(200);
+	expect((await signIn(w, `${local}@example.com`, PASSWORD, from("203.0.113.8"))).status).toBe(429);
+});
