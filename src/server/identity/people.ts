@@ -332,10 +332,14 @@ class PasswordBlocked extends Error {
 	}
 }
 
-/** Admission and result accounting shared by sign-in and a change's current-password check. */
+/**
+ * Admission and result accounting shared by sign-in and a change's current-password check. A success clears the
+ * count of `name` unless `clears` is false: for a sign-in through an email address, whose key can be another
+ * person's name in another case or padding, so that one person's sign-ins would clear the guesses at another's.
+ */
 async function checkPassword(
 	app: App,
-	input: { password: string; stored: string; name: string; address: string | null },
+	input: { password: string; stored: string; name: string; address: string | null; clears?: boolean },
 ): Promise<PasswordMatch | Limited> {
 	const limiter = limiterOf(app);
 	const account = accountKey(input.name);
@@ -361,7 +365,7 @@ async function checkPassword(
 		if (failed.kind === "blocked") return waiting(failed);
 	}
 	// A success clears only the name, and cannot erase a block begun while this check was running.
-	else if (account !== null) await limiter.succeeded([account], blockVersion);
+	else if (account !== null && input.clears !== false) await limiter.succeeded([account], blockVersion);
 	return right;
 }
 
@@ -386,10 +390,10 @@ export async function signInWithPassword(
 	const keys = counted(addressKey(about.address), account);
 	const answer = await limiter.check(keys, app.now());
 	if (answer.kind === "blocked") return waiting(answer);
-	const person = await app.database.admissionRead(
-		async (readDb) =>
-			(await readDb.get(Q.personByName, { name: input.name })) ?? (await personByEmail(readDb, input.name)),
+	const named = await app.database.admissionRead(
+		async (readDb) => await readDb.get(Q.personByName, { name: input.name }),
 	);
+	const person = named ?? (await app.database.admissionRead(async (readDb) => await personByEmail(readDb, input.name)));
 	const name = person?.name ?? input.name;
 	const stored = person
 		? await app.database.admissionRead(async (readDb) => await livePassword(readDb, person.id))
@@ -404,6 +408,7 @@ export async function signInWithPassword(
 			stored: stored?.data ?? nobodys,
 			name: input.name,
 			address: about.address,
+			clears: named !== null,
 		});
 		if (typeof checked !== "string") return checked;
 		right = checked;
