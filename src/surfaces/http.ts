@@ -977,15 +977,16 @@ export function serve(
 		maxRequestBodySize: STREAM_BODY_LIMIT,
 		...(ui?.websocket ? { websocket: ui.websocket } : {}),
 		routes: {
-			...withHeadersOnEvery(routes, refuseProxy),
 			// Exempt by the route Bun matched on the raw path, never by the request's URL, which Bun hands over normalised
 			// (`/%2e/healthz` arrives as `/healthz`): the startup probe, and Cloud Scheduler's call, which proves itself
 			// with a Google token (`authenticateJob`). Any other method on these paths falls to the guarded fallback.
+			// First, so a test's own `/healthz` (extra routes) still replaces it.
 			...withHeadersOnEvery({
 				// Bun answers HEAD from the GET route; only the probe's GET is exempt.
 				"/healthz": { GET: (req: Request) => (req.method === "GET" ? healthz() : (refuseProxy(req) ?? healthz())) },
 				"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
 			}),
+			...withHeadersOnEvery(routes, refuseProxy),
 			...keepingPolicyOnEvery(extra.open ?? {}, refuseProxy),
 			...(ui ? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) } : {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
