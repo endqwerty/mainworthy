@@ -1562,6 +1562,16 @@ describe("Mainworthy instance archives", () => {
 		]);
 	});
 
+	test("an archive whose span is half there, or ends past the safest integer, is refused and rolled back", async () => {
+		const text = await archive(await source());
+		const span = `"started_at":${time - 90_000},"ended_at":${time - 60_000}`;
+		for (const changed of [
+			`"started_at":${time - 90_000},"ended_at":null`,
+			`"started_at":${time - 90_000},"ended_at":9007199254740992`,
+		])
+			await refuse(rehash(text.replace(span, changed)), /batches/);
+	});
+
 	test("an archive without decision evidence imports legacy hashes as NULL", async () => {
 		const from = await source();
 		await from.transaction(() => from.exec("ALTER TABLE decisions DROP COLUMN on_evidence"));

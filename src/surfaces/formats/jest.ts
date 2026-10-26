@@ -138,5 +138,6 @@ function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] | "unusa
 		start = Math.min(start, file.startTime);
 		end = Math.max(end, file.endTime);
 	}
-	return Number.isFinite(start) && Number.isFinite(end) ? spanOf(start, end - start) : undefined;
+	if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined;
+	return spanOf(start, end - start) ?? "unusable";
 }

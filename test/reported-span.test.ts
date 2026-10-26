@@ -125,6 +125,10 @@ describe("a change run's reported test span", () => {
 			await expect(
 				h.app.database.write((db) => db.transaction(() => db.exec(`UPDATE batches SET ${half} = NULL`))),
 			).rejects.toThrow(/batches_span/);
+		// The verifier's finding: a stored time beyond what a reply can carry made the results read fail.
+		await expect(
+			h.app.database.write((db) => db.transaction(() => db.exec("UPDATE batches SET ended_at = 9007199254740992"))),
+		).rejects.toThrow(/batches_span/);
 	});
 
 	test("never moves a gate or the time a write is stored at", async () => {
