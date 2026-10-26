@@ -35,8 +35,9 @@ Read this first. These are the known gaps, in order of how soon they bite.
    a forgotten person's name in stored command replies (#228),
    forgetting a person without the raw API (#229), and a person's drafts left in the browser after sign-out
    (#230). The policy names the operator as "the owner of the Mainworthy project" and gives `admin@mainworthy.com`
-   for private requests. The owner chose to publish no postal address and accepted the contact-check
-   email's Cloudflare deduplication notice as sufficient ([#231](https://github.com/endqwerty/mainworthy/issues/231)).
+   for private requests. The owner chose to publish no postal address. The owner tested delivery from
+   another personal mailbox and reported that it does not work. Fix delivery and confirm receipt before
+   relying on this contact ([#231](https://github.com/endqwerty/mainworthy/issues/231)).
 
 ## Privacy (GDPR, UK GDPR, CCPA)
 
