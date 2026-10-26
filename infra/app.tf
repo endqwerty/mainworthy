@@ -14,10 +14,12 @@ locals {
 # cf-connecting-ip only with it. The organisation forbids allUsers, so the invoker check is off instead. Each apply
 # on main sets the image to the commit's tested digest; Cloud Run moves traffic once the new revision is ready.
 resource "google_cloud_run_v2_service" "app" {
-  project              = var.production_project
-  name                 = "mainworthy"
-  location             = local.region
-  deletion_protection  = true
+  project  = var.production_project
+  name     = "mainworthy"
+  location = local.region
+  # The service holds no state (data is in Cloud SQL and the bucket), and protection would stop Terraform replacing a
+  # service whose first revision failed: the retry after a fix must be able to recreate it.
+  deletion_protection  = false
   ingress              = "INGRESS_TRAFFIC_ALL"
   invoker_iam_disabled = true
   labels               = local.labels
@@ -132,6 +134,11 @@ resource "google_cloud_run_v2_service" "app" {
         mount_options = ["metadata-cache-ttl-secs=0", "uid=10001", "file-mode=0600", "dir-mode=0700"]
       }
     }
+  }
+  # Every apply sends all traffic to the revision it releases, which also ends an emergency pin made in Cloud Shell.
+  traffic {
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    percent = 100
   }
   depends_on = [
     google_project_iam_member.sql, google_secret_manager_secret_iam_member.app,

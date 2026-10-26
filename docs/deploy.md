@@ -56,7 +56,7 @@ and the state lock.
 
 Rollback is a revert on `main`, which releases the previous commit's image. In an emergency the owner can move
 traffic in Cloud Shell (`gcloud run services update-traffic mainworthy --to-revisions=<revision>=100 --region=us-west1
---project=example-production`); the next apply moves it to its own revision again. Releases do not run the previous
+--project=example-production`); the next apply moves all traffic to its own revision again (the service declares 100% to the latest), so pause merging until the fix is on `main`. Releases do not run the previous
 release's smoke checks against the new schema: before 1.0 nothing is compatible (`AGENTS.md`).
 
 A manual run of **infrastructure** on `main` is the drift check: the reader plans `main`'s tip with its published
