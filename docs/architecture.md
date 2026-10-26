@@ -167,7 +167,10 @@ job change does not certify or re-enable that workload for issue #914.
 ## Who may call
 
 An actor is a person, an agent, a pipeline or the policy's own rule. What it may do is a grant per project (or
-one for every project): a list of capabilities. A token names an actor and carries its grants.
+one for every project): a list of capabilities. Today projects belong directly to the instance, and teams are
+named grant sets whose memberships add capabilities for people. A token names an actor and carries its grants.
+The accepted [project-owning team model](decisions/2026-10-26-projects-belong-to-teams.md) replaces those grant sets
+with owner, admin, user and viewer memberships in M8; it is not implemented yet.
 
 | Capability | Lets its holder |
 | --- | --- |

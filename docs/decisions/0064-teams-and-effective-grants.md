@@ -4,6 +4,10 @@
 
 ## Decision
 
+[Projects belong to teams](2026-10-26-projects-belong-to-teams.md), accepted 2026-10-26, supersedes this grant-set
+model once [issue #955](https://github.com/endqwerty/mainworthy/issues/955) lands. Until then this record describes
+the implemented model. The replacement retains the old teams' history.
+
 A team is a named set of grants, on individual projects or on every project. People hold memberships. Identity owns `teams`, `team_members`, `team_grants` and `team_events`; all actions extend the existing `admin` operation, with no new MCP tool. Settings, People manages them. The generated CLI exposes the same actions.
 
 `toActor` reads personal grants plus the grants of current memberships and passes the union through `heldCapabilities`. No team grant is copied into a person's grants. Two teams can grant the same permission, and removing one membership leaves every other source intact. Agents, pipelines and the policy cannot join. The owner's authority stays independent of teams. As with personal grants, a person cannot change their own membership or the grants of a team they belong to.
