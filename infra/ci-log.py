@@ -11,7 +11,8 @@ from pathlib import Path
 def identifiers():
     values = set()
     for name, value in os.environ.items():
-        if name.startswith(("TF_VAR_", "GCP_")) or name == "STATE_BUCKET":
+        # The image digest is public and is what a release log is for.
+        if (name.startswith(("TF_VAR_", "GCP_")) and name != "TF_VAR_app_digest") or name == "STATE_BUCKET":
             if value and value != "null":
                 values.add(value)
     provider = os.environ.get("GCP_WORKLOAD_IDENTITY_PROVIDER", "")

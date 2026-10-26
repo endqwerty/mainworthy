@@ -1,9 +1,9 @@
 name: infrastructure
 
 on:
+  # Every push to main: each one releases its own tested image (infra/ci.sh waits for check.yml to publish it).
   push:
     branches: [main]
-    paths: ['infra/**', '.github/workflows/infra*.yml']
   workflow_dispatch:
 
 permissions:

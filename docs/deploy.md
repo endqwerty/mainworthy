@@ -4,145 +4,100 @@ Mainworthy runs as one app process connected to PostgreSQL 18. The app volume ho
 archive staging; PostgreSQL has its own volume. `compose.yaml` runs both. Running elsewhere is possible but
 not yet supported, as amended in [decision 0026](decisions/0026-the-apps-offer-one-instance.md).
 
-## Prepare Google Cloud infrastructure
+## Google Cloud
 
-The move to Cloud Run uses [application Terraform](../infra/) in `us-west1`. It does not switch public traffic.
-[The ownership decision](decisions/2026-10-25-cloud-infrastructure-and-release-ownership.md) separates infrastructure
-from image/traffic releases. [The cost table](cloud-costs.md) records prices before the first apply.
+Mainworthy runs as one Cloud Run service, `mainworthy` in `us-west1`, on one Cloud SQL database, defined by the
+[Terraform in `infra/`](../infra/) and applied only by CI ([the decision](decisions/2026-10-26-one-service-released-by-the-apply.md);
+[the costs](cloud-costs.md)). It does not serve `mainworthy.com` until the cutover below.
 
-1. Have the owner apply the reviewed private foundation patch in Cloud Shell. It creates the app state bucket,
-   enables APIs, creates the two runtime accounts, pins this repository's `infra.yml` on `main`, and grants separate CI writer and reader identities.
-   Apply its stage A, wait for IAM propagation, then stage B. Wait again before running app infrastructure CI.
-   The owner keeps organisation, billing and project identifiers in the private foundation.
-2. Have the owner set these Actions repository secrets from the private foundation's outputs, under
-   **Settings > Secrets and variables > Actions > Repository secrets**. The values below are placeholders.
-   Store no account key, credential JSON, secret value or project identifier in this repository.
+### What the owner sets up once
+
+1. The private foundation, applied in Cloud Shell: projects, organisation policies, the app's state bucket, the two
+   runtime accounts (`app`, `jobs`), and two CI identities federated from GitHub, a writer for `infra.yml`'s push runs
+   and a read-only planner for its manual runs. No pull request can sign in.
+2. These Actions repository secrets (placeholders shown; no identifier belongs in this repository), under
+   **Settings > Secrets and variables > Actions > Repository secrets**:
 
    | Secret | Example or source |
    | --- | --- |
    | `GCP_PRODUCTION_PROJECT` | `example-production` |
-   | `GCP_PREVIEW_PROJECT` | `example-preview` |
+   | `GCP_PREVIEW_PROJECT` | `example-preview` (its network is kept for previews, #894) |
    | `GCP_ATTACHMENTS_BUCKET` | `example-attachments` |
    | `GCP_TERRAFORM_STATE_BUCKET` | `example-app-tfstate`, the foundation's app state bucket |
-   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Foundation's complete provider name; keep the value outside the repository |
-   | `GCP_INFRA_DEPLOY_ACCOUNT` | Foundation's deploy service account; push only |
-   | `GCP_INFRA_PLAN_ACCOUNT` | Foundation's infrastructure reader; manual dispatch only |
+   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | the foundation's complete provider name |
+   | `GCP_INFRA_DEPLOY_ACCOUNT` | the foundation's writer; push only |
+   | `GCP_INFRA_PLAN_ACCOUNT` | the foundation's reader; manual dispatch only |
 
-3. Merge the infrastructure change after review. A push to `main` touching `infra/` or `infra.yml` plans and applies
-   the saved plan. A one-hour impersonated access token covers the 45-minute job. GitHub's writer concurrency group serializes applies; the GCS backend locks writes. The writer refuses to apply a saved plan if its commit is no longer main's tip. The first run creates
-   both SQL instances, isolated VPCs, private services access, the registry, attachment bucket, runtime-account permissions,
-   IAM SQL users, secret containers and the Tasks queue, then the private job service and its Scheduler job.
-4. Run **infrastructure** manually on `main` after the first apply. The reader runs `plan -lock=false
-   -detailed-exitcode` because it cannot create lock objects. Exit 0 means no change, 2 means drift, and 1 is an
-   error. Drift fails the job and needs review. Dispatch never applies and has its own concurrency group, so it cannot cancel a pending writer. A drift check
-   during an apply may see intermediate state; rerun it once the writer finishes. No PR event can federate, including one
-   from this repository. A manual run on another branch skips the job and the pool also refuses it.
-
-The entry workflow passes these repository secrets to `infra-execute.yml` as reusable-workflow secrets. Actions
-therefore masks their values before printing any step environment. The first script step also registers masks
-for runtime image references, the WIF project number, seed project ids and derived runtime service-account emails.
-The private foundation must permit this exact called workflow in its WIF condition,
-while keeping `infra.yml` on `main` as the caller.
-Terraform output and saved plans stay in a restricted directory under `RUNNER_TEMP`, removed when the script
-exits and never uploaded. Public logs show only the plan and apply counts, `No changes.`, one line per planned change (its action, its
-resource address and the names of the attributes that change, never their values; a drift check names what differs),
-and redacted error headers on failure.
-Full resource diffs and multiline diagnostic context stay out of the log. Error headers redact configured identifiers,
-URLs, email addresses, project numbers, IPv4 and IPv6 addresses, and UUID-shaped identifiers.
-Error headers can still contain unforeseen non-secret attributes.
-There are no Terraform outputs because no consumer needs them. Removing them prevents apply from printing
-cloud identifiers. Diagnose failures through the owner's private cloud access.
-
-Plans run only in CI after merge or a manual dispatch of main's workflow. Local author checks use no Google
-login and run only `fmt`, `init -backend=false`, and `validate`. Put `TF_DATA_DIR` in task scratch outside the
-checkout when initializing locally, so repository privacy tests do not read downloaded provider binaries.
-Keep the committed provider lockfile and use Terraform 1.17.0. Run `bash infra/ci.test.sh` to check CI command
-ordering and failure paths with a local stand-in for Terraform, without credentials.
-
-### Enable the private job service
-
-The required `check.yml` static job runs formatting, backend-free initialization, validation and the CI command
-test before merge, without Google credentials. Changes to `infra/` select that job and the repository checks
-that read infrastructure files.
-
-The job service (step 4):
-
-1. **Its image is CI's.** `check.yml` builds and smoke-tests the image once and `publish` pushes it to GHCR. The
-   registry `mainworthy` is a remote repository of `https://ghcr.io`, so Cloud Run pulls that same digest through it
-   and no CI identity pushes to Google Cloud. `infra/jobs.tf` names the first app digest (main's tested image of
-   `a29e971d`) and the Cloud SQL Auth Proxy release by digest; both are public. Step 5's deploys replace the app
-   digest, which Terraform then ignores.
-2. **Two secret values come from the owner**, added in Cloud Shell before the first apply that creates the
-   service, since no CI identity may add secret versions:
+3. Three secret values, in Cloud Shell, since no CI identity may add one:
 
    ```sh
    p=example-production   # the production project
    openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add mainworthy-job-key --project="$p" --data-file=-
    openssl rand -base64 48 | tr -d '\n/+=' | gcloud secrets versions add mainworthy-owner-token --project="$p" --data-file=-
+   openssl rand -base64 48 | tr -d '\n/+=' | gcloud secrets versions add mainworthy-proxy-secret --project="$p" --data-file=-
    ```
 
-   The job key encrypts private job inputs; replacing it makes queued private jobs unreadable, so keep old versions.
-   The owner token signs the owner in on first start; read it back with `gcloud secrets versions access latest
-   --secret=mainworthy-owner-token --project="$p"`. Neither value is printed, logged or in Terraform state.
-   `mainworthy-database-password` stays an empty container: the runtimes sign in to PostgreSQL through IAM.
-3. **Database privileges are Terraform's.** Both IAM users are members of `cloudsqlsuperuser` (`database_roles`),
-   which owns the `mainworthy` database, and every session starts as that role (`options=-c role=cloudsqlsuperuser`
-   in the database URL). Tables either service creates therefore belong to one role, and both may migrate. The
-   instance holds no other application's data. No hand-run SQL session is needed.
-4. **The bucket mount is checked before the cutover**, when attachments first arrive: publish-by-rename, immediate
-   cross-instance reads, concurrent same-hash uploads, an interrupted pending file, hashes and a prune beside an
-   upload. Metadata caching is off and the mount is owned by the image's UID 10001 with owner-only modes. If a
-   check fails, the Cloud Storage API `BlobStore` replaces the disk store before real data lands.
-5. **Check:** the service's ready revision runs the digest above. Cloud Run marks a revision ready only after its
-   startup probe gets `/healthz` ready (the database answers and migrations are done), and the image's
-   `MAINWORTHY_COMMIT` is that digest's commit. The public `/healthz` check comes with step 5's public service.
+   The job key encrypts private job inputs (replacing it makes queued ones unreadable). The owner token signs the
+   owner in on first start; read it with `gcloud secrets versions access latest --secret=mainworthy-owner-token
+   --project="$p"`. The proxy secret goes into Cloudflare at the cutover. `mainworthy-database-password` stays empty:
+   the app signs in to PostgreSQL through IAM.
 
-The job service accepts Google OIDC for its deterministic Run URL, from the jobs service account only. It keeps
-Cloud Run's invoker IAM check on, and the app verifies the token again at `POST /api/job`. Scheduler sends
-`{"do":"tick"}` every minute. The Tasks queue fixes the destination, method, content type, audience and identity;
-only the app account may enqueue. Step 3 continues with the Cloud Tasks dispatcher after step 4 supplies the
-first tested image, before step 5 releases public traffic. That follow-up must send the registry's run body, give
-it a 600-second dispatch deadline and reconcile a lost dispatch from durable jobs. Scheduler's service timeout
-and attempt deadline are 600 seconds. Retries and expired claims must pass the real queue checks before cutover.
-A periodic tick can recover jobs even when dispatch fails, but it is not a latency guarantee.
+### Every push to main releases
 
-Both service-level and revision-level job instance maxima are one. Each current process can use six database
-connections after setting read and write pools to one. Two job revisions plus migration and operator fit a
-14-connection budget. Adding two public-service revisions would make 26, above the instance's default 25.
-Step 5 must reduce the pools that job mode does not need and prove headroom, including brief instance overshoot,
-before deploying the public app. Preview apps and their per-PR database/user lifecycle remain in
-[issue #894](https://github.com/endqwerty/mainworthy/issues/894); the preview SQL instance is reserved now.
+`check.yml` builds the image once, tests it and, after its gate, publishes it to GHCR under the commit's tag.
+`infra.yml` runs on every push to `main`: before signing in it waits up to 40 minutes for that tag (`ci.sh digest`,
+anonymous, since the image is public), then plans and applies with the digest as `app_digest`. The registry
+`mainworthy` is a remote repository of `https://ghcr.io`, so Cloud Run runs that exact digest. A new image makes a new
+revision; Cloud Run moves traffic to it once its startup probe gets `/healthz` ready (the database answers and the
+migrations are done; until then it answers 503), and keeps traffic on the previous revision if it never does. The
+writer refuses a plan whose commit is no longer main's tip, so a late older push never replaces a newer release, and
+a commit whose gate failed has no image and is not released. Releases and other changes share one concurrency group
+and the state lock.
 
-### Finish deployment and cutover
+Rollback is a revert on `main`, which releases the previous commit's image. In an emergency the owner can move
+traffic in Cloud Shell (`gcloud run services update-traffic mainworthy --to-revisions=<revision>=100 --region=us-west1
+--project=example-production`); the next apply moves it to its own revision again. Releases do not run the previous
+release's smoke checks against the new schema: before 1.0 nothing is compatible (`AGENTS.md`).
 
-For the public Cloud Run service, supply `MAINWORTHY_PROXY_SECRET` from Secret Manager and set
-`MAINWORTHY_CLIENT_ADDRESS_HEADER=cf-connecting-ip`. Leave `MAINWORTHY_TRUSTED_PROXY` unset: Google's front end
-connects both direct and Cloudflare requests, so its address cannot prove which path a request took.
-Use a random secret of at least 32 characters. Configure Cloudflare's request-header rule to overwrite
-`x-mainworthy-proxy` with that same secret on every request forwarded to the public app, replacing any value
-the visitor supplied. Keep the value out of repository files, logs and response headers. Cloudflare must also
-replace the visitor's `CF-Connecting-IP` with the visitor's actual address.
+A manual run of **infrastructure** on `main` is the drift check: the reader plans `main`'s tip with its published
+digest, with `-lock=false -detailed-exitcode`. Exit 0 is no change, 2 is drift (the job fails and names the
+resources), 1 an error.
 
-The app checks the proof before sign-in, API, stream, archive, documentation and UI handlers. Without a matching
-proof it returns JSON 403, even if the request has a valid token or claims a client address. Only `GET /healthz`
-is exempt so Cloud Run's startup probe can reach it directly. It returns 503 during migration and 200 only
-after startup is ready. Check before cutover that the direct `run.app` address refuses an application request
-without proof, including one with a forged `CF-Connecting-IP`, while a request through Cloudflare succeeds.
-Then check that failed sign-ins through Cloudflare count against each visitor's own address.
+Public logs show the image digest, the plan and apply counts, `No changes.`, one line per planned change (action,
+resource address and the names of changed attributes, never values) and redacted error headers. Terraform output,
+plans and full diagnostics stay in a private directory under `RUNNER_TEMP`, deleted on exit; the secrets reach the
+called workflow as reusable-workflow secrets, which Actions masks. Locally, an author runs only `terraform fmt`,
+`init -backend=false` and `validate` (with `TF_DATA_DIR` outside the checkout), `bash infra/ci.test.sh` for CI's
+command order and failure paths, and no Google login. `check.yml`'s static job runs the same before a merge.
 
-Step 5 adds the public app service to Terraform with its Cloudflare proof, probes and verified connection budget.
-It releases both services by patching only app image and traffic, under the same `mainworthy-infrastructure`
-concurrency group as infrastructure CI. Terraform ignores those two job-service release fields and owns every
-other field. Preserve the proxy, secrets, mount and networking during image updates. A release followed by a
-manual infrastructure run must report no change. An infrastructure update must preserve the released image and
-traffic. Updating the bootstrap image variable alone does not release a new image after creation.
+### The service
 
-Keep the build-once image, `/healthz` commit, continuous-request deploy, Cloud Run revision rollback, compatible
-schema, backup/restore and client-address proof checks in the accepted record. Drop the home-server fallback,
-parallel-host operation and switch-back rehearsal. Once those checks pass, move Cloudflare to Cloud Run and
-retire the Coolify instance and its autodeploy. Until cutover, Coolify is best-effort: check it only after
-migration or startup changes. After cutover, check Cloud Run's `/healthz` commit after every landing. The
-existing deployment instructions below describe the current host.
+- One minimum and one maximum instance, 1 vCPU and 512 MiB, request-based billing, with the Cloud SQL Auth Proxy
+  beside it (IAM sign-in, private IP) and the attachment bucket mounted at `/data/blobs` with metadata caching off.
+- Background work: Cloud Scheduler posts `{"do":"tick"}` to the service's `/api/job` every minute, signed with a
+  Google token as the `jobs` account. The app checks that token's audience and account and runs the due jobs inside
+  the request; it runs no timer of its own (`MAINWORTHY_JOB_RUNNER=0`).
+- Cloudflare's proof: the organisation forbids `allUsers`, so the invoker check is off and the app refuses every
+  request without `x-mainworthy-proxy` set to the proxy secret, except `/healthz` and the token-checked `/api/job`.
+  Only requests with it are read for `cf-connecting-ip`.
+- Database privileges: the app's IAM user is a member of `cloudsqlsuperuser`, which owns the `mainworthy` database,
+  and every session starts as that role, so tables have one owner.
+- Connections: a deploy runs two revisions, each with up to 2 read, 2 write, 1 job, 2 admission, 1 `LISTEN` and 1
+  migration connection: 18, plus an operator's session, under `db-f1-micro`'s 25.
+
+### The cutover
+
+1. The bucket mount's checks, before attachments arrive: publish-by-rename, an object written on one instance read
+   at once on another, concurrent same-hash uploads, an interrupted pending file, hashes and a prune beside an
+   upload. If one fails, a Cloud Storage `BlobStore` replaces the disk store first.
+2. A Cloudflare Transform Rule on `mainworthy.com` sets the request header `x-mainworthy-proxy` to the proxy secret
+   (`gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`), overwriting any value a
+   client sent; Cloudflare also replaces any `CF-Connecting-IP` a visitor sent with the visitor's real address. Then
+   `mainworthy.com` points at the service.
+3. Check that public `/healthz` names the deployed commit, that direct requests to the `run.app` address with and
+   without a forged `cf-connecting-ip` are refused, and that the iPhone app's TestFlight job still uploads. Then the
+   Coolify instance and its autodeploy go. Until then it is best-effort: check it only after migration or startup
+   changes; after the cutover, check `/healthz`'s commit after every landing.
 
 ## PostgreSQL cutover at merge
 

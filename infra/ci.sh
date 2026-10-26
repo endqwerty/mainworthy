@@ -4,6 +4,29 @@ suite=$(cd -- "$(dirname -- "$0")" && pwd)
 if [ "${1:-}" = mask ]; then
   exec python3 "$suite/ci-log.py" mask
 fi
+# The app runs the image check.yml tested and published to GHCR for this commit. A push waits for it (check.yml's
+# gate runs first); a drift check reads the same commit's. The image is public, so no credentials are needed. The
+# workflow runs this before signing in, so the wait does not use up the access token.
+if [ "${1:-}" = digest ]; then
+  deadline=$((SECONDS + ${IMAGE_WAIT_SECONDS:-2400}))
+  while :; do
+    token=$(curl --fail --silent --max-time 10 "https://ghcr.io/token?scope=repository:endqwerty/mainworthy:pull" | jq -r .token) || token=
+    digest=$(curl --fail --silent --head --max-time 10 -H "Authorization: Bearer $token" \
+      -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+      "https://ghcr.io/v2/endqwerty/mainworthy/manifests/${GITHUB_SHA:?Set the checked-out commit}" |
+      tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }') || digest=
+    if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "Image: ghcr.io/endqwerty/mainworthy@$digest ($GITHUB_SHA)" >&2
+      printf '%s\n' "$digest"
+      exit 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "No tested image of $GITHUB_SHA on GHCR: check.yml publishes one only after its gate passes on main." >&2
+      exit 1
+    fi
+    sleep 30
+  done
+fi
 # The workflow and WIF independently restrict callers to main and bind each event to its own identity.
 case "${1:-}" in
   push|workflow_dispatch) ;;
@@ -33,6 +56,7 @@ changes() {
     return 1
   fi
 }
+: "${TF_VAR_app_digest:?Set the tested image digest (ci.sh digest)}"
 terraform_ci init -lockfile=readonly -backend-config="bucket=$STATE_BUCKET"
 terraform_ci validate
 if [ "$1" = push ]; then

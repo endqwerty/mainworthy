@@ -18,13 +18,11 @@ resource "google_artifact_registry_repository" "images" {
 }
 
 resource "google_sql_database_instance" "app" {
-  for_each         = local.projects
-  project          = each.value
-  name             = "mainworthy"
-  region           = local.region
-  database_version = "POSTGRES_18"
-  # The preview instance goes in the next change (no previews yet, #894); Terraform reads this from state on delete.
-  deletion_protection = each.key == "production"
+  project             = var.production_project
+  name                = "mainworthy"
+  region              = local.region
+  database_version    = "POSTGRES_18"
+  deletion_protection = true
   settings {
     tier                        = "db-f1-micro"
     edition                     = "ENTERPRISE"
@@ -33,10 +31,10 @@ resource "google_sql_database_instance" "app" {
     disk_size                   = 10
     disk_autoresize             = true
     user_labels                 = local.labels
-    deletion_protection_enabled = each.key == "production"
+    deletion_protection_enabled = true
     ip_configuration {
       ipv4_enabled    = false
-      private_network = google_compute_network.app[each.key].id
+      private_network = google_compute_network.app.id
       ssl_mode        = "ENCRYPTED_ONLY"
     }
     database_flags {
@@ -44,12 +42,11 @@ resource "google_sql_database_instance" "app" {
       value = "on"
     }
     backup_configuration {
-      enabled                        = each.key == "production"
-      point_in_time_recovery_enabled = each.key == "production"
+      enabled                        = true
+      point_in_time_recovery_enabled = true
       transaction_log_retention_days = 7
       start_time                     = "09:00"
-      # Google keeps no backup location while backups are off, so preview sets none.
-      location = each.key == "production" ? local.region : null
+      location                       = local.region
       backup_retention_settings {
         retained_backups = 7
       }
@@ -58,9 +55,14 @@ resource "google_sql_database_instance" "app" {
   depends_on = [google_service_networking_connection.sql]
 }
 
+moved {
+  from = google_sql_database_instance.app["production"]
+  to   = google_sql_database_instance.app
+}
+
 resource "google_sql_database" "production" {
   project  = var.production_project
-  instance = google_sql_database_instance.app["production"].name
+  instance = google_sql_database_instance.app.name
   name     = "mainworthy"
 }
 

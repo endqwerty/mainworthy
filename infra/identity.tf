@@ -1,4 +1,5 @@
-# The foundation creates runtime identities so it can grant deployment access directly on each account.
+# The foundation creates both runtime accounts. The app runs as `app`; Cloud Scheduler signs its minute call to
+# /api/job as `jobs`, which the app checks (MAINWORTHY_JOB_ACCOUNT) and which holds nothing else.
 data "google_service_account" "runtime" {
   for_each   = toset(["app", "jobs"])
   project    = var.production_project
@@ -6,25 +7,24 @@ data "google_service_account" "runtime" {
 }
 
 resource "google_project_iam_member" "sql" {
-  for_each = {
-    app_client  = { account = "app", role = "roles/cloudsql.client" }
-    app_login   = { account = "app", role = "roles/cloudsql.instanceUser" }
-    jobs_client = { account = "jobs", role = "roles/cloudsql.client" }
-    jobs_login  = { account = "jobs", role = "roles/cloudsql.instanceUser" }
-  }
-  project = var.production_project
-  role    = each.value.role
-  member  = "serviceAccount:${data.google_service_account.runtime[each.value.account].email}"
+  for_each = { app_client = "roles/cloudsql.client", app_login = "roles/cloudsql.instanceUser" }
+  project  = var.production_project
+  role     = each.value
+  member   = "serviceAccount:${data.google_service_account.runtime["app"].email}"
 }
 
-resource "google_sql_user" "runtime" {
-  for_each = data.google_service_account.runtime
+resource "google_sql_user" "app" {
   project  = var.production_project
-  instance = google_sql_database_instance.app["production"].name
-  name     = trimsuffix(each.value.email, ".gserviceaccount.com")
+  instance = google_sql_database_instance.app.name
+  name     = trimsuffix(data.google_service_account.runtime["app"].email, ".gserviceaccount.com")
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
   # cloudsqlsuperuser owns the mainworthy database; its members may create in it. The instance holds nothing else.
   database_roles = ["cloudsqlsuperuser"]
+}
+
+moved {
+  from = google_sql_user.runtime["app"]
+  to   = google_sql_user.app
 }
 
 # The complete policy removes Google's projectViewer and projectEditor convenience grants.
@@ -33,24 +33,24 @@ resource "google_storage_bucket_iam_policy" "attachments" {
   policy_data = jsonencode({
     bindings = [{
       role    = "roles/storage.objectUser"
-      members = [for account in data.google_service_account.runtime : "serviceAccount:${account.email}"]
+      members = ["serviceAccount:${data.google_service_account.runtime["app"].email}"]
     }]
   })
 }
 
-resource "google_secret_manager_secret_iam_member" "job_key" {
-  for_each  = data.google_service_account.runtime
+resource "google_secret_manager_secret_iam_member" "app" {
+  for_each  = toset(["job-key", "owner-token", "proxy-secret"])
   project   = var.production_project
-  secret_id = google_secret_manager_secret.app["job-key"].secret_id
+  secret_id = google_secret_manager_secret.app[each.key].secret_id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${each.value.email}"
+  member    = "serviceAccount:${data.google_service_account.runtime["app"].email}"
 }
 
-# Both processes bootstrap the same owner. Neither may print a newly generated owner token in logs.
-resource "google_secret_manager_secret_iam_member" "owner" {
-  for_each  = data.google_service_account.runtime
-  project   = var.production_project
-  secret_id = google_secret_manager_secret.app["owner-token"].secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${each.value.email}"
+moved {
+  from = google_secret_manager_secret_iam_member.job_key["app"]
+  to   = google_secret_manager_secret_iam_member.app["job-key"]
+}
+moved {
+  from = google_secret_manager_secret_iam_member.owner["app"]
+  to   = google_secret_manager_secret_iam_member.app["owner-token"]
 }
