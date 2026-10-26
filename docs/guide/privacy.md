@@ -81,7 +81,7 @@ We keep your account, your sessions and your content because you asked us to pro
 
 - **Cloudflare** carries every request to `mainworthy.com`. It provides the domain's DNS, the encrypted connection and the tunnel to our server.
   Cloudflare sees your network address and the requests you make. See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
-- **Apple** delivers the iPhone app through TestFlight and the App Store, under [Apple's privacy policy](https://www.apple.com/legal/privacy/).
+- **Apple** delivers the iPhone app to the internal tester group through TestFlight, under [Apple's privacy policy](https://www.apple.com/legal/privacy/).
 
 The server and its database are ours, not a cloud provider's.
 
@@ -147,7 +147,7 @@ Mainworthy is a tool for software teams and is not meant for children under 16. 
 
 We may update this policy to comply with the law and to reflect what Mainworthy does. Every change is in the [history of this page on GitHub](https://github.com/endqwerty/mainworthy/commits/main/docs/guide/privacy.md). Whenever we change the policy, we update the date at the top.
 
-Have a question, a concern or a request about your data? We do not yet have a private contact address ([#231](https://github.com/endqwerty/mainworthy/issues/231)). Until we do, open an issue in the [Mainworthy repository on GitHub](https://github.com/endqwerty/mainworthy/issues). Issues there are public, so do not put personal information in one. Say that you want to reach us privately, and we will give you a private way to do so.
+Have a question, a concern or a request about your data? Email `admin@mainworthy.com`. The owner chose this private contact for now and chose to publish no postal address.
 
 ---
 

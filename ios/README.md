@@ -89,8 +89,11 @@ Real-device provider sign-in remains open in issue #421.
 
 ## Send it to TestFlight
 
-A paid team can send the app to App Store Connect, and TestFlight installs it on the team's phones with no cable.
-A build from TestFlight opens for 90 days.
+Distribution is internal TestFlight only. The owner chose this route because "only I have the app"
+([#210](https://github.com/endqwerty/mainworthy/issues/210)). The owner is the only tester in the internal group.
+The owner confirmed native passkey sign-in with 1Password on a physical iPhone against `mainworthy.com`,
+closing [#205](https://github.com/endqwerty/mainworthy/issues/205). That is the recorded device evidence.
+A paid team uploads through App Store Connect. TestFlight installs the build without a cable, and it opens for 90 days.
 
 1. Once: in [App Store Connect](https://appstoreconnect.apple.com) accept the agreements it shows, then Apps, +,
    New App, with the bundle ID that `ios/Config/Local.xcconfig` names (`com.mainworthy.app.` and the team's id).
@@ -110,12 +113,10 @@ and when it has that number already, Xcode raises it; the command prints the one
 `MARKETING_VERSION` in `Config/Base.xcconfig`. `Info.plist` answers the question about encryption, so a build is
 not held for it. `App/PrivacyInfo.xcprivacy` says what the app collects (the name a person signs in with, what they
 write and what each session records, for the app to work, tracking nobody) and why it reads its own settings, which Apple asks of every
-upload. The App Privacy answers on the App Store page are a separate form, needed only for the App Store, and the
-privacy policy is `https://mainworthy.com/privacy` (`docs/guide/privacy.md`).
+upload. The privacy policy is `https://mainworthy.com/privacy` (`docs/guide/privacy.md`).
 
 `bun scripts/ios.ts upload --dry-run` builds and signs the same and writes the `.ipa` to the cache instead of
-sending it. Testers outside the team need Apple's beta review first, and issue #210 says what else is left before the
-app suits people who do not run their own instance.
+sending it. Distribute uploaded builds to the internal tester group only.
 
 ### Sent on its own after a deploy
 
@@ -132,17 +133,19 @@ Health also names the build's commit while `state` is `upgrading` and `ok` is fa
 must require `ok: true` before treating that commit as deployed. This repository does not change or verify
 the job in the homelab repository.
 
-## Licence and the App Store
+## Licence and listing text
 
 The app is under the Apache License 2.0 like the rest of the repository, copyright held by the owner
 (decision 0025). It contains no code from others, only its own and Apple's frameworks, so it carries no
 third-party notice. It shows its copyright line, its licence and a link to the instance's page "Licence" under
 **You**, **About**; the copyright line is `NSHumanReadableCopyright` in `App/Info.plist`.
 
-What App Store Connect asks about the licence, and what to answer:
+The repository keeps the following listing text for App Store Connect. Distribution remains internal TestFlight only.
 
 | Field | Answer |
 | --- | --- |
+| Privacy policy | `https://mainworthy.com/privacy` |
+| Operator and privacy contact | The owner of the Mainworthy project. For privacy requests, email `admin@mainworthy.com`. The owner chose this address for now and chose to publish no postal address. |
 | Copyright, in the version's information | The line in `Info.plist` without the word `Copyright`: the year and the name (Apple adds the ©) |
 | App Information, License Agreement | Apple's standard licence agreement. The Apache licence covers the source; the App Store build is delivered under Apple's agreement, which the copyright holder may choose for their own build |
 
