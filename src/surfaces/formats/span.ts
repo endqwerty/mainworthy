@@ -24,7 +24,9 @@ export function zonedTime(text: string): number | "no zone" | undefined {
 	const [year, month, day, hour, minute, second, offsetHours, offsetMinutes] = [1, 2, 3, 4, 5, 6, 10, 11].map((i) =>
 		Number(match[i] ?? 0),
 	) as [number, number, number, number, number, number, number, number];
-	const date = new Date(Date.UTC(year, month - 1, day));
+	// setUTCFullYear, not Date.UTC, which reads years 0 to 99 as 1900 to 1999.
+	const date = new Date(0);
+	date.setUTCFullYear(year, month - 1, day);
 	if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59)
 		return undefined;
 	if (match[8] === undefined && match[9] === undefined) return "no zone";
@@ -32,7 +34,8 @@ export function zonedTime(text: string): number | "no zone" | undefined {
 	// Whole milliseconds, the rest cut off, as Date.parse reads them.
 	const fraction = Number((match[7] ?? "").slice(0, 3).padEnd(3, "0"));
 	const offset = (match[9] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes) * 60_000;
-	return Date.UTC(year, month - 1, day, hour, minute, second) + fraction - offset;
+	date.setUTCHours(hour, minute, second, fraction);
+	return date.getTime() - offset;
 }
 
 /** The span of several files sent as one report: from the first start to the last end, when every file has one. */
