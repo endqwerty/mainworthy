@@ -7,6 +7,7 @@ import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { Policy } from "../../src/core/kinds.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { lockNamedProject } from "../../src/server/kernel/ctx.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
@@ -80,7 +81,10 @@ for (const action of ["folder", "restore"] as const) {
 			if (action === "restore")
 				await harness.page.locator("#detail .ctitle").filter({ hasText: "Second title" }).waitFor();
 			await instance.app.database.write(async (db) => {
-				await db.transaction(async () => removeProject(db, "scratch"));
+				await db.transaction(async () => {
+					await lockNamedProject(db, "scratch");
+					await removeProject(db, "scratch");
+				});
 			});
 			await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
 			await twoVersions(server);

@@ -8,6 +8,7 @@ import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { AttachmentReply } from "../../src/core/attachments.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { lockNamedProject } from "../../src/server/kernel/ctx.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
@@ -496,6 +497,7 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 				await page.locator("#list").getByRole("link", { name: "Runs", exact: true }).click();
 				await instance.app.database.write(async (db) => {
 					await db.transaction(async () => {
+						await lockNamedProject(db, "scratch");
 						await removeProject(db, "scratch");
 						// Deliberately collide slot ids with retained browser state, as SQLite reused deleted row ids.
 						await db.exec("ALTER TABLE slots ALTER COLUMN id RESTART WITH 1");
