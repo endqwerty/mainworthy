@@ -62,7 +62,33 @@ if [ "$*" != 'ls-remote origin refs/heads/main' ]; then exit 1; fi
 printf '%s\trefs/heads/main\n' "${REMOTE_SHA:-example-main}"
 MOCK
 chmod +x "$scratch/terraform" "$scratch/git"
+cat > "$scratch/curl" <<'MOCK'
+#!/usr/bin/env bash
+case "$*" in
+  *ghcr.io/token*) echo '{"token":"anonymous"}' ;;
+  *"/manifests/$PUBLISHED_SHA"*) printf 'HTTP/2 200\r\ndocker-content-digest: %s\r\n\r\n' "$TF_VAR_app_digest" ;;
+  *) exit 22 ;;
+esac
+MOCK
+cat > "$scratch/sleep" <<'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+chmod +x "$scratch/curl" "$scratch/sleep"
 export PATH="$scratch:$PATH" CALLS="$scratch/calls" STATE_BUCKET=example-state GITHUB_SHA=example-main
+export TF_VAR_app_digest=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc PUBLISHED_SHA=example-main
+# The release digest comes from GHCR's tag for the commit, and a commit with no tested image is never applied.
+test "$(bash "$suite/ci.sh" digest 2> "$scratch/digest.log")" = "$TF_VAR_app_digest"
+grep -Fxq "Image: ghcr.io/endqwerty/mainworthy@$TF_VAR_app_digest (example-main)" "$scratch/digest.log"
+if PUBLISHED_SHA=other IMAGE_WAIT_SECONDS=0 bash "$suite/ci.sh" digest > /dev/null 2> "$scratch/digest.log"; then
+  echo 'A commit without a published image must not be released.' >&2
+  exit 1
+fi
+grep -q 'No tested image of example-main on GHCR' "$scratch/digest.log"
+if (unset TF_VAR_app_digest; bash "$suite/ci.sh" push > /dev/null 2>&1); then
+  echo 'An apply without a digest must be refused.' >&2
+  exit 1
+fi
 export RUNNER_TEMP="$scratch" TF_VAR_production_project=example-private-project
 run_ci() {
   local rc=0
@@ -74,6 +100,7 @@ run_ci() {
   return "$rc"
 }
 bash "$suite/ci.sh" mask > "$scratch/masks"
+if grep -Fq "$TF_VAR_app_digest" "$scratch/masks"; then echo 'The public image digest must stay readable.' >&2; exit 1; fi
 for value in "$TF_VAR_production_project" "$STATE_BUCKET" \
   "mainworthy-app@$TF_VAR_production_project.iam.gserviceaccount.com" \
   "mainworthy-jobs@$TF_VAR_production_project.iam.gserviceaccount.com"; do
