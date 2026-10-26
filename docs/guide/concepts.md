@@ -92,6 +92,8 @@ The data is the same under all three presets. You can switch without migrating a
 
 The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. Changes to project records use those operations, whichever client sends them. Ten operations are also agent tools. For another one, such as planning a run, an agent uses the command line or the API.
 
+Today projects belong to the instance. Teams are named sets of grants, and a person receives their teams' capabilities as well as personal grants. The accepted team model gives each project one owning team and each member an owner, admin, user or viewer role. That model is not implemented yet.
+
 What a caller may do depends on the caller's identity. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can report results, announce deployments, mark changes as ended and read the gate. It can also hold `read` for project data. It can never edit, answer, plan or administer, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
 
 ## Where to go next
