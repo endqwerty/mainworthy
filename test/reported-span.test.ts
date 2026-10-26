@@ -119,6 +119,14 @@ describe("a change run's reported test span", () => {
 		});
 	});
 
+	test("a batch holds both halves of a span or neither (the verifier's finding)", async () => {
+		await report({ span: { startedAt: T0, endedAt: T0 + 60_000 }, results: [pass("a")] });
+		for (const half of ["started_at", "ended_at"])
+			await expect(
+				h.app.database.write((db) => db.transaction(() => db.exec(`UPDATE batches SET ${half} = NULL`))),
+			).rejects.toThrow(/batches_span/);
+	});
+
 	test("never moves a gate or the time a write is stored at", async () => {
 		await report({ results: [pass("a"), fail("b")] });
 		const before = await h.call<GateStatus>("gate", { commit: COMMIT });
