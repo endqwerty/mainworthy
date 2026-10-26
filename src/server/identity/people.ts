@@ -18,7 +18,7 @@ import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/error
 import { limiterOf, takeStart } from "./attempts.ts";
 import { holdCeremonyGeneration } from "./ceremonies.ts";
 import { findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
-import { clearMailLinksOf, credentialNotice } from "./contacts.ts";
+import { clearMailLinksOf, credentialNotice, personByEmail } from "./contacts.ts";
 import { CONTEXT } from "./contexts.ts";
 import {
 	type CredentialRow,
@@ -366,26 +366,30 @@ async function checkPassword(
 }
 
 /**
- * Signs a person in with their name and password.
+ * Signs a person in with their name, or their email address, and password. A name wins over another person's
+ * address that reads the same.
  *
  * A password is checked whoever is named: for a name that has none, against a hash nobody's password matches
  * (`dummyHash`). So the unknown name, the forgotten person, the person without a password and the wrong
  * password all cost the same work and get the same answer, and all four are counted alike under the address
- * and the name. While either is blocked the password is not checked at all.
+ * and the name: a person's own name, whether the name or the address was typed. While either is blocked the
+ * password is not checked at all.
  */
 export async function signInWithPassword(
 	app: App,
 	input: { name: string; password: string },
 	about: About,
 ): Promise<Entry | { ok: true; secondFactor: { challenge: string; expiresAt: number }; ceremony: string }> {
+	const person = await app.database.admissionRead(
+		async (readDb) =>
+			(await readDb.get(Q.personByName, { name: input.name })) ?? (await personByEmail(readDb, input.name)),
+	);
+	const name = person?.name ?? input.name;
 	const limiter = limiterOf(app);
-	const account = accountKey(input.name);
+	const account = accountKey(name);
 	const keys = counted(addressKey(about.address), account);
 	const answer = await limiter.check(keys, app.now());
 	if (answer.kind === "blocked") return waiting(answer);
-	const person = await app.database.admissionRead(
-		async (readDb) => await readDb.get(Q.personByName, { name: input.name }),
-	);
 	const stored = person
 		? await app.database.admissionRead(async (readDb) => await livePassword(readDb, person.id))
 		: null;
@@ -397,7 +401,7 @@ export async function signInWithPassword(
 		const checked = await checkPassword(app, {
 			password: input.password,
 			stored: stored?.data ?? nobodys,
-			name: input.name,
+			name,
 			address: about.address,
 		});
 		if (typeof checked !== "string") return checked;
@@ -414,7 +418,7 @@ export async function signInWithPassword(
 	const cookie = newSessionSecret();
 	return await commit(app, { signIn: person.id }, async (db) => {
 		// The name is looked up again and must lead to a password with the very hash that was verified.
-		const now = await db.get(Q.personByName, { name: input.name });
+		const now = await db.get(Q.personByName, { name });
 		if (now && now.id !== person.id) throw new Busy();
 		const current = now ? await livePassword(db, now.id) : null;
 		if (!now || !current || current.data !== stored.data) return no("changed-meanwhile");

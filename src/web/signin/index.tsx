@@ -80,12 +80,12 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							attempt("password", "That name and password did not sign you in.", () =>
+							attempt("password", "That email or name and password did not sign you in.", () =>
 								signInWithPassword({ name: name.trim(), password }),
 							);
 						}}
 					>
-						<label htmlFor="signin-name">Name</label>
+						<label htmlFor="signin-name">Email or name</label>
 						<input
 							id="signin-name"
 							name="username"

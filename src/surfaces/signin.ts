@@ -95,7 +95,7 @@ const NO_INVITATION =
 
 // A body is one way of signing in and nothing beside it, so each shape refuses a member it does not name: a
 // request that carries two proofs is not judged by the one that happens to be read first.
-const WithPassword = z.strictObject({ name: z.string().min(1).max(64), password: z.string().min(1).max(512) });
+const WithPassword = z.strictObject({ name: z.string().min(1).max(254), password: z.string().min(1).max(512) });
 const WithTotp = z.strictObject({ challenge: z.string().min(1).max(128), code: z.string().min(1).max(128) });
 const RecentProof = z.union([
 	z.strictObject({ begin: z.literal(true) }),

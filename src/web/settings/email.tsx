@@ -4,6 +4,7 @@ import { z } from "zod";
 import { call } from "../lib/api.ts";
 import { signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
+import { SectionHeading } from "../ui/index.tsx";
 import { saidBy } from "./list.ts";
 import { useRecentProof } from "./recent-proof.tsx";
 
@@ -16,13 +17,15 @@ export function EmailForm({ actor }: { actor?: string }) {
 		queryKey: [project, "credential-email", actor ?? session.actor],
 		queryFn: async ({ signal }) =>
 			Contact.parse(await call("credential", { do: "email.get", ...(actor ? { actor } : {}) }, { signal })),
-		enabled: methods.data?.mail === true,
+		enabled: methods.data !== undefined,
 		refetchOnMount: "always",
 	});
 	const [email, setEmail] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
 	const shown = contact.error ? undefined : contact.data;
+	// Without mail nothing is sent to the address: it is kept unverified, and signs the person in.
+	const mail = methods.data?.mail === true;
 	function save(value: string | null): void {
 		if (busy) return;
 		setBusy(true);
@@ -35,7 +38,9 @@ export function EmailForm({ actor }: { actor?: string }) {
 				setMessage(
 					value === null
 						? "Email address removed."
-						: "Verification mail requested. Open its link before this address can receive password resets.",
+						: mail
+							? "Verification mail requested. Open its link before this address can receive password resets."
+							: "Email address saved. Sign in with it or with the name.",
 				);
 				await contact.refetch();
 			})
@@ -46,14 +51,20 @@ export function EmailForm({ actor }: { actor?: string }) {
 		event.preventDefault();
 		save(email);
 	}
-	if (!methods.data?.mail) return null;
+	if (!methods.data) return null;
 	return (
-		<section aria-label="Email for password reset">
-			<h3>Email for password reset</h3>
+		<section aria-label="Email">
+			<SectionHeading>Email</SectionHeading>
 			{proof.prompt}
+			<p className="dim">
+				{mail
+					? "Sign in with it or with the name. Once verified, password resets are mailed to it."
+					: "Sign in with it or with the name. This instance sends no mail, so the address stays unverified and no password reset is mailed to it."}
+			</p>
 			{shown?.email && (
 				<p>
-					{shown.email} · {shown.verified ? "verified" : "awaiting verification"}
+					{shown.email}
+					{mail && (shown.verified ? " · verified" : " · awaiting verification")}
 				</p>
 			)}
 			{contact.error && <p role="status">{saidBy(contact.error)}</p>}
@@ -69,12 +80,12 @@ export function EmailForm({ actor }: { actor?: string }) {
 					maxLength={254}
 					autoComplete="email"
 				/>
-				<button className="btn" type="submit" aria-disabled={busy}>
-					Send verification link
+				<button className="out" type="submit" aria-disabled={busy}>
+					{mail ? "Send verification link" : "Save email address"}
 				</button>
 			</form>
 			{shown?.email && (
-				<button className="btn" type="button" aria-disabled={busy} onClick={() => save(null)}>
+				<button className="out" type="button" aria-disabled={busy} onClick={() => save(null)}>
 					Remove email address
 				</button>
 			)}

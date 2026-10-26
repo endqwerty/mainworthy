@@ -58,7 +58,8 @@ build has no credential settings. If it receives `recent_proof_required`, it
 keeps you signed in and directs you to the web app.
 To sign in, follow these steps:
 
-1. Type your name and your password.
+1. Type your email address or your name, and your password. The email address is the one set in the web app, under
+   Settings, **Your sign-in**, **Email**.
 2. Press **Sign in**.
 3. If **One more step** appears, enter your authenticator code or an unused recovery code, then press **Verify code**.
 
@@ -94,7 +95,7 @@ iPhone", and you can end it there.
 
 ### Fill the password from 1Password or the phone's passwords
 
-The name and password fields take what the phone's AutoFill offers. The phone offers the login it keeps for
+The **Email or name** and password fields take what the phone's AutoFill offers. The phone offers the login it keeps for
 `mainworthy.com` only when the app is tied to that site. Apple allows that tie only for an app signed by a paid
 Apple developer membership. For an app installed with a free Apple ID, press the key above the
 keyboard and search for the login yourself.
