@@ -1509,8 +1509,9 @@ test("an upgrading server is not ready to Cloud Run's probe, but health and the 
 	try {
 		const url = listener.url.origin;
 		// Cloud Run's startup probe reads only the status, so a revision still migrating must not answer 200.
-		const reply = await fetch(`${url}/healthz`);
+		const reply = await fetch(`${url}/health`);
 		expect(reply.status).toBe(503);
+		expect((await fetch(`${url}/healthz`)).status).toBe(503);
 		expect(await reply.json()).toMatchObject({ ok: false, state: "upgrading", apiVersion: API_VERSION });
 		await withInstance(async ({ run }) => {
 			const health = await run(["health", "--url", url]);
@@ -1633,7 +1634,7 @@ test("a generated command refuses a reply its operation's schema does not descri
 		hostname: "127.0.0.1",
 		port: 0,
 		fetch(req) {
-			if (new URL(req.url).pathname === "/healthz")
+			if (new URL(req.url).pathname === "/health")
 				return Response.json({ ok: true, version: "0.1.0", apiVersion: API_VERSION });
 			return reply instanceof Response ? reply.clone() : Response.json({ ok: true, result: reply, seq: 1 });
 		},
@@ -2236,7 +2237,7 @@ async function viaServer<T>(
 			process.stderr.write("[fetch]\n");
 			if (options.refuse === true || (options.refuse === "authenticated" && headers.has("authorization")))
 				throw new TypeError("connection refused");
-			if (new URL(url).pathname === "/healthz" && options.healthResponse) return options.healthResponse.clone();
+			if (new URL(url).pathname === "/health" && options.healthResponse) return options.healthResponse.clone();
 			return real(url.replace(/^https?:\/\/[^/]+/, instance.url), init);
 		},
 		{ preconnect: real.preconnect },
@@ -2271,7 +2272,7 @@ test("all client diagnostics omit URL credentials while requests keep the config
 				expect(result.stderr).toContain(PLAIN);
 				expect(result.stderr).not.toContain("robin");
 				expect(result.stderr).not.toContain("synthetic-url-password");
-				expect(asked[0]?.url).toBe(`${url}/healthz`);
+				expect(asked[0]?.url).toBe(`${url}/health`);
 			}
 			const { result } = await viaServer(instance, () => run(base));
 			expect(result.code).toBe(0);
@@ -2704,7 +2705,7 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 			fetch(req) {
 				received.push({ path: new URL(req.url).pathname, token: req.headers.get("authorization") });
 				return Response.json(
-					new URL(req.url).pathname === "/healthz"
+					new URL(req.url).pathname === "/health"
 						? { ok: true, version: "0.1.0", apiVersion }
 						: { ok: true, result: {} },
 				);
@@ -2728,7 +2729,7 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 				expect(result.code).toBe(4);
 				expect(result.stderr).toContain("incompatible:");
 				expect(result.stderr).toContain(`CLI requires API ${API_VERSION}`);
-				expect(received).toEqual([{ path: "/healthz", token: null }]);
+				expect(received).toEqual([{ path: "/health", token: null }]);
 			});
 		} finally {
 			await server.stop(true);
@@ -2744,20 +2745,20 @@ test("a redirecting health probe does not warn that a token was sent", async () 
 			{
 				healthResponse: new Response(null, {
 					status: 301,
-					headers: { location: "https://mainworthy.example/healthz" },
+					headers: { location: "https://mainworthy.example/health" },
 				}),
 			},
 		);
 		expect(result.code).toBe(4);
-		expect(asked).toEqual([{ url: `${PLAIN}/healthz`, authorization: null, apiVersion: null }]);
+		expect(asked).toEqual([{ url: `${PLAIN}/health`, authorization: null, apiVersion: null }]);
 		expect(result.stderr).not.toContain("warning:");
-		expect(result.stderr).toContain("the server answered 301 to /healthz");
+		expect(result.stderr).toContain("the server answered 301 to /health");
 	});
 });
 
 test("health probe diagnostics distinguish redirects, HTTP failures and invalid JSON", async () => {
 	const received: { path: string; token: string | null }[] = [];
-	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example/healthz" } });
+	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example/health" } });
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
@@ -2770,8 +2771,8 @@ test("health probe diagnostics distinguish redirects, HTTP failures and invalid 
 		await withInstance(async ({ run }) => {
 			for (const [reply, message] of [
 				[response, "redirect to origin https://mainworthy.example; set --url to https://mainworthy.example"],
-				[new Response("proxy unavailable", { status: 503 }), "the server answered 503 to /healthz"],
-				[new Response("proxy page"), "the server answered 200 to /healthz with invalid JSON"],
+				[new Response("proxy unavailable", { status: 503 }), "the server answered 503 to /health"],
+				[new Response("proxy page"), "the server answered 200 to /health with invalid JSON"],
 			] as const) {
 				response = reply;
 				received.length = 0;
@@ -2780,7 +2781,7 @@ test("health probe diagnostics distinguish redirects, HTTP failures and invalid 
 				expect(result.stderr).toContain(message);
 				expect(result.stderr).not.toContain("start the server");
 				expect(result.stderr).not.toContain("incompatible:");
-				expect(received).toEqual([{ path: "/healthz", token: null }]);
+				expect(received).toEqual([{ path: "/health", token: null }]);
 			}
 		});
 	} finally {

@@ -85,10 +85,10 @@ The warning does not affect standard output, so `--json` remains valid JSON.
 `mainworthy version --json` prints `{"version":"0.1.0","apiVersion":1}`.
 `mainworthy health --json` reports the server's `apiVersion` and whether it is `compatible` with this CLI.
 Health still exits 0 for a healthy server with an incompatible or unknown API version. It checks availability.
-While the database is upgrading, health also exits 0 and prints `upgrading`; its JSON includes `state: "upgrading"`. The process is alive but cannot accept application requests yet. Other commands report that the server is upgrading. A deployment must require `/healthz` to report `ok: true` and the expected commit before declaring it ready.
+While the database is upgrading, health also exits 0 and prints `upgrading`; its JSON includes `state: "upgrading"`. The process is alive but cannot accept application requests yet. Other commands report that the server is upgrading. A deployment must require `/health` to report `ok: true` and the expected commit before declaring it ready.
 
-Before its first authenticated request, the CLI reads `/healthz` without sending a token.
-If that probe redirects, the error gives the destination's origin for `--url`, without the `/healthz` path.
+Before its first authenticated request, the CLI reads `/health` without sending a token.
+If that probe redirects, the error gives the destination's origin for `--url`, without the `/health` path.
 The server must advertise the same API version as the CLI. Software versions and build commits may differ.
 An absent, malformed or different API version stops the command with `incompatible` and exit code 4, before it sends an operation.
 A retry requires a CLI and server with the same API version. Servers from before

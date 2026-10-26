@@ -213,7 +213,7 @@ $ mainworthy health
 healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 ```
 
-`mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
+`mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/health` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
 
 During startup, health answers HTTP 503 with `ok: false, state: "upgrading"`, so a probe that reads only the status waits. The health command reads the body, exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Startup failure closes the listener.
 
@@ -258,7 +258,8 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 | Address | What it returns |
 | --- | --- |
-| `/healthz` | Whether the server is up, its software and API versions, and the commit it runs when it was told |
+| `/health` | Whether the server is up, its software and API versions, and the commit it runs when it was told |
+| `/healthz` | The same answer, for a container's own health check and Cloud Run's startup probe. Cloud Run's front end answers `/healthz` from outside itself, so monitors and the CLI use `/health`. |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |

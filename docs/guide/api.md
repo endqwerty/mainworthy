@@ -25,7 +25,7 @@ both schemas. `seq` is required and is `null` for an instance operation. A field
 declared nullable may hold `null`. An optional field may be absent. Replies
 selected by an action or a ref are described as alternatives.
 
-The current API version is **3**. The CLI checks `/healthz` before sending an operation and sends
+The current API version is **3**. The CLI checks `/health` before sending an operation and sends
 `x-mainworthy-api-version: 3`. A server with another advertised version is refused before a write.
 Clients pinned to API 1 or 2 must upgrade with the server.
 

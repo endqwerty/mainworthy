@@ -589,6 +589,9 @@ describe("a proxy proved by a secret", () => {
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }))).toBe("401 unauthenticated");
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }, proof))).toBe("401 unauthenticated");
 		expect(await said(await fetch(`${instance.url}/api/job`))).toBe("403 forbidden");
+		// The public health path goes through Cloudflare like any page; only the probe's /healthz is exempt.
+		expect(await said(await fetch(`${instance.url}/health`))).toBe("403 forbidden");
+		expect(await said(await fetch(`${instance.url}/health`, { headers: proof }))).toBe("200");
 		expect(await said(await postJson(instance, "/api/session", {}))).toBe("403 forbidden");
 		// Only the raw paths are exempt: URL normalisation (%2e, \, ..) must not turn another route into one of them.
 		const raw = (method: string, path: string) =>

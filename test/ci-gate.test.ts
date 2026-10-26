@@ -232,7 +232,7 @@ test("CI awaits the retry pause before sending another request", async () => {
 			await resume.promise;
 		},
 	);
-	const response = request("https://mainworthy.example/healthz");
+	const response = request("https://mainworthy.example/health");
 	try {
 		expect(await Promise.race([paused.promise.then(() => "paused"), response.then(() => "completed")])).toBe("paused");
 		await Bun.sleep(0);
@@ -278,7 +278,7 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 			},
 		),
 		routes: {
-			"/healthz": () => {
+			"/health": () => {
 				const status = health.length === 1 ? 503 : 200;
 				health.push(status);
 				return status === 503
@@ -291,7 +291,7 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 		expect(await Promise.race([paused.promise.then(() => "paused"), running.then(() => "completed")])).toBe("paused");
 		await Bun.sleep(0);
 		expect(health).toEqual([200, 503]);
-		expect(requests).toEqual([{ path: "/healthz", status: 503 }]);
+		expect(requests).toEqual([{ path: "/health", status: 503 }]);
 		expect(await batches()).toBe(0);
 	} finally {
 		resume.resolve();
@@ -327,7 +327,7 @@ test("the production deployment transport keeps twelve attempts, ten-second paus
 		const request = deploymentFetch(undefined, async (ms) => {
 			pauses.push(ms);
 		});
-		expect((await request("https://mainworthy.example/healthz")).status).toBe(503);
+		expect((await request("https://mainworthy.example/health")).status).toBe(503);
 		expect(transport).toHaveBeenCalledTimes(12);
 		expect(pauses).toEqual(Array(11).fill(10_000));
 		expect(timeouts).toEqual(Array(12).fill(10_000));
@@ -352,7 +352,7 @@ test("CI retries health, report and gate outages, exhausts its attempts and retu
 		},
 	});
 	try {
-		for (const path of ["/healthz", "/api/p/scratch/report", "/api/p/scratch/gate"]) {
+		for (const path of ["/health", "/api/p/scratch/report", "/api/p/scratch/gate"]) {
 			const send = async (statuses: number[], retry = true) => {
 				replies = [...statuses];
 				received.length = 0;
@@ -362,9 +362,9 @@ test("CI retries health, report and gate outages, exhausts its attempts and retu
 					...(retry ? { request: deploymentFetch({ fetch, attempts: 3, pauseMs: 0, timeoutMs: 1000 }) } : {}),
 				});
 				// For an operation outage, its compatibility check succeeds before the outage begins.
-				if (path !== "/healthz") replies.unshift(200);
+				if (path !== "/health") replies.unshift(200);
 				try {
-					const response = await client.request(path === "/healthz" ? "/api/session" : path, {
+					const response = await client.request(path === "/health" ? "/api/session" : path, {
 						method: "POST",
 						body: '{"results":[{"test":{"key":"one"},"outcome":"pass"}]}',
 					});
@@ -379,24 +379,22 @@ test("CI retries health, report and gate outages, exhausts its attempts and retu
 				expect(received.filter((req) => req.path === path)).toEqual(
 					Array(2).fill({
 						path,
-						body: path === "/healthz" ? "" : '{"results":[{"test":{"key":"one"},"outcome":"pass"}]}',
+						body: path === "/health" ? "" : '{"results":[{"test":{"key":"one"},"outcome":"pass"}]}',
 					}),
 				);
 			}
 			const outage = await send([503, 503, 503, 200]);
-			expect(outage).toBe(path === "/healthz" ? `the server answered 503 to /healthz at ${server.url.origin}` : 503);
+			expect(outage).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url.origin}` : 503);
 			expect(received.filter((req) => req.path === path)).toHaveLength(3);
 			for (const status of [400, 401, 403, 404, 429, 500]) {
 				const refused = await send([status, 200]);
 				expect(refused).toBe(
-					path === "/healthz" ? `the server answered ${status} to /healthz at ${server.url.origin}` : status,
+					path === "/health" ? `the server answered ${status} to /health at ${server.url.origin}` : status,
 				);
 				expect(received.filter((req) => req.path === path)).toHaveLength(1);
 			}
 			const interactive = await send([503, 200], false);
-			expect(interactive).toBe(
-				path === "/healthz" ? `the server answered 503 to /healthz at ${server.url.origin}` : 503,
-			);
+			expect(interactive).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url.origin}` : 503);
 			expect(received.filter((req) => req.path === path)).toHaveLength(1);
 		}
 	} finally {
@@ -420,7 +418,7 @@ test("CI retries live upgrading health without sending credentials or declaring 
 				);
 			},
 		});
-		const reply = await transport("https://mainworthy.example/healthz");
+		const reply = await transport("https://mainworthy.example/health");
 		expect(calls).toBe(finishes ? 2 : 3);
 		expect(await reply.json()).toMatchObject(finishes ? { ok: true } : { ok: false, state: "upgrading" });
 	}
@@ -483,7 +481,7 @@ test("CI stops retrying unreachable requests and shares its deadline across comm
 			throw new Error("still unreachable");
 		},
 	});
-	await expect(unreachable("https://mainworthy.example/healthz")).rejects.toThrow("still unreachable");
+	await expect(unreachable("https://mainworthy.example/health")).rejects.toThrow("still unreachable");
 	expect(unreachableCalls).toBe(3);
 	let calls = 0;
 	const expired = deploymentFetch({
@@ -496,7 +494,7 @@ test("CI stops retrying unreachable requests and shares its deadline across comm
 			return new Response("still deploying", { status: 503 });
 		},
 	});
-	expect((await expired("https://mainworthy.example/healthz")).status).toBe(503);
+	expect((await expired("https://mainworthy.example/health")).status).toBe(503);
 	expect((await expired("https://mainworthy.example/api/p/scratch/gate")).status).toBe(503);
 	expect(calls).toBe(2);
 });
@@ -928,7 +926,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		},
 	});
 	const healthy: Answers = {
-		"/healthz": () => Response.json({ ok: true, apiVersion: API_VERSION }),
+		"/health": () => Response.json({ ok: true, apiVersion: API_VERSION }),
 		"/api/openapi.json": () => Response.json(openApi()),
 		"/api/session": recorder,
 	};
@@ -947,7 +945,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	expect(
 		await choose({
 			...healthy,
-			"/healthz": () =>
+			"/health": () =>
 				Response.json(
 					++upgradeTries < 2
 						? { ok: false, state: "upgrading", apiVersion: API_VERSION }
@@ -958,10 +956,10 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	expect(upgradeTries).toBe(2);
 	for (const apiVersion of [undefined, 0, API_VERSION + 1, "1", null]) {
 		asked.length = 0;
-		expect(await choose({ ...healthy, "/healthz": () => Response.json({ ok: true, apiVersion }) })).toStartWith(
+		expect(await choose({ ...healthy, "/health": () => Response.json({ ok: true, apiVersion }) })).toStartWith(
 			`own (warning): https://mainworthy.example does not support CLI API ${API_VERSION}`,
 		);
-		expect(asked).toEqual(["/healthz"]);
+		expect(asked).toEqual(["/health"]);
 	}
 	expect(await choose(healthy, { MAINWORTHY_URL: "" })).toBe("own: MAINWORTHY_URL is not set");
 
@@ -970,8 +968,8 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	expect(await choose({})).toStartWith(
 		"own (warning): https://mainworthy.example cannot be reached (connection refused)",
 	);
-	expect(asked).toEqual(["/healthz", "/healthz", "/healthz"]);
-	expect(await choose({ ...healthy, "/healthz": () => new Response("", { status: 502 }) })).toStartWith(
+	expect(asked).toEqual(["/health", "/health", "/health"]);
+	expect(await choose({ ...healthy, "/health": () => new Response("", { status: 502 }) })).toStartWith(
 		"own (warning): https://mainworthy.example cannot be reached (it answered 502)",
 	);
 	// A runner that has just joined the network: the first try fails and the second answers.
@@ -980,7 +978,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		if (++tries === 1) throw new Error("no route yet");
 		return Response.json({ ok: true, apiVersion: API_VERSION });
 	};
-	expect(await choose({ ...healthy, "/healthz": slow })).toStartWith("deployed:");
+	expect(await choose({ ...healthy, "/health": slow })).toStartWith("deployed:");
 
 	// Another version: it describes report or gate differently, or does not describe them.
 	const other = structuredClone(openApi()) as { paths: Record<string, Record<string, unknown>> };
@@ -1080,7 +1078,7 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 				fetch(req) {
 					const path = new URL(req.url).pathname;
 					received.push({ path, apiVersion: req.headers.get("x-mainworthy-api-version") });
-					return path === "/healthz"
+					return path === "/health"
 						? Response.json({ ok: true, version: "0.1.0", commit: "before-versions", apiVersion })
 						: Response.json(body, { status });
 				},
@@ -1105,7 +1103,7 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 					new Response(child.stderr).text(),
 				]);
 				expect([apiVersion, status, code, stderr]).toEqual([apiVersion, status, expected, ""]);
-				const healthRequest = { path: "/healthz", apiVersion: null };
+				const healthRequest = { path: "/health", apiVersion: null };
 				if (apiVersion !== API_VERSION && apiVersion !== undefined) expect(received).toEqual([healthRequest]);
 				else {
 					expect(received).toEqual([
@@ -1186,10 +1184,10 @@ exec "$REAL_CURL" "$@"
 				port: 0,
 				async fetch(req) {
 					const path = new URL(req.url).pathname;
-					received.push({ path, payload: path === "/healthz" ? null : await req.json() });
-					const statuses = path === "/healthz" ? health : report;
-					const call = path === "/healthz" ? healthCalls++ : reportCalls++;
-					if (path === "/healthz" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
+					received.push({ path, payload: path === "/health" ? null : await req.json() });
+					const statuses = path === "/health" ? health : report;
+					const call = path === "/health" ? healthCalls++ : reportCalls++;
+					if (path === "/health" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
 						return Response.json({ ok: false, state: "upgrading", apiVersion: API_VERSION });
 					return Response.json(
 						{ ok: true, apiVersion: API_VERSION },

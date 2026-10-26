@@ -25,7 +25,7 @@ export type Choice =
 export type Environment = Record<string, string | undefined>;
 export type Probe = {
 	fetch: (url: string, init?: RequestInit) => Promise<Response>;
-	/** How often `/healthz` is asked before the instance counts as unreachable, and the wait between two tries. */
+	/** How often `/health` is asked before the instance counts as unreachable, and the wait between two tries. */
 	attempts: number;
 	pauseMs: number;
 	timeoutMs: number;
@@ -58,7 +58,7 @@ export function deploymentFetch(
 						response.ok && response.body !== null ? new Response(await response.arrayBuffer(), response) : response;
 					if (
 						!buffered.ok ||
-						new URL(url).pathname !== "/healthz" ||
+						new URL(url).pathname !== "/health" ||
 						!UpgradingHealth.safeParse(
 							await buffered
 								.clone()
@@ -127,7 +127,7 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 	let compatible = false;
 	for (let attempt = 1; attempt <= probe.attempts; attempt++) {
 		try {
-			const health = await get("/healthz");
+			const health = await get("/health");
 			unreachable = health.ok ? "" : `it answered ${health.status}`;
 			if (health.ok) {
 				const body: unknown = await health.json().catch(() => null);
