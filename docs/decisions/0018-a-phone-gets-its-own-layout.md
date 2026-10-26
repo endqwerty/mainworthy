@@ -48,10 +48,12 @@ whether the drawer is open. A screen still returns `#list` and `#detail`. The de
   to one (also to the one the address already names), by the browser's Back and Forward. An address that only
   changes in place, as it does for a case that was just recorded, is nobody going anywhere, and the pane stays,
 - anything in the detail takes the focus: the field in which "New case" or "Plan run" puts the caret, and a
-  button that the Tab key of an attached keyboard reaches.
+  target of an explicit focus request. Tab stays in the shown pane. Opening a row moves focus into its detail.
 
-Both panes stay laid out, one over the other. A pane that was removed from the layout could not take the focus,
-so an action that opens the editor would put the caret nowhere.
+The owner chose the covered-pane rule in [issue #136](https://github.com/endqwerty/mainworthy/issues/136) on 2026-10-26.
+Both panes stay laid out, one over the other, with the covered pane `inert`: Tab and accessibility tools reach
+only the shown pane. Explicit focus requests pass through `focusInto`, so the shell reveals the target pane
+before the browser focuses it, even after an asynchronous action. Opening a row focuses the detail region.
 
 **What is covered cannot be acted on.** A screen whose list has rows has a selected row, and its keys act on it: `f`
 answers the selected question "Flaky". On the desktop the question is beside the list. On a phone something can
@@ -116,8 +118,11 @@ These are in issue #136 with the rest of what was left.
   which report a fine pointer and keep the desktop layout. Nobody has asked, and a wrong guess there leaves the
   layout that was there before.
 
-## What is not checked
+## Automated phone acceptance
 
-The tests run in Chromium with touch emulated. No real phone has opened this layout. Not checked: how iOS and
-Android move the page when the keyboard opens over a field at the bottom, such as a run's note; the browser's
-own bars against `100dvh`; a phone with a notch on its side.
+On 2026-10-26 the owner replaced the manual device pass in issue #136 with automated checks.
+`test/e2e/phone-focus.test.ts` checks the browser accessibility tree, Tab traversal, row activation, keys-sheet
+focus return, iOS Safari and Android Chrome device profiles, rotation, reduced viewport space for a keyboard,
+and axe WCAG rules. Profiles run in the shared Chromium helper. Playwright cannot open an OS software keyboard
+or run VoiceOver or TalkBack; shrinking the viewport exercises layout with the space a keyboard or browser bar
+would occupy. It does not reproduce those native interfaces or a physical notch.

@@ -2,6 +2,8 @@ import { useBindings } from "../lib/keys.ts";
 
 const action = (key: string, label: string, handler: () => void, hidden = false) => ({ key, label, handler, hidden });
 export function useSuiteBindings({
+	canEdit,
+	canRecord,
 	create,
 	edit,
 	next,
@@ -22,6 +24,8 @@ export function useSuiteBindings({
 	cancelTag,
 	cancelFolder,
 }: {
+	canEdit: boolean;
+	canRecord: boolean;
 	create: () => void;
 	edit: () => void;
 	next: () => void;
@@ -51,16 +55,15 @@ export function useSuiteBindings({
 	useBindings([
 		// The three marked `list` do not act on the case the detail shows (`Binding.list`).
 		{ key: "c", label: "New case", list: true, handler: create },
-		action("e", "Edit case", edit),
-		action("enter", "Edit case", edit),
+		{ key: "e", label: "Edit case", handler: edit, applies: () => canEdit },
+		{ key: "enter", label: "Edit case", handler: edit, hidden: true, applies: () => canEdit },
 		action("j", "Next case", next),
 		action("arrowdown", "Next case", next, true),
 		action("k", "Previous case", previous),
 		action("arrowup", "Previous case", previous, true),
 		{ key: "/", label: "Filter", list: true, handler: filter },
-		action("escape", "Seal and leave editor", seal),
-		action("mod+enter", "Record version", seal),
-		action("shift+enter", "Next new case", create),
+		{ key: "escape", label: "Seal and leave editor", handler: seal, applies: () => canRecord },
+		{ key: "mod+enter", label: "Record version", handler: seal, applies: () => canRecord },
 		action("x", "Select case", select),
 		action("m", "Move selected", move),
 		action("t", "Tag selected", tag),

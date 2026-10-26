@@ -3,6 +3,7 @@ import { newStepId } from "../../core/ids.ts";
 import { CaseKind, type FieldDefinitions } from "../../core/model.ts";
 import { parseBodyInline, parseOutline, splitExpected } from "../../core/outline.ts";
 import { addDraftTags, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
+import { focusInto } from "../lib/focus.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
 import { AutoGrowingTextarea } from "../ui/auto-growing-textarea.tsx";
@@ -115,20 +116,35 @@ export function BodyEditor({
 		document.activeElement instanceof HTMLElement &&
 		document.activeElement.matches(".body-editor textarea");
 	useBindings([
-		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, applies: editing },
+		{
+			key: "shift+enter",
+			label: "Next new case",
+			handler: rapid,
+			allowInInput: true,
+			applies: () => !readOnly,
+			when: editing,
+		},
 		{
 			key: "enter",
 			label: draft.caret.field === "title" || draft.caret.field === "capture-title" ? "First step" : "Next step",
 			handler: nextStep,
 			allowInInput: true,
-			applies: editing,
+			applies: () =>
+				!readOnly &&
+				(draft.caret.field === "title" ||
+					draft.caret.field === "capture-title" ||
+					draft.body.steps.some(
+						(step) => draft.caret.field === `${step.id}:action` || draft.caret.field === `${step.id}:expected`,
+					)),
+			when: editing,
 		},
 		{
 			key: "tab",
 			label: "Expected result",
 			handler: expected,
 			allowInInput: true,
-			applies: () => editing() && draft.caret.field.endsWith(":action"),
+			applies: () => !readOnly && draft.caret.field.endsWith(":action"),
+			when: editing,
 		},
 	]);
 	const root = useRef<HTMLDivElement>(null);
@@ -140,7 +156,7 @@ export function BodyEditor({
 			`[data-field="${draft.caret.field === "capture-title" ? "title" : draft.caret.field}"]`,
 		);
 		if (field instanceof HTMLTextAreaElement) {
-			field.focus();
+			focusInto(field);
 			field.setSelectionRange(draft.caret.start, draft.caret.end);
 		}
 	}, [draft.caret]);

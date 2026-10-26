@@ -12,6 +12,8 @@ records the automated coverage and remaining manual checks, including screen-rea
 
 ## How the keys work
 
+Closing the list of keys returns focus to the control that opened it.
+
 The command palette offers actions that apply to the current screen and section. In Settings, for example, **New invitation** appears under People and **New project** under Projects.
 
 - A sequence such as <kbd>g</kbd> <kbd>q</kbd> means one key followed by the other. You have a little under a second to press the second key.
@@ -33,10 +35,10 @@ In a phone browser, the web app shows one pane at a time. A tablet held upright 
 The phone layout has these controls and keyboard rules.
 
 - **Menu** opens the sidebar with the screens, the project, the suite's folders and tags, the theme, and Sign out. Opening it with a keyboard moves focus into the drawer. Pressing **Close menu** returns focus to **Menu**.
-- A screen opens on its list. Tapping a row opens its details. **Back** returns to the list. A link to a case, question, run, or change opens the linked item.
+- A screen opens on its list. Tapping a row opens its details and moves focus there. The covered pane is outside the Tab order and accessibility tree. **Back** returns to the list. A link to a case, question, run, or change opens the linked item.
 - **Actions** opens the palette. The palette lists the screen's actions, apart from opening the palette or the list of keys. Tapping an action runs the action. The field at the top lets you search for a case or jump to a ref. With a keyboard attached, <kbd>?</kbd> still opens the list of keys.
-- While a list is shown, **Actions** offers what belongs to the list, such as New case, New folder, Filter and Plan run. Opening a row makes its actions available, such as Edit case, an answer, or Record version. Nothing is decided about a case or a question you have not opened.
-- With a keyboard attached, the keys follow the same rule. While a list is shown, its keys work. These include <kbd>c</kbd> and <kbd>/</kbd> in Suite, <kbd>n</kbd> in Runs, <kbd>n</kbd> <kbd>f</kbd> in Suite, and the keys under [Everywhere](#everywhere) except <kbd>[</kbd>. Once a row is open, every key for the screen works. <kbd>n</kbd> <kbd>f</kbd> opens the sidebar's form for a new folder. Moving focus into the details with <kbd>Tab</kbd> shows the details pane. While the sidebar is open, only the list's keys work.
+- While a list is shown, **Actions** offers what belongs to the list, such as New case, New folder, Filter and Plan run. Opening a row makes its actions available, such as Edit case or an answer. Record version, Seal and leave editor, and Next new case appear while editing a writable draft. Nothing is decided about a case or a question you have not opened.
+- With a keyboard attached, the keys follow the same rule. While a list is shown, its keys work. These include <kbd>c</kbd> and <kbd>/</kbd> in Suite, <kbd>n</kbd> in Runs, <kbd>n</kbd> <kbd>f</kbd> in Suite, and the keys under [Everywhere](#everywhere) except <kbd>[</kbd>. Once a row is open, every key for the screen works. <kbd>n</kbd> <kbd>f</kbd> opens the sidebar's form for a new folder. <kbd>Tab</kbd> moves only through the shown pane. Open a row with a tap or <kbd>↵</kbd> to reach its details. While the sidebar is open, only the list's keys work.
 - Buttons offer the same actions as on a desktop, including answers in Queue, run outcomes, and accepting or rejecting proposals.
 
 While the palette is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work, as on the desktop.

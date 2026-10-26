@@ -12,6 +12,7 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
 import { presetOf } from "../../core/presets.ts";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
+import { focusInto } from "../lib/focus.ts";
 import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, navigationToken, projectUrl, routeUrl } from "../lib/router.ts";
@@ -172,7 +173,7 @@ function SettingsWorkbench() {
 			key: "n",
 			label: section === "Tokens" ? "New token" : "New project",
 			applies: () => instanceAdmin && (section === "Tokens" || section === "Projects"),
-			handler: () => (section === "Tokens" ? actorRef.current?.focus() : projectRef.current?.focus()),
+			handler: () => (section === "Tokens" ? focusInto(actorRef.current) : focusInto(projectRef.current)),
 		},
 		// Each is registered only for a caller who has the section, so the keys sheet does not list it for one
 		// who has not.
@@ -182,7 +183,7 @@ function SettingsWorkbench() {
 						key: "n",
 						label: "New invitation",
 						applies: () => section === "People",
-						handler: () => inviteRef.current?.focus(),
+						handler: () => focusInto(inviteRef.current),
 					},
 				]
 			: []),
@@ -192,7 +193,7 @@ function SettingsWorkbench() {
 						key: "n",
 						label: "New password",
 						applies: () => section === "Your sign-in",
-						handler: () => passwordRef.current?.focus(),
+						handler: () => focusInto(passwordRef.current),
 					},
 				]
 			: []),
@@ -660,7 +661,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 									setStatus("Copy failed. Try again.");
 								} finally {
 									field.type = "password";
-									if (focused instanceof HTMLElement) focused.focus();
+									if (focused instanceof HTMLElement) focusInto(focused);
 								}
 							}}
 						>

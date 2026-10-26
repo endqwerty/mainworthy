@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { usePhone } from "./lib/layout.ts";
 import { type Route, readRoute, WENT } from "./lib/router.ts";
 import "./phone.css";
@@ -25,7 +26,7 @@ const typingIn = (pane: Pane): boolean => {
  *   nobody going anywhere, and the pane stays: a case that was recorded after Back gets its address so.
  * - anything in the detail takes the focus, as when an action of the palette opens the editor there.
  *
- * Both panes stay laid out, one over the other, so a pane that is covered can still take the focus.
+ * Both panes stay laid out. The covered pane is inert; explicit focus requests reveal it before focusing.
  *
  * One rule holds all of it together: what is covered cannot be acted on. The pointer cannot reach it (the
  * stylesheet). What takes the focus is shown first, and what gets covered gives the focus up (here). A key or
@@ -67,13 +68,36 @@ export function usePhoneShell(
 			setMenuAt(null);
 		};
 		there();
+		const openDetail = () => {
+			flushSync(() => show("detail"));
+			const detail = document.getElementById("detail");
+			if (detail) {
+				detail.tabIndex = -1;
+				detail.focus();
+			}
+		};
 		const pressed = (event: MouseEvent) => {
-			if (event.target instanceof Element && event.target.closest("#list [role=option]")) show("detail");
+			if (!(event.target instanceof Element) || !event.target.closest("#list [role=option]")) return;
+			openDetail();
 		};
 		// The Tab key moves the focus in the same task as its keydown, so the flag is still up when the focus
 		// arrives and down again before anything else can move it.
 		let tabbed = false;
 		const key = (event: KeyboardEvent) => {
+			if (
+				event.key === "Enter" &&
+				!event.shiftKey &&
+				!event.ctrlKey &&
+				!event.metaKey &&
+				!event.altKey &&
+				event.target instanceof Element &&
+				!event.target.matches("input, textarea, select, button, a[href]") &&
+				event.target.closest('#list [role="listbox"], #list[role="listbox"], #list [role="option"]')
+			) {
+				event.preventDefault();
+				openDetail();
+				return;
+			}
 			if (event.key !== "Tab") return;
 			tabbed = true;
 			setTimeout(() => {
@@ -81,8 +105,8 @@ export function usePhoneShell(
 			}, 0);
 		};
 		// What takes the focus is shown, and is not left under the sidebar. In the detail that is anything: a
-		// field an action put the caret in, and a button the Tab key of an attached keyboard reached, before
-		// Enter presses it. In the list it is a field, or what Tab reached. A screen that gives its list the
+		// field an action put the caret in, or the detail region after opening a row. In the list it is a field, or what Tab reached.
+		// A screen that gives its list the
 		// focus back after an answer or a result does neither, and the person stays on the detail.
 		const focused = (event: FocusEvent) => {
 			const node = event.target;
@@ -117,6 +141,45 @@ export function usePhoneShell(
 			window.removeEventListener("focusin", focused);
 		};
 	}, [phone]);
+	useLayoutEffect(() => {
+		if (!phone) return;
+		const requested = (event: Event) => {
+			if (!(event instanceof CustomEvent) || !(event.detail instanceof HTMLElement)) return;
+			const node = event.detail;
+			const to = node.closest("#detail")
+				? "detail"
+				: node.closest("#list") && node.matches("input, textarea, select, [contenteditable=true]")
+					? "list"
+					: null;
+			if (!to) return;
+			const target = document.getElementById(to);
+			if (target) target.inert = false;
+			show(to);
+			setMenuAt(null);
+		};
+		window.addEventListener("mainworthy:focus", requested);
+		return () => window.removeEventListener("mainworthy:focus", requested);
+	}, [phone]);
+	useLayoutEffect(() => {
+		const cover = () => {
+			for (const name of ["list", "detail"] as const) {
+				const node = document.getElementById(name);
+				if (node) node.inert = phone && name !== pane;
+			}
+		};
+		cover();
+		const app = document.getElementById("app");
+		if (!phone || !app) return;
+		const observer = new MutationObserver(cover);
+		observer.observe(app, { childList: true });
+		return () => {
+			observer.disconnect();
+			for (const name of ["list", "detail"]) {
+				const node = document.getElementById(name);
+				if (node) node.inert = false;
+			}
+		};
+	}, [phone, pane]);
 	// What gets covered gives the focus up: text typed, or Enter pressed, would go to something nobody sees.
 	// The detail is covered by the list, and both panes by the sidebar.
 	useEffect(() => {

@@ -5,6 +5,7 @@ import { PlanInput } from "../../core/selection.ts";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
+import { focusInto } from "../lib/focus.ts";
 import { randomId } from "../lib/ids.ts";
 import { navigate, navigationToken, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -119,7 +120,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 	const locked = submission !== null && submission.state !== "released";
 	const nameRef = useRef<HTMLInputElement>(null);
 	useEffect(() => {
-		nameRef.current?.focus();
+		focusInto(nameRef.current);
 	}, []);
 	useEffect(() => {
 		const timer = setTimeout(() => setQuery(filter), 80);
@@ -362,7 +363,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						}
 						hold(null);
 						setStatus("The saved plan was discarded. Any run already recorded is unchanged.");
-						nameRef.current?.focus();
+						focusInto(nameRef.current);
 					}}
 				>
 					Discard this plan
