@@ -167,3 +167,43 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"desktop keys can return to an open draft and leave a read-only draft",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .ctitle").waitFor();
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("A draft that stays in this window");
+			for (const key of ["Enter", "e"]) {
+				await page.locator("#list [role=option]").first().focus();
+				await page.keyboard.press(key);
+				expect(await title.evaluate((node) => node === document.activeElement)).toBe(true);
+			}
+			const other = await h.context.newPage();
+			try {
+				await other.goto(`${server.url}/p/scratch/suite/c/1`);
+				const readOnly = other.getByRole("textbox", { name: "Case title", exact: true });
+				await readOnly.waitFor();
+				expect(await readOnly.getAttribute("readonly")).not.toBeNull();
+				await readOnly.focus();
+				await other.keyboard.press("Escape");
+				expect(await readOnly.evaluate((node) => node === document.activeElement)).toBe(false);
+				await other.keyboard.press("ControlOrMeta+k");
+				await palette(other).waitFor();
+				expect(await command(other, "Record version").count()).toBe(0);
+				expect(await command(other, "Leave editor").count()).toBe(1);
+			} finally {
+				await other.close();
+			}
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
