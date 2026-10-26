@@ -456,7 +456,7 @@ export async function handleOp(
 ): Promise<Response> {
 	const operation = OPS[op];
 	if (operation?.effect === "service") {
-		if (project !== null || !(await authenticateJob(req.headers.get("authorization"), app.config.jobService)))
+		if (project !== null || !(await authenticateJob(req.headers.get("authorization"), app.config.jobCaller)))
 			return unauthenticated();
 		let input: unknown;
 		try {
@@ -877,7 +877,14 @@ export function serve(
 	const proof =
 		app.config.proxy?.by === "secret" ? createHash("sha256").update(app.config.proxy.secret).digest() : null;
 	const refuseProxy = (req: Request): Response | null => {
-		if (proof === null || (req.method === "GET" && new URL(req.url).pathname === "/healthz")) return null;
+		const path = new URL(req.url).pathname;
+		// The startup probe, and Cloud Scheduler's call, which proves itself with a Google token (`authenticateJob`).
+		if (
+			proof === null ||
+			(req.method === "GET" && path === "/healthz") ||
+			(req.method === "POST" && path === "/api/job")
+		)
+			return null;
 		const sent = createHash("sha256")
 			.update(req.headers.get("x-mainworthy-proxy") ?? "")
 			.digest();
@@ -976,19 +983,9 @@ export function serve(
 		maxRequestBodySize: STREAM_BODY_LIMIT,
 		...(ui?.websocket ? { websocket: ui.websocket } : {}),
 		routes: {
-			...withHeadersOnEvery(
-				app.config.jobService
-					? {
-							"/healthz": routes["/healthz"],
-							"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
-						}
-					: routes,
-				refuseProxy,
-			),
-			...keepingPolicyOnEvery(app.config.jobService ? {} : (extra.open ?? {}), refuseProxy),
-			...(!app.config.jobService && ui
-				? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) }
-				: {}),
+			...withHeadersOnEvery(routes, refuseProxy),
+			...keepingPolicyOnEvery(extra.open ?? {}, refuseProxy),
+			...(ui ? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) } : {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		} as any,
 		fetch: (req: Request) =>

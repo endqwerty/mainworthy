@@ -13,7 +13,8 @@ import { migrate } from "./migrate.ts";
 
 export type Config = {
 	jobKey?: string | undefined;
-	jobService?: JobService;
+	/** Who may call `POST /api/job` (Cloud Scheduler's Google token): `MAINWORTHY_JOB_AUDIENCE` and `_ACCOUNT`. */
+	jobCaller?: JobService;
 	jobRunner?: boolean;
 	/** Where attachments live. */
 	dataDir: string;
@@ -426,19 +427,18 @@ function adminMfaOf(env: Record<string, string | undefined>): boolean {
 	throw new Error("MAINWORTHY_REQUIRE_ADMIN_MFA must be true or false");
 }
 
-function jobConfig(env: Record<string, string | undefined>): Pick<Config, "jobService" | "jobRunner"> {
-	const role = env.MAINWORTHY_JOB_SERVICE;
+function jobConfig(env: Record<string, string | undefined>): Pick<Config, "jobCaller" | "jobRunner"> {
 	const runner = env.MAINWORTHY_JOB_RUNNER;
-	if (role && role !== "0" && role !== "1") throw new Error("MAINWORTHY_JOB_SERVICE must be 0 or 1");
 	if (runner && runner !== "0" && runner !== "1") throw new Error("MAINWORTHY_JOB_RUNNER must be 0 or 1");
-	if (role !== "1") return { jobRunner: runner !== "0" };
+	const jobRunner = runner !== "0";
 	const audience = env.MAINWORTHY_JOB_AUDIENCE;
 	const account = env.MAINWORTHY_JOB_ACCOUNT;
-	if (!audience || !account) throw new Error("Job service requires MAINWORTHY_JOB_AUDIENCE and MAINWORTHY_JOB_ACCOUNT");
+	if (!audience && !account) return { jobRunner };
+	if (!audience || !account) throw new Error("MAINWORTHY_JOB_AUDIENCE and MAINWORTHY_JOB_ACCOUNT are set together");
 	const url = new URL(audience);
 	if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search)
 		throw new Error("MAINWORTHY_JOB_AUDIENCE must be an HTTPS URL");
 	if (!/^[^\s@]+@[^\s@]+\.gserviceaccount\.com$/.test(account))
 		throw new Error("MAINWORTHY_JOB_ACCOUNT must name a service account");
-	return { jobService: { audience, account }, jobRunner: false };
+	return { jobCaller: { audience, account }, jobRunner };
 }

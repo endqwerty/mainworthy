@@ -511,7 +511,7 @@ describe("a proxy proved by a secret", () => {
 			["GET", "/api/session"],
 			["POST", "/api/p/scratch/find"],
 			["POST", "/api/admin"],
-			["POST", "/api/job"],
+			["GET", "/api/job"],
 			["GET", "/api/p/scratch/events"],
 			["POST", "/mcp"],
 			["GET", "/api/export"],
@@ -577,15 +577,17 @@ describe("a proxy proved by a secret", () => {
 		expect(await said(await fetch(`${instance.url}/missing`, { headers: proof }))).toBe("404 not_found");
 	});
 
-	test("the job listener also requires proof when configured", async () => {
+	test("the Scheduler's POST /api/job needs its Google token, not the proxy's proof", async () => {
 		const instance = await boot(clockAt(), {
 			...settings,
-			MAINWORTHY_JOB_SERVICE: "1",
-			MAINWORTHY_JOB_AUDIENCE: "https://jobs.example.run.app",
+			MAINWORTHY_JOB_AUDIENCE: "https://mainworthy.example.run.app",
 			MAINWORTHY_JOB_ACCOUNT: "jobs@example.iam.gserviceaccount.com",
 		});
-		expect(await said(await postJson(instance, "/api/job", { do: "tick" }))).toBe("403 forbidden");
+		// Cloud Scheduler calls the service directly, so the token is its proof; a forged one is refused.
+		expect(await said(await postJson(instance, "/api/job", { do: "tick" }))).toBe("401 unauthenticated");
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }, proof))).toBe("401 unauthenticated");
+		expect(await said(await fetch(`${instance.url}/api/job`))).toBe("403 forbidden");
+		expect(await said(await postJson(instance, "/api/session", {}))).toBe("403 forbidden");
 		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
 	});
 

@@ -143,8 +143,8 @@ async function startInstance(
 		return minuteWork;
 	};
 	const minute = (): Promise<void> => run(true);
-	const timer = !config.jobService && config.jobRunner !== false ? setInterval(() => void minute(), 60_000) : null;
-	const poller = !config.jobService && config.jobRunner !== false ? setInterval(() => void run(false), 1000) : null;
+	const timer = config.jobRunner !== false ? setInterval(() => void minute(), 60_000) : null;
+	const poller = config.jobRunner !== false ? setInterval(() => void run(false), 1000) : null;
 	timer?.unref();
 	poller?.unref();
 	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;

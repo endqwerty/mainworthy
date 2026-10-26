@@ -93,7 +93,7 @@ resource "google_storage_bucket" "attachments" {
 }
 
 resource "google_secret_manager_secret" "app" {
-  for_each  = toset(["database-password", "job-key", "owner-token"])
+  for_each  = toset(["database-password", "job-key", "owner-token", "proxy-secret"])
   project   = var.production_project
   secret_id = "mainworthy-${each.key}"
   labels    = local.labels

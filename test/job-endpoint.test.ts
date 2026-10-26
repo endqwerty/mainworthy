@@ -27,15 +27,14 @@ test("the public job endpoint refuses unauthenticated requests and ordinary auth
 		await server.stop(true);
 	}
 });
-test("the job service exposes only health and the authenticated registry job endpoint", async () => {
+test("a server that takes the Scheduler's calls still serves everything else, and /api/job checks the token", async () => {
 	h = await harness();
-	h.app.config.jobService = service;
+	h.app.config.jobCaller = service;
 	const server = serve(h.app, h.owner, { ui: null });
 	try {
 		const url = `http://127.0.0.1:${server.port}`;
 		expect((await fetch(`${url}/healthz`)).status).toBe(200);
-		expect((await fetch(`${url}/api/openapi.json`)).status).toBe(404);
-		expect((await fetch(`${url}/api/admin`, { method: "POST", body: "{}" })).status).toBe(404);
+		expect((await fetch(`${url}/api/openapi.json`)).status).toBe(200);
 		expect(
 			(
 				await fetch(`${url}/api/job`, {
