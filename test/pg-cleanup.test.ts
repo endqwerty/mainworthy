@@ -199,6 +199,49 @@ test("damaged abandoned clusters cannot prevent another checkout from starting",
 		await f.pg(deleted, "stop");
 		const metadata = readFileSync(f.metadata(deleted), "utf8");
 		rmSync(deleted, { recursive: true });
+		const pidFile = join(orphan.directory, "data/postmaster.pid");
+		const signalFile = join(f.cache, "unexpected-signal");
+		const unrelated = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`
+			import {writeFileSync, rmSync} from "node:fs";
+			process.on("SIGINT", () => {
+				writeFileSync(${JSON.stringify(signalFile)}, "received SIGINT");
+				rmSync(${JSON.stringify(pidFile)}, {force:true});
+				process.exit(0);
+			});
+			console.log("ready");
+			setInterval(() => {}, 1000);
+		`,
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		try {
+			const reader = unrelated.stdout.getReader();
+			expect(new TextDecoder().decode((await reader.read()).value)).toContain("ready");
+			reader.releaseLock();
+			writeFileSync(pidFile, `${unrelated.pid}\n${join(orphan.directory, "data")}\n`);
+			await f.pg(keeper, "start");
+			expect(existsSync(signalFile)).toBe(false);
+			expect(unrelated.exitCode).toBeNull();
+			expect(existsSync(orphan.directory)).toBe(true);
+		} finally {
+			if (unrelated.exitCode === null) unrelated.kill("SIGTERM");
+			await unrelated.exited;
+			rmSync(pidFile, { force: true });
+		}
+		const keeperState = stateSchema.parse(JSON.parse(readFileSync(f.metadata(keeper), "utf8")));
+		const keeperPid = pidOf(keeperState.directory);
+		writeFileSync(pidFile, `${keeperPid}\n${join(orphan.directory, "data")}\n`);
+		try {
+			await f.pg(keeper, "start");
+			expect(pidOf(keeperState.directory)).toBe(keeperPid);
+			await f.available(keeperState);
+		} finally {
+			rmSync(pidFile, { force: true });
+		}
 		const marker = join(orphan.directory, ".mw-scratch");
 		rmSync(marker);
 		await f.pg(keeper, "start");

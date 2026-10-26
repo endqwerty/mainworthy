@@ -5,6 +5,7 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
 	realpathSync,
 	renameSync,
 	rmSync,
@@ -163,18 +164,37 @@ function validateDirectory(directory: string, clusterId: string): void {
 		throw new Error("cluster directory is outside the scratch root");
 	}
 }
+async function stopPostmaster(state: ClusterFiles): Promise<void> {
+	const data = join(state.directory, "data");
+	const pid = Number(readFileSync(join(data, "postmaster.pid"), "utf8").split("\n")[0]);
+	if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid checkout PostgreSQL PID");
+	const name = Bun.spawnSync(["ps", "-p", String(pid), "-o", "comm="], { stdout: "pipe", stderr: "pipe" });
+	let directory: string | undefined;
+	if (process.platform === "linux") directory = readlinkSync(`/proc/${pid}/cwd`);
+	else {
+		const cwd = Bun.spawnSync(["lsof", "-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (cwd.exitCode === 0)
+			directory = cwd.stdout
+				.toString()
+				.split("\n")
+				.find((line) => line.startsWith("n"))
+				?.slice(1);
+	}
+	if (
+		name.exitCode !== 0 ||
+		basename(name.stdout.toString().trim()) !== "postgres" ||
+		directory === undefined ||
+		realpathSync(directory) !== realpathSync(data)
+	)
+		throw new Error("cannot confirm checkout PostgreSQL postmaster; cluster retained");
+	await command([join(controlBinaries(state), "pg_ctl"), "-D", data, "-m", "fast", "-w", "stop"]);
+}
 async function deleteState(state: ClusterFiles, clusterId: string): Promise<void> {
 	validateDirectory(state.directory, clusterId);
-	if (running(state))
-		await command([
-			join(controlBinaries(state), "pg_ctl"),
-			"-D",
-			join(state.directory, "data"),
-			"-m",
-			"fast",
-			"-w",
-			"stop",
-		]);
+	if (running(state)) await stopPostmaster(state);
 	rmSync(state.directory, { recursive: true, force: true });
 }
 /** A path supplied for legacy recovery must be the original absolute checkout path, not a guess from its id. */
@@ -299,15 +319,7 @@ export async function stopCluster(): Promise<string> {
 	return exclusive(async () => {
 		const state = stored();
 		if (!state || !running(state)) return "checkout PostgreSQL is stopped";
-		await command([
-			join(controlBinaries(state), "pg_ctl"),
-			"-D",
-			join(state.directory, "data"),
-			"-m",
-			"fast",
-			"-w",
-			"stop",
-		]);
+		await stopPostmaster(state);
 		return "stopped checkout PostgreSQL";
 	});
 }
