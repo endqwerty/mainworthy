@@ -18,7 +18,7 @@ import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/error
 import { limiterOf, takeStart } from "./attempts.ts";
 import { holdCeremonyGeneration } from "./ceremonies.ts";
 import { findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
-import { clearMailLinksOf, credentialNotice, personByEmail } from "./contacts.ts";
+import { clearMailLinksOf, credentialNotice, emailHolders, personByEmail } from "./contacts.ts";
 import { CONTEXT } from "./contexts.ts";
 import {
 	type CredentialRow,
@@ -123,6 +123,9 @@ const Q = {
 		"SELECT id, name FROM actors WHERE id = $id AND kind = 'human' AND disabled_at IS NULL",
 	),
 	nameOf: sql<{ id: number }, { name: string }>("SELECT name FROM actors WHERE id = $id"),
+	actorsNamedLike: sql<{ name: string }, { id: number }>(
+		"SELECT id FROM actors WHERE lower(name) = $name AND disabled_at IS NULL AND org = (SELECT id FROM orgs ORDER BY id LIMIT 1)",
+	),
 };
 
 const hashOf = (secret: string): string => bytesToHex(sha256(new TextEncoder().encode(secret)));
@@ -333,13 +336,14 @@ class PasswordBlocked extends Error {
 }
 
 /**
- * Admission and result accounting shared by sign-in and a change's current-password check. A success clears the
- * count of `name` unless `clears` is false: for a sign-in through an email address, whose key can be another
- * person's name in another case or padding, so that one person's sign-ins would clear the guesses at another's.
+ * Admission and result accounting shared by sign-in and a change's current-password check. A right password
+ * resets the count of `name` only when what it counts is `holder`'s alone: the count is of the text, trimmed and
+ * in lower case, which can also be another person's name in another case, or their email address. Resetting it
+ * then would let one person's sign-ins clear the wrong passwords tried at another's.
  */
 async function checkPassword(
 	app: App,
-	input: { password: string; stored: string; name: string; address: string | null; clears?: boolean },
+	input: { password: string; stored: string; name: string; address: string | null; holder: number | null },
 ): Promise<PasswordMatch | Limited> {
 	const limiter = limiterOf(app);
 	const account = accountKey(input.name);
@@ -365,8 +369,18 @@ async function checkPassword(
 		if (failed.kind === "blocked") return waiting(failed);
 	}
 	// A success clears only the name, and cannot erase a block begun while this check was running.
-	else if (account !== null && input.clears !== false) await limiter.succeeded([account], blockVersion);
+	else if (account !== null && input.holder !== null && (await countedForOnly(app, input.name, input.holder)))
+		await limiter.succeeded([account], blockVersion);
 	return right;
+}
+
+/** Is `holder` the only one whose name, in any case, or whose email address is `text` trimmed and lower-cased? */
+async function countedForOnly(app: App, text: string, holder: number): Promise<boolean> {
+	const counted = text.trim().toLowerCase();
+	return await app.database.admissionRead(async (db) => {
+		const named = (await db.all(Q.actorsNamedLike, { name: counted })).map((row) => row.id);
+		return [...named, ...(await emailHolders(db, counted))].every((id) => id === holder);
+	});
 }
 
 /**
@@ -390,10 +404,10 @@ export async function signInWithPassword(
 	const keys = counted(addressKey(about.address), account);
 	const answer = await limiter.check(keys, app.now());
 	if (answer.kind === "blocked") return waiting(answer);
-	const named = await app.database.admissionRead(
-		async (readDb) => await readDb.get(Q.personByName, { name: input.name }),
+	const person = await app.database.admissionRead(
+		async (readDb) =>
+			(await readDb.get(Q.personByName, { name: input.name })) ?? (await personByEmail(readDb, input.name)),
 	);
-	const person = named ?? (await app.database.admissionRead(async (readDb) => await personByEmail(readDb, input.name)));
 	const name = person?.name ?? input.name;
 	const stored = person
 		? await app.database.admissionRead(async (readDb) => await livePassword(readDb, person.id))
@@ -408,7 +422,7 @@ export async function signInWithPassword(
 			stored: stored?.data ?? nobodys,
 			name: input.name,
 			address: about.address,
-			clears: named !== null,
+			holder: person?.id ?? null,
 		});
 		if (typeof checked !== "string") return checked;
 		right = checked;
@@ -508,6 +522,7 @@ export async function changePassword(
 				stored: held.data,
 				name: person.name,
 				address: input.address,
+				holder: person.id,
 			});
 			if (typeof checked !== "string") return checked;
 			if (checked === "wrong") return { ok: false, why: "wrong-current" };
@@ -602,6 +617,7 @@ export async function proveCredential(
 				stored: row?.data ?? (await dummyHash(app.config.passwordCost)),
 				name: person.name,
 				address: input.address,
+				holder: person.id,
 			});
 			if (typeof checked !== "string") return checked;
 			if (!row || checked === "wrong") return no("wrong-password");
