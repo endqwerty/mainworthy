@@ -421,7 +421,7 @@
       "lane": "deploy",
       "col": 4,
       "type": "backend",
-      "label": "Read GET /healthz",
+      "label": "Read GET /health",
       "sublabel": "Deployed commit must match",
       "width": 160,
       "sources": [

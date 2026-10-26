@@ -94,13 +94,16 @@ for latency); the load balancer in #945 replaces it once outside users arrive.
 
 1. The owner, once: adds CI's deploy account as an **Owner** of `mainworthy.com` in Search Console (Google requires
    the account that creates a mapping to own the domain), and creates a Cloudflare Transform Rule, "Modify Request
-   Header", on all incoming requests, that sets `x-mainworthy-proxy` to the proxy secret
+   Header", on requests whose host is `mainworthy.com` (`http.host eq "mainworthy.com"`), that sets `x-mainworthy-proxy` to the proxy secret
    (`gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`). Cloudflare overwrites
    both that header and `CF-Connecting-IP`, whatever a client sent.
 2. The apply creates the mapping. Its status lists the DNS records Google expects.
 3. In Cloudflare, `mainworthy.com`'s records become those records with the proxy off (DNS only), so Google can issue
-   the certificate. Until it does, which takes minutes to hours, the site answers 403: requests skip Cloudflare and
-   carry no proof. Then the proxy goes back on, with SSL/TLS set to Full (strict).
+   the certificate ("usually about 15 minutes but can take up to 24 hours"). Until it does, the site answers 403:
+   requests skip Cloudflare and carry no proof. Then the proxy goes back on, with SSL/TLS set to Full (strict).
+   Google renews the certificate through Cloudflare, and its page says Cloudflare's "Always Use HTTPS" must be off,
+   or Cloudflare would redirect the renewal's plain-HTTP check. So that setting is off, and a redirect rule sends every
+   other `http://mainworthy.com` request to `https://`, leaving paths under `/.well-known/acme-challenge/` alone.
 4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address and to
    Google's addresses for `mainworthy.com` without the proof are refused, and that the iPhone app's TestFlight job
    still uploads. Then the Coolify instance and its autodeploy go.
