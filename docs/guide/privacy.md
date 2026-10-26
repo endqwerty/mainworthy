@@ -10,7 +10,7 @@ This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone ap
 
 ### Identity and access
 
-An account is a name and a way to sign in. We do not require an email address or a real name. If the instance has mail enabled, you can add a recovery email address. We store the address and whether and when you verified it. We use that information to send recovery links and notices about changes to your sign-in methods. Pending outgoing mail jobs temporarily hold the recipient and message, including any one-use sign-in link. They are excluded from exports. A completed or exhausted job removes that message input. SMTP credentials stay in the server environment.
+An account is a name and a way to sign in. We do not require an email address or a real name. You can add an email address, and sign in with it in place of your name. We store the address and whether and when you verified it. If the instance has mail enabled, we use that information to send recovery links and notices about changes to your sign-in methods; without mail, nothing is sent to it and it stays unverified. Pending outgoing mail jobs temporarily hold the recipient and message, including any one-use sign-in link. They are excluded from exports. A completed or exhausted job removes that message input. SMTP credentials stay in the server environment.
 
 Somebody who already has an account invites you. You choose how you sign in:
 

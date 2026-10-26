@@ -186,7 +186,7 @@ Flags of `mainworthy report`:
 
 Flags of `mainworthy login`:
 
-- `--name <string>`: Your sign-in name.
+- `--name <string>`: Your sign-in name, or your email address.
 - `--password-file <string>`: A private file holding your password. One final newline is ignored.
 - `--code-file <string>`: A private file holding a current authenticator code or unused recovery code.
 - `--label <string>`: The personal token label. Default: command line.

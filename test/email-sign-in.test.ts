@@ -25,7 +25,7 @@ test("on an instance that sends no mail, a person sets an email address and sign
 	expect((await signIn(w, "robin", PASSWORD)).status).toBe(200);
 });
 
-test("an email address gets the same refusal as a name, and its failures count against that person", async () => {
+test("an email address gets the same refusal as a name, and a blocked name says nothing about its address", async () => {
 	const w = await world({ proxied: true });
 	const cookie = await joined(w, "robin", PASSWORD);
 	expect((await w.op("credential", { do: "email.set", email: "robin@example.com" }, { cookie })).status).toBe(200);
@@ -36,16 +36,17 @@ test("an email address gets the same refusal as a name, and its failures count a
 	expect(wrong.status).toBe(401);
 	expect(wrong.body).toEqual(unknown.body);
 
-	// Guesses through the address count against the person's name too: switching to the name buys nothing. Each
-	// guess comes from another client, so only the person's count can block.
+	// Guessing at the name until it is blocked, each guess from another client so that only the name's count can
+	// block. The attempts are counted by what was typed: were the address counted as the name it belongs to, its
+	// refusal would now differ from an unknown address's, and tell whose it is.
 	let blocked = false;
 	for (let attempt = 0; attempt < 40 && !blocked; attempt++)
-		blocked =
-			(await signIn(w, "robin@example.com", "not the password at all", from(`198.51.100.${attempt + 1}`))).status ===
-			429;
+		blocked = (await signIn(w, "robin", "not the password at all", from(`198.51.100.${attempt + 1}`))).status === 429;
 	expect(blocked).toBe(true);
-	expect((await signIn(w, "robin", PASSWORD, from("203.0.113.7"))).status).toBe(429);
-	expect((await signIn(w, "robin@example.com", PASSWORD, from("203.0.113.8"))).status).toBe(429);
+	const mine = await signIn(w, "robin@example.com", "not the password at all", from("203.0.113.7"));
+	const nobodys = await signIn(w, "nobody@example.com", "not the password at all", from("203.0.113.8"));
+	expect(mine.status).toBe(401);
+	expect(mine.body).toEqual(nobodys.body);
 });
 
 test("a name wins over another person's email address that reads the same", async () => {

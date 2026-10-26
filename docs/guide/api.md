@@ -153,7 +153,7 @@ accepts its original spelling. If that spelling is not NFC, successful sign-in
 refreshes the password's hash without ending existing sessions. Accepting a
 recovery invitation revokes the person's previous passwords, passkeys, and tokens,
 and ends their existing sessions. Recovery does not change other actors' tokens. See
-[passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the
+[passwords and recovery](./access.md#an-email-address-or-a-name-and-a-password-or-a-passkey) for the
 legacy-password behavior and the limit when concurrent responses replace the
 browser's cookie.
 
