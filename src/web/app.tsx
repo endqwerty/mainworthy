@@ -425,7 +425,10 @@ function Workbench({
 			);
 		});
 	};
-	const [inInput, setInInput] = useState(false);
+	const [focusedElement, setFocusedElement] = useState<Element | null>(null);
+	const inInput =
+		focusedElement instanceof HTMLElement &&
+		(focusedElement.matches("input,textarea,select") || focusedElement.isContentEditable);
 	// Collapsed or open is this browser's choice, as the theme is: a reload and the next visit find it as it was.
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(sidebarKept);
 	useEffect(() => keepSidebar(sidebarCollapsed), [sidebarCollapsed]);
@@ -440,11 +443,11 @@ function Workbench({
 	useEffect(() => {
 		const change = () =>
 			queueMicrotask(() => {
-				const node = document.activeElement;
-				setInInput(node instanceof HTMLElement && (node.matches("input,textarea,select") || node.isContentEditable));
+				setFocusedElement(document.activeElement);
 			});
 		window.addEventListener("focusin", change);
 		window.addEventListener("focusout", change);
+		change();
 		return () => {
 			window.removeEventListener("focusin", change);
 			window.removeEventListener("focusout", change);
@@ -607,6 +610,7 @@ function Workbench({
 			(binding) =>
 				!binding.hidden &&
 				(!binding.applies || binding.applies()) &&
+				(!binding.when || binding.when()) &&
 				(!inInput || binding.allowInInput || binding.key.startsWith("mod+") || binding.key === "escape"),
 		)
 		.filter((binding) => priorities.includes(binding.key))
