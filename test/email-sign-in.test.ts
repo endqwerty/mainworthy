@@ -82,3 +82,27 @@ test("two long addresses that differ only past a name's length are counted apart
 	expect((await signIn(w, `${local}@example.org`, "sam's own long password", from("203.0.113.7"))).status).toBe(200);
 	expect((await signIn(w, `${local}@example.com`, PASSWORD, from("203.0.113.8"))).status).toBe(429);
 });
+
+test("signing in through an address that reads as another person's name clears nothing of that name's count", async () => {
+	const w = await world({ proxied: true });
+	await joined(w, "victim@example.com", PASSWORD);
+	const sam = await joined(w, "sam", "sam's own long password");
+	expect((await w.op("credential", { do: "email.set", email: "victim@example.com" }, { cookie: sam })).status).toBe(
+		200,
+	);
+	// The exact name is the victim's; padded or in another case it is no name, and is sam's address. Both are
+	// counted under one key, so sam's sign-ins between guesses at the victim must not clear it.
+	let blocked = false;
+	let client = 0;
+	for (let round = 0; round < 15 && !blocked; round++) {
+		for (let guess = 0; guess < 3 && !blocked; guess++)
+			blocked =
+				(await signIn(w, "victim@example.com", "not the password at all", from(`198.51.100.${++client}`))).status ===
+				429;
+		if (!blocked)
+			expect(
+				(await signIn(w, " Victim@example.com ", "sam's own long password", from(`198.51.100.${++client}`))).status,
+			).toBe(200);
+	}
+	expect(blocked).toBe(true);
+});
