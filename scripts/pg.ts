@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { defaultRoot, make, refusal } from "./work/scratch.ts";
 
 export const POSTGRES_MISSING =
@@ -37,7 +37,14 @@ export function binaries(): string | null {
 	return null;
 }
 export type Cluster = { adminUrl: string; directory: string | null; owned: boolean; startMs: number };
-type Stored = { directory: string; port: number; bin: string; startMs: number; checkout: string | null };
+type Stored = {
+	directory: string;
+	port: number;
+	bin: string;
+	startMs: number;
+	checkout: string | null;
+	device: number | undefined;
+};
 type ClusterFiles = Pick<Stored, "directory"> & { bin: string | null };
 const checkout = realpathSync(resolve(import.meta.dir, ".."));
 const checkoutId = (path: string): string => createHash("sha256").update(path).digest("hex").slice(0, 16);
@@ -55,15 +62,24 @@ function stored(file = stateFile): Stored | null {
 	const bin: unknown = Reflect.get(value, "bin");
 	const startMs: unknown = Reflect.get(value, "startMs");
 	const owner: unknown = Reflect.get(value, "checkout");
+	const device: unknown = Reflect.get(value, "device");
 	if (
 		typeof directory !== "string" ||
 		typeof port !== "number" ||
 		typeof bin !== "string" ||
 		typeof startMs !== "number" ||
-		(owner !== undefined && typeof owner !== "string")
+		(owner !== undefined && typeof owner !== "string") ||
+		(device !== undefined && (typeof device !== "number" || !Number.isSafeInteger(device) || device < 0))
 	)
 		throw new Error("invalid checkout PostgreSQL metadata");
-	return { directory, port, bin, startMs, checkout: typeof owner === "string" ? owner : null };
+	return { directory, port, bin, startMs, checkout: typeof owner === "string" ? owner : null, device };
+}
+function ancestorDevice(path: string): number {
+	for (let ancestor = dirname(path); ; ancestor = dirname(ancestor)) {
+		const info = statSync(ancestor, { throwIfNoEntry: false });
+		if (info) return info.dev;
+		if (ancestor === dirname(ancestor)) throw new Error("cannot establish checkout filesystem; cluster retained");
+	}
 }
 async function command(args: string[]): Promise<void> {
 	const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
@@ -237,7 +253,12 @@ export async function cleanupClusters(
 				}
 				if (checkoutId(owner) !== clusterId) throw new Error("checkout PostgreSQL owner does not match its id");
 				if (present(owner)) {
-					if (state && state.checkout === null) save(file, { ...state, checkout: owner });
+					if (state && (state.checkout === null || state.device === undefined))
+						save(file, { ...state, checkout: owner, device: statSync(owner).dev });
+					return;
+				}
+				if (state && (state.device === undefined ? !owners.has(clusterId) : ancestorDevice(owner) !== state.device)) {
+					retained.push(clusterId);
 					return;
 				}
 				if (state) await deleteState(state, clusterId);
@@ -264,13 +285,17 @@ export async function cluster(): Promise<Cluster> {
 	await cleanupClusters([], { strict: false });
 	return exclusive(async () => {
 		let state = stored();
-		if (state && running(state)) return describe(state);
+		const device = statSync(checkout).dev;
+		if (state && running(state)) {
+			if (state.checkout !== checkout || state.device !== device) save(stateFile, { ...state, checkout, device });
+			return describe(state);
+		}
 		const bin = binaries();
 		if (!bin) throw new Error(POSTGRES_MISSING);
 		const start = performance.now();
 		if (!state) {
 			const directory = make(`pg-${id}`);
-			state = { directory, port: await freePort(), bin, startMs: 0, checkout };
+			state = { directory, port: await freePort(), bin, startMs: 0, checkout, device };
 			save(stateFile, state);
 		}
 		const data = join(state.directory, "data");
@@ -292,6 +317,8 @@ export async function cluster(): Promise<Cluster> {
 		);
 		state.port = await freePort();
 		state.bin = bin;
+		state.checkout = checkout;
+		state.device = device;
 		save(stateFile, state);
 		await command([
 			join(bin, "pg_ctl"),
@@ -337,7 +364,9 @@ if (import.meta.main) {
 	if (action === "cleanup") {
 		const retained = await cleanupClusters(process.argv.slice(3));
 		if (retained.length)
-			console.log(`Legacy ownership unknown; retained: ${retained.join(", ")}. See docs/development/tests.md.`);
+			console.log(
+				`Ownership or filesystem unavailable; retained: ${retained.join(", ")}. See docs/development/tests.md.`,
+			);
 	} else if (action === "cleanup-scratch") {
 		const [directory, root, ...paths] = process.argv.slice(3);
 		if (!directory || !root) throw new Error("cleanup-scratch needs a directory and its scratch root");

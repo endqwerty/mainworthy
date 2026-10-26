@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { binaries } from "../scripts/pg.ts";
@@ -87,6 +97,9 @@ test("startup reaps deleted exports, keeps existing checkout clusters, and finis
 		const orphan = await f.start(deleted),
 			existing = await f.start(keeper);
 		const pid = pidOf(orphan.directory);
+		const recorded = JSON.parse(readFileSync(f.metadata(deleted), "utf8"));
+		const device = statSync(deleted).dev;
+		expect(recorded.device).toBe(device);
 		expect(JSON.parse(readFileSync(f.metadata(deleted), "utf8")).checkout).toBe(deleted);
 		chmodSync(protectedParent, 0);
 		try {
@@ -97,6 +110,15 @@ test("startup reaps deleted exports, keeps existing checkout clusters, and finis
 			chmodSync(protectedParent, 0o700);
 		}
 		rmSync(deleted, { recursive: true });
+		writeFileSync(f.metadata(deleted), JSON.stringify({ ...recorded, device: device + 1 }));
+		await f.pg(keeper, "start");
+		await f.available(orphan);
+		expect(existsSync(f.metadata(deleted))).toBe(true);
+		writeFileSync(f.metadata(deleted), JSON.stringify({ ...recorded, device: undefined }));
+		await f.pg(keeper, "start");
+		await f.available(orphan);
+		expect(existsSync(f.metadata(deleted))).toBe(true);
+		writeFileSync(f.metadata(deleted), JSON.stringify({ ...recorded, device }));
 		await f.pg(keeper, "start");
 		f.gone(deleted, orphan, pid);
 		await f.available(existing);

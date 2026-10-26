@@ -11,8 +11,9 @@ Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fall
 
 ## Clean up checkout PostgreSQL
 
-Each checkout cluster records its absolute checkout path in `~/.cache/mainworthy/pg/<id>.json`.
-Starting a checkout cluster stops and deletes clusters whose recorded checkout no longer exists.
+Each checkout cluster records its absolute checkout path and filesystem device in `~/.cache/mainworthy/pg/<id>.json`.
+Starting a checkout cluster stops and deletes clusters whose recorded checkout no longer exists, provided its
+nearest existing ancestor remains on the recorded filesystem. An unmounted checkout volume retains its cluster.
 An existing checkout keeps its cluster, including a stopped cluster. `bun scripts/work.ts scratch rm <directory>`
 also cleans up clusters for the deleted export and nested exports before returning.
 `stop-server` stops the current checkout cluster; `release` stops and deletes it.
@@ -27,12 +28,13 @@ cluster's data directory. A stale PID file cannot authorize stopping another pro
 
 ### Recover older clusters
 
-Older metadata has no checkout path. Starting that checkout records its owner without replacing the cluster.
+Older metadata may lack a checkout path or filesystem device. Starting that checkout records both without replacing the cluster.
 Other clusters with unknown owners remain untouched, even when stopped. A stopped server alone does not prove
 that its checkout was deleted. This includes the stopped data directories from the shared-memory incident
 in [issue #935](https://github.com/endqwerty/mainworthy/issues/935).
 
-Run `bun scripts/pg.ts cleanup` to clean known abandoned clusters and list legacy metadata ids with unknown owners.
+Run `bun scripts/pg.ts cleanup` to clean known abandoned clusters and list retained ids with unknown ownership or
+an unavailable filesystem. An absent owner with no recorded device is retained unless its original path is supplied explicitly.
 If you know an old cluster's original absolute checkout path, supply it:
 
 ```sh
@@ -45,10 +47,13 @@ lost their metadata. If the recorded PostgreSQL binaries were deleted, cleanup u
 PostgreSQL 18 binaries when it must stop a server. A stopped directory needs no executable.
 
 Recover original checkout paths from retained review logs or worktree records. The hash cannot recover a path.
-Without that evidence, retain the directory. Do not delete all stopped clusters or remove directories by pattern.
+Without that evidence, retain the directory. Before supplying a legacy path without a recorded device, confirm its
+volume is mounted: a missing mount is not a deleted checkout. Do not delete all stopped clusters or remove directories by pattern.
 
 The real-process regression is `test/pg-cleanup.test.ts`, selected by `bun run performance`.
 It runs in its own cache and starts PostgreSQL from exported checkouts.
+The unavailable-volume case supplies a different recorded device and verifies SQL, metadata and data survive;
+restoring the matching device lets the same abandoned cluster be removed. Metadata without a device is also retained.
 
 ## Run the tests
 
