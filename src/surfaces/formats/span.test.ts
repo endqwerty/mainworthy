@@ -62,6 +62,24 @@ describe("a report's span", () => {
 		}
 	});
 
+	test("a time with more than three decimals keeps the millisecond it names, as Date.parse does", async () => {
+		const report = JSON.parse(await fixture("real-playwright.json"));
+		report.stats.startTime = "2026-10-26T09:00:00.999999Z";
+		expect(parseReport(JSON.stringify(report), { file: "report.json" }).span?.startedAt).toBe(
+			Date.parse("2026-10-26T09:00:00.999999Z"),
+		);
+	});
+
+	test("Jest JSON whose times are too large for a span says so (the verifier's finding)", async () => {
+		const report = JSON.parse(await fixture("real-jest.json"));
+		report.testResults[0].startTime = 1e100;
+		report.testResults[0].endTime = 1e100;
+		const parsed = parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/home/robin/project" });
+		expect(parsed.span).toBeUndefined();
+		expect(parsed.results.length).toBeGreaterThan(0);
+		expect(parsed.warnings.filter((line) => line.includes("span"))).toHaveLength(1);
+	});
+
 	test("a date that is no date in the calendar gives no span (the verifier's finding)", async () => {
 		const parsed = junit(`<testsuite name="a" timestamp="2026-02-30T00:00:00Z" time="1">${testcase}</testsuite>`);
 		expect(parsed.span).toBeUndefined();

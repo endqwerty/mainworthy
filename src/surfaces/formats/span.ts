@@ -29,7 +29,8 @@ export function zonedTime(text: string): number | "no zone" | undefined {
 		return undefined;
 	if (match[8] === undefined && match[9] === undefined) return "no zone";
 	if (offsetHours > 23 || offsetMinutes > 59) return undefined;
-	const fraction = match[7] === undefined ? 0 : Number(`0.${match[7]}`) * 1000;
+	// Whole milliseconds, the rest cut off, as Date.parse reads them.
+	const fraction = Number((match[7] ?? "").slice(0, 3).padEnd(3, "0"));
 	const offset = (match[9] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes) * 60_000;
 	return Date.UTC(year, month - 1, day, hour, minute, second) + fraction - offset;
 }
