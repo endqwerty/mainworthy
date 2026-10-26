@@ -195,7 +195,7 @@ A pipeline reports tests that no case names. What happens to them is one choice 
 New cases always use the [computed folder](./report-results.md#link-tests-to-cases),
 even if you moved other cases from the same file. Changing this setting or reporting
 again does not move existing cases. Maintainers of this repository can use the
-[one-off regrouping procedure](../development/regroup-automated-cases.md) after deployment.
+[one-off regrouping procedure](https://github.com/endqwerty/mainworthy/blob/main/docs/development/regroup-automated-cases.md) after deployment.
 
 When a report creates cases, health checks and reads can run between creation slices and files. The new cases and test links become visible together when the report applies. A concurrent save waits for that transaction.
 

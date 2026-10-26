@@ -761,7 +761,7 @@ describe("what Changes and Your sessions read", () => {
 			job: "runner",
 			results: [
 				{
-					test: { key: "tests/e2e/shipping.spec.ts::shipping::address" },
+					test: { key: "tests/shipping.spec.ts::shipping::address" },
 					outcome: "pass",
 					tries: [{ outcome: "fail", durationMs: 25, failure: { message: "Address lookup timed out" } }],
 				},
