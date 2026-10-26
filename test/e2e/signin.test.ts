@@ -616,3 +616,27 @@ for (const cookie of ["ended", "valid"] as const)
 		},
 		30_000,
 	);
+
+test.skipIf(!browserAvailable)(
+	"sign-in offers a passkey only at the configured public hostname",
+	async () => {
+		const server = await startServer({ mode: "server", passkeys: true });
+		const browser = await openPage(server, { signedIn: false });
+		try {
+			const { page } = browser;
+			await page.waitForLoadState("networkidle");
+			const evidence = process.env.MAINWORTHY_PASSKEY_HOST_EVIDENCE;
+			if (evidence) await page.screenshot({ path: `${evidence}/other-host.png` });
+			expect(await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).count()).toBe(0);
+			await page.locator("#signin-password").waitFor();
+			await page.locator("#token").waitFor();
+			await page.goto(server.url.replace("127.0.0.1", "localhost"));
+			await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).waitFor();
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

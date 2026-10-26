@@ -1116,12 +1116,15 @@ the browsers they are signed in on and ends any of them.
 
 A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL` when it was registered. One made at
 `https://mainworthy.com` does not sign in at another name of the same instance, such as its tailnet name;
-there people use a password or a token. If you change the variable to another host name, the passkeys made
-under the old one stay stored and no browser offers them: people sign in with a password and register again.
+the web sign-in page hides the passkey button there, and people use a password or a token. If you change the
+variable to another host name, the passkeys made under the old one stay stored and no browser offers them: people sign in with a password and register again.
 
-In a browser, passkeys were tried with Chromium's built-in test authenticator and nothing else
-(`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). No physical security key, no synced passkey
-and neither Safari nor Firefox has been tried.
+Automated browser coverage uses Chromium's built-in test authenticator
+(`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). On 2026-10-26 the owner reported successful
+sign-in with a 1Password passkey on iOS, macOS and omarchy through Chrome, and in the iPhone app
+([issue #132](https://github.com/endqwerty/mainworthy/issues/132)). This evidence covers sign-in only.
+Safari, Firefox and a hardware security key were not reported, nor were registration, adding or removing
+credentials on those devices.
 
 ### What it costs
 
