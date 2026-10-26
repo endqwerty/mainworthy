@@ -92,6 +92,18 @@ test.skipIf(!browserAvailable)(
 							await page.getByRole("button", { name: "Close keys", exact: true }).click({ position: { x: 2, y: 2 } });
 						await eventually(() => opener.evaluate((node) => node === document.activeElement), Boolean);
 					}
+					if (device === "desktop") {
+						const opener = page.getByRole("button", { name: "Keyboard shortcuts", exact: true });
+						await opener.focus();
+						await page.keyboard.press("ControlOrMeta+k");
+						await page.locator(".palette-input").fill("All keys");
+						await page
+							.locator("[data-overlay=palette]")
+							.getByRole("option", { name: /All keys/ })
+							.click();
+						await page.locator(".help-close").click();
+						await eventually(() => opener.evaluate((node) => node === document.activeElement), Boolean);
+					}
 				} catch (error) {
 					console.error(error);
 					throw error;

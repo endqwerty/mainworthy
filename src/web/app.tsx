@@ -559,9 +559,7 @@ function Workbench({
 				label: "All keys",
 				list: true,
 				desktopOnly: true,
-				handler: () => {
-					openHelp();
-				},
+				handler: openHelp.bind(null, palette ? paletteOrigin.current : undefined),
 			},
 			{
 				key: "escape",
