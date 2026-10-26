@@ -29,10 +29,11 @@ prove the live instance or a restore works.
 Scope is software QA across the process spectrum, loose to regulated, with
 the full CI/CD flow in every profile (decision 0003).
 
-## From the MVP to 1.0 (updated 2026-10-24)
+## From the MVP to 1.0 (updated 2026-10-25)
 
 On 2026-10-13 the milestone `Backlog to 1.0` became seven milestones, M1 to M7,
-in three phases. Their titles stay unchanged so existing board filters do not break.
+in three phases. On 2026-10-25 the owner added M8 to phase 2: projects live under teams, and a team
+has owners, admins, users and viewers. It starts after the hosting transition. Their titles stay unchanged so existing board filters do not break.
 A milestone has no date. It ends when its acceptance criteria and required evidence
 are met. [Issue #64](https://github.com/endqwerty/mainworthy/issues/64)
 sets the current work order. Milestone numbers do not require independent work to
@@ -45,6 +46,7 @@ wait for a device check or an owner decision.
 | 2: the first usable version | M3 An exact gate that reaches the pull request | Each assigned issue has a fixture for its effect on the gate, including branch heads, scope, empty reports, disputes and failure signatures, and outbound GitHub checks publish the verdict |
 | | M4 Agents | Reviews belong to the exact change and patch, replies have registry schemas, delegation and edit limits preserve authority, and agent jobs meet budgets measured in two clients |
 | | M5 The rest of the workflow | The remaining case, execution, reporting, traceability and data-movement work meets its criteria, and each of the three team profiles runs its workflow end to end with policy switches only |
+| 2: the first usable version | M8 Teams own projects | A project is created in a team; each of the four roles (owner, admin, user, viewer) holds its capabilities on that team's projects and nothing on another's; a team's owner and admins administer members, invitations and service tokens without instance admin; the checks are recorded on web, CLI, MCP and the iPhone app |
 | 3: 1.0 | M6 Teams and organisations | Assigned organisation features meet their criteria, and a hosted tier has an owner-approved decision based on demonstrated need; PostgreSQL storage has landed |
 | | M7 Before 1.0 | The friction comparison, accessibility audit and trademark search have recorded results, distribution requirements are addressed, and the owner declares 1.0 |
 
@@ -78,6 +80,11 @@ for the individual issues, their order and dependencies:
    [#821](https://github.com/endqwerty/mainworthy/issues/821), including shared state, deployment
    gating, off-host backups and a recorded restore drill. Demo cleanup remains
    [#914](https://github.com/endqwerty/mainworthy/issues/914).
+4. Then put projects under teams, milestone [M8](https://github.com/endqwerty/mainworthy/milestone/10):
+   the decision in [#948](https://github.com/endqwerty/mainworthy/issues/948) first, then ownership, roles,
+   team administration, invitations, team-owned agents and pipelines, the web screens, and the removal of
+   grant-set teams ([#949](https://github.com/endqwerty/mainworthy/issues/949) to
+   [#955](https://github.com/endqwerty/mainworthy/issues/955)). M6 keeps SSO, compliance and the hosted tier.
 
 Issue #64 and each feature issue distinguish shipped source from remaining work. Optional features
 need a concrete workflow; they are not all prerequisites for this reliability and developer-experience cleanup.
@@ -88,7 +95,7 @@ gather sign-in and phone evidence on real devices. Public-source research for th
 
 Correctness and recovery come first because later capabilities depend on decisions
 and evidence that remain true. Several workstreams can proceed together. M5 extends
-the existing workflow; M6 needs concrete organisational demand; M7 records the
+the existing workflow; M8 gives projects an owning team; M6 needs concrete organisational demand; M7 records the
 evidence for the owner's 1.0 decision. Source review alone proves no runtime,
 device, deployment or compliance result.
 
