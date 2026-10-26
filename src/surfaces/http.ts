@@ -877,14 +877,7 @@ export function serve(
 	const proof =
 		app.config.proxy?.by === "secret" ? createHash("sha256").update(app.config.proxy.secret).digest() : null;
 	const refuseProxy = (req: Request): Response | null => {
-		const path = new URL(req.url).pathname;
-		// The startup probe, and Cloud Scheduler's call, which proves itself with a Google token (`authenticateJob`).
-		if (
-			proof === null ||
-			(req.method === "GET" && path === "/healthz") ||
-			(req.method === "POST" && path === "/api/job")
-		)
-			return null;
+		if (proof === null) return null;
 		const sent = createHash("sha256")
 			.update(req.headers.get("x-mainworthy-proxy") ?? "")
 			.digest();
@@ -936,8 +929,9 @@ export function serve(
 		address: (req, server) => clientAddress(req, server, app.config),
 		limited,
 	});
+	const healthz = () =>
+		jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
 	const routes: Record<string, unknown> = {
-		"/healthz": () => jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit }),
 		"/.well-known/apple-app-site-association": () =>
 			app.config.appleApps?.length
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
@@ -984,6 +978,14 @@ export function serve(
 		...(ui?.websocket ? { websocket: ui.websocket } : {}),
 		routes: {
 			...withHeadersOnEvery(routes, refuseProxy),
+			// Exempt by the route Bun matched on the raw path, never by the request's URL, which Bun hands over normalised
+			// (`/%2e/healthz` arrives as `/healthz`): the startup probe, and Cloud Scheduler's call, which proves itself
+			// with a Google token (`authenticateJob`). Any other method on these paths falls to the guarded fallback.
+			...withHeadersOnEvery({
+				// Bun answers HEAD from the GET route; only the probe's GET is exempt.
+				"/healthz": { GET: (req: Request) => (req.method === "GET" ? healthz() : (refuseProxy(req) ?? healthz())) },
+				"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
+			}),
 			...keepingPolicyOnEvery(extra.open ?? {}, refuseProxy),
 			...(ui ? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) } : {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.

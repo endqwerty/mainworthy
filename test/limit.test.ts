@@ -5,8 +5,10 @@
 // Every request here comes from the loopback address, which is never counted. A request gets an address the way
 // a visitor behind a proxy does: the instance trusts the loopback peer as its proxy and reads the address that
 // peer wrote in `x-client-address`.
+
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -588,6 +590,31 @@ describe("a proxy proved by a secret", () => {
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }, proof))).toBe("401 unauthenticated");
 		expect(await said(await fetch(`${instance.url}/api/job`))).toBe("403 forbidden");
 		expect(await said(await postJson(instance, "/api/session", {}))).toBe("403 forbidden");
+		// Only the raw paths are exempt: URL normalisation (%2e, \, ..) must not turn another route into one of them.
+		const raw = (method: string, path: string) =>
+			new Promise<string>((resolve, reject) => {
+				const { hostname, port } = new URL(instance.url);
+				const socket = connect(Number(port), hostname, () =>
+					socket.write(
+						`${method} ${path} HTTP/1.1\r\nhost: ${hostname}\r\ncf-connecting-ip: ${A}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}`,
+					),
+				);
+				let reply = "";
+				socket.on("data", (chunk) => {
+					reply += chunk.toString();
+				});
+				socket.on("end", () => resolve(reply.split("\r\n")[0] ?? ""));
+				socket.on("error", reject);
+			});
+		for (const [method, path] of [
+			["GET", "/%2e/healthz"],
+			["GET", "/docs/%2e%2e/healthz"],
+			["POST", "/api/p/%2e%2e/job"],
+			["POST", "/api/x\\..\\job"],
+			["POST", "/api/p/scratch/find\\..\\..\\..\\job"],
+			["POST", "/api/job/"],
+		] as const)
+			expect(await raw(method, path), `${method} ${path}`).toBe("HTTP/1.1 403 Forbidden");
 		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
 	});
 

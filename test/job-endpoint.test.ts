@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { generateKeyPair, SignJWT } from "jose";
+import { defaultConfig } from "../src/server/kernel/app.ts";
 import { authenticateJob } from "../src/server/kernel/job-auth.ts";
 import { enqueueJob, jobById } from "../src/server/kernel/jobs.ts";
 import { OPS } from "../src/server/ops/index.ts";
@@ -29,6 +30,10 @@ test("the public job endpoint refuses unauthenticated requests and ordinary auth
 });
 test("a server that takes the Scheduler's calls still serves everything else, and /api/job checks the token", async () => {
 	h = await harness();
+	// The two settings alone, on an ordinary server: no job-only mode.
+	const read = defaultConfig({ MAINWORTHY_JOB_AUDIENCE: service.audience, MAINWORTHY_JOB_ACCOUNT: service.account });
+	expect(read.jobCaller).toEqual(service);
+	expect(read.jobRunner).toBe(true);
 	h.app.config.jobCaller = service;
 	const server = serve(h.app, h.owner, { ui: null });
 	try {
