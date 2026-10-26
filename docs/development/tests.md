@@ -18,7 +18,9 @@ also cleans up clusters for the deleted export and nested exports before returni
 `stop-server` stops the current checkout cluster; `release` stops and deletes it.
 
 Cleanup takes the same per-cluster lock as startup, stops PostgreSQL before deleting its data, and removes
-metadata last. A later startup retries an interrupted deletion. An external `MAINWORTHY_TEST_PG` URL is never removed.
+metadata last. A later startup retries an interrupted deletion. Automatic startup and scratch cleanup warn and
+retain an entry they cannot safely clean, so a damaged orphan does not block another checkout. Explicit
+`bun scripts/pg.ts cleanup` still fails on such an entry. An external `MAINWORTHY_TEST_PG` URL is never removed.
 
 ### Recover older clusters
 

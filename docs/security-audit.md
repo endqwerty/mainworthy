@@ -55,7 +55,8 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   sets `CODEX_HOME` to a private temporary directory containing only a symlink to the existing home's `auth.json`,
   when present. It copies no credentials. Codex loads no `AGENTS.md`, `AGENTS.override.md` or config from the
   original Codex home. The temporary home is removed when Codex exits. The brief supplies the audit instructions;
-  Codex's built-in and managed instructions and default skill discovery still apply. Project docs alone did not exclude global instructions
+  Codex's built-in and managed instructions still apply. The automatic skills instruction block is disabled for this run
+  (`-c skills.include_instructions=false`), excluding the host's skill catalog from the model input too. Project docs alone did not exclude global instructions
   in Codex 0.164.0. The regression uses `codex debug prompt-input` to show a user-file marker in a control run and
   its absence with the audit invocation, while the brief remains present. Run in the export, Codex took the head's
   own `AGENTS.md` as its instructions (probed 2026-10-21), so a change could tell its auditor what to find;

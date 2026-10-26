@@ -176,7 +176,10 @@ async function deleteState(state: ClusterFiles, clusterId: string): Promise<void
 	rmSync(state.directory, { recursive: true, force: true });
 }
 /** A path supplied for legacy recovery must be the original absolute checkout path, not a guess from its id. */
-export async function cleanupClusters(paths: string[] = []): Promise<string[]> {
+export async function cleanupClusters(
+	paths: string[] = [],
+	{ strict = true }: { strict?: boolean } = {},
+): Promise<string[]> {
 	const retained: string[] = [];
 	mkdirSync(stateRoot, { recursive: true });
 	const owners = new Map(
@@ -189,35 +192,43 @@ export async function cleanupClusters(paths: string[] = []): Promise<string[]> {
 		readdirSync(stateRoot).flatMap((name) => (/^[a-f0-9]{16}\.json$/.test(name) ? [name.slice(0, -5)] : [])),
 	);
 	for (const clusterId of owners.keys()) ids.add(clusterId);
-	for (const clusterId of ids)
-		await exclusive(async () => {
-			const file = join(stateRoot, `${clusterId}.json`);
-			const state = stored(file);
-			const owner = state?.checkout ?? owners.get(clusterId);
-			if (!owner) {
-				retained.push(clusterId);
-				return;
-			}
-			if (checkoutId(owner) !== clusterId) throw new Error("checkout PostgreSQL owner does not match its id");
-			if (existsSync(owner)) {
-				if (state && state.checkout === null) save(file, { ...state, checkout: owner });
-				return;
-			}
-			if (state) await deleteState(state, clusterId);
-			for (const name of readdirSync(defaultRoot())) {
-				if (!new RegExp(`^mw-pg-${clusterId}-[a-zA-Z0-9]+$`).test(name)) continue;
-				const directory = join(defaultRoot(), name);
-				if (refusal(directory) !== null) continue;
-				await deleteState({ directory, bin: state?.bin ?? null }, clusterId);
-			}
-			rmSync(file, { force: true });
-		}, clusterId);
+	for (const clusterId of ids) {
+		try {
+			await exclusive(async () => {
+				const file = join(stateRoot, `${clusterId}.json`);
+				const state = stored(file);
+				const owner = state?.checkout ?? owners.get(clusterId);
+				if (!owner) {
+					retained.push(clusterId);
+					return;
+				}
+				if (checkoutId(owner) !== clusterId) throw new Error("checkout PostgreSQL owner does not match its id");
+				if (existsSync(owner)) {
+					if (state && state.checkout === null) save(file, { ...state, checkout: owner });
+					return;
+				}
+				if (state) await deleteState(state, clusterId);
+				for (const name of readdirSync(defaultRoot())) {
+					if (!new RegExp(`^mw-pg-${clusterId}-[a-zA-Z0-9]+$`).test(name)) continue;
+					const directory = join(defaultRoot(), name);
+					if (refusal(directory) !== null) continue;
+					await deleteState({ directory, bin: state?.bin ?? null }, clusterId);
+				}
+				rmSync(file, { force: true });
+			}, clusterId);
+		} catch (error) {
+			if (strict) throw error;
+			console.warn(
+				`PostgreSQL ${clusterId}: cleanup failed; retained: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
 	return retained;
 }
 export async function cluster(): Promise<Cluster> {
 	if (process.env.MAINWORTHY_TEST_PG)
 		return { adminUrl: process.env.MAINWORTHY_TEST_PG, directory: null, owned: false, startMs: 0 };
-	await cleanupClusters();
+	await cleanupClusters([], { strict: false });
 	return exclusive(async () => {
 		let state = stored();
 		if (state && running(state)) return describe(state);
@@ -308,7 +319,7 @@ if (import.meta.main) {
 		const why = refusal(directory, root);
 		if (why !== null) throw new Error(why);
 		rmSync(directory, { recursive: true });
-		await cleanupClusters(paths);
+		await cleanupClusters(paths, { strict: false });
 	} else if (action === "stop") console.log(await stopCluster());
 	else if (action === "delete") console.log(await removeCluster());
 	else if (action === "status") console.log(JSON.stringify(await clusterStatus()));
