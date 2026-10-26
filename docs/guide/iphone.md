@@ -11,7 +11,13 @@ and their pins in the web editor. The app's editor cannot change fragments or ca
 
 ## Install the app
 
-There is no App Store entry. You build the app from the repository and install it over a cable. You need a Mac
+The app is distributed through the internal TestFlight tester group only. The owner is the only tester.
+The owner confirmed sign-in on a physical iPhone with a native passkey held by 1Password, closing
+[#205](https://github.com/endqwerty/mainworthy/issues/205).
+
+### From the source
+
+You can also build the app from the repository and install it over a cable. You need a Mac
 with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Bun. Add an Apple ID in Xcode under
 Settings, Accounts. A free Apple ID will do. The app needs iOS 26 or later: it supports the current iOS and
 the one before it. To install the app, follow these steps:
@@ -33,10 +39,10 @@ until**. Run the command again before that day. You stay signed in.
 
 ### From TestFlight
 
-With a paid Apple developer membership you can send the app to TestFlight instead.
-You can then install it from TestFlight on your phone and your team's phones, with no cable. Before running `bun scripts/ios.ts upload` on the Mac, make the app
-once in App Store Connect. The repository's `ios/README.md` has the steps under "Send it to TestFlight". A build from
-TestFlight opens for 90 days, and the TestFlight app shows when it ends.
+The owner installs uploaded builds from the internal TestFlight group, with no cable. Before running
+`bun scripts/ios.ts upload` on the Mac, make the app once in App Store Connect and add the owner to that group.
+The repository's `ios/README.md` has the steps under "Send it to TestFlight".
+A build from TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 
 ## Sign in
 
