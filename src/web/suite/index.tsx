@@ -2389,9 +2389,7 @@ export function SuiteScreen() {
 	});
 	useSuiteBindings({
 		canEdit: Boolean(recordedView) && (!draft || ownedElsewhere),
-		canRecord: Boolean(
-			draft && !ownedElsewhere && !conflict && draft.sent === null && draft.submission.kind !== "waiting",
-		),
+		canRecord: Boolean(draft && !ownedElsewhere && !conflict),
 		create,
 		edit: () => edit(),
 		next: () => stepCursor(1),

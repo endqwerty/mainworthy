@@ -123,3 +123,47 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"editor commands remain available while a version is being recorded",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const sent = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		try {
+			const { page } = h;
+			await page.locator("#detail .ctitle").waitFor();
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("A recording still in flight");
+			await page.route("**/propose", async (route) => {
+				sent.resolve();
+				await release.promise;
+				await route.continue();
+			});
+			await page.keyboard.press("ControlOrMeta+Enter");
+			await sent.promise;
+			await title.fill("Text typed while recording");
+			await page.keyboard.press("ControlOrMeta+k");
+			await palette(page).waitFor();
+			for (const label of ["Seal and leave editor", "Record version"])
+				expect([label, await command(page, label).count()]).toEqual([label, 1]);
+			await page.keyboard.press("Escape");
+			await title.focus();
+			await page.keyboard.press("Escape");
+			expect(await title.evaluate((node) => node === document.activeElement)).toBe(false);
+			release.resolve();
+			await eventually(
+				async () => (await server.api("find", { in: "cases", text: "Text typed while recording" })).items.length,
+				(count) => count === 1,
+			);
+			expect(h.errors).toEqual([]);
+		} finally {
+			release.resolve();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
