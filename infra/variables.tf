@@ -17,6 +17,16 @@ variable "app_digest" {
   }
 }
 
+variable "apple_apps" {
+  description = "MAINWORTHY_APPLE_APPS, the iPhone apps mainworthy.com vouches for, from the repository variable of that name: the repository holds no team id."
+  type        = string
+  # Empty, the site serves no apple-app-site-association and the app can use no passkey or saved login for it.
+  validation {
+    condition     = trimspace(var.apple_apps) != ""
+    error_message = "apple_apps is empty: set the repository variable MAINWORTHY_APPLE_APPS (docs/deploy.md)."
+  }
+}
+
 variable "attachments_bucket" {
   description = "Globally unique bucket name, supplied by CI."
   type        = string

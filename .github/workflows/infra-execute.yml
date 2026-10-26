@@ -39,6 +39,8 @@ jobs:
       TF_VAR_production_project: ${{ secrets.GCP_PRODUCTION_PROJECT }}
       TF_VAR_preview_project: ${{ secrets.GCP_PREVIEW_PROJECT }}
       TF_VAR_attachments_bucket: ${{ secrets.GCP_ATTACHMENTS_BUCKET }}
+      # Public (the site serves it), so a variable: the repository holds no team id.
+      TF_VAR_apple_apps: ${{ vars.MAINWORTHY_APPLE_APPS }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_INFRA_DEPLOY_ACCOUNT: ${{ secrets.GCP_INFRA_DEPLOY_ACCOUNT }}
       GCP_INFRA_PLAN_ACCOUNT: ${{ secrets.GCP_INFRA_PLAN_ACCOUNT }}

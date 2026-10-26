@@ -77,6 +77,10 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
 - Background work: Cloud Scheduler posts `{"do":"tick"}` to the service's `/api/job` every minute, signed with a
   Google token as the `jobs` account. The app checks that token's audience and account and runs the due jobs inside
   the request; it runs no timer of its own (`MAINWORTHY_JOB_RUNNER=0`).
+- The iPhone app: `MAINWORTHY_APPLE_APPS` comes from the repository variable of that name (Settings, Secrets and
+  variables, Actions, Variables), the name `bun scripts/ios.ts install` prints; the repository holds no team id. An
+  apply without it fails: the site would serve no `/.well-known/apple-app-site-association`, and the app could use
+  no passkey or saved login for it.
 - Cloudflare's proof: the organisation forbids `allUsers`, so the invoker check is off and the app refuses every
   request without `x-mainworthy-proxy` set to the proxy secret, except `/health` and the token-checked `/api/job`.
   Only requests with it are read for `cf-connecting-ip`.
@@ -105,8 +109,9 @@ for latency); the load balancer in #945 replaces it once outside users arrive.
    or Cloudflare would redirect the renewal's plain-HTTP check. So that setting is off, and a redirect rule sends every
    other `http://mainworthy.com` request to `https://`, leaving paths under `/.well-known/acme-challenge/` alone.
 4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address and to
-   Google's addresses for `mainworthy.com` without the proof are refused, and that the iPhone app's TestFlight job
-   still uploads. Then the Coolify instance and its autodeploy go.
+   Google's addresses for `mainworthy.com` without the proof are refused, that
+   `https://mainworthy.com/.well-known/apple-app-site-association` names the app, and that the iPhone app's
+   TestFlight job still uploads. Then the Coolify instance and its autodeploy go.
 
 Rollback, before anything is written to the new instance, is restoring the previous DNS records.
 
