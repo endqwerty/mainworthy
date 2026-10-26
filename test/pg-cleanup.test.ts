@@ -30,11 +30,7 @@ async function fixture() {
 	};
 	const exported = (parent = cache) => {
 		const checkout = make("review-export", parent);
-		const archive = Bun.spawnSync(["git", "archive", "HEAD", "scripts"]);
-		expect(archive.exitCode, archive.stderr.toString()).toBe(0);
-		const unpacked = Bun.spawnSync(["tar", "-x", "-C", checkout], { stdin: archive.stdout });
-		expect(unpacked.exitCode, unpacked.stderr.toString()).toBe(0);
-		for (const file of ["pg.ts", "work/scratch.ts"]) cpSync(join("scripts", file), join(checkout, "scripts", file));
+		cpSync("scripts", join(checkout, "scripts"), { recursive: true });
 		return checkout;
 	};
 	const metadata = (checkout: string) => join(cache, "mainworthy/pg", `${key(checkout)}.json`);
