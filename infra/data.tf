@@ -18,12 +18,13 @@ resource "google_artifact_registry_repository" "images" {
 }
 
 resource "google_sql_database_instance" "app" {
-  for_each            = local.projects
-  project             = each.value
-  name                = "mainworthy"
-  region              = local.region
-  database_version    = "POSTGRES_18"
-  deletion_protection = true
+  for_each         = local.projects
+  project          = each.value
+  name             = "mainworthy"
+  region           = local.region
+  database_version = "POSTGRES_18"
+  # The preview instance goes in the next change (no previews yet, #894); Terraform reads this from state on delete.
+  deletion_protection = each.key == "production"
   settings {
     tier                        = "db-f1-micro"
     edition                     = "ENTERPRISE"
@@ -32,7 +33,7 @@ resource "google_sql_database_instance" "app" {
     disk_size                   = 10
     disk_autoresize             = true
     user_labels                 = local.labels
-    deletion_protection_enabled = true
+    deletion_protection_enabled = each.key == "production"
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.app[each.key].id
