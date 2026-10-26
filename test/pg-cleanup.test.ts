@@ -26,7 +26,7 @@ async function fixture() {
 			child.exited,
 		]);
 		expect(rc, out + err).toBe(0);
-		return out.trim();
+		return { out: out.trim(), err };
 	};
 	const exported = (parent = cache) => {
 		const checkout = make("review-export", parent);
@@ -215,6 +215,27 @@ test("damaged abandoned clusters cannot prevent another checkout from starting",
 		expect(existsSync(orphan.directory)).toBe(false);
 		const existing = await f.start(keeper);
 		await f.available(existing);
+	} finally {
+		await f.close();
+	}
+}, 120_000);
+
+test("cleanup does not wait on another existing checkout's startup lock", async () => {
+	const f = await fixture();
+	try {
+		const keeper = f.exported(),
+			locked = f.exported();
+		const existing = await f.start(locked);
+		const lock = f.metadata(locked).replace(/\.json$/, ".lock");
+		mkdirSync(lock);
+		writeFileSync(join(lock, "pid"), String(process.pid));
+		try {
+			const result = await f.pg(keeper, "start");
+			expect(result.err).not.toContain("timed out waiting for checkout PostgreSQL startup");
+			await f.available(existing);
+		} finally {
+			rmSync(lock, { recursive: true, force: true });
+		}
 	} finally {
 		await f.close();
 	}

@@ -17,7 +17,8 @@ An existing checkout keeps its cluster, including a stopped cluster. `bun script
 also cleans up clusters for the deleted export and nested exports before returning.
 `stop-server` stops the current checkout cluster; `release` stops and deletes it.
 
-Cleanup takes the same per-cluster lock as startup, stops PostgreSQL before deleting its data, and removes
+Cleanup skips existing owners without waiting on their startup locks. Before deleting anything it re-reads
+ownership and checkout existence under the same per-cluster lock as startup, stops PostgreSQL, and removes
 metadata last. A later startup retries an interrupted deletion. Automatic startup and scratch cleanup warn and
 retain an entry they cannot safely clean, so a damaged orphan does not block another checkout. Explicit
 `bun scripts/pg.ts cleanup` still fails on such an entry. An external `MAINWORTHY_TEST_PG` URL is never removed.

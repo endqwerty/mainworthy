@@ -194,8 +194,19 @@ export async function cleanupClusters(
 	for (const clusterId of owners.keys()) ids.add(clusterId);
 	for (const clusterId of ids) {
 		try {
+			const file = join(stateRoot, `${clusterId}.json`);
+			let observed: Stored | null = null;
+			try {
+				observed = stored(file);
+			} catch {
+				// A legacy writer may be updating it. Re-read under its lock before judging it.
+			}
+			if (observed?.checkout && checkoutId(observed.checkout) === clusterId && existsSync(observed.checkout)) continue;
+			if (observed && observed.checkout === null && !owners.has(clusterId)) {
+				retained.push(clusterId);
+				continue;
+			}
 			await exclusive(async () => {
-				const file = join(stateRoot, `${clusterId}.json`);
 				const state = stored(file);
 				const owner = state?.checkout ?? owners.get(clusterId);
 				if (!owner) {
