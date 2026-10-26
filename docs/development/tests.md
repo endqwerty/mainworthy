@@ -22,7 +22,8 @@ ownership and checkout existence under the same per-cluster lock as startup, sto
 metadata last. A later startup retries an interrupted deletion. Automatic startup and scratch cleanup warn and
 retain an entry they cannot safely clean, so a damaged orphan does not block another checkout. Explicit
 `bun scripts/pg.ts cleanup` still fails on such an entry. Permission errors do not count as a missing checkout
-or a stopped server. An external `MAINWORTHY_TEST_PG` URL is never removed.
+or a stopped server. Before signaling a PID, cleanup checks that it is a PostgreSQL process running from that
+cluster's data directory. A stale PID file cannot authorize stopping another process. An external `MAINWORTHY_TEST_PG` URL is never removed.
 
 ### Recover older clusters
 
