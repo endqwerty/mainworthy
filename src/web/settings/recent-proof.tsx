@@ -32,16 +32,15 @@ export function useRecentProof() {
 	const hasPassword = rows.some((row) => row.kind === "password");
 	const hasTotp = rows.some((row) => row.kind === "totp");
 	const hasPasskey = rows.some((row) => row.kind === "passkey");
-	const guidance =
-		credentials.isPending || credentials.isFetching
-			? "loading"
-			: credentials.isError
-				? "error"
-				: rows.length === 0
-					? "first"
-					: rows.every((row) => row.kind === "oidc")
-						? "recovery"
-						: "proof";
+	const guidance = credentials.isPending
+		? "loading"
+		: credentials.isError && credentials.data === undefined
+			? "error"
+			: rows.length === 0
+				? "first"
+				: rows.every((row) => row.kind === "oidc")
+					? "recovery"
+					: "proof";
 	useEffect(() => () => pending.current?.(false), []);
 	useEffect(() => {
 		if (!open) return;
