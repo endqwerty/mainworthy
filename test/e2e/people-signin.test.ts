@@ -121,6 +121,28 @@ test.skipIf(!browserAvailable)(
 			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			await prompt.getByText("that credential proof was not accepted; nothing was changed", { exact: true }).waitFor();
 			expect(await page.getByTestId("totp-setup-key").count()).toBe(0);
+			const reading = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			await page.route("**/api/credential", async (route) => {
+				if (route.request().postDataJSON().do === "list") {
+					reading.resolve();
+					await resume.promise;
+				}
+				await route.continue();
+			});
+			const refreshed = page.waitForResponse(
+				(response) => response.url().endsWith("/api/credential") && response.request().postDataJSON().do === "list",
+			);
+			await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+			await reading.promise;
+			try {
+				expect(await prompt.getByLabel("Password", { exact: true }).count()).toBe(1);
+				expect(await prompt.getByLabel("Password", { exact: true }).inputValue()).toBe("wrong password");
+			} finally {
+				resume.resolve();
+			}
+			await refreshed;
+			await page.unroute("**/api/credential");
 			await prompt.getByLabel("Password", { exact: true }).fill(password);
 			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			await page.getByTestId("totp-setup-key").waitFor();
