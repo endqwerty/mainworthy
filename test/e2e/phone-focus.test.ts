@@ -52,7 +52,12 @@ test.skipIf(!browserAvailable)(
 			await page.goto(`${server.url}/p/scratch/suite`);
 			await page.getByRole("option", { name: /^C-2 / }).tap();
 			await page.waitForURL("**/suite/c/2");
-			expect(await page.locator("#detail .ctitle").innerText()).not.toBe("");
+			const chosen = (await server.api("get", { refs: ["C-2"] }))[0];
+			if (!chosen || !("title" in chosen)) throw new Error("Missing C-2 title");
+			await eventually(
+				() => page.locator("#detail .ctitle").innerText(),
+				(title) => title === chosen.title,
+			);
 			await page.getByRole("button", { name: "Back to the list", exact: true }).tap();
 			await page.locator("#list [role=listbox]").focus();
 			await page.keyboard.press("Enter");
@@ -76,7 +81,6 @@ test.skipIf(!browserAvailable)(
 				const h = await openPage(server, { device });
 				try {
 					const { page } = h;
-					await page.locator("#filter").focus();
 					for (const close of ["Escape", "button", "backdrop"]) {
 						// ? is an app key outside a text field, with a concrete control to return to.
 						const opener =
@@ -144,6 +148,12 @@ for (const device of ["ios", "android"] as const) {
 				await audit();
 				await page.getByRole("option", { name: /^C-2 / }).tap();
 				await page.waitForURL("**/suite/c/2");
+				const chosen = (await server.api("get", { refs: ["C-2"] }))[0];
+				if (!chosen || !("title" in chosen)) throw new Error("Missing C-2 title");
+				await eventually(
+					() => page.locator("#detail .ctitle").innerText(),
+					(title) => title === chosen.title,
+				);
 				expect(await page.evaluate(() => document.activeElement?.closest("#detail") !== null)).toBe(true);
 				expect(await exposed(page, "#list")).toBe(0);
 				await audit();
