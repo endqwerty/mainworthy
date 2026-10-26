@@ -16,6 +16,7 @@ import { type Assertion, CreationOptions, type Registration, RequestOptions } fr
 const Methods = z.object({
 	password: schemaFlag,
 	passkey: schemaFlag,
+	passkeyHost: schemaNullableText.default(null),
 	mail: schemaFlag.default(false),
 	/** The identity provider people may sign in through, by the name the operator gave it; null for none. */
 	oidc: z.object({ name: schemaText }).nullable().default(null),

@@ -102,6 +102,7 @@ test.skipIf(!browserAvailable)(
 			expect(resultOf<unknown>(await send(page, "/api/login/methods"))).toEqual({
 				password: true,
 				passkey: true,
+				passkeyHost: "localhost",
 				mail: false,
 				oidc: null,
 			});

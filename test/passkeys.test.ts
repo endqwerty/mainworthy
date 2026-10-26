@@ -702,7 +702,7 @@ describe("the relying party", () => {
 		const cookie = await joined(w, "robin", PASSWORD);
 		expect((await w.get("/api/login/methods")).body).toEqual({
 			ok: true,
-			result: { password: true, passkey: false, mail: false, oidc: null },
+			result: { password: true, passkey: false, passkeyHost: null, mail: false, oidc: null },
 		});
 		const replies = [
 			await w.post("/api/login/challenge", {}),

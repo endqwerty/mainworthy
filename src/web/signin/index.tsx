@@ -178,7 +178,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 						</div>
 					</div>
 				)}
-				{methods?.passkey && passkeysAvailable() && (
+				{methods?.passkey && methods.passkeyHost === window.location.hostname && passkeysAvailable() && (
 					<div className="signin-way">
 						<button
 							type="button"

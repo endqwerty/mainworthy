@@ -178,12 +178,15 @@ function mustHavePasskeys(app: App): RelyingParty {
 export function signInMethods(app: App): {
 	password: true;
 	passkey: boolean;
+	passkeyHost: string | null;
 	mail: boolean;
 	oidc: { name: string } | null;
 } {
+	const address = publicAddress(app.config);
 	return {
 		password: true,
-		passkey: publicAddress(app.config) !== null,
+		passkey: address !== null,
+		passkeyHost: address?.party.id ?? null,
 		mail: app.config.mail !== undefined,
 		oidc: app.config.oidc ? { name: app.config.oidc.name } : null,
 	};
