@@ -48,6 +48,7 @@ async function mailbox(options: Parameters<typeof fakeSmtp>[0] = {}) {
 	}).mail;
 	return { ...smtp, w };
 }
+type Contact = { email: string | null; verified: boolean };
 const contactInput = (email: string | null) => ({ do: "email.set", actor: "robin", email });
 function linkCode(text: string, purpose: "email" | "reset"): string {
 	const code = new RegExp(`/${purpose}#([A-Za-z0-9_-]{43})`).exec(text)?.[1];
@@ -149,7 +150,7 @@ test("entering the verified address again changes nothing and mails nothing", as
 	}
 });
 
-test("a stored recovery address can be removed after mail is switched off", async () => {
+test("after mail is switched off, an address is replaced unverified with no mail, and removed", async () => {
 	const box = await mailbox();
 	const w = box.w;
 	try {
@@ -157,7 +158,10 @@ test("a stored recovery address can be removed after mail is switched off", asyn
 		const before = box.messages.length;
 		w.instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
 		w.instance.app.config.mail = undefined;
-		expect((await w.op("credential", { do: "email.set", email: "new@example.com" }, { cookie })).status).toBe(400);
+		expect(must(await w.op<Contact>("credential", { do: "email.set", email: "new@example.com" }, { cookie }))).toEqual({
+			email: "new@example.com",
+			verified: false,
+		});
 		expect((await w.op("credential", { do: "email.set", email: null }, { cookie })).status).toBe(200);
 		expect(
 			must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),

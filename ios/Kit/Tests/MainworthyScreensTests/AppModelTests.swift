@@ -81,7 +81,7 @@ struct AppModelTests {
 		form.password = "not the password"
 		#expect(form.canSubmit)
 		await form.submit()
-		#expect(form.notice == "That did not sign you in. Check the name and the password.")
+		#expect(form.notice == "That did not sign you in. Check the email or name, and the password.")
 		form.password = Live.password
 		await form.submit()
 		let workspace = try workspace(app)

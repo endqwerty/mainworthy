@@ -323,7 +323,10 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Tab");
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
 			await page.keyboard.press("Enter");
-			await page.getByRole("status").filter({ hasText: "That name and password did not sign you in." }).waitFor();
+			await page
+				.getByRole("status")
+				.filter({ hasText: "That email or name and password did not sign you in." })
+				.waitFor();
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
 			expect(await page.locator("#signin-name").inputValue()).toBe("sam");
 			expect(await page.locator("#app").count()).toBe(0);
@@ -1024,6 +1027,44 @@ test.skipIf(!browserAvailable)(
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"on an instance that sends no mail, a person saves an email address in Settings and signs in with it",
+	async () => {
+		const password = "an email sign-in browser password";
+		const made = await server.api("invitation", { do: "create", name: "email-browser", can: ["read"] });
+		if (!("code" in made)) throw new Error("no invitation was made");
+		await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ invitation: made.code, password }),
+		});
+		const browser = await openPage(server, {
+			path: "/p/scratch/settings?section=signin",
+			as: { name: "email-browser", password },
+		});
+		const fresh = await openPage(server, { path: "/p/scratch/suite", signedIn: false, ready: "#signin-name" });
+		try {
+			const email = browser.page.getByRole("region", { name: "Email", exact: true });
+			await email.getByText("This instance sends no mail", { exact: false }).waitFor();
+			await email.getByLabel("Email address", { exact: true }).fill("Email.Browser@Example.org");
+			await email.getByRole("button", { name: "Save email address", exact: true }).click();
+			await email.getByText("Email address saved. Sign in with it or with the name.", { exact: true }).waitFor();
+			await email.getByText("email.browser@example.org", { exact: true }).waitFor();
+
+			const { page } = fresh;
+			await page.getByLabel("Email or name", { exact: true }).fill("email.browser@example.org");
+			await page.locator("#signin-password").fill(password);
+			await page.keyboard.press("Enter");
+			await page.locator("#app").waitFor();
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await fresh.close();
 		}
 	},
 	30_000,

@@ -10,7 +10,7 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/settings?section=signin" });
 		try {
 			const { page } = browser;
-			const email = page.getByRole("region", { name: "Email for password reset", exact: true });
+			const email = page.getByRole("region", { name: "Email", exact: true });
 			const save = async () => {
 				await email.getByLabel("Email address", { exact: true }).fill("owner-recovery@example.org");
 				const reply = page.waitForResponse(

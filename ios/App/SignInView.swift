@@ -40,8 +40,9 @@ struct SignInView: View {
 					Section {
 						// The two content types, with the associated domain the app's entitlements name, are what lets
 						// the phone's password AutoFill (and 1Password through it) offer the login it keeps for the site.
-						TextField("Name", text: $form.name)
+						TextField("Email or name", text: $form.name)
 							.textContentType(.username)
+							.keyboardType(.emailAddress)
 							.textInputAutocapitalization(.never)
 							.autocorrectionDisabled()
 							.focused($focus, equals: .name)
@@ -55,7 +56,7 @@ struct SignInView: View {
 							.onSubmit(submit)
 							.accessibilityIdentifier("password")
 					} footer: {
-						Text("Set a password or add a passkey in the web app, under Settings, Your sign-in.")
+						Text("Set a password, an email address or a passkey in the web app, under Settings, Your sign-in.")
 					}
 				}
 				Section {

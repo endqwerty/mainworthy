@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { EmailAddress } from "../../core/people.ts";
 import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
@@ -22,6 +23,10 @@ const Q = {
 		`SELECT c.*, a.name FROM mail_contacts c JOIN actors a ON a.id = c.actor WHERE c.email = $email AND a.disabled_at IS NULL AND c.verified_at IS NOT NULL`,
 	),
 	owner: sql<{ email: string }, { actor: number }>("SELECT actor FROM mail_contacts WHERE email = $email"),
+	person: sql<{ email: string }, { id: number; name: string }>(
+		`SELECT a.id, a.name FROM mail_contacts c JOIN actors a ON a.id = c.actor
+		 WHERE c.email = $email AND a.kind = 'human' AND a.disabled_at IS NULL`,
+	),
 	put: sql<{ actor: number; email: string; revision: string }>(
 		`INSERT INTO mail_contacts (actor, email, revision) VALUES ($actor, $email, $revision) ON CONFLICT(actor) DO UPDATE SET email = excluded.email, revision = excluded.revision, verified_at = NULL`,
 	),
@@ -100,7 +105,8 @@ export async function setEmail(
 	// The verified address on file, entered again: nothing changes, so nothing is mailed and it stays verified.
 	const current = await db.get(Q.get, { actor });
 	if (current?.email === email && current.verified_at !== null) return { email, verified: true };
-	const url = requireMail(app);
+	// Without mail the address is kept unverified: it signs the person in, and resets no password.
+	const url = app.config.mail ? requireMail(app) : null;
 	const owner = await db.get(Q.owner, { email });
 	if (owner && owner.actor !== actor) throw conflict("that email address is already assigned");
 	await credentialNotice(app, db, actor, "Your recovery email address was changed");
@@ -108,6 +114,7 @@ export async function setEmail(
 	await db.run(Q.put, { actor, email, revision });
 	const contact = await db.get(Q.get, { actor });
 	if (!contact) throw invalid("only a person has an email address");
+	if (url === null) return { email, verified: false };
 	const code = await issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 }, db);
 	queueMail(app, db, {
 		to: email,
@@ -115,6 +122,15 @@ export async function setEmail(
 		text: `Verify this address for ${contact.name}:\n${url}/email#${code}\n\nThis link works once for 24 hours. If you did not ask for it, ignore this message.`,
 	});
 	return { email, verified: false };
+}
+/**
+ * The person whose email address `text` is, verified or not, for signing in with it in place of the name. Not
+ * an address, or nobody's: null. An unverified address proves nothing, and needs none to: the person's password
+ * or passkey is still asked for, and an address is one person's at most.
+ */
+export async function personByEmail(db: ReadDb, text: string): Promise<{ id: number; name: string } | null> {
+	const email = EmailAddress.safeParse(text);
+	return email.success ? await db.get(Q.person, { email: email.data }) : null;
 }
 export async function verifyEmail(app: App, code: string, proven?: () => void): Promise<boolean> {
 	const first = await app.database.admissionRead(async (db) => find(app, db, code));

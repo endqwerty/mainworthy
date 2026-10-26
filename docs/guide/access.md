@@ -312,7 +312,7 @@ A person cannot yet request forgetting inside Mainworthy or delete their own acc
 
 ## Sign in as yourself
 
-A person can sign in with their name and a password, or with a passkey, and needs no token for it. A person gets their first way in through an invitation link. An admin copies it or sends it by mail when [SMTP is configured](./configuration.md#turn-on-mail). Nobody chooses a password for somebody else.
+A person can sign in with their email address or their name and a password, or with a passkey, and needs no token for it. A person gets their first way in through an invitation link. An admin copies it or sends it by mail when [SMTP is configured](./configuration.md#turn-on-mail). Nobody chooses a password for somebody else.
 
 Manage invitations and sign-in methods in Settings. The sections below also list the commands and API requests for scripts.
 
@@ -378,15 +378,15 @@ A link that was used, was revoked or has run out says "This invitation does not 
 
 A script accepts an invitation with `POST /api/login`. [API](./api.md#sign-in-as-a-person) has the request.
 
-### A name and a password, or a passkey
+### An email address or a name and a password, or a passkey
 
 Mainworthy normalizes passwords to Unicode NFC before hashing and checking them. An accented letter such as `é` matches the same letter entered as `e` followed by a combining accent, including from an iPhone keyboard. Compatibility characters such as full-width letters stay distinct. Passkeys and the PIN or biometric check that unlocks them are unchanged.
 
 A password stored before this change still accepts its original spelling. For an older non-NFC spelling, the first successful sign-in with that spelling refreshes its hash. After that refresh, canonical spellings both work. Until then, a different spelling may fail. Refreshing the hash keeps existing sessions signed in. Changing a password accepts the original spelling of an older password too.
 
-Sign in on the sign-in page with your name and password, or choose "Sign in with a passkey". A wrong name or password gets the same message: "That name and password did not sign you in." A wrong token and a refused passkey each have their own message. After too many failed attempts, the page says how long to wait.
+Sign in on the sign-in page with your email address or your name, and your password, or choose "Sign in with a passkey". The email address is the one set under **Your sign-in**, **Email**. A name wins over another person's email address that reads the same. A wrong email address, name or password gets the same message: "That email or name and password did not sign you in." A wrong token and a refused passkey each have their own message. After too many failed attempts, the page says how long to wait.
 
-A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. When the server checks and refuses those credentials, it replies `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server logs the reason as a code, never the name or password tried.
+A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`, where `name` can also be the person's email address. Failed attempts count against the person whichever of the two was typed. When the server checks and refuses those credentials, it replies `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server logs the reason as a code, never the name or password tried.
 
 A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. Without that variable the pages offer no passkey. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
 
@@ -466,13 +466,15 @@ The reset link works once for 15 minutes. It replaces your password and ends all
 
 To set a recovery address, follow these steps:
 
-1. In **Your sign-in**, set **Email for password reset**.
+1. In **Your sign-in**, set your address under **Email**.
 2. Open the verification mail.
 3. Press **Verify email**.
 
 The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
 
 As with adding a passkey, the browser session is sufficient without re-entering an existing credential. With mail enabled, replacing or removing a verified address sends a notice to the previous address. That notice contains no verification or reset code. If you did not make the change, the notice asks you to contact an instance admin. You can remove a stored address through the API even after mail is switched off, when no notice can be sent.
+
+Without mail, **Email** under **Your sign-in** still saves an address, with **Save email address**. Nothing is sent to it and it stays unverified: it signs you in, in place of your name, and receives no reset link or notice. Another person who wants the same address finds it taken, and the owner can change or remove it under that person's **Sign-in details**.
 
 Without mail, there is no reset link or invitation address field. An admin recovery invitation remains available. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
 
@@ -559,12 +561,12 @@ In local mode you sign in as the owner, with no step. An operation waiting acros
 
 In server mode the sign-in page has these ways in, one under the other:
 
-- Your name and password, then "Sign in".
+- Your email address or your name, and your password, then "Sign in".
 - "Sign in with" and the name of the instance's identity provider, where it has one. See [through an identity provider](#through-an-identity-provider).
 - "Sign in with a passkey", where the instance has passkeys and your browser has them. You type no name.
 - "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before anybody has a password, and how you try a token somebody handed you.
 
-The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser holds neither the token nor the password.
+The caret starts in **Email or name**, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser holds neither the token nor the password.
 
 A page's operation requests and signed-in account changes carry the actor id the page loaded, so a shared cookie cannot record your text as somebody else. If another tab signs in as a different person, the server refuses the stale page's request and asks you to sign in again. This also applies when the new person has the same name as a forgotten person.
 

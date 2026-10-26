@@ -129,7 +129,7 @@ public final class SignInForm {
 		} catch ClientError.refused(code: "unauthenticated", _) {
 			notice = needsSecondFactor
 				? "That code did not sign you in. Use a new authenticator code or an unused recovery code."
-				: "That did not sign you in. Check the name and the password."
+				: "That did not sign you in. Check the email or name, and the password."
 		} catch {
 			notice = error.shown
 		}
