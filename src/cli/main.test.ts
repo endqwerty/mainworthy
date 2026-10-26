@@ -1511,7 +1511,7 @@ test("an upgrading server is not ready to Cloud Run's probe, but health and the 
 		// Cloud Run's startup probe reads only the status, so a revision still migrating must not answer 200.
 		const reply = await fetch(`${url}/health`);
 		expect(reply.status).toBe(503);
-		expect((await fetch(`${url}/healthz`)).status).toBe(503);
+		expect((await fetch(`${url}/health`)).status).toBe(503);
 		expect(await reply.json()).toMatchObject({ ok: false, state: "upgrading", apiVersion: API_VERSION });
 		await withInstance(async ({ run }) => {
 			const health = await run(["health", "--url", url]);

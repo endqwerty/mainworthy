@@ -200,7 +200,7 @@ base propagation, corrections, closed runs and policy changes.
 5,000 open questions and a separate live demo. Its probe starts a fresh database copy
 in another process with production `NODE_ENV`, the normal WAL settings, eight ready
 reader threads on a ten-core host, and the ordinary checkpoint worker. It probes
-`/healthz` every 125 ms after the preceding response, logs 20 ms server timer drift,
+`/health` every 125 ms after the preceding response, logs 20 ms server timer drift,
 and records every health wait or drift above 250 ms with its active workload and timestamp.
 This frequency slows during a stall; the server's independent drift log records the pause too.
 

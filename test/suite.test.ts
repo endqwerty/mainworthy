@@ -3041,7 +3041,7 @@ describe("placement reply boundaries and order", () => {
 			hostname: "127.0.0.1",
 			port: 0,
 			fetch(request) {
-				if (new URL(request.url).pathname === "/healthz") return Response.json({ ok: true, apiVersion: 1 });
+				if (new URL(request.url).pathname === "/health") return Response.json({ ok: true, apiVersion: 1 });
 				writes++;
 				return Response.json({
 					ok: true,

@@ -264,7 +264,7 @@ def udp(namespace, address, port, expected, payload=b"round-five"):
     )
 
 
-def request(port, target="/healthz", headers=None):
+def request(port, target="/health", headers=None):
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{target}", headers=headers or {}
     )
@@ -519,7 +519,7 @@ try:
         "-q",
         "-O",
         "/dev/null",
-        "http://127.0.0.1:8080/healthz",
+        "http://127.0.0.1:8080/health",
     )
     report(
         "ingress loopback and configured health command work; host LAN address fails with reachable LAN control"

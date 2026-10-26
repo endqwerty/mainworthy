@@ -41,7 +41,7 @@ a time, and looking at the next request between landings. Its other gates hold.
 
 ## After the command
 
-- Check that every layer says merged and that `main` holds its commits. The `/healthz` check is made once, for the
+- Check that every layer says merged and that `main` holds its commits. The `/health` check is made once, for the
   commit `main` ends on.
 - A command that fails can leave the merge running: it asks for the status up to 600 times, a second apart, and
   gives up at the first request that fails. Read the state of every layer first. Land nothing one at a time until

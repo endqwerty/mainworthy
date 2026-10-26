@@ -170,7 +170,7 @@ test("a SIGKILLed worker's server exits and frees its port without stopping an u
 			await server.owner.exited;
 			await released(server);
 			expect(alive(unrelated.pid)).toBe(true);
-			expect((await fetch(`${unrelated.url}/healthz`)).ok).toBe(true);
+			expect((await fetch(`${unrelated.url}/health`)).ok).toBe(true);
 		} finally {
 			await server.dispose();
 		}

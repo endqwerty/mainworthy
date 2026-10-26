@@ -38,7 +38,7 @@ test("a server that takes the Scheduler's calls still serves everything else, an
 	const server = serve(h.app, h.owner, { ui: null });
 	try {
 		const url = `http://127.0.0.1:${server.port}`;
-		expect((await fetch(`${url}/healthz`)).status).toBe(200);
+		expect((await fetch(`${url}/health`)).status).toBe(200);
 		expect((await fetch(`${url}/api/openapi.json`)).status).toBe(200);
 		expect(
 			(

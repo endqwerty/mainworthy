@@ -54,7 +54,7 @@ test("startup migrates an empty PostgreSQL database before creating its first pr
 		() => ({ ui: null }),
 	);
 	try {
-		expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
+		expect((await fetch(`${instance.url}/health`)).status).toBe(200);
 		expect(
 			await new Client({ url: instance.url, token: undefined, project: "scratch" }).call("find", {}),
 		).toMatchObject({ items: [] });
@@ -386,7 +386,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
 			if (url) {
 				// An answered request proves the signal handlers are installed (see the test above).
-				expect((await fetch(`${url}/healthz`)).status).toBe(200);
+				expect((await fetch(`${url}/health`)).status).toBe(200);
 				await during(url);
 				child.kill("SIGTERM");
 			}
@@ -679,7 +679,7 @@ test("the upgrading listener retains the caller's idle timeout after installing 
 	let received = "";
 	const address = new URL(instance.url);
 	const socket = connect(Number(address.port), "127.0.0.1");
-	socket.on("connect", () => socket.write(`GET /healthz HTTP/1.1\r\nHost: ${address.host}\r\n\r\n`));
+	socket.on("connect", () => socket.write(`GET /health HTTP/1.1\r\nHost: ${address.host}\r\n\r\n`));
 	socket.on("data", (data) => {
 		received += data.toString();
 	});
@@ -718,7 +718,7 @@ test("a failing listening callback closes liveness", async () => {
 			}),
 		).rejects.toThrow("listening callback failed");
 		expect(Number(new URL(url).port)).toBeGreaterThan(0);
-		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
+		await expect(fetch(`${url}/health`)).rejects.toThrow();
 	} finally {
 		await opened?.stop();
 		await rm(directory, { recursive: true, force: true });

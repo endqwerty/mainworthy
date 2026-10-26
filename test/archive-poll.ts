@@ -15,7 +15,7 @@ let errors = 0;
 do {
 	const started = performance.now();
 	try {
-		const response = await fetch(`${url}/healthz`);
+		const response = await fetch(`${url}/health`);
 		const health = z.object({ ok: z.literal(true) }).safeParse(await response.json());
 		if (response.status !== 200 || !health.success) errors++;
 	} catch {

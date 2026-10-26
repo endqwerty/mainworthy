@@ -439,7 +439,7 @@ test("startup queues age-bounded pruning and accepted attachment recovery withou
 	now += BLOB_GRACE_MS + 1;
 	instance = await start(config, () => ({ ui: null }), { now: () => now });
 	instances.push(instance);
-	expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
+	expect((await fetch(`${instance.url}/health`)).status).toBe(200);
 	expect(await instance.app.blobs.get(orphan)).not.toBeNull();
 	await instance.minute();
 	expect(await instance.app.blobs.get(orphan)).toBeNull();

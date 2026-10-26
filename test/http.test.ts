@@ -199,7 +199,7 @@ test.each([
 		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
 	}
-	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
+	expect((await fetch(`${first.url}/health`)).status).toBe(200);
 });
 
 async function post<T>(
@@ -987,7 +987,7 @@ describe("graceful stop", () => {
 		const client = wire(instance, `POST /api/p/scratch/propose HTTP/1.1\r\n${host}Content-Length: 1000\r\n\r\n{`);
 		try {
 			// A separate answered request ensures the listener has had a turn to accept the partial body too.
-			expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
+			expect((await fetch(`${instance.url}/health`)).status).toBe(200);
 			await instance.stop();
 			expect(await client.within(1000)).toBe("closed");
 		} finally {
@@ -3135,10 +3135,10 @@ describe("the surface", () => {
 	});
 });
 
-describe("/healthz and the commit", () => {
+describe("/health and the commit", () => {
 	const SHA = "2f6b67e1ac063e6ac29c9fe45fdae07137b81c76";
 
-	/** Asks `/healthz` of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
+	/** Asks `/health` of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
 	async function healthz(env: Record<string, string>): Promise<unknown> {
 		using directory = testDirectory("mainworthy-http-healthz-");
 		const dataDir = directory.path;
@@ -3152,7 +3152,7 @@ describe("/healthz and the commit", () => {
 		// No reader threads: this route does not read a project, and the loop below starts one server per value.
 		const instance = await start(config, () => ({ ui: null }), {});
 		try {
-			const response = await fetch(`${instance.url}/healthz`);
+			const response = await fetch(`${instance.url}/health`);
 			expect(response.status).toBe(200);
 			return await response.json();
 		} finally {
@@ -3338,7 +3338,7 @@ describe("a connection that sends nothing", () => {
 		// one second is over within five.
 		await using instance = await boot("local", null, undefined, { patience: { ...PATIENCE, idleSeconds: 1 } });
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
-		const idle = wire(instance, `GET /healthz HTTP/1.1\r\n${host}\r\n`);
+		const idle = wire(instance, `GET /health HTTP/1.1\r\n${host}\r\n`);
 		const stream = wire(instance, `GET /api/p/scratch/events HTTP/1.1\r\n${host}\r\n`);
 		try {
 			expect(await idle.within(7000)).toBe("closed");

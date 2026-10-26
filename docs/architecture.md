@@ -305,7 +305,7 @@ PostgreSQL, shared by every instance, with at most 10,000 keys. Admission accoun
 a separate two-connection pool. A local source ceiling rejects floods before a database query. Restarting an
 instance grants no fresh allowance. Every route that takes a session is under the limit, `/mcp`, the archive and
 the change stream included, because each takes its session in one place (`sessionFor` in `src/surfaces/http.ts`).
-A route that takes none (`/healthz`, the API description, the documentation) looks at no token, and a sign-in
+A route that takes none (`/health`, the API description, the documentation) looks at no token, and a sign-in
 body the schema refuses is refused before it is counted.
 
 A person's sign-in is counted in the same limiter (`src/server/identity/attempts.ts` holds its shared database implementation).

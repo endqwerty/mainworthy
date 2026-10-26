@@ -104,7 +104,7 @@ check(
 				await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
 				await page.keyboard.press("Escape");
 				// A proposal that Escape sent would leave the page before this request does, and be counted first.
-				await page.evaluate(() => fetch("/healthz").then(() => undefined));
+				await page.evaluate(() => fetch("/health").then(() => undefined));
 			}
 			expect(sent).toBe(0);
 			await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();

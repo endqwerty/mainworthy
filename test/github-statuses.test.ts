@@ -539,7 +539,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 	try {
 		expect(instance.stop()).toBe(stopping);
 		// Refusing a new connection proves shutdown has stopped the HTTP listener while the status reply is held.
-		await expect(fetch(`${instance.url}/healthz`, { keepalive: false })).rejects.toThrow();
+		await expect(fetch(`${instance.url}/health`, { keepalive: false })).rejects.toThrow();
 		expect(stopped).toBe(false);
 	} finally {
 		finish.resolve(response());
