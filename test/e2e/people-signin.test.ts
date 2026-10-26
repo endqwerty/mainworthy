@@ -5,6 +5,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { z } from "zod";
 import { totpCode } from "../../src/server/identity/totp.ts";
 import {
+	addAuthenticator,
 	advanceClock,
 	browserAvailable,
 	devicePrefix,
@@ -26,6 +27,71 @@ afterAll(async () => {
 	await server?.stop();
 });
 
+for (const [method, device] of [
+	["password", "phone"],
+	["passkey", "desktop"],
+] as const)
+	test.skipIf(!browserAvailable)(
+		`a token-only owner adds a first ${method} before enrolling an authenticator on ${device}`,
+		async () => {
+			const started = await startServer({ mode: "server", passkeys: method === "passkey" });
+			const server = { ...started, url: started.url.replace("127.0.0.1", "localhost") };
+			let browser: PageHarness | null = null;
+			try {
+				browser = await openPage(server, { path: "/p/scratch/settings", device });
+				const { page } = browser;
+				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+				await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
+				const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+				await prompt.getByText("Add your first password or passkey", { exact: false }).waitFor();
+				expect(await prompt.getByRole("textbox").count()).toBe(0);
+				expect(await prompt.locator('input[type="password"]').count()).toBe(0);
+				await prompt.getByRole("button", { name: "Cancel confirmation", exact: true }).click();
+				const password = "the first owner password";
+				if (method === "password") {
+					await page.getByLabel("New password", { exact: true }).fill(password);
+					await page.getByLabel("New password again", { exact: true }).fill(password);
+					await page.getByRole("button", { name: "Set password", exact: true }).click();
+					await page.getByText("Password set.", { exact: true }).waitFor();
+				} else {
+					await addAuthenticator(browser);
+					await page.getByLabel("Passkey name", { exact: true }).fill("This browser");
+					await page.getByRole("button", { name: "Add a passkey", exact: true }).click();
+					await page.getByText("This browser was added.", { exact: true }).waitFor();
+				}
+				await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
+				if (method === "password") {
+					await prompt.getByLabel("Password", { exact: true }).fill(password);
+					expect(await prompt.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
+					await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
+				} else {
+					const usePasskey = prompt.getByRole("button", { name: "Use a passkey", exact: true });
+					await usePasskey.waitFor();
+					expect(await prompt.locator("input").count()).toBe(0);
+					expect(await usePasskey.evaluate((button) => button === document.activeElement)).toBe(true);
+					await usePasskey.click();
+				}
+				await page.getByRole("img", { name: "Authenticator QR code", exact: true }).waitFor();
+				const secret = await page.getByTestId("totp-setup-key").innerText();
+				const reply = await browser.context.request.post(`${server.url}/test/clock`, {
+					headers: { authorization: `Bearer ${server.token}` },
+					data: { advanceMs: 0 },
+				});
+				const ahead = z.object({ result: z.object({ ahead: z.number() }) }).parse(await reply.json()).result.ahead;
+				await page
+					.getByLabel("Authenticator code", { exact: true })
+					.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
+				await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
+				await page.getByRole("list", { name: "Recovery codes", exact: true }).waitFor();
+				expect(await server.api("credential", { do: "list" })).toMatchObject([{ kind: method }, { kind: "totp" }]);
+			} finally {
+				await browser?.close();
+				await started.stop();
+			}
+		},
+		30_000,
+	);
+
 test.skipIf(!browserAvailable)(
 	"Settings asks for inline recent proof and retries the refused action",
 	async () => {
@@ -45,6 +111,9 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
 			const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
 			await prompt.waitFor();
+			await prompt.getByLabel("Password", { exact: true }).waitFor();
+			expect(await prompt.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
+			expect(await prompt.getByRole("button", { name: "Use a passkey", exact: true }).count()).toBe(0);
 			expect(
 				await prompt.getByLabel("Password", { exact: true }).evaluate((input) => input === document.activeElement),
 			).toBe(true);
