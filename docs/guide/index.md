@@ -50,7 +50,7 @@ claim of WCAG conformance.
 
 ### Reference
 
-- [Keyboard](./keyboard.md). This page lists the web app's keys by screen. <kbd>?</kbd> lists the keys for the current screen. The bar at the bottom shows common actions.
+- [Keyboard](./keyboard.md). This page lists the web app's keys by screen. <kbd>?</kbd> lists the keys for the current screen. The bar at the bottom shows common actions. Its editor hints follow the focused field.
 - [Command line](./cli.md). This page lists every `mainworthy` command, with its flags and exit codes. The program generates the tables for the version that serves these docs.
 - [API and agent tools](./api.md). This page lists every Mainworthy operation, with its address, required capability, and input. The web UI, command line, and agent tools call these operations. The command line and HTTP API reach every operation. MCP exposes ten of them as agent tools.
 - [Glossary](./glossary.md). These definitions explain the words you see in Mainworthy and its command output, with links to the pages that describe them.
