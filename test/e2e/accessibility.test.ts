@@ -89,7 +89,8 @@ async function keyboard(page: Page): Promise<string[]> {
 test.skipIf(!browserAvailable)(
 	"WCAG 2.2 AA: every web screen, both themes, keyboard, targets and live status",
 	async () => {
-		const server = await startServer({ mode: "server", cases: 8, passkeys: true });
+		const started = await startServer({ mode: "server", cases: 8, passkeys: true });
+		const server = { ...started, url: started.url.replace("127.0.0.1", "localhost") };
 		const h = await openPage(server, { signedIn: false, path: "/" });
 		const { page } = h;
 		const findings: string[] = [];
@@ -185,6 +186,7 @@ test.skipIf(!browserAvailable)(
 			await page.locator(ready).first().waitFor();
 		};
 		try {
+			await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).waitFor();
 			await scan("sign-in");
 			const invitation = await server.api("invitation", { do: "create", name: "pat" });
 			if (!("code" in invitation)) throw new Error("No invitation code");

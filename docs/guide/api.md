@@ -108,7 +108,7 @@ logout needs no body. Replies use the operation envelope without `seq`.
 
 | Request | Body | What it does |
 | --- | --- | --- |
-| `GET /api/login/methods` | none | Returns `{"password": true, "passkey": <boolean>, "mail": <boolean>, "oidc": {"name"} or null}`. The booleans say whether the instance offers passkeys and mail. `oidc` names the identity provider, or is `null` when the instance has none. |
+| `GET /api/login/methods` | none | Returns `{"password": true, "passkey": <boolean>, "passkeyHost": <hostname> or null, "mail": <boolean>, "oidc": {"name"} or null}`. The booleans say whether the instance offers passkeys and mail. `passkeyHost` is the hostname from `MAINWORTHY_PUBLIC_URL`, or `null` without that setting. The web sign-in page offers its passkey button only at that hostname. `oidc` names the identity provider, or is `null` when the instance has none. |
 | `POST /api/login` | `{"token"}` | Signs in with a token. |
 | `POST /api/login` | `{"name", "password"}` | Signs in with a name, or the person's email address, and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. A second-factor reply creates no session. The next step requires the ceremony cookie from this response. |
 | `POST /api/login` | `{"challenge", "code"}` | Completes the password sign-in with a fresh six-digit TOTP or unused recovery code, plus the ceremony cookie from the first step. The challenge lasts five minutes and works once. A successful reply is `{"signedIn": true}` and sets the session cookie. |
