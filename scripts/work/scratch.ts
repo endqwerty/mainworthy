@@ -76,6 +76,7 @@ export function remove(given: string, root = defaultRoot()): string {
 			stderr: "pipe",
 		});
 		if (result.exitCode !== 0) throw new Error(`scratch PostgreSQL cleanup failed: ${result.stderr.toString().trim()}`);
+		if (result.stderr.length > 0) console.warn(result.stderr.toString().trim());
 	} else rmSync(real, { recursive: true });
 	return real;
 }

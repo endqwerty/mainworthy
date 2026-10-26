@@ -339,6 +339,7 @@ test("no module outside the tests reads a file that only the tests naming it are
 		"scripts/work/pull-request.ts": "judges docs/decisions/ and .changes/ paths from GitHub; reads no local file",
 		"scripts/ios/swift.ts": "writes the app's generated Swift; test/ios-contract.test.ts compares it and names ios/",
 		"scripts/security-audit.ts": "names the audit's own files to call out a change to them, and reads none of them",
+		"scripts/pg.ts": "a cleanup diagnostic that points to docs/development/tests.md",
 		"src/server/identity/identity.ts": "a message that points to docs/deploy.md",
 	};
 	const found: string[] = [];

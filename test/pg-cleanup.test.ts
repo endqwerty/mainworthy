@@ -180,3 +180,42 @@ test("scratch deletion loads cleanup before removing its own checkout", async ()
 		await f.close();
 	}
 }, 120_000);
+
+test("damaged abandoned clusters cannot prevent another checkout from starting", async () => {
+	const f = await fixture();
+	try {
+		const deleted = f.exported(),
+			keeper = f.exported();
+		const orphan = await f.start(deleted);
+		await f.pg(deleted, "stop");
+		const metadata = readFileSync(f.metadata(deleted), "utf8");
+		rmSync(deleted, { recursive: true });
+		const marker = join(orphan.directory, ".mw-scratch");
+		rmSync(marker);
+		await f.pg(keeper, "start");
+		expect(existsSync(orphan.directory)).toBe(true);
+		const strict = Bun.spawnSync([process.execPath, join(keeper, "scripts/pg.ts"), "cleanup"], {
+			env: { ...process.env, HOME: join(f.cache, ".."), MAINWORTHY_TEST_PG: "", MAINWORTHY_PG_BIN: binaries() ?? "" },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(strict.exitCode).not.toBe(0);
+		expect(strict.stderr.toString()).toContain("was not made by");
+		writeFileSync(marker, `${orphan.directory}\n`);
+		writeFileSync(f.metadata(deleted), "{");
+		await f.pg(keeper, "start");
+		expect(existsSync(orphan.directory)).toBe(true);
+		writeFileSync(f.metadata(deleted), metadata);
+		rmSync(join(orphan.directory, "data/PG_VERSION"));
+		writeFileSync(join(orphan.directory, "data/postmaster.pid"), `${process.pid}\n`);
+		await f.pg(keeper, "start");
+		expect(existsSync(orphan.directory)).toBe(true);
+		rmSync(join(orphan.directory, "data/postmaster.pid"));
+		await f.pg(keeper, "start");
+		expect(existsSync(orphan.directory)).toBe(false);
+		const existing = await f.start(keeper);
+		await f.available(existing);
+	} finally {
+		await f.close();
+	}
+}, 120_000);

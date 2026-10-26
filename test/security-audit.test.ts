@@ -367,6 +367,12 @@ test("the audit gives Codex its brief and an auth link without inherited instruc
 	const audit = join(root, "audit");
 	mkdirSync(original);
 	mkdirSync(audit);
+	const skill = join(root, ".agents/skills/audit-marker");
+	mkdirSync(skill, { recursive: true });
+	writeFileSync(
+		join(skill, "SKILL.md"),
+		"---\nname: audit-marker\ndescription: HOST_SKILL_MARKER_900\n---\nInherited host skill instructions.",
+	);
 	writeFileSync(join(original, "auth.json"), "test authentication");
 	writeFileSync(join(original, "AGENTS.md"), "GLOBAL_MARKER_900");
 	writeFileSync(join(original, "AGENTS.override.md"), "OVERRIDE_MARKER_900");
@@ -375,6 +381,7 @@ test("the audit gives Codex its brief and an auth link without inherited instruc
 	const invocation = codexInvocation(audit, join(audit, "findings.md"), "AUDIT_BRIEF_900", {
 		...process.env,
 		CODEX_HOME: original,
+		HOME: root,
 	});
 	const home = invocation.env.CODEX_HOME;
 	expect(home).not.toBe(original);
@@ -391,14 +398,21 @@ test("the audit gives Codex its brief and an auth link without inherited instruc
 				env,
 				encoding: "utf8",
 			});
-		const control = render([], { ...process.env, CODEX_HOME: original });
+		const control = render([], { ...process.env, CODEX_HOME: original, HOME: root });
 		expect(control.status).toBe(0);
 		expect(control.stdout).toContain("OVERRIDE_MARKER_900");
 		expect(control.stdout).toContain("PROJECT_MARKER_900");
+		expect(control.stdout).toContain("HOST_SKILL_MARKER_900");
 		const isolated = render(overrides, invocation.env);
 		expect(isolated.status).toBe(0);
 		expect(isolated.stdout).toContain("AUDIT_BRIEF_900");
-		for (const marker of ["GLOBAL_MARKER_900", "OVERRIDE_MARKER_900", "PROJECT_MARKER_900", "CONFIG_MARKER_900"])
+		for (const marker of [
+			"GLOBAL_MARKER_900",
+			"OVERRIDE_MARKER_900",
+			"PROJECT_MARKER_900",
+			"CONFIG_MARKER_900",
+			"HOST_SKILL_MARKER_900",
+		])
 			expect(isolated.stdout).not.toContain(marker);
 	}
 });

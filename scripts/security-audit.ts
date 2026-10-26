@@ -293,6 +293,8 @@ export const codexArgs = (directory: string, findings: string, text: string): st
 	`model_reasoning_effort=${EFFORT}`,
 	"-c",
 	"project_doc_max_bytes=0",
+	"-c",
+	"skills.include_instructions=false",
 	"-C",
 	directory,
 	"--sandbox",
