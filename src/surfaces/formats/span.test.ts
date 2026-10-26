@@ -33,11 +33,50 @@ describe("a report's span", () => {
 		const parsed = parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/home/robin/project" });
 		expect(parsed.span).toBeUndefined();
 		expect(parsed.results.length).toBeGreaterThan(0);
-		report.testResults[0].endTime = "later";
-		report.startTime = -5;
-		const odd = parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/home/robin/project" });
-		expect(odd.span).toBeUndefined();
-		expect(odd.results.length).toBeGreaterThan(0);
+		expect(parsed.warnings.filter((line) => line.includes("span"))).toEqual([]);
+	});
+
+	test("Jest or Vitest JSON with a time that is no time has none, says so once and keeps its results", async () => {
+		const options = { file: "report.json", rootDir: "/home/robin/project" };
+		for (const [name, change] of [
+			[
+				"a file's end is no number",
+				(report: { testResults: { endTime?: unknown }[] }) => {
+					report.testResults[0] = { ...report.testResults[0], endTime: "later" };
+				},
+			],
+			// The verifier's finding: an unusable run start fell back to the files' starts and still gave a span.
+			[
+				"the run's start is negative",
+				(report: { startTime?: unknown }) => {
+					report.startTime = -1;
+				},
+			],
+		] as const) {
+			const report = JSON.parse(await fixture("real-jest.json"));
+			change(report);
+			const parsed = parseReport(JSON.stringify(report), options);
+			expect([name, parsed.span]).toEqual([name, undefined]);
+			expect(parsed.results.length).toBeGreaterThan(0);
+			expect([name, parsed.warnings.filter((line) => line.includes("span")).length]).toEqual([name, 1]);
+		}
+	});
+
+	test("a date that is no date in the calendar gives no span (the verifier's finding)", async () => {
+		const parsed = junit(`<testsuite name="a" timestamp="2026-02-30T00:00:00Z" time="1">${testcase}</testsuite>`);
+		expect(parsed.span).toBeUndefined();
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.warnings.filter((line) => line.includes("span"))).toHaveLength(1);
+		for (const time of [
+			"2026-02-30T00:00:00Z",
+			"2026-10-11T24:00:00Z",
+			"2026-10-11T12:60:00Z",
+			"2026-10-11T12:00:00+25:00",
+		]) {
+			const report = JSON.parse(await fixture("real-playwright.json"));
+			report.stats.startTime = time;
+			expect([time, parseReport(JSON.stringify(report), { file: "report.json" }).span]).toEqual([time, undefined]);
+		}
 	});
 
 	test("Playwright JSON whose stats are unusable has none, says so once and keeps its results", async () => {

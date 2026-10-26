@@ -2,7 +2,7 @@ import { posix, win32 } from "node:path";
 import { z } from "zod";
 import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport, reportIdentifier, reportWarnings } from "./native.ts";
-import { spanOf } from "./span.ts";
+import { SPAN_UNUSABLE, spanOf } from "./span.ts";
 
 const Report = z.object({
 	rootDir: z.string().min(1).optional(),
@@ -116,20 +116,27 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 		}
 	}
 	const span = jestSpan(report);
-	return { results, warnings: warnings.finish(), ...(span ? { span } : {}) };
+	if (span === "unusable") warnings.add(() => SPAN_UNUSABLE);
+	return { results, warnings: warnings.finish(), ...(span && span !== "unusable" ? { span } : {}) };
 }
 
-/** From the run's start, or its first file's, to the last file's end: only when every file names both. */
-function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] {
-	const time = (value: unknown): number | undefined =>
-		typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-	let start = time(report.startTime) ?? Number.POSITIVE_INFINITY;
+/**
+ * From the run's start, or its first file's, to the last file's end: only when every file names both. A time that is
+ * there but is no time makes the span unusable, which the report says.
+ */
+function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] | "unusable" {
+	const times = [report.startTime, ...report.testResults.flatMap((file) => [file.startTime, file.endTime])];
+	if (
+		times.some((value) => value !== undefined && !(typeof value === "number" && Number.isFinite(value) && value >= 0))
+	)
+		return "unusable";
+	let start = typeof report.startTime === "number" ? report.startTime : Number.POSITIVE_INFINITY;
 	let end = Number.NEGATIVE_INFINITY;
 	for (const file of report.testResults) {
-		const [from, to] = [time(file.startTime), time(file.endTime)];
-		if (from === undefined || to === undefined || to < from) return undefined;
-		start = Math.min(start, from);
-		end = Math.max(end, to);
+		if (typeof file.startTime !== "number" || typeof file.endTime !== "number") return undefined;
+		if (file.endTime < file.startTime) return "unusable";
+		start = Math.min(start, file.startTime);
+		end = Math.max(end, file.endTime);
 	}
 	return Number.isFinite(start) && Number.isFinite(end) ? spanOf(start, end - start) : undefined;
 }

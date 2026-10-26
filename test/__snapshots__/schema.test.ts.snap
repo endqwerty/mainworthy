@@ -746,7 +746,7 @@ constraint batches.batches_project_key_key: UNIQUE (project, key)
 constraint batches.batches_project_not_null: NOT NULL project
 constraint batches.batches_seq_not_null: NOT NULL seq
 constraint batches.batches_shard_check: CHECK (((shard IS NULL) OR (shard >= 1)))
-constraint batches.batches_span: CHECK ((((started_at IS NULL) AND (ended_at IS NULL)) OR ((started_at >= 0) AND (ended_at >= started_at))))
+constraint batches.batches_span: CHECK ((((started_at IS NULL) AND (ended_at IS NULL)) OR ((started_at IS NOT NULL) AND (ended_at IS NOT NULL) AND (started_at >= 0) AND (ended_at >= started_at))))
 constraint batches.batches_state_not_null: NOT NULL state
 constraint batches.batches_state_v2: CHECK ((state = ANY (ARRAY['accepted'::text, 'processed'::text, 'cancelled'::text])))
 constraint batches.batches_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE

@@ -12,13 +12,26 @@ export function spanOf(startedAt: number, durationMs: number): ReportSpan | unde
 		: undefined;
 }
 
-/** An ISO 8601 time that names its zone, in milliseconds; a time without one is local to an unknown machine. */
+/**
+ * An ISO 8601 time that names its zone, in milliseconds; a time without one is local to an unknown machine. A date
+ * the calendar does not have, such as February 30, is no time: `Date.parse` would roll it into March.
+ */
 export function zonedTime(text: string): number | "no zone" | undefined {
-	const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(Z|[+-]\d{2}:?\d{2})?$/i.exec(text.trim());
+	const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:(Z)|([+-])(\d{2}):?(\d{2}))?$/i.exec(
+		text.trim(),
+	);
 	if (!match) return undefined;
-	if (match[1] === undefined) return "no zone";
-	const ms = Date.parse(text.trim().replace(",", "."));
-	return Number.isFinite(ms) ? ms : undefined;
+	const [year, month, day, hour, minute, second, offsetHours, offsetMinutes] = [1, 2, 3, 4, 5, 6, 10, 11].map((i) =>
+		Number(match[i] ?? 0),
+	) as [number, number, number, number, number, number, number, number];
+	const date = new Date(Date.UTC(year, month - 1, day));
+	if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59)
+		return undefined;
+	if (match[8] === undefined && match[9] === undefined) return "no zone";
+	if (offsetHours > 23 || offsetMinutes > 59) return undefined;
+	const fraction = match[7] === undefined ? 0 : Number(`0.${match[7]}`) * 1000;
+	const offset = (match[9] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes) * 60_000;
+	return Date.UTC(year, month - 1, day, hour, minute, second) + fraction - offset;
 }
 
 /** The span of several files sent as one report: from the first start to the last end, when every file has one. */

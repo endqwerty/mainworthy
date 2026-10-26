@@ -537,7 +537,7 @@ const Q = {
 		 FROM unnest($results::bigint[]) AS requested(value) JOIN results r ON r.id = requested.value`,
 	),
 	reportedSpan: sql<{ results: readonly number[] }, { untimed: number; started: number | null; ended: number | null }>(
-		`SELECT count(*) FILTER (WHERE b.started_at IS NULL) AS untimed, min(b.started_at) AS started, max(b.ended_at) AS ended
+		`SELECT count(*) FILTER (WHERE b.started_at IS NULL OR b.ended_at IS NULL) AS untimed, min(b.started_at) AS started, max(b.ended_at) AS ended
 		 FROM batches b WHERE b.id IN (
 		   SELECT r.batch FROM unnest($results::bigint[]) AS requested(value) JOIN results r ON r.id = requested.value)`,
 	),

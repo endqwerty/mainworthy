@@ -4,5 +4,6 @@ ALTER TABLE batches
  ADD COLUMN started_at bigint,
  ADD COLUMN ended_at bigint,
  ADD CONSTRAINT batches_span CHECK (
-  (started_at IS NULL AND ended_at IS NULL) OR (started_at >= 0 AND ended_at >= started_at)
+  (started_at IS NULL AND ended_at IS NULL)
+  OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND started_at >= 0 AND ended_at >= started_at)
  );
