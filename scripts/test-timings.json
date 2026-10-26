@@ -37,7 +37,7 @@
 		"test/e2e/signin.test.ts": 13802,
 		"test/e2e/interception.test.ts": 13224,
 		"test/ci-gate.test.ts": 12648,
-		"test/e2e/people-signin.test.ts": 12603,
+		"test/e2e/people-signin.test.ts": 13688,
 		"test/e2e/results.test.ts": 12411,
 		"test/e2e/suite-commands.test.ts": 12060,
 		"test/people.test.ts": 11771,

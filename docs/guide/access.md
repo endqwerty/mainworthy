@@ -257,6 +257,11 @@ The raw operation remains available. The page and shorter command are described 
 
 In Settings, open **Your sign-in**, then choose **Add an authenticator**.
 
+If confirmation is needed, use a password or passkey you already added. The
+confirmation offers an authenticator code only when an authenticator is enrolled.
+If you signed in with only a token, add your first password or passkey in
+**Your sign-in**, then choose **Add an authenticator** again and confirm that credential.
+
 To enrol the authenticator, follow these steps:
 
 1. Scan the QR code with a TOTP authenticator, or enter the setup key by hand. Mainworthy generates the QR code on the instance without contacting another service.
@@ -391,7 +396,7 @@ Adding or removing a password, passkey or authenticator, changing your recovery
 address, and linking or removing a provider identity need recent proof of your
 own credential. Password or passkey sign-in counts for ten minutes in that
 session. When proof is older, Settings asks inline for your password, passkey or
-six-digit authenticator code, then retries the change. A recovery code alone does
+six-digit authenticator code, showing only methods you have already added, then retries the change. A recovery code alone does
 not count. Another browser's proof does not count for this session.
 
 An admin removing somebody else's credential, or the owner changing their

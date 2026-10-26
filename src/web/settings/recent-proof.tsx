@@ -11,7 +11,7 @@ import { saidBy } from "./list.ts";
 
 /** Keeps the refused action in this component until this session proves a credential or cancels. */
 export function useRecentProof() {
-	const { project, session } = useApp();
+	const { project } = useApp();
 	const pending = useRef<((accepted: boolean) => void) | null>(null);
 	const [open, setOpen] = useState(false);
 	const [password, setPassword] = useState("");
@@ -21,24 +21,36 @@ export function useRecentProof() {
 	const field = useRef<HTMLInputElement>(null);
 	const setupLink = useRef<HTMLAnchorElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
-	const noPrimary = session.credentials !== null && !session.credentials.password && session.credentials.passkeys === 0;
+	const passkeyButton = useRef<HTMLButtonElement>(null);
 	const credentials = useQuery({
 		queryKey: [project, "credential", { do: "list" }],
 		queryFn: ({ signal }) => listCredentials({ signal }),
-		enabled: open && noPrimary,
+		enabled: open,
+		staleTime: 0,
 	});
+	const rows = credentials.data ?? [];
+	const hasPassword = rows.some((row) => row.kind === "password");
+	const hasTotp = rows.some((row) => row.kind === "totp");
+	const hasPasskey = rows.some((row) => row.kind === "passkey");
 	const guidance =
-		noPrimary && credentials.data
-			? credentials.data.length === 0
-				? "first"
-				: credentials.data.every((row) => row.kind === "oidc")
-					? "recovery"
-					: "proof"
-			: "proof";
+		credentials.isPending || credentials.isFetching
+			? "loading"
+			: credentials.isError
+				? "error"
+				: rows.length === 0
+					? "first"
+					: rows.every((row) => row.kind === "oidc")
+						? "recovery"
+						: "proof";
 	useEffect(() => () => pending.current?.(false), []);
 	useEffect(() => {
-		if (open) (guidance === "first" ? setupLink : guidance === "recovery" ? cancel : field).current?.focus();
-	}, [open, guidance]);
+		if (!open) return;
+		if (guidance === "first") setupLink.current?.focus();
+		else if (guidance === "proof") {
+			if (hasPassword || hasTotp) field.current?.focus();
+			else passkeyButton.current?.focus();
+		} else cancel.current?.focus();
+	}, [open, guidance, hasPassword, hasTotp]);
 	function finish(accepted: boolean) {
 		setOpen(false);
 		setPassword("");
@@ -97,7 +109,13 @@ export function useRecentProof() {
 			}}
 		>
 			<h3>Confirm your sign-in</h3>
-			{guidance === "first" ? (
+			{guidance === "loading" ? (
+				<p role="status">Reading your sign-in methods…</p>
+			) : guidance === "error" ? (
+				<p role="status">
+					{saidBy(credentials.error)} Cancel confirmation and retry the action to read your sign-in methods again.
+				</p>
+			) : guidance === "first" ? (
 				<p>
 					Add your first password or passkey in{" "}
 					<a ref={setupLink} href={`${routeUrl({ project, screen: "settings" })}?section=signin`}>
@@ -113,35 +131,48 @@ export function useRecentProof() {
 			) : (
 				<>
 					<p>Prove your own credential to continue. This proof lasts ten minutes in this session.</p>
-					<div className="settings-form">
-						<label>
-							Password
-							<input
-								ref={field}
-								className="form-input"
-								type="password"
-								autoComplete="current-password"
-								value={password}
-								onChange={(event) => setPassword(event.target.value)}
-							/>
-						</label>
-						<label>
-							Or authenticator code
-							<input
-								className="form-input"
-								autoComplete="one-time-code"
-								inputMode="numeric"
-								maxLength={6}
-								value={code}
-								onChange={(event) => setCode(event.target.value)}
-							/>
-						</label>
-						<button className="out" type="button" aria-disabled={busy} onClick={() => void prove(false)}>
-							Confirm credential
-						</button>
-					</div>
-					{(session.credentials?.passkeys ?? 0) > 0 && (
-						<button className="out" type="button" aria-disabled={busy} onClick={() => void prove(true)}>
+					{(hasPassword || hasTotp) && (
+						<div className="settings-form">
+							{hasPassword && (
+								<label>
+									Password
+									<input
+										ref={field}
+										className="form-input"
+										type="password"
+										autoComplete="current-password"
+										value={password}
+										onChange={(event) => setPassword(event.target.value)}
+									/>
+								</label>
+							)}
+							{hasTotp && (
+								<label>
+									{hasPassword ? "Or authenticator code" : "Authenticator code"}
+									<input
+										ref={hasPassword ? undefined : field}
+										className="form-input"
+										autoComplete="one-time-code"
+										inputMode="numeric"
+										maxLength={6}
+										value={code}
+										onChange={(event) => setCode(event.target.value)}
+									/>
+								</label>
+							)}
+							<button className="out" type="button" aria-disabled={busy} onClick={() => void prove(false)}>
+								Confirm credential
+							</button>
+						</div>
+					)}
+					{hasPasskey && (
+						<button
+							ref={passkeyButton}
+							className="out"
+							type="button"
+							aria-disabled={busy}
+							onClick={() => void prove(true)}
+						>
 							Use a passkey
 						</button>
 					)}
