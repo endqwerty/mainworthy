@@ -1,6 +1,7 @@
 {
 	"version": 1,
 	"files": {
+		"test/e2e/placement.test.ts": 51501,
 		"test/sequences-extended-strict.test.ts": 39525,
 		"test/e2e/proposal-shown.test.ts": 39456,
 		"test/sequences-extended-loose.test.ts": 39386,
@@ -30,7 +31,6 @@
 		"test/e2e/agent.test.ts": 17327,
 		"test/e2e/phone.test.ts": 17215,
 		"test/inherited.test.ts": 16008,
-		"test/e2e/placement.test.ts": 51501,
 		"test/e2e/round6.test.ts": 15467,
 		"test/check.test.ts": 14628,
 		"test/e2e/draft-conflicts.test.ts": 14377,
@@ -45,6 +45,7 @@
 		"test/e2e/round3-interactions.test.ts": 11401,
 		"test/budgets-performance.test.ts": 11131,
 		"test/runner-retries.test.ts": 11120,
+		"test/e2e/suite-archive-selection.test.ts": 10325,
 		"test/e2e/round7.test.ts": 10060,
 		"test/e2e/round3-capture.test.ts": 9921,
 		"test/e2e/round5.test.ts": 9789,
@@ -57,6 +58,7 @@
 		"test/e2e/cockpit-work.test.ts": 8510,
 		"test/e2e/accessibility.test.ts": 8367,
 		"test/e2e/session-and-keys.test.ts": 8308,
+		"test/e2e/suite-folder-cursor.test.ts": 8174,
 		"test/e2e/conflict.test.ts": 7962,
 		"test/signin-start-limit.test.ts": 7302,
 		"test/e2e/triage.test.ts": 7212,
@@ -107,9 +109,9 @@
 		"test/e2e/docs.test.ts": 3029,
 		"test/teams.test.ts": 2843,
 		"test/e2e/project-switcher.test.ts": 2813,
+		"test/limit.test.ts": 2768,
 		"test/impact.test.ts": 2512,
 		"test/check-process.test.ts": 2397,
-		"test/limit.test.ts": 2320,
 		"test/e2e/headers.test.ts": 2316,
 		"test/csv-import.test.ts": 2304,
 		"test/e2e/handoff.test.ts": 2270,
@@ -147,7 +149,6 @@
 		"test/result-location.test.ts": 1089,
 		"test/policy-fixture.test.ts": 1006,
 		"test/architecture.test.ts": 993,
-		"test/e2e/suite-folder-cursor.test.ts": 8174,
 		"test/e2e/result-location.test.ts": 975,
 		"test/e2e/queue-failure-evidence.test.ts": 940,
 		"test/report-storage.test.ts": 918,
@@ -218,7 +219,6 @@
 		"src/core/text.test.ts": 24,
 		"src/web/reports/format.test.ts": 24,
 		"src/web/lib/browser.test.ts": 23,
-		"src/web/lib/former-name.test.ts": 22,
-		"test/e2e/suite-archive-selection.test.ts": 10325
+		"src/web/lib/former-name.test.ts": 22
 	}
 }

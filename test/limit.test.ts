@@ -6,7 +6,7 @@
 // a visitor behind a proxy does: the instance trusts the loopback peer as its proxy and reads the address that
 // peer wrote in `x-client-address`.
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -14,7 +14,7 @@ import { type Instance, start } from "../src/app/start.ts";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
-import { clientAddress } from "../src/surfaces/http.ts";
+import { clientAddress, type Extra } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { closeIdentityDatabases, identityDatabaseUrl } from "./identity-db.ts";
 
@@ -61,6 +61,7 @@ async function boot(
 	clock: Clock = clockAt(),
 	proxy: Record<string, string> = BEHIND_PROXY,
 	ownerToken: string | null = TOKEN,
+	extra: Extra = { ui: null },
 ): Promise<Instance> {
 	const config = defaultConfig({
 		MAINWORTHY_DATA: scratch(),
@@ -73,7 +74,7 @@ async function boot(
 	config.databaseUrl = await identityDatabaseUrl(config.dataDir);
 	const instance = await start(
 		config,
-		(app, owner) => ({ ui: null, routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) } }),
+		(app, owner) => ({ ...extra, routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) } }),
 		{ now: clock.now },
 	);
 	running.push(instance);
@@ -476,9 +477,11 @@ describe("the client's address", () => {
 			MAINWORTHY_CLIENT_ADDRESS_HEADER: " CF-Connecting-IP ",
 		});
 		expect(proxy?.header).toBe("cf-connecting-ip");
-		expect(["10.1.2.3", "::1", "::ffff:10.1.2.3", "11.0.0.1", null].map((peer) => proxy?.peers.contains(peer))).toEqual(
-			[true, true, true, false, false],
-		);
+		expect(
+			["10.1.2.3", "::1", "::ffff:10.1.2.3", "11.0.0.1", null].map(
+				(peer) => proxy?.by === "address" && proxy.peers.contains(peer),
+			),
+		).toEqual([true, true, true, false, false]);
 		for (const header of ["x forwarded for", "x-real-ip:", "x-real-ip, forwarded"]) {
 			expect(() => read({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: header })).toThrow(
 				`MAINWORTHY_CLIENT_ADDRESS_HEADER is "${header}", which is not the name of a header`,
@@ -488,6 +491,172 @@ describe("the client's address", () => {
 		expect(() => read({ MAINWORTHY_TRUSTED_PROXY: " , ", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" })).toThrow(
 			"MAINWORTHY_TRUSTED_PROXY names no address",
 		);
+	});
+});
+
+describe("a proxy proved by a secret", () => {
+	const secret = "test-proxy-proof-0123456789abcdef0123456789";
+	const settings = { MAINWORTHY_PROXY_SECRET: secret, MAINWORTHY_CLIENT_ADDRESS_HEADER: "cf-connecting-ip" };
+	const proof = { "x-mainworthy-proxy": secret };
+	const visitor = (address: string): Sent => ({ ...proof, "cf-connecting-ip": address });
+
+	test("missing, wrong and forged proof is refused before every request handler", async () => {
+		const page = join(scratch(), "index.html");
+		writeFileSync(page, "<!doctype html><title>Proxy test</title>");
+		const instance = await boot(clockAt(), settings, TOKEN, {
+			ui: { index: page, files: [{ path: page, headers: { etag: "test", "content-type": "text/html" } }] },
+			open: { "/docs": () => new Response("documentation") },
+		});
+		const entries: [string, string][] = [
+			["GET", "/api/session"],
+			["POST", "/api/p/scratch/find"],
+			["POST", "/api/admin"],
+			["POST", "/api/job"],
+			["GET", "/api/p/scratch/events"],
+			["POST", "/mcp"],
+			["GET", "/api/export"],
+			["POST", "/api/import"],
+			["POST", "/api/login"],
+			["POST", "/api/logout"],
+			["GET", "/api/login/methods"],
+			["POST", "/api/login/challenge"],
+			["POST", "/api/login/oidc"],
+			["POST", "/api/login/oidc/native"],
+			["GET", "/api/login/oidc/native/callback"],
+			["POST", "/api/account/password"],
+			["POST", "/api/account/proof"],
+			["GET", "/.well-known/apple-app-site-association"],
+			["GET", "/api/openapi.json"],
+			["GET", "/docs"],
+			["GET", "/"],
+			["GET", "/index.html"],
+			["GET", "/_bun/hmr"],
+			["PUT", "/api/session"],
+			["OPTIONS", "/api/session"],
+			["OPTIONS", "/api/p/scratch/find"],
+			["DELETE", "/api/export"],
+			["POST", "/healthz"],
+		];
+		for (const headers of [
+			{},
+			{ "x-mainworthy-proxy": "wrong" },
+			{ "cf-connecting-ip": A },
+			{ "x-mainworthy-proxy": `${secret.slice(0, -1)}x` },
+			{ "x-mainworthy-proxy": `${secret}, ${secret}` },
+		]) {
+			for (const [method, path] of entries) {
+				const response = await fetch(`${instance.url}${path}`, {
+					method,
+					headers: { ...bearer(TOKEN), ...headers, "x-mainworthy-api-version": "0", "x-forwarded-proto": "https" },
+					...(method === "POST" ? { body: "not JSON" } : {}),
+				});
+				expect(response.status, `${method} ${path} ${JSON.stringify(headers)}`).toBe(403);
+				const body = await response.text();
+				expect(Refusal.parse(JSON.parse(body)).error.code).toBe("forbidden");
+				expect(body).not.toContain(secret);
+				expect(response.headers.getSetCookie()).toEqual([]);
+				expect(JSON.stringify([...response.headers])).not.toContain(secret);
+			}
+		}
+		for (const path of ["/healthz", "/api/login/methods", "/docs", "/index.html"]) {
+			const head = await fetch(`${instance.url}${path}`, { method: "HEAD" });
+			expect(head.status, `HEAD ${path}`).toBe(403);
+		}
+		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/healthz?startup=1`))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/docs`, { headers: proof }))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/`, { headers: proof }))).toBe("200");
+		expect(await who(instance, { ...proof, ...bearer(TOKEN) })).toBe("200");
+		expect(instance.warnings.some((warning) => warning.startsWith("MAINWORTHY_TRUSTED_PROXY"))).toBe(false);
+	});
+
+	test("the fallback refuses unknown paths without proof", async () => {
+		const instance = await boot(clockAt(), settings);
+		for (const headers of [{}, { "x-mainworthy-proxy": "wrong" }, { "cf-connecting-ip": A }])
+			expect(await said(await fetch(`${instance.url}/missing`, { headers }))).toBe("403 forbidden");
+		expect(await said(await fetch(`${instance.url}/missing`, { headers: proof }))).toBe("404 not_found");
+	});
+
+	test("the job listener also requires proof when configured", async () => {
+		const instance = await boot(clockAt(), {
+			...settings,
+			MAINWORTHY_JOB_SERVICE: "1",
+			MAINWORTHY_JOB_AUDIENCE: "https://jobs.example.run.app",
+			MAINWORTHY_JOB_ACCOUNT: "jobs@example.iam.gserviceaccount.com",
+		});
+		expect(await said(await postJson(instance, "/api/job", { do: "tick" }))).toBe("403 forbidden");
+		expect(await said(await postJson(instance, "/api/job", { do: "tick" }, proof))).toBe("401 unauthenticated");
+		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
+	});
+
+	test("proved sign-in failures count against the reported address, and unproved ones count against nobody", async () => {
+		const instance = await boot(clockAt(), settings);
+		for (let i = 0; i < 6; i++) {
+			expect(await said(await signIn(instance, wrong(), { "cf-connecting-ip": A }))).toBe("403 forbidden");
+		}
+		for (let i = 0; i < 5; i++)
+			expect(await said(await signIn(instance, wrong(), visitor(A)))).toBe("401 unauthenticated");
+		expect(await said(await signIn(instance, TOKEN, visitor(A)))).toBe("429 limited, retry after 1");
+		expect(await who(instance, { ...visitor(A), ...bearer(TOKEN) })).toBe("429 limited, retry after 1");
+		expect(await said(await signIn(instance, TOKEN, visitor(B)))).toBe("200");
+		for (const address of [undefined, `${A}, ${B}`, `${A}:443`]) {
+			for (let i = 0; i < 6; i++)
+				expect(
+					await who(instance, { ...proof, ...(address ? { "cf-connecting-ip": address } : {}), ...bearer(wrong()) }),
+				).toBe("401 unauthenticated");
+		}
+	});
+
+	test("invalid secret configurations stop startup without disclosing the secret", () => {
+		const invalid = [
+			{ ...settings, MAINWORTHY_TRUSTED_PROXY: "127.0.0.1" },
+			{ MAINWORTHY_PROXY_SECRET: secret },
+			{ ...settings, MAINWORTHY_PROXY_SECRET: "s".repeat(31) },
+			{ ...settings, MAINWORTHY_CLIENT_ADDRESS_HEADER: "not a header" },
+		];
+		for (const env of invalid) {
+			const read = () => defaultConfig({ MAINWORTHY_DATA: "unused", ...env });
+			expect(read).toThrow(/MAINWORTHY_/);
+			try {
+				read();
+			} catch (error) {
+				expect(String(error)).not.toContain(env.MAINWORTHY_PROXY_SECRET);
+			}
+		}
+		expect(defaultConfig({ ...settings, MAINWORTHY_PROXY_SECRET: "s".repeat(32) }).proxy).toEqual({
+			by: "secret",
+			secret: "s".repeat(32),
+			header: "cf-connecting-ip",
+		});
+		expect(defaultConfig({ ...BEHIND_PROXY, MAINWORTHY_PROXY_SECRET: "" }).proxy?.by).toBe("address");
+	});
+
+	test("the serve command refuses a secret without its address header before opening data", async () => {
+		const home = scratch();
+		const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+			cwd: home,
+			env: { PATH: process.env.PATH ?? "", HOME: home, USER: "robin", MAINWORTHY_PROXY_SECRET: secret },
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+		});
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
+		try {
+			const [code, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			expect({ code, stdout, stderr: stderr.trim(), opened: existsSync(join(home, ".mainworthy")) }).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: "invalid: MAINWORTHY_PROXY_SECRET requires MAINWORTHY_CLIENT_ADDRESS_HEADER",
+				opened: false,
+			});
+		} finally {
+			clearTimeout(timeout);
+			child.kill("SIGKILL");
+		}
 	});
 });
 

@@ -35,8 +35,14 @@ const isHandler = (value: unknown): value is Handler => typeof value === "functi
 
 /** A handler whose reply carries the headers. One that answers at once still answers at once. */
 const wrapped =
-	(handler: Handler, put: (req: Request, reply: Response) => Response = withHeaders): Handler =>
+	(
+		handler: Handler,
+		put: (req: Request, reply: Response) => Response = withHeaders,
+		before?: (req: Request) => Response | null,
+	): Handler =>
 	(req, server) => {
+		const refused = before?.(req);
+		if (refused) return refused;
 		const reply = handler(req, server);
 		return reply instanceof Promise ? reply.then((settled) => put(req, settled)) : put(req, reply);
 	};
@@ -44,9 +50,10 @@ const wrapped =
 /** The routes that answer without a session, each reply with the headers and with the policy its route wrote. */
 export function keepingPolicyOnEvery(
 	routes: Readonly<Record<string, (req: Request) => Response | Promise<Response>>>,
+	before?: (req: Request) => Response | null,
 ): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.entries(routes).map(([path, handler]) => [path, wrapped(handler, withHeadersKeepingPolicy)]),
+		Object.entries(routes).map(([path, handler]) => [path, wrapped(handler, withHeadersKeepingPolicy, before)]),
 	);
 }
 
@@ -56,9 +63,12 @@ export function keepingPolicyOnEvery(
  * header can be added: one of those is refused here, when the server starts, and not found missing its headers
  * later.
  */
-export function withHeadersOnEvery(routes: Readonly<Record<string, unknown>>): Record<string, unknown> {
+export function withHeadersOnEvery(
+	routes: Readonly<Record<string, unknown>>,
+	before?: (req: Request) => Response | null,
+): Record<string, unknown> {
 	const handlerOf = (path: string, value: unknown): Handler => {
-		if (isHandler(value)) return wrapped(value);
+		if (isHandler(value)) return wrapped(value, withHeaders, before);
 		throw new Error(`the route ${path} is not a handler, so its replies could not carry the headers`);
 	};
 	const route = (path: string, value: unknown): unknown => {

@@ -91,19 +91,11 @@ export type Config = {
 export type OidcConfig = { issuer: string; clientId: string; clientSecret: string; name: string; mfa: boolean };
 
 /**
- * A proxy whose word for the client's address is believed. The two halves come from two variables that are set
- * together or not at all: a header with no peer to believe it from would be believed from anybody, and a peer
- * with no header says nothing.
+ * A proxy whose word for the client's address is believed, proved by its connecting address or a secret header.
  */
-export type TrustedProxy = {
-	/** The addresses a connection from the proxy comes from. `MAINWORTHY_TRUSTED_PROXY`: addresses and ranges. */
-	peers: AddressRanges;
-	/**
-	 * The header in which the proxy writes the address of the client it serves, in lower case.
-	 * `MAINWORTHY_CLIENT_ADDRESS_HEADER`. It must be one the proxy sets itself, replacing what the client sent.
-	 */
-	header: string;
-};
+export type TrustedProxy =
+	| { by: "address"; peers: AddressRanges; header: string }
+	| { by: "secret"; secret: string; header: string };
 
 /** The two lifetimes of a session when the environment names none. */
 export const SESSION_LIFETIMES = { sessionIdleMs: 14 * 86_400_000, sessionMaxMs: 90 * 86_400_000 } as const;
@@ -244,13 +236,19 @@ const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/i;
 function proxyOf(env: Record<string, string | undefined>): TrustedProxy | null {
 	const list = env.MAINWORTHY_TRUSTED_PROXY?.trim() ?? "";
 	const header = env.MAINWORTHY_CLIENT_ADDRESS_HEADER?.trim() ?? "";
+	const secret = env.MAINWORTHY_PROXY_SECRET ?? "";
+	if (secret !== "") {
+		if (list !== "") throw new Error("MAINWORTHY_PROXY_SECRET and MAINWORTHY_TRUSTED_PROXY cannot be set together");
+		if (header === "") throw new Error("MAINWORTHY_PROXY_SECRET requires MAINWORTHY_CLIENT_ADDRESS_HEADER");
+		if (secret.length < 32) throw new Error("MAINWORTHY_PROXY_SECRET must have at least 32 characters");
+	}
 	if (list === "" && header === "") return null;
 	if (header === "") {
 		throw new Error(
 			"MAINWORTHY_TRUSTED_PROXY is set and MAINWORTHY_CLIENT_ADDRESS_HEADER is not: name the header in which that proxy writes the client's address, or unset both",
 		);
 	}
-	if (list === "") {
+	if (list === "" && secret === "") {
 		throw new Error(
 			"MAINWORTHY_CLIENT_ADDRESS_HEADER is set and MAINWORTHY_TRUSTED_PROXY is not: name the addresses of the proxy whose header is to be believed, or unset both",
 		);
@@ -258,13 +256,14 @@ function proxyOf(env: Record<string, string | undefined>): TrustedProxy | null {
 	if (!HEADER_NAME.test(header)) {
 		throw new Error(`MAINWORTHY_CLIENT_ADDRESS_HEADER is "${header}", which is not the name of a header`);
 	}
+	if (secret !== "") return { by: "secret", secret, header: header.toLowerCase() };
 	const peers = parseAddressRanges(list);
 	if (peers.kind === "malformed") throw new Error(`MAINWORTHY_TRUSTED_PROXY: "${peers.entry}" ${peers.why}`);
 	// Commas and spaces alone are a list that was meant to name somebody.
 	if (list.split(",").every((entry) => entry.trim() === "")) {
 		throw new Error(`MAINWORTHY_TRUSTED_PROXY names no address: it is "${list}"`);
 	}
-	return { peers, header: header.toLowerCase() };
+	return { by: "address", peers, header: header.toLowerCase() };
 }
 
 /** An app as Apple names it: the team's ten-character id, a dot, and the bundle identifier. */

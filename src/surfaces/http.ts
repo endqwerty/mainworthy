@@ -1,5 +1,6 @@
 // The HTTP surface. It has no logic of its own: every route is the registry's `invoke` behind authentication, plus
 // the session, the change stream and the generated API description. Nothing here knows what an operation does.
+import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
 import { API_VERSION, API_VERSION_HEADER, AT_HEADER, VERSION } from "../core/version.ts";
@@ -211,15 +212,17 @@ type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
  * says. It is what failed sign-ins are counted against.
  *
  * A peer is its own address, and whatever its headers say about where it came from is ignored: anybody can
- * write a header. The one exception is a peer the operator named as the proxy in front (`config.proxy`). Every
- * request comes from that peer, so its own address tells no two visitors apart, and the address is read from
+ * write a header. The exception is a proxy the operator named (`config.proxy`), proved by its connecting address
+ * or by the secret checked before any handler runs. Its own address tells no two visitors apart, so it is read from
  * the header the operator named instead. That header must hold exactly one address. When it is missing or holds
  * anything else, the proxy is not sending what the operator said it sends: the request then has no address, and
  * is not counted under the proxy's, which would be every visitor's.
  */
 function addressOf(req: Request, peer: string | null, config: Config): string | null {
 	const { proxy } = config;
-	return proxy?.peers.contains(peer) ? headerAddress(req.headers.get(proxy.header)) : peer;
+	return proxy && (proxy.by === "secret" || proxy.peers.contains(peer))
+		? headerAddress(req.headers.get(proxy.header))
+		: peer;
 }
 
 /** The address a request came from (`addressOf`), with the connection's own address asked of the listener. */
@@ -871,6 +874,23 @@ export function serve(
 	listener?: ReturnType<typeof upgradingListener>,
 ) {
 	const closing = new AbortController();
+	const proof =
+		app.config.proxy?.by === "secret" ? createHash("sha256").update(app.config.proxy.secret).digest() : null;
+	const refuseProxy = (req: Request): Response | null => {
+		if (proof === null || (req.method === "GET" && new URL(req.url).pathname === "/healthz")) return null;
+		const sent = createHash("sha256")
+			.update(req.headers.get("x-mainworthy-proxy") ?? "")
+			.digest();
+		return timingSafeEqual(proof, sent)
+			? null
+			: withHeaders(
+					null,
+					jsonResponse(
+						{ ok: false, error: { code: "forbidden", message: "request must come through the configured proxy" } },
+						403,
+					),
+				);
+	};
 	// Every route that takes a session takes it here or in `handleOp`, and both through `sessionFor`.
 	const guarded =
 		(handler: (req: Request, session: Session) => Response | Promise<Response>) =>
@@ -963,12 +983,16 @@ export function serve(
 							"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
 						}
 					: routes,
+				refuseProxy,
 			),
-			...keepingPolicyOnEvery(app.config.jobService ? {} : (extra.open ?? {})),
-			...(!app.config.jobService && ui ? { "/*": ui.route } : {}),
+			...keepingPolicyOnEvery(app.config.jobService ? {} : (extra.open ?? {}), refuseProxy),
+			...(!app.config.jobService && ui
+				? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) }
+				: {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		} as any,
 		fetch: (req: Request) =>
+			refuseProxy(req) ??
 			withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
 		error(error: Error) {
 			if (isBusy(error))

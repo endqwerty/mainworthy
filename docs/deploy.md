@@ -115,6 +115,21 @@ before deploying the public app. Preview apps and their per-PR database/user lif
 
 ### Finish deployment and cutover
 
+For the public Cloud Run service, supply `MAINWORTHY_PROXY_SECRET` from Secret Manager and set
+`MAINWORTHY_CLIENT_ADDRESS_HEADER=cf-connecting-ip`. Leave `MAINWORTHY_TRUSTED_PROXY` unset: Google's front end
+connects both direct and Cloudflare requests, so its address cannot prove which path a request took.
+Use a random secret of at least 32 characters. Configure Cloudflare's request-header rule to overwrite
+`x-mainworthy-proxy` with that same secret on every request forwarded to the public app, replacing any value
+the visitor supplied. Keep the value out of repository files, logs and response headers. Cloudflare must also
+replace the visitor's `CF-Connecting-IP` with the visitor's actual address.
+
+The app checks the proof before sign-in, API, stream, archive, documentation and UI handlers. Without a matching
+proof it returns JSON 403, even if the request has a valid token or claims a client address. Only `GET /healthz`
+is exempt so Cloud Run's startup probe can reach it directly. It returns 503 during migration and 200 only
+after startup is ready. Check before cutover that the direct `run.app` address refuses an application request
+without proof, including one with a forged `CF-Connecting-IP`, while a request through Cloudflare succeeds.
+Then check that failed sign-ins through Cloudflare count against each visitor's own address.
+
 Step 5 adds the public app service to Terraform with its Cloudflare proof, probes and verified connection budget.
 It releases both services by patching only app image and traffic, under the same `mainworthy-infrastructure`
 concurrency group as infrastructure CI. Terraform ignores those two job-service release fields and owns every
@@ -247,8 +262,9 @@ sending the token itself.
 | `MAINWORTHY_DB_POOL` / `MAINWORTHY_DB_WRITE_POOL` | `2` / `1` | PostgreSQL read and write pool sizes, each from 1 to 64. Writes remain exclusive for the whole operation. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. A value that is not one stops the start with a line that names the variable. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
-| `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Set it together with the next variable, or neither: one without the other stops the start with a line that says which is missing, and so does an entry that is not an address or a range. See "The limit on failed sign-ins". |
-| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only from a peer `MAINWORTHY_TRUSTED_PROXY` names, and must hold exactly one address. |
+| `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER` and cannot be set with `MAINWORTHY_PROXY_SECRET`. A missing header name or malformed address or range stops startup. See "The limit on failed sign-ins". |
+| `MAINWORTHY_PROXY_SECRET` | not set | The secret the proxy overwrites `x-mainworthy-proxy` with on every request, at least 32 characters. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. All requests without matching proof receive JSON 403 except `GET /healthz`. See the Cloud Run cutover section above. |
+| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only after the proxy is proved by its configured connecting address or secret, and must hold exactly one address. |
 | `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_APPLE_APPS` | not set | The iPhone apps the site vouches for, so a phone offers the logins it keeps for this site (its own passwords, or a password manager's such as 1Password) on the app's sign-in screen: each a team id and a bundle identifier, `ABCDE12345.com.mainworthy.app.ABCDE12345`, separated by commas. `bun scripts/ios.ts install` prints the one it built when it signs the app with that site (a paid Apple developer team only: `docs/guide/iphone.md`). The server lists them at `/.well-known/apple-app-site-association`, where Apple reads them; the app names the site in its entitlements (`ios/App/Mainworthy.entitlements`, `mainworthy.com`). Not set: that address is not found, and the app's sign-in screen is offered no login. An entry that is not an app's name stops the start with a line that names the variable. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
