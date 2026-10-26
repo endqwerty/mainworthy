@@ -14,6 +14,7 @@ import {
 	linkTest,
 	linkTests,
 	mustTarget,
+	NO_FILE,
 	producedCause,
 	restoreLink,
 	scopeOf,
@@ -409,11 +410,19 @@ const mapHandler: Handler<"map"> = {
 	undoHint: "",
 };
 
-/** `tests/checkout/coupon.spec.ts` suggests the folder `checkout`; a file with no directory goes to `Automated`. */
-function folderFor(file: string): string {
+/** Keep meaningful directories; otherwise use the file, retaining an e2e directory. */
+export function folderFor(file: string): string {
+	if (file === NO_FILE) return "Automated";
 	const parts = file.split("/").filter((part) => part && !/^(src|tests?|specs?|e2e|__tests__|lib|app)$/i.test(part));
 	parts.pop();
-	return parts.length > 0 ? parts.slice(0, 3).join("/") : "Automated";
+	if (parts.length > 0) return parts.slice(0, 3).join("/");
+	const fallback = file.split("/").filter(Boolean);
+	const name = fallback
+		.pop()
+		?.replace(/\.[^.]+$/, "")
+		.replace(/\.(test|spec)$/i, "");
+	while (fallback[0] && /^(src|tests?|specs?|__tests__|lib|app)$/i.test(fallback[0])) fallback.shift();
+	return [...fallback, name].filter(Boolean).join("/") || "Automated";
 }
 
 /**

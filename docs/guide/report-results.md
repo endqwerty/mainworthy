@@ -302,6 +302,17 @@ What happens to a test without a case is the project's choice. Under `loose` and
 the policy starts as "Track without a case". Mainworthy keeps the test and asks
 nobody. A project can instead create a case for each such test or raise an
 unlinked-test question for each file. The `strict` preset starts with questions. See [policy](./policy.md#tests-with-no-case).
+With **Create a case for each test**, the folder normally comes from the test file's
+meaningful directories, such as `tests/checkout/coupon.spec.ts` to `checkout`.
+If removing conventional directories leaves none, Mainworthy uses the file name
+without its extension or `.test` or `.spec` suffix. It drops leading `src`, `test`,
+`tests`, `spec`, `specs`, `__tests__`, `lib`, and `app` directories but keeps `e2e`.
+For example, `test/e2e/docs.test.ts` becomes `e2e/docs`, and `test/policy.test.ts`
+becomes `policy`. A report with no usable file name still uses `Automated`.
+New cases use this computed folder even if you moved other cases from that file.
+Existing cases keep their folders. The demo's unlinked shipping test uses
+`tests/e2e/shipping.spec.ts`; creating its case puts it in `e2e/shipping`.
+
 An unlinked automated test still counts toward the commit gate.
 
 ## Read what each test did

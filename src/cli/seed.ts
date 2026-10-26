@@ -650,9 +650,9 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		});
 	}
 	const shippingAddress = {
-		key: "tests/shipping.spec.ts::shipping::address",
+		key: "tests/e2e/shipping.spec.ts::shipping::address",
 		name: "Shipping accepts an address",
-		file: "tests/shipping.spec.ts",
+		file: "tests/e2e/shipping.spec.ts",
 	};
 	// A pull request merged by rebase: its head passed, and `main` holds a rewritten commit no report has named, as
 	// when a stack lands in one push and the pipeline tests only its newest commit. Changes shows the head's gate and,

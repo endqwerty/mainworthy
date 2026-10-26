@@ -24,7 +24,7 @@
 		"test/e2e/placement.test.ts": 20550,
 		"test/signin-start-limit.test.ts": 19945,
 		"test/import-aliases.test.ts": 19938,
-		"test/policy.test.ts": 19726,
+		"test/policy.test.ts": 19587,
 		"src/cli/main.test.ts": 19666,
 		"test/e2e/latency-2000.test.ts": 19062,
 		"src/cli/demo.test.ts": 18475,
