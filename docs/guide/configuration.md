@@ -56,8 +56,9 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_SMTP_PASSWORD` | none | SMTP password, read only from the process environment. It never enters the database, archives, replies or logs. |
 | `MAINWORTHY_MAIL_FROM` | none | A single sender email address, such as `mainworthy@example.com`. Display names and address lists are refused. |
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen may offer the logins the phone keeps for this site. List each app as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). Separate the entries with commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
-| `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
-| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
+| `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Cannot be set with `MAINWORTHY_PROXY_SECRET`. |
+| `MAINWORTHY_PROXY_SECRET` | none | A secret of at least 32 characters that the proxy overwrites `x-mainworthy-proxy` with on every request. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Requests without matching proof receive 403, except `GET /healthz`. |
+| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which the proxy reports one visitor address. Requires either the trusted proxy addresses or the proxy secret. |
 | `MAINWORTHY_JOB_SERVICE` | `0` | Set to `1` on the separate job service. It serves only `/healthz` and `/api/job`; the public service refuses the job endpoint. Keep the host's invoker IAM check enabled for the configured service account. |
 | `MAINWORTHY_JOB_AUDIENCE` | none | Required on the job service. The HTTPS audience in the caller's Google OIDC token. |
 | `MAINWORTHY_JOB_ACCOUNT` | none | Required on the job service. The service account email that may invoke jobs. Tokens must have a valid Google signature, issuer, audience, expiry and verified account email. No shared job secret is used. |
@@ -244,7 +245,9 @@ Password sign-in shares the address count. The server counts a wrong password by
 
 Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
 
-With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all. For those addresses, wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Setting the two variables fixes both.
+On a host such as Cloud Run, a direct request and a proxied request arrive from the same front end. Set `MAINWORTHY_PROXY_SECRET` instead of trusted proxy addresses. The proxy must overwrite `x-mainworthy-proxy` with that secret on every request. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to its visitor-address header, such as `cf-connecting-ip`. Mainworthy compares the proof in constant time before any request handler runs. Missing or incorrect proof receives a JSON 403, including on sign-in, docs, static files, streams and archives. Only `GET /healthz` answers without proof, for the startup probe. A missing or malformed visitor address gives a proved request no address. Startup refuses a secret shorter than 32 characters, a secret without an address-header name, or a secret together with trusted proxy addresses.
+
+With no proxy configured, what happens depends on the connection's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all. For those addresses, wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Configuring either proxy trust method fixes both.
 
 After three minutes of silence, the server closes a connection nobody has signed in on. If a sign-in's body has not arrived within five seconds, the server answers with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
 
@@ -252,7 +255,7 @@ The server accepts a request body of up to 64 MiB for an operation. A proxy with
 
 ## What answers without a token
 
-In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer anyone who can reach the server:
+In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer without a session. When a proxy secret is configured, all except `GET /healthz` still require the proxy's proof:
 
 | Address | What it returns |
 | --- | --- |
