@@ -537,7 +537,7 @@ describe("a proxy proved by a secret", () => {
 			["OPTIONS", "/api/session"],
 			["OPTIONS", "/api/p/scratch/find"],
 			["DELETE", "/api/export"],
-			["POST", "/healthz"],
+			["POST", "/health"],
 		];
 		for (const headers of [
 			{},
@@ -560,12 +560,12 @@ describe("a proxy proved by a secret", () => {
 				expect(JSON.stringify([...response.headers])).not.toContain(secret);
 			}
 		}
-		for (const path of ["/healthz", "/api/login/methods", "/docs", "/index.html"]) {
+		for (const path of ["/health", "/api/login/methods", "/docs", "/index.html"]) {
 			const head = await fetch(`${instance.url}${path}`, { method: "HEAD" });
 			expect(head.status, `HEAD ${path}`).toBe(403);
 		}
-		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
-		expect(await said(await fetch(`${instance.url}/healthz?startup=1`))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/health`))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/health?startup=1`))).toBe("200");
 		expect(await said(await fetch(`${instance.url}/docs`, { headers: proof }))).toBe("200");
 		expect(await said(await fetch(`${instance.url}/`, { headers: proof }))).toBe("200");
 		expect(await who(instance, { ...proof, ...bearer(TOKEN) })).toBe("200");
@@ -589,9 +589,8 @@ describe("a proxy proved by a secret", () => {
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }))).toBe("401 unauthenticated");
 		expect(await said(await postJson(instance, "/api/job", { do: "tick" }, proof))).toBe("401 unauthenticated");
 		expect(await said(await fetch(`${instance.url}/api/job`))).toBe("403 forbidden");
-		// The public health path goes through Cloudflare like any page; only the probe's /healthz is exempt.
-		expect(await said(await fetch(`${instance.url}/health`))).toBe("403 forbidden");
-		expect(await said(await fetch(`${instance.url}/health`, { headers: proof }))).toBe("200");
+		// The startup probe's GET /health needs no proof; it says only the version and the commit.
+		expect(await said(await fetch(`${instance.url}/health`))).toBe("200");
 		expect(await said(await postJson(instance, "/api/session", {}))).toBe("403 forbidden");
 		// Only the raw paths are exempt: URL normalisation (%2e, \, ..) must not turn another route into one of them.
 		const raw = (method: string, path: string) =>
@@ -610,15 +609,15 @@ describe("a proxy proved by a secret", () => {
 				socket.on("error", reject);
 			});
 		for (const [method, path] of [
-			["GET", "/%2e/healthz"],
-			["GET", "/docs/%2e%2e/healthz"],
+			["GET", "/%2e/health"],
+			["GET", "/docs/%2e%2e/health"],
 			["POST", "/api/p/%2e%2e/job"],
 			["POST", "/api/x\\..\\job"],
 			["POST", "/api/p/scratch/find\\..\\..\\..\\job"],
 			["POST", "/api/job/"],
 		] as const)
 			expect(await raw(method, path), `${method} ${path}`).toBe("HTTP/1.1 403 Forbidden");
-		expect(await said(await fetch(`${instance.url}/healthz`))).toBe("200");
+		expect(await said(await fetch(`${instance.url}/health`))).toBe("200");
 	});
 
 	test("proved sign-in failures count against the reported address, and unproved ones count against nobody", async () => {

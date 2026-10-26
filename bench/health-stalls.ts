@@ -200,7 +200,7 @@ async function probe(dataset: string, artifacts: string, root: string, profile: 
 				const started = performance.now();
 				const observed = phase;
 				try {
-					const response = await fetch(`${message.url}/healthz`);
+					const response = await fetch(`${message.url}/health`);
 					if (response.status !== 200 || !z.object({ ok: z.literal(true) }).safeParse(await response.json()).success)
 						errors++;
 				} catch {

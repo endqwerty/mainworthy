@@ -14,7 +14,7 @@ In local mode you are the owner. The server listens on the loopback address, and
 
 Any other request needs a token or signed-in session. Both modes refuse browser requests made from another site's page when signing in or using a session cookie.
 
-In server mode every request to a project needs a token or a browser that is signed in. A few addresses answer without either, including `/healthz`, `/docs` and the sign-in endpoints. See [What answers without a token](#what-answers-without-a-token). The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
+In server mode every request to a project needs a token or a browser that is signed in. A few addresses answer without either, including `/health`, `/docs` and the sign-in endpoints. See [What answers without a token](#what-answers-without-a-token). The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
 
 Either `MAINWORTHY_MODE=server` or a non-loopback `MAINWORTHY_HOST` selects server mode. Setting `MAINWORTHY_MODE=local` does not override a non-loopback host. Every other start is local mode. The first line the server prints says which mode it is in:
 
@@ -57,7 +57,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_MAIL_FROM` | none | A single sender email address, such as `mainworthy@example.com`. Display names and address lists are refused. |
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen may offer the logins the phone keeps for this site. List each app as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). Separate the entries with commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Cannot be set with `MAINWORTHY_PROXY_SECRET`. |
-| `MAINWORTHY_PROXY_SECRET` | none | A secret of at least 32 characters that the proxy overwrites `x-mainworthy-proxy` with on every request. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Requests without matching proof receive 403, except `GET /healthz`. |
+| `MAINWORTHY_PROXY_SECRET` | none | A secret of at least 32 characters that the proxy overwrites `x-mainworthy-proxy` with on every request. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Requests without matching proof receive 403, except `GET /health`. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which the proxy reports one visitor address. Requires either the trusted proxy addresses or the proxy secret. |
 | `MAINWORTHY_JOB_AUDIENCE` | none | Set with `MAINWORTHY_JOB_ACCOUNT` to accept `POST /api/job` from a scheduler: the HTTPS audience in its Google OIDC token, the server's own address on Cloud Run. Without both, `/api/job` refuses every caller. |
 | `MAINWORTHY_JOB_ACCOUNT` | none | Set with `MAINWORTHY_JOB_AUDIENCE`. The service account email that may call `/api/job`. Tokens must have a valid Google signature, issuer, audience, expiry and verified account email. No shared job secret is used. That call needs no proxy proof (`MAINWORTHY_PROXY_SECRET`): the token is its proof. |
@@ -67,7 +67,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
 | `MAINWORTHY_DB_WRITE_POOL` | `4` | Write-pool connections, an integer from 1 to 64. Writes lock their actors and projects; different projects can write concurrently. |
 | `MAINWORTHY_DEMO` | none | Paused since 2026-10-24 (#914): the server leaves the demo as it is. A marked demo refreshed once per deployed revision after listening. The commit comes from `MAINWORTHY_COMMIT` or `SOURCE_COMMIT`. Same-revision restarts preserve edits and renew featured work. New revisions swap in a fresh demo with existing grants; retired data drains in bounded transactions. Unknown revisions and unmarked projects are refused. See [demo data](./customize.md#a-project-of-demo-data). |
-| `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
+| `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/health` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
 | `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects and optional gate commit statuses to GitHub. Set the project, repository, and token together. |
 | `MAINWORTHY_GITHUB_REPOSITORY` | none | The destination on github.com, written `owner/repository`. Requests cannot choose another repository. |
 | `MAINWORTHY_GITHUB_TOKEN` | none | A token for that repository. Defect requests need Issues write permission. Gate commit statuses need Commit statuses write permission on a fine-grained personal access token, or the `repo:status` scope on a classic token. Keep it in the server's secret environment, outside the repository. It is never stored in the database or an archive. |
@@ -204,10 +204,10 @@ Compose passes owner, session, proxy, public URL, Apple app, demo and mail setti
 
 Set `MAINWORTHY_OWNER_TOKEN` to a long random string. If you leave it empty on first start, the server generates one and prints it once in `docker compose logs`. Open `http://localhost:7357` and sign in with it.
 
-The image checks its own health every 30 seconds by running `mainworthy health`. The check calls `/healthz`, which needs no token:
+The image checks its own health every 30 seconds by running `mainworthy health`. The check calls `/health`, which needs no token:
 
 ```
-$ curl -s http://127.0.0.1:7357/healthz
+$ curl -s http://127.0.0.1:7357/health
 {"ok":true,"version":"0.1.0","apiVersion":1,"commit":null}
 $ mainworthy health
 healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
@@ -217,7 +217,7 @@ healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 
 During startup, health answers HTTP 503 with `ok: false, state: "upgrading"`, so a probe that reads only the status waits. The health command reads the body, exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Startup failure closes the listener.
 
-`commit` identifies the server's build when the commit was supplied. To include the commit, build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`. Then `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without a supplied commit, the answer is `null`.
+`commit` identifies the server's build when the commit was supplied. To include the commit, build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`. Then `/health` names that commit, and `mainworthy health` prints its first 12 characters. Without a supplied commit, the answer is `null`.
 
 Back up PostgreSQL and the attachment volume. [Your data](./data.md) explains how.
 
@@ -234,7 +234,7 @@ The server also reads `Sec-Fetch-Site`, the header that identifies which site ma
 
 The session cookie still has `SameSite=Strict`, so the browser excludes it from requests made by another site's page. However, plain HTTP sends the password or token and the cookie without encryption. The cookie also lacks its `__Host-` prefix and `Secure` mark. HTTPS through a proxy is the supported way to serve an instance to anybody but yourself.
 
-The server counts wrong tokens by their source address and first 8 characters, both on authenticated operations and in the sign-in form. `/healthz`, the API description and the documentation need no sign-in and ignore tokens. The fifth wrong token within 15 minutes blocks that address or token prefix for one second. Each further wrong token doubles the wait, up to 15 minutes. A blocked request gets HTTP 429 with `Retry-After`. Repeated checks and valid sign-ins do not spend the failed-attempt allowance.
+The server counts wrong tokens by their source address and first 8 characters, both on authenticated operations and in the sign-in form. `/health`, the API description and the documentation need no sign-in and ignore tokens. The fifth wrong token within 15 minutes blocks that address or token prefix for one second. Each further wrong token doubles the wait, up to 15 minutes. A blocked request gets HTTP 429 with `Retry-After`. Repeated checks and valid sign-ins do not spend the failed-attempt allowance.
 
 Failed-attempt counts and anonymous sign-in start allowances are shared by all instances on the same database. Restarting an instance does not reset them. Session expiry and sign-in-record retention jobs check their lease after waiting for identity and actor locks; an expired worker cannot commit over its successor. Passkey, authenticator, provider and mail ceremonies can start on one instance and finish on another; each can be used once. Importing an archive invalidates pending ceremonies on every instance. Token and session last uses are stored during requests, at most once a minute for each credential. The idle check uses that stored time, so an active session can end up to a minute early.
 
@@ -244,7 +244,7 @@ Password sign-in shares the address count. The server counts a wrong password by
 
 Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
 
-On a host such as Cloud Run, a direct request and a proxied request arrive from the same front end. Set `MAINWORTHY_PROXY_SECRET` instead of trusted proxy addresses. The proxy must overwrite `x-mainworthy-proxy` with that secret on every request. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to its visitor-address header, such as `cf-connecting-ip`. Mainworthy compares the proof in constant time before any request handler runs. Missing or incorrect proof receives a JSON 403, including on sign-in, docs, static files, streams and archives. Only `GET /healthz` answers without proof, for the startup probe. A missing or malformed visitor address gives a proved request no address. Startup refuses a secret shorter than 32 characters, a secret without an address-header name, or a secret together with trusted proxy addresses.
+On a host such as Cloud Run, a direct request and a proxied request arrive from the same front end. Set `MAINWORTHY_PROXY_SECRET` instead of trusted proxy addresses. The proxy must overwrite `x-mainworthy-proxy` with that secret on every request. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to its visitor-address header, such as `cf-connecting-ip`. Mainworthy compares the proof in constant time before any request handler runs. Missing or incorrect proof receives a JSON 403, including on sign-in, docs, static files, streams and archives. Only `GET /health` answers without proof, for the startup probe. A missing or malformed visitor address gives a proved request no address. Startup refuses a secret shorter than 32 characters, a secret without an address-header name, or a secret together with trusted proxy addresses.
 
 With no proxy configured, what happens depends on the connection's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all. For those addresses, wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Configuring either proxy trust method fixes both.
 
@@ -254,12 +254,12 @@ The server accepts a request body of up to 64 MiB for an operation. A proxy with
 
 ## What answers without a token
 
-In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer without a session. When a proxy secret is configured, all except `GET /healthz` still require the proxy's proof:
+In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer without a session. When a proxy secret is configured, all except `GET /health` still require the proxy's proof:
 
 | Address | What it returns |
 | --- | --- |
 | `/health` | Whether the server is up, its software and API versions, and the commit it runs when it was told |
-| `/healthz` | The same answer, for a container's own health check and Cloud Run's startup probe. Cloud Run's front end answers `/healthz` from outside itself, so monitors and the CLI use `/health`. |
+| `/health` | The same answer, for a container's own health check and Cloud Run's startup probe. Cloud Run's front end answers `/health` from outside itself, so monitors and the CLI use `/health`. |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |

@@ -469,7 +469,7 @@ export async function interceptionLive(page: Page): Promise<void> {
 						(reply) => reply.headers.get("x-mainworthy-e2e") === "intercepted",
 						() => false,
 					),
-				`/healthz?interception=${id}`,
+				`/health?interception=${id}`,
 			);
 			if (intercepted) return;
 		}

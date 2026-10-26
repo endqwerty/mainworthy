@@ -37,7 +37,7 @@ export type Config = {
 	ownerToken: string | null;
 	/**
 	 * The commit this build was made from, if the process was told: 40 lower-case hexadecimal characters, else
-	 * `null`. `/healthz` shows it without a sign-in, so it holds nothing else (see `commitOf`).
+	 * `null`. `/health` shows it without a sign-in, so it holds nothing else (see `commitOf`).
 	 */
 	commit: string | null;
 	/** Milliseconds a browser's session may go unused before it ends. `MAINWORTHY_SESSION_IDLE`, by default `14d`. */

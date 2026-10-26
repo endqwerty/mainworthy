@@ -223,7 +223,7 @@ const INITIALIZE = JSON.stringify({
 
 /** One request of each kind the server answers without the web UI: its route, and the status that proves it. */
 const REQUESTS: { name: string; path: string; init?: RequestInit; status: number; type?: string }[] = [
-	{ name: "the health check", path: "/healthz", status: 200 },
+	{ name: "the health check", path: "/health", status: 200 },
 	{ name: "the API description", path: "/api/openapi.json", status: 200 },
 	{ name: "the session", path: "/api/session", init: { headers: bearer }, status: 200 },
 	{ name: "the session, refused", path: "/api/session", status: 401 },
@@ -353,7 +353,7 @@ describe("on a real listener, without the web UI", () => {
 	test("a proxy's list of schemes counts by its first element, whatever its case", async () => {
 		const instance = await boot();
 		const sent = async (forwarded: string) =>
-			(await fetch(`${instance.url}/healthz`, { headers: { "x-forwarded-proto": forwarded } })).headers.get(
+			(await fetch(`${instance.url}/health`, { headers: { "x-forwarded-proto": forwarded } })).headers.get(
 				"strict-transport-security",
 			);
 		expect(await sent("https, http")).toBe("max-age=31536000");
@@ -950,7 +950,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			}
 			reader.releaseLock();
 			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(printed)?.[0] ?? "";
-			expect((await fetch(`${url}/healthz`)).status).toBe(200);
+			expect((await fetch(`${url}/health`)).status).toBe(200);
 			const demo = new Client({ url, token: TOKEN, project: "demo" });
 			expect((await demo.call("find", { limit: 100 })).items).toHaveLength(30);
 			const retiring = await Database.open({ url: await identityDatabaseUrl(data) });

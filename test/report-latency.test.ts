@@ -49,9 +49,9 @@ for (const files of [1, 200]) {
 	const label = files === 1 ? "one file" : `${files} files`;
 	test(`HTTP reports creating cases across ${label} leave health requests answering`, async () => {
 		const longest = await reportWhilePolling(files);
-		console.log(`Report-created cases in ${label}: longest /healthz wait ${longest.toFixed(1)} ms`);
+		console.log(`Report-created cases in ${label}: longest /health wait ${longest.toFixed(1)} ms`);
 		budget(
-			`report creating ${files === 1 ? 500 : 2000} cases across ${label}: longest /healthz wait`,
+			`report creating ${files === 1 ? 500 : 2000} cases across ${label}: longest /health wait`,
 			longest,
 			50,
 			"ms",

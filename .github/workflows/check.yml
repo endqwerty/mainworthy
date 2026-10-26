@@ -142,7 +142,7 @@ jobs:
             --env MAINWORTHY_DATABASE_URL=postgres://postgres@postgres:5432/postgres mainworthy:check
           ready=false
           for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:7357/healthz | jq --exit-status --arg commit "$GITHUB_SHA" '.ok == true and .commit == $commit'; then ready=true; break; fi
+            if curl --fail --silent http://127.0.0.1:7357/health | jq --exit-status --arg commit "$GITHUB_SHA" '.ok == true and .commit == $commit'; then ready=true; break; fi
             sleep 1
           done
           test "$ready" = true

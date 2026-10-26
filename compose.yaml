@@ -20,7 +20,7 @@ services:
     build:
       context: .
       args:
-        # `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` makes /healthz name the commit; unset, it says null.
+        # `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` makes /health name the commit; unset, it says null.
         MAINWORTHY_COMMIT: ${MAINWORTHY_COMMIT:-}
     restart: unless-stopped
     ports:

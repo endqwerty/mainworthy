@@ -733,7 +733,7 @@ describe("a public repository", () => {
 		expect(foreignTailnetNames("https://mainworthy.example.ts.net and example.ts.net")).toEqual([]);
 		// Built in two parts: this file is read by the check it runs.
 		const foreign = `casebook.tail1a2b3.${"ts"}.net`;
-		expect(foreignTailnetNames(`curl https://${foreign}/healthz`)).toEqual([foreign]);
+		expect(foreignTailnetNames(`curl https://${foreign}/health`)).toEqual([foreign]);
 		const found = wholeTree().flatMap((file) =>
 			foreignTailnetNames(readFileSync(file, "utf8")).map((name) => `${file}: ${name}`),
 		);

@@ -128,7 +128,7 @@ test("an invalid public address is refused before waiting for another server's d
 	expect(stdout).toBe("");
 	expect(stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
 	expect(stderr).not.toContain("waiting for another server");
-	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
+	expect((await fetch(`${first.url}/health`)).status).toBe(200);
 });
 
 async function send<T>(url: string, op: string, input: unknown): Promise<Envelope<T>> {

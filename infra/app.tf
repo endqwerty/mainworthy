@@ -10,7 +10,7 @@ locals {
 }
 
 # The one service. Cloudflare stands in front of mainworthy.com and sets x-mainworthy-proxy to the proxy secret; the
-# app refuses a request without it, except /healthz and the Scheduler's token-checked POST /api/job, and believes
+# app refuses a request without it, except /health and the Scheduler's token-checked POST /api/job, and believes
 # cf-connecting-ip only with it. The organisation forbids allUsers, so the invoker check is off instead. Each apply
 # on main sets the image to the commit's tested digest; Cloud Run moves traffic once the new revision is ready.
 resource "google_cloud_run_v2_service" "app" {
@@ -57,12 +57,11 @@ resource "google_cloud_run_v2_service" "app" {
       }
       dynamic "env" {
         for_each = {
-          MAINWORTHY_HOST       = "0.0.0.0"
-          MAINWORTHY_MODE       = "server"
-          MAINWORTHY_DATA       = "/data"
-          MAINWORTHY_PUBLIC_URL = "https://mainworthy.com"
-          # Set by the Cloudflare Worker in front (infra/edge), which overwrites any value a client sent.
-          MAINWORTHY_CLIENT_ADDRESS_HEADER = "x-mainworthy-client"
+          MAINWORTHY_HOST                  = "0.0.0.0"
+          MAINWORTHY_MODE                  = "server"
+          MAINWORTHY_DATA                  = "/data"
+          MAINWORTHY_PUBLIC_URL            = "https://mainworthy.com"
+          MAINWORTHY_CLIENT_ADDRESS_HEADER = "cf-connecting-ip"
           # Jobs run in the Scheduler's minute request (and any sign-in's own), not on a timer.
           MAINWORTHY_JOB_RUNNER   = "0"
           MAINWORTHY_JOB_AUDIENCE = local.app_url
@@ -97,7 +96,7 @@ resource "google_cloud_run_v2_service" "app" {
       }
       startup_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
           port = 7357
         }
         period_seconds    = 5
@@ -172,4 +171,19 @@ resource "google_cloud_scheduler_job" "tick" {
     }
   }
   depends_on = [google_cloud_run_v2_service.app]
+}
+
+# mainworthy.com, served by Google's front end with a Google-managed certificate; Cloudflare proxies to it and sets
+# the proof header. Creating it needs CI's deploy account to be an owner of the domain in Search Console. Cloud Run
+# domain mappings are in preview; the load balancer (#945) replaces this once outside users arrive.
+resource "google_cloud_run_domain_mapping" "app" {
+  project  = var.production_project
+  location = local.region
+  name     = "mainworthy.com"
+  metadata {
+    namespace = var.production_project
+  }
+  spec {
+    route_name = google_cloud_run_v2_service.app.name
+  }
 }

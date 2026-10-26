@@ -60,13 +60,13 @@ test("concurrent fixtures publish distinct live URLs and release only their own 
 		expect(new Set(servers.map((server) => server.url)).size).toBe(servers.length);
 		for (const server of servers) {
 			expect(Number(new URL(server.url).port)).toBeGreaterThan(0);
-			expect((await fetch(`${server.url}/healthz`)).ok).toBe(true);
+			expect((await fetch(`${server.url}/health`)).ok).toBe(true);
 		}
 		const [first, second] = servers;
 		if (!first || !second) throw new Error("missing concurrent fixture");
 		await Promise.all([first.stop(), first.stop()]);
-		await expect(fetch(`${first.url}/healthz`)).rejects.toThrow();
-		expect((await fetch(`${second.url}/healthz`)).ok).toBe(true);
+		await expect(fetch(`${first.url}/health`)).rejects.toThrow();
+		expect((await fetch(`${second.url}/health`)).ok).toBe(true);
 	} finally {
 		await Promise.all(servers.map((server) => server.stop()));
 	}

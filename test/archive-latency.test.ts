@@ -67,9 +67,9 @@ test("HTTP archives leave the server answering other requests", async () => {
 		});
 
 		console.log(
-			`20,000 results: longest /healthz wait export ${exported.toFixed(1)} ms, import ${imported.toFixed(1)} ms; 0 request failures`,
+			`20,000 results: longest /health wait export ${exported.toFixed(1)} ms, import ${imported.toFixed(1)} ms; 0 request failures`,
 		);
-		budget("archive export: longest /healthz wait", exported, LIMIT_MS, "ms");
-		budget("archive import: longest /healthz wait", imported, LIMIT_MS, "ms");
+		budget("archive export: longest /health wait", exported, LIMIT_MS, "ms");
+		budget("archive import: longest /health wait", imported, LIMIT_MS, "ms");
 	});
 }, 30_000);

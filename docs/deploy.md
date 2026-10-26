@@ -48,7 +48,7 @@ Mainworthy runs as one Cloud Run service, `mainworthy` in `us-west1`, on one Clo
 `infra.yml` runs on every push to `main`: before signing in it waits up to 40 minutes for that tag (`ci.sh digest`,
 anonymous, since the image is public), then plans and applies with the digest as `app_digest`. The registry
 `mainworthy` is a remote repository of `https://ghcr.io`, so Cloud Run runs that exact digest. A new image makes a new
-revision; Cloud Run moves traffic to it once its startup probe gets `/healthz` ready (the database answers and the
+revision; Cloud Run moves traffic to it once its startup probe gets `/health` ready (the database answers and the
 migrations are done; until then it answers 503), and keeps traffic on the previous revision if it never does. The
 writer refuses a plan whose commit is no longer main's tip, so a late older push never replaces a newer release, and
 a commit whose gate failed has no image and is not released. Releases and other changes share one concurrency group
@@ -78,7 +78,7 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
   Google token as the `jobs` account. The app checks that token's audience and account and runs the due jobs inside
   the request; it runs no timer of its own (`MAINWORTHY_JOB_RUNNER=0`).
 - Cloudflare's proof: the organisation forbids `allUsers`, so the invoker check is off and the app refuses every
-  request without `x-mainworthy-proxy` set to the proxy secret, except `/healthz` and the token-checked `/api/job`.
+  request without `x-mainworthy-proxy` set to the proxy secret, except `/health` and the token-checked `/api/job`.
   Only requests with it are read for `cf-connecting-ip`.
 - Database privileges: the app's IAM user is a member of `cloudsqlsuperuser`, which owns the `mainworthy` database,
   and every session starts as that role, so tables have one owner.
@@ -87,27 +87,29 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
 
 ### The cutover
 
-Cloudflare's Free plan cannot rewrite the Host header in an Origin Rule, and the service answers only its own
-`run.app` host, so a Worker is the proxy in front of it: `infra/edge/worker.js`, on the route `mainworthy.com/*`. It
-forwards each request to the service with `x-mainworthy-proxy` set to the proxy secret and `x-mainworthy-client` set
-to Cloudflare's `CF-Connecting-IP`, overwriting whatever a client sent, and turns a `mainworthy.com` page's `Origin`
-into the service's own, which the app's same-origin check compares with the host it is reached at. Its two secrets,
-`ORIGIN` (the service's `run.app` address) and `PROXY_SECRET`, live in Cloudflare, not in this repository. DNS does
-not change: the route takes `mainworthy.com`'s proxied requests whatever its record points at.
+`mainworthy.com` reaches the service through a Cloud Run domain mapping (`infra/app.tf`): Google's front end answers
+for the domain with a Google-managed certificate, and Cloudflare proxies to it, so requests arrive with
+`Host: mainworthy.com` and Cloudflare's own `CF-Connecting-IP`. Domain mappings are in preview ("not production-ready",
+for latency); the load balancer in #945 replaces it once outside users arrive.
 
-1. Deploy the Worker without a route and set `ORIGIN`. The owner sets `PROXY_SECRET` from
-   `gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`, in Cloudflare's dashboard
-   (Workers, `mainworthy-edge`, Settings, Variables and Secrets), never in chat.
-2. On the Worker's `workers.dev` address: `/health` names the deployed commit, a page loads, a sign-in works.
-3. Add the route `mainworthy.com/*`. Rollback is removing it, which sends requests back to the previous origin.
-4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address with
-   and without a forged address header are refused, and that the iPhone app's TestFlight job still uploads. Then the
-   Coolify instance and its autodeploy go.
+1. The owner, once: adds CI's deploy account as an **Owner** of `mainworthy.com` in Search Console (Google requires
+   the account that creates a mapping to own the domain), and creates a Cloudflare Transform Rule, "Modify Request
+   Header", on all incoming requests, that sets `x-mainworthy-proxy` to the proxy secret
+   (`gcloud secrets versions access latest --secret=mainworthy-proxy-secret --project="$p"`). Cloudflare overwrites
+   both that header and `CF-Connecting-IP`, whatever a client sent.
+2. The apply creates the mapping. Its status lists the DNS records Google expects.
+3. In Cloudflare, `mainworthy.com`'s records become those records with the proxy off (DNS only), so Google can issue
+   the certificate. Until it does, which takes minutes to hours, the site answers 403: requests skip Cloudflare and
+   carry no proof. Then the proxy goes back on, with SSL/TLS set to Full (strict).
+4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address and to
+   Google's addresses for `mainworthy.com` without the proof are refused, and that the iPhone app's TestFlight job
+   still uploads. Then the Coolify instance and its autodeploy go.
 
-Cloud Run's front end answers `/healthz` itself with Google's 404, so everything that asks from outside uses
-`/health`; `/healthz` stays for the startup probe and containers. The bucket mount's two-instance checks (#946) wait
-for a second instance or for attachments in use: the service runs one instance, and a deploy overlaps two only for
-seconds.
+Rollback, before anything is written to the new instance, is restoring the previous DNS records.
+
+Cloud Run's front end answers `/healthz` itself with Google's 404, so the health path is `/health`, which needs no
+proof: it says only the version and the commit. The bucket mount's two-instance checks (#946) wait for a second
+instance or for attachments in use.
 
 ## PostgreSQL cutover at merge
 
@@ -135,7 +137,7 @@ checks are historical evidence, not verification of this cutover.
 ## Images published by CI
 
 On each push to `main`, `check.yml` builds the image once with a GitHub Actions layer cache (`type=gha`).
-The `image` job loads it locally and checks readiness, the full commit from `/healthz`, and the packaged
+The `image` job loads it locally and checks readiness, the full commit from `/health`, and the packaged
 documentation. After `gate` succeeds, also when it passes in the automatic rerun of a test failing by chance,
 `publish` downloads that same tested image and pushes it to `ghcr.io/endqwerty/mainworthy`. It never rebuilds it. Pull requests never log in to GHCR or publish images.
 Only `publish` has `packages: write`, using `GITHUB_TOKEN`; no additional secret is needed.
@@ -155,7 +157,7 @@ The tags are:
   registry manifest digest, then compares the commit tag before promoting that digest. Staging tags remain after
   successful or failed attempts and are not deployment targets.
 
-The image embeds `MAINWORTHY_COMMIT`, so `/healthz` reports the image's full SHA without a runtime override.
+The image embeds `MAINWORTHY_COMMIT`, so `/health` reports the image's full SHA without a runtime override.
 Its OCI labels name the source repository (`org.opencontainers.image.source`), commit
 (`org.opencontainers.image.revision`), and the commit's committer timestamp (`org.opencontainers.image.created`,
 from `git log -1 --format=%cI`). The timestamp stays the same on reruns. This removes wall-clock label drift;
@@ -198,9 +200,9 @@ perform it. Until then, anonymous pulls fail. GitHub documents
    expect no `main` update. Confirm the summary records the published digest reference.
 3. After making the package public, pull the summary's digest reference without registry credentials. Inspect its
    OCI labels and run it without a commit environment override. Require HTTP 200, `ok: true`, and `commit` equal to that SHA
-   from `/healthz`. Check that both tags resolve to the same digest when the commit is still `main`.
+   from `/health`. Check that both tags resolve to the same digest when the commit is still `main`.
 4. Confirm Coolify still builds from source on its existing schedule. After that deployment, the public
-   `/healthz` must report the deployed commit. This checks the existing deploy path, not deployment of the GHCR image.
+   `/health` must report the deployed commit. This checks the existing deploy path, not deployment of the GHCR image.
 
 ## The container
 
@@ -228,13 +230,13 @@ sending the token itself.
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. A value that is not one stops the start with a line that names the variable. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
 | `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER` and cannot be set with `MAINWORTHY_PROXY_SECRET`. A missing header name or malformed address or range stops startup. See "The limit on failed sign-ins". |
-| `MAINWORTHY_PROXY_SECRET` | not set | The secret the proxy overwrites `x-mainworthy-proxy` with on every request, at least 32 characters. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. All requests without matching proof receive JSON 403 except `GET /healthz`. See the Cloud Run cutover section above. |
+| `MAINWORTHY_PROXY_SECRET` | not set | The secret the proxy overwrites `x-mainworthy-proxy` with on every request, at least 32 characters. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. All requests without matching proof receive JSON 403 except `GET /health`. See the Cloud Run cutover section above. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only after the proxy is proved by its configured connecting address or secret, and must hold exactly one address. |
 | `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_APPLE_APPS` | not set | The iPhone apps the site vouches for, so a phone offers the logins it keeps for this site (its own passwords, or a password manager's such as 1Password) on the app's sign-in screen: each a team id and a bundle identifier, `ABCDE12345.com.mainworthy.app.ABCDE12345`, separated by commas. `bun scripts/ios.ts install` prints the one it built when it signs the app with that site (a paid Apple developer team only: `docs/guide/iphone.md`). The server lists them at `/.well-known/apple-app-site-association`, where Apple reads them; the app names the site in its entitlements (`ios/App/Mainworthy.entitlements`, `mainworthy.com`). Not set: that address is not found, and the app's sign-in screen is offered no login. An entry that is not an app's name stops the start with a line that names the variable. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_DEMO` | not set | Paused since 2026-10-24 (#914): the server leaves the demo as it is. A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds over HTTP. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
-| `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
+| `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/health` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
 A container waiting for the data-directory lock ignores `docker stop` until Docker sends SIGKILL after its default 10 seconds, which is harmless with Compose's stop-then-create replacement.
 
@@ -243,7 +245,7 @@ Mail jobs store authenticated ciphertext using AES-256-GCM, a random nonce per e
 A missing key refuses private enqueue and rolls back link issuance, while instances without private work can start. To rotate, first drain private jobs, then replace the key on every instance together. Retain the old key separately for backups containing pending jobs. Under a different key, queued jobs fail authentication, record a generic decryption error naming the setting, and send nothing on that attempt. Restoring the old key before bounded retries exhaust recovers delivery; otherwise request new links. Jobs never fall back to plaintext, including private rows from an older build. Completed or exhausted jobs erase the encrypted input. See [mail configuration](guide/configuration.md#turn-on-mail).
 
 The process runs as an unprivileged user (uid 10001). The health check is `mainworthy health`, which reads
-`/healthz`.
+`/health`.
 
 A connection nobody has vouched for is closed after three minutes in which it sends and receives nothing, and the
 body of a sign-in has five seconds to arrive. A request that carries a valid token, cookie or local session
@@ -312,7 +314,7 @@ can pass the deployment gate.
 
 A wrong token is counted where the server asks who the caller is: on a route that needs a sign-in, whether a
 script or a pipeline sends it, and when a person types it into the sign-in form. A route that needs no sign-in
-(`/healthz`, the API description, the documentation at `/docs`) looks at no token, and a sign-in body the form
+(`/health`, the API description, the documentation at `/docs`) looks at no token, and a sign-in body the form
 does not accept (longer than 512 characters, or not text) is refused without being counted. A wrong token is
 counted twice: against the address it came from, and against its own first 8 characters. The fifth failure of
 either within 15 minutes blocks it for one second, and each failure after that doubles the block, up to 15
@@ -497,7 +499,7 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
    ordinary non-lockdown service a domain in Coolify.
-6. **Deploy**, then check: `curl https://mainworthy.example.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
+6. **Deploy**, then check: `curl https://mainworthy.example.ts.net/health` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
    built (it comes from `SOURCE_COMMIT`; `compose.coolify.yaml` needs no line for it: naming the variable there would
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
@@ -840,7 +842,7 @@ the steps are kept below for an instance that has none.
   except for the missing-change reply below. After retries run out, fix the cause and replay the event.
   The workflow checks the instance's API version first. While the first build with API
   versions waits to deploy (the tip of `main` must stand still for ten minutes), the running instance still
-  answers `/healthz` without `apiVersion`. The workflow warns and sends the lifecycle request without the
+  answers `/health` without `apiVersion`. The workflow warns and sends the lifecycle request without the
   version header, as before, so pull requests closed in that window need no manual replay when the request
   succeeds. An instance that names a different API version, or an unknown operation, fails the job and needs
   a replay after the instance is upgraded. Only the specific reply that the named change was never reported
@@ -1137,7 +1139,7 @@ Nothing schedules these backups yet. Keep tested backups outside the server.
 ### Health while upgrading
 
 `mainworthy serve` opens its startup listener before applying the PostgreSQL baseline and recovery.
-`GET /healthz` returns HTTP 503 with `ok: false, state: "upgrading"` and `Retry-After: 5` until startup
+`GET /health` returns HTTP 503 with `ok: false, state: "upgrading"` and `Retry-After: 5` until startup
 finishes, so a probe that reads only the status, such as Cloud Run's startup probe, does not call the revision
 ready. `mainworthy health` reads the body and exits 0 during that state; it proves liveness, not readiness.
 Other routes answer 503 with `Retry-After: 5`. Startup failure closes the listener.
@@ -1171,7 +1173,7 @@ prove the checks passed. The external job needs these reads before deploying a c
 4. Read `GET https://api.github.com/repos/endqwerty/mainworthy/actions/runs/<run-id>` and `main` again immediately
    before deploying. If the run's attempt or result changed,
    check it again. If the tip changed, start over with that commit and the existing settle delay.
-5. After deploying the pinned commit, read `GET https://mainworthy.com/healthz`. Keep the deploy in flight
+5. After deploying the pinned commit, read `GET https://mainworthy.com/health`. Keep the deploy in flight
    while that commit reports `ok: false, state: "upgrading"`, within the job's separate deployment deadline.
    The server's 30-minute inactivity allowance can reset throughout an active upgrade. Require HTTP 200, `ok: true`
    and `commit` equal to the full candidate SHA. Record failure if the deploy fails or that reply does not arrive

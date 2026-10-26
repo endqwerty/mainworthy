@@ -834,7 +834,7 @@ export function upgradingListener(config: Config, patience: Patience = PATIENCE)
 		fetch: (req) =>
 			withHeaders(
 				req,
-				["/healthz", "/health"].includes(new URL(req.url).pathname)
+				new URL(req.url).pathname === "/health"
 					? // 503: a probe that reads only the status (Cloud Run's) must not call a migrating revision ready.
 						jsonResponse(
 							{ ok: false, state: "upgrading", version: VERSION, apiVersion: API_VERSION, commit: config.commit },
@@ -852,7 +852,7 @@ export function upgradingListener(config: Config, patience: Patience = PATIENCE)
 
 /**
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
- * `/healthz` (is the process up, and which version and commit: the container's health check),
+ * `/health` (is the process up, and which version and commit: the container's health check),
  * `/.well-known/apple-app-site-association` (the iPhone apps that may be offered this site's saved logins, which
  * Apple reads without a sign-in; not found when the instance lists none),
  * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
@@ -929,12 +929,8 @@ export function serve(
 		address: (req, server) => clientAddress(req, server, app.config),
 		limited,
 	});
-	const healthz = () =>
-		jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
+	const health = () => jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
 	const routes: Record<string, unknown> = {
-		// The public health answer. Cloud Run's front end swallows `/healthz` itself (Google's own 404, never the app), so
-		// everything that asks from outside uses this path; `/healthz` stays for the startup probe and containers.
-		"/health": healthz,
 		"/.well-known/apple-app-site-association": () =>
 			app.config.appleApps?.length
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
@@ -981,12 +977,13 @@ export function serve(
 		...(ui?.websocket ? { websocket: ui.websocket } : {}),
 		routes: {
 			// Exempt by the route Bun matched on the raw path, never by the request's URL, which Bun hands over normalised
-			// (`/%2e/healthz` arrives as `/healthz`): the startup probe, and Cloud Scheduler's call, which proves itself
+			// (`/%2e/health` arrives as `/health`): the startup probe, and Cloud Scheduler's call, which proves itself
 			// with a Google token (`authenticateJob`). Any other method on these paths falls to the guarded fallback.
-			// First, so a test's own `/healthz` (extra routes) still replaces it.
+			// First, so a test's own `/health` (extra routes) still replaces it.
 			...withHeadersOnEvery({
-				// Bun answers HEAD from the GET route; only the probe's GET is exempt.
-				"/healthz": { GET: (req: Request) => (req.method === "GET" ? healthz() : (refuseProxy(req) ?? healthz())) },
+				// Bun answers HEAD from the GET route; only the probe's GET is exempt. Not `/health`: Cloud Run's front end
+				// answers that path itself with Google's 404, so nothing outside could read it.
+				"/health": { GET: (req: Request) => (req.method === "GET" ? health() : (refuseProxy(req) ?? health())) },
 				"/api/job": { POST: (req: Request, server: Listener) => handleOp(app, owner, req, server, null, "job") },
 			}),
 			...withHeadersOnEvery(routes, refuseProxy),

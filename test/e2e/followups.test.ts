@@ -213,7 +213,7 @@ test.skipIf(!browserAvailable)(
 			expect(await token.getAttribute("type")).toBe("password");
 			await context.grantPermissions(["clipboard-read"], { origin: server.url });
 			const reader = await context.newPage();
-			await reader.goto(`${server.url}/healthz`);
+			await reader.goto(`${server.url}/health`);
 			expect((await reader.evaluate(() => navigator.clipboard.readText())) === value).toBe(true);
 			expect(browser.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 403 (Forbidden)",

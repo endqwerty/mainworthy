@@ -10,7 +10,7 @@ it on 2026-10-23 ([#234](https://github.com/endqwerty/mainworthy/issues/234)).
 
 Mainworthy is Apache-2.0 and its whole source is public in this repository. An image names the commit it was
 built from three ways: its tag (`ghcr.io/endqwerty/mainworthy:<full commit>`), its OCI label
-`org.opencontainers.image.revision`, and `/healthz`, which reports the commit. The `Dockerfile` at that commit is
+`org.opencontainers.image.revision`, and `/health`, which reports the commit. The `Dockerfile` at that commit is
 the complete build: it compiles the executable with `bun build --compile` using the Bun release it names.
 
 ## The parts under the LGPL and the MPL, at the revisions shipped

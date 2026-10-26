@@ -85,6 +85,6 @@ async function adoptWhilePolling(): Promise<number> {
 
 test("HTTP policy adoption across change runs leaves health requests answering", async () => {
 	const longest = await adoptWhilePolling();
-	console.log(`Policy adoption across ${CHANGE_RUNS} changes: longest /healthz wait ${longest.toFixed(1)} ms`);
-	budget(`policy adoption across ${CHANGE_RUNS} changes: longest /healthz wait`, longest, LIMIT_MS, "ms");
+	console.log(`Policy adoption across ${CHANGE_RUNS} changes: longest /health wait ${longest.toFixed(1)} ms`);
+	budget(`policy adoption across ${CHANGE_RUNS} changes: longest /health wait`, longest, LIMIT_MS, "ms");
 }, 180_000);
