@@ -189,8 +189,13 @@ A pipeline reports tests that no case names. What happens to them is one choice 
 | Choice | What happens |
 | --- | --- |
 | Track without a case (`track`) | The tests are kept without cases and nobody is asked. They still gate the build. `loose` and `standard` start here. |
-| Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The case's folder is named after the directory of the test's file. Nobody is asked. |
+| Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The folder comes from meaningful directories of the test's file, or its file name when none remain. For example, `test/e2e/docs.test.ts` becomes `e2e/docs`. Nobody is asked. |
 | Ask in the queue (`ask`) | Each file with such tests is one question in the queue. It blocks nothing. `strict` starts here. |
+
+New cases always use the [computed folder](./report-results.md#link-tests-to-cases),
+even if you moved other cases from the same file. Changing this setting or reporting
+again does not move existing cases. Maintainers of this repository can use the
+[one-off regrouping procedure](../development/regroup-automated-cases.md) after deployment.
 
 When a report creates cases, health checks and reads can run between creation slices and files. The new cases and test links become visible together when the report applies. A concurrent save waits for that transaction.
 

@@ -6,7 +6,7 @@ import { parseCase } from "../src/core/markdown.ts";
 import { emptyBody } from "../src/core/model.ts";
 import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
-import { HANDLERS } from "../src/server/decisions/kinds.ts";
+import { folderFor, HANDLERS } from "../src/server/decisions/kinds.ts";
 import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
 import { Database, isForeignKeyViolation, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { invalid } from "../src/server/kernel/errors.ts";
@@ -41,6 +41,25 @@ const first = <T>(items: T[]): T => {
 };
 const queue = async (input: Record<string, unknown> = {}) => await h.call<InboxReply>("inbox", input);
 const title = async (ref: string) => (await h.call<{ title: string }[]>("get", { refs: [ref] }))[0]?.title;
+
+test("automatic case folders retain meaningful directories and fall back to the file", () => {
+	for (const [file, folder] of [
+		["test/e2e/docs.test.ts", "e2e/docs"],
+		["test/policy.test.ts", "policy"],
+		["tests/docs.spec.tsx", "docs"],
+		["docs.test.ts", "docs"],
+		["tests/test_parser.py", "test_parser"],
+		["src/__tests__/docs.test.ts", "docs"],
+		["tests/checkout/coupon.spec.ts", "checkout"],
+		["src/server/identity/identity.test.ts", "server/identity"],
+		["test/e2e/checkout/docs.test.ts", "checkout"],
+		["src/a/b/c/d/test.spec.ts", "a/b/c"],
+		["", "Automated"],
+		["(no file)", "Automated"],
+	] satisfies [string, string][]) {
+		expect(folderFor(file)).toBe(folder);
+	}
+});
 
 describe("who may answer", () => {
 	const ask = (more: Partial<Ask>): Ask => ({
@@ -2096,6 +2115,38 @@ describe("unlinked tests", () => {
 		expect((await h.call<{ count: number }>("find", { in: "cases" })).count).toBe(4);
 		expect(await unlinkedTests()).toBe(0);
 		expect((await queue()).counts.open).toBe(0);
+	});
+
+	test("create uses file-based fallback folders and new cases do not follow moved neighbours", async () => {
+		await setUnlinked("create");
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
+		const file = "test/e2e/docs.test.ts";
+		await h.call("report", ciReport({ commit: "folder-first", n: 2, file }), pipeline);
+		const folders = async (refs: string[]) =>
+			(await h.call<{ folder: { path: string }; tests: { t: string }[] }[]>("get", { refs })).map((c) => [
+				c.folder.path,
+				c.tests.map((t) => t.t),
+			]);
+		expect(await folders(["C-1", "C-2"])).toEqual([
+			["e2e/docs", ["T-1"]],
+			["e2e/docs", ["T-2"]],
+		]);
+		await h.call("propose", { edits: [{ op: "place", cases: ["C-1", "C-2"], folder: "Hand sorted" }] });
+		await h.call("report", ciReport({ commit: "folder-next", n: 3, file }), pipeline);
+		expect(await folders(["C-1", "C-2", "C-3"])).toEqual([
+			["Hand sorted", ["T-1"]],
+			["Hand sorted", ["T-2"]],
+			["e2e/docs", ["T-3"]],
+		]);
+		await h.call(
+			"report",
+			{
+				...ciReport({ commit: "folder-no-file", n: 0 }),
+				results: [{ test: { key: "no-file", name: "A test with no source file" }, outcome: "pass" }],
+			},
+			pipeline,
+		);
+		expect(await folders(["C-4"])).toEqual([["Automated", ["T-4"]]]);
 	});
 
 	test("create under standard: an agent's new case waits for a person, so its report leaves the file's question open", async () => {
