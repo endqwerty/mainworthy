@@ -127,7 +127,9 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] | "unusable" {
 	const times = [report.startTime, ...report.testResults.flatMap((file) => [file.startTime, file.endTime])];
 	if (
-		times.some((value) => value !== undefined && !(typeof value === "number" && Number.isFinite(value) && value >= 0))
+		times.some(
+			(value) => value !== undefined && !(typeof value === "number" && value >= 0 && value <= Number.MAX_SAFE_INTEGER),
+		)
 	)
 		return "unusable";
 	let start = typeof report.startTime === "number" ? report.startTime : Number.POSITIVE_INFINITY;

@@ -70,13 +70,41 @@ describe("a report's span", () => {
 		);
 	});
 
-	test("Jest JSON whose times are too large for a span says so (the verifier's finding)", async () => {
-		const report = JSON.parse(await fixture("real-jest.json"));
-		report.testResults[0].startTime = 1e100;
-		report.testResults[0].endTime = 1e100;
-		const parsed = parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/home/robin/project" });
+	test("Jest JSON whose times are too large for a span says so (the verifier's findings)", async () => {
+		for (const [name, change] of [
+			[
+				"both file times",
+				(report: { testResults: Record<string, unknown>[] }) => {
+					report.testResults[0] = { ...report.testResults[0], startTime: 1e100, endTime: 1e100 };
+				},
+			],
+			[
+				"the run's start",
+				(report: { startTime?: unknown }) => {
+					report.startTime = 9007199254740992;
+				},
+			],
+			[
+				"a file's end beside no start",
+				(report: { testResults: Record<string, unknown>[] }) => {
+					report.testResults[0] = { ...report.testResults[0], startTime: undefined, endTime: 1e100 };
+				},
+			],
+		] as const) {
+			const report = JSON.parse(await fixture("real-jest.json"));
+			change(report);
+			const parsed = parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/home/robin/project" });
+			expect([name, parsed.span]).toEqual([name, undefined]);
+			expect(parsed.results.length).toBeGreaterThan(0);
+			expect([name, parsed.warnings.filter((line) => line.includes("span")).length]).toEqual([name, 1]);
+		}
+	});
+
+	test("a year before 1970 gives no span, not a time in the 1900s (the verifier's finding)", async () => {
+		const report = JSON.parse(await fixture("real-playwright.json"));
+		report.stats.startTime = "0099-10-26T09:00:00.999Z";
+		const parsed = parseReport(JSON.stringify(report), { file: "report.json" });
 		expect(parsed.span).toBeUndefined();
-		expect(parsed.results.length).toBeGreaterThan(0);
 		expect(parsed.warnings.filter((line) => line.includes("span"))).toHaveLength(1);
 	});
 
