@@ -309,8 +309,10 @@ without a recognized lower-case source extension, then removes a trailing `.test
 or `.spec` marker. Other keys stay whole, including dotted class names such as
 `com.example.ui.Feature` and `com.example.Test`. Empty or whitespace-only stems
 use `Automated`. Long stems are shortened to fit the existing
-120-character folder-name limit. It drops leading `src`, `test`,
-`tests`, `spec`, `specs`, `__tests__`, `lib`, and `app` directories but keeps `e2e`.
+120-character folder-name limit, after the same Unicode cleanup used by folder paths.
+The fallback drops conventional `src`, `test`, `tests`, `spec`, `specs`, `__tests__`,
+`lib`, and `app` wrappers. It keeps at most one `e2e` segment before the file stem,
+so repeated wrappers cannot create deep folder chains.
 For example, `test/e2e/docs.test.ts` becomes `e2e/docs`, and `test/policy.test.ts`
 becomes `policy`. A report with no usable file name still uses `Automated`.
 New cases use this computed folder even if you moved other cases from that file.

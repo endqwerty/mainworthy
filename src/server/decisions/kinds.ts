@@ -4,7 +4,7 @@
 // `effect` is the only place a standing writer is called (it receives the witness). `revert` undoes exactly what
 // `effect` recorded, for a withdrawn or expired decision. `holds` says how long the decision carries forward.
 import { ANSWERS, type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
-import type { CaseBody } from "../../core/model.ts";
+import { type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
 import {
@@ -410,14 +410,14 @@ const mapHandler: Handler<"map"> = {
 	undoHint: "",
 };
 
-/** Keep meaningful directories; otherwise use the file, retaining an e2e directory. */
+/** Keep meaningful directories; otherwise use the normalized file and at most one e2e directory. */
 export function folderFor(file: string): string {
 	if (file === NO_FILE) return "Automated";
 	const parts = file.split("/").filter((part) => part && !/^(src|tests?|specs?|e2e|__tests__|lib|app)$/i.test(part));
 	parts.pop();
 	if (parts.length > 0) return parts.slice(0, 3).join("/");
 	const fallback = file.split("/").filter(Boolean);
-	const leaf = fallback.pop() ?? "";
+	const leaf = cleanPath(fallback.pop() ?? "")[0] ?? "";
 	const source = leaf.replace(
 		/\.(?:[cm]?[jt]sx?|py|java|kts?|cs|go|rb|rs|php|swift|scala|exs?|feature|robot|sh|vue|svelte)$/,
 		"",
@@ -426,8 +426,8 @@ export function folderFor(file: string): string {
 		.trim()
 		.slice(0, 120)
 		.replace(/[\uD800-\uDBFF]$/, "");
-	while (fallback[0] && /^(src|tests?|specs?|__tests__|lib|app)$/i.test(fallback[0])) fallback.shift();
-	return name ? [...fallback, name].join("/") : "Automated";
+	if (!name) return "Automated";
+	return fallback.some((part) => /^e2e$/i.test(part)) ? `e2e/${name}` : name;
 }
 
 /**

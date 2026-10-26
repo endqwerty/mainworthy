@@ -66,6 +66,10 @@ test("automatic case folders retain meaningful directories and fall back to the 
 		["org.foo.Spec", "org.foo.Spec"],
 		["test/ .test.ts", "Automated"],
 		["test/e2e/ .test.ts", "Automated"],
+		[`test/${"e2e/".repeat(120)}deep.test.ts`, "e2e/deep"],
+		["src/test/e2e/lib/spec/e2e/app/__tests__/deep.test.ts", "e2e/deep"],
+		["test/\u200b.test.ts", "Automated"],
+		[`test/${"\u0344".repeat(120)}.test.ts`, "\u0308\u0301".repeat(60)],
 	] satisfies [string, string][]) {
 		expect(folderFor(file)).toBe(folder);
 	}
@@ -2169,11 +2173,13 @@ describe("unlinked tests", () => {
 			"com.example.Test",
 			"org.foo.Spec",
 			"test/ .test.ts",
+			"test/\u200b.test.ts",
+			`test/${"\u0344".repeat(120)}.test.ts`,
 		]) {
 			await h.call("report", ciReport({ commit: "folder-keys", n: 1, file, job: file.slice(0, 100) }));
 		}
 		const made = await h.call<{ folder: { path: string }; tests: { t: string }[] }[]>("get", {
-			refs: ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7"],
+			refs: ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7", "C-8", "C-9"],
 		});
 		expect(made.map((c) => c.folder.path)).toEqual([
 			"a".repeat(120),
@@ -2183,8 +2189,36 @@ describe("unlinked tests", () => {
 			"com.example.Test",
 			"org.foo.Spec",
 			"Automated",
+			"Automated",
+			"\u0308\u0301".repeat(60),
 		]);
-		expect(made.map((c) => c.tests.length)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+		expect(made.map((c) => c.tests.length)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+		expect((await queue()).counts.open).toBe(0);
+	});
+
+	test("create bounds fallback folder depth across distinct reported files", async () => {
+		await setUnlinked("create");
+		const pipeline = await h.actor("pipeline", "ci", ["record"]);
+		await h.call(
+			"report",
+			{
+				...ciReport({ commit: "deep-folders", n: 0 }),
+				results: Array.from({ length: 12 }, (_, i) => ({
+					test: {
+						key: `deep-source-${i}`,
+						name: `Deep source ${i}`,
+						file: `test/${"e2e/".repeat(110)}file-${i}.test.ts`,
+					},
+					outcome: "pass",
+				})),
+			},
+			pipeline,
+		);
+		const folders = await h.call<{ items: { path: string }[] }>("find", { in: "folders" });
+		expect(folders.items.map((folder) => folder.path).sort()).toEqual(
+			["e2e", ...Array.from({ length: 12 }, (_, i) => `e2e/file-${i}`)].sort(),
+		);
+		expect(await unlinkedTests()).toBe(0);
 		expect((await queue()).counts.open).toBe(0);
 	});
 
