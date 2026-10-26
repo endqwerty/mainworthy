@@ -1,5 +1,5 @@
 ---
-id: 457-file-based-automatic-folders
+id: 457
 category: Fixed
 date: 2026-10-26
 issue: https://github.com/endqwerty/mainworthy/issues/457

@@ -32,7 +32,7 @@ operations. No database access or policy change is needed.
 The preview reads every page before moving anything. It selects active cases
 still directly in `Automated`, skips fragments and cases with missing or
 conflicting linked file paths, and groups the rest by the landed folder rule.
-Cases already moved by a person are outside that selection. Archived cases stay
+Cases a person moved out of `Automated` are outside that selection. Archived cases stay
 where they are. A changed case aborts `apply`; inspect it and create a fresh plan
 in a new scratch directory. Saved placement inverses in the receipt can restore
 old folders, but review them before using them after later edits.
@@ -103,4 +103,5 @@ if (mode === "preview") {
     await Bun.write(file("request"), JSON.stringify({ cmd: crypto.randomUUID(), reason: "Organize existing auto-created cases by test file (#457)", edits }, null, 2));
     await send();
   }
-}```
+}
+```
