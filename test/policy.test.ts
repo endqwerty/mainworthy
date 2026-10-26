@@ -61,6 +61,11 @@ test("automatic case folders retain meaningful directories and fall back to the 
 		["com.example.checkout.CouponTest", "com.example.checkout.CouponTest"],
 		["tests.test_parser", "tests.test_parser"],
 		["tests.billing.test_invoice", "tests.billing.test_invoice"],
+		["com.example.ui.Feature", "com.example.ui.Feature"],
+		["com.example.Test", "com.example.Test"],
+		["org.foo.Spec", "org.foo.Spec"],
+		["test/ .test.ts", "Automated"],
+		["test/e2e/ .test.ts", "Automated"],
 	] satisfies [string, string][]) {
 		expect(folderFor(file)).toBe(folder);
 	}
@@ -2156,18 +2161,30 @@ describe("unlinked tests", () => {
 
 	test("create handles long file stems and dotted class or module keys", async () => {
 		await setUnlinked("create");
-		for (const file of [`test/${"a".repeat(121)}.test.ts`, "com.example.checkout.CouponTest", "tests.test_parser"]) {
+		for (const file of [
+			`test/${"a".repeat(121)}.test.ts`,
+			"com.example.checkout.CouponTest",
+			"tests.test_parser",
+			"com.example.ui.Feature",
+			"com.example.Test",
+			"org.foo.Spec",
+			"test/ .test.ts",
+		]) {
 			await h.call("report", ciReport({ commit: "folder-keys", n: 1, file, job: file.slice(0, 100) }));
 		}
 		const made = await h.call<{ folder: { path: string }; tests: { t: string }[] }[]>("get", {
-			refs: ["C-1", "C-2", "C-3"],
+			refs: ["C-1", "C-2", "C-3", "C-4", "C-5", "C-6", "C-7"],
 		});
 		expect(made.map((c) => c.folder.path)).toEqual([
 			"a".repeat(120),
 			"com.example.checkout.CouponTest",
 			"tests.test_parser",
+			"com.example.ui.Feature",
+			"com.example.Test",
+			"org.foo.Spec",
+			"Automated",
 		]);
-		expect(made.map((c) => c.tests.length)).toEqual([1, 1, 1]);
+		expect(made.map((c) => c.tests.length)).toEqual([1, 1, 1, 1, 1, 1, 1]);
 		expect((await queue()).counts.open).toBe(0);
 	});
 

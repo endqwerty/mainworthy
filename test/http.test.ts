@@ -111,6 +111,7 @@ async function boot(
 		publicUrl?: string;
 		surfaces?: boolean;
 		oidc?: Config["oidc"];
+		jobRunner?: boolean;
 	} = {},
 ): Promise<Instance & AsyncDisposable> {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
@@ -126,6 +127,7 @@ async function boot(
 			ownerToken,
 			...(options.publicUrl ? { publicUrl: options.publicUrl } : {}),
 			...(options.oidc ? { oidc: options.oidc } : {}),
+			...(options.jobRunner === undefined ? {} : { jobRunner: options.jobRunner }),
 			commit: null,
 			...SESSION_LIFETIMES,
 			proxy: null,
@@ -2477,7 +2479,7 @@ describe("the surface", () => {
 	});
 
 	test("every public operation validates real replies against Zod and the served OpenAPI schema", async () => {
-		await using instance = await boot("local");
+		await using instance = await boot("local", null, undefined, { jobRunner: false });
 		const sweep = await replySweep(instance, "scratch");
 		const { checked } = sweep;
 		await checked("admin", { do: "project.create", key: "schema-demo" });
