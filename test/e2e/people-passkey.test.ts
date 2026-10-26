@@ -204,22 +204,22 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"a page opened at another name of the instance says the browser could not use a passkey there",
+	"sign-in offers a passkey only at the configured public hostname",
 	async () => {
-		let browser: PageHarness | null = null;
+		const browser = await openPage(started, { signedIn: false });
 		try {
-			// 127.0.0.1 is the same server, and not the name its passkeys belong to.
-			browser = await openPage(started, { signedIn: false });
 			const { page } = browser;
-			await addAuthenticator(browser);
-			await page.getByRole("button", { name: "Sign in with a passkey" }).click();
-			await page.getByRole("status").filter({ hasText: "This browser could not use a passkey here." }).waitFor();
-			expect(await page.locator("#app").count()).toBe(0);
-			// The other ways are still there to use.
-			expect(await page.getByRole("button", { name: "Sign in with a passkey" }).isEnabled()).toBe(true);
+			await page.waitForLoadState("networkidle");
+			const evidence = process.env.MAINWORTHY_PASSKEY_HOST_EVIDENCE;
+			if (evidence) await page.screenshot({ path: `${evidence}/other-host.png` });
+			expect(await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).count()).toBe(0);
+			await page.locator("#signin-password").waitFor();
+			await page.locator("#token").waitFor();
+			await page.goto(server.url);
+			await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).waitFor();
 			expect(browser.errors).toEqual([]);
 		} finally {
-			await browser?.close();
+			await browser.close();
 		}
 	},
 	30_000,
