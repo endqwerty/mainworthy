@@ -53,6 +53,7 @@ export function writeTimings(path: string, durations: Readonly<Record<string, nu
 /** Elapsed-time assertions and database process cleanup checks run serially on a dedicated CI runner. */
 export const PERFORMANCE = [
 	"test/check-process.test.ts",
+	"test/pg-cleanup.test.ts",
 	"test/demo-removal-budget.test.ts",
 	"test/archive-latency.test.ts",
 	"test/report-latency.test.ts",

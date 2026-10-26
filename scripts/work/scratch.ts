@@ -7,6 +7,7 @@ import {
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	rmSync,
@@ -58,6 +59,23 @@ export function remove(given: string, root = defaultRoot()): string {
 	const why = refusal(given, root);
 	if (why !== null) throw new Error(why);
 	const real = realpathSync(resolve(given));
-	rmSync(real, { recursive: true });
+	const pg = resolve(import.meta.dir, "../pg.ts");
+	const owners: string[] = [];
+	const findCheckouts = (path: string): void => {
+		if (existsSync(join(path, "scripts/pg.ts"))) owners.push(realpathSync(path));
+		for (const entry of readdirSync(path, { withFileTypes: true }))
+			if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== ".git")
+				findCheckouts(join(path, entry.name));
+	};
+	if (existsSync(join(defaultRoot(), "mainworthy/pg"))) {
+		findCheckouts(real);
+		// Load the helper before it deletes an export that may contain this very script.
+		const result = Bun.spawnSync([process.execPath, pg, "cleanup-scratch", real, realpathSync(root), ...owners], {
+			cwd: defaultRoot(),
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (result.exitCode !== 0) throw new Error(`scratch PostgreSQL cleanup failed: ${result.stderr.toString().trim()}`);
+	} else rmSync(real, { recursive: true });
 	return real;
 }
