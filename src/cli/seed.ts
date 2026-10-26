@@ -18,6 +18,7 @@ import {
 	type Failure,
 	hex,
 	LANDED_CHANGE,
+	pipelineSpan,
 	REPO,
 	REVIEW_CHANGE,
 	todayAt,
@@ -329,6 +330,9 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			return [result];
 		});
 
+	/** The shop job's report of these results, uploaded at `at`: its runner names when it started and ended them. */
+	const shop = (at: number, results: Result[]) => ({ job: "shop", span: pipelineSpan(at, results), results });
+
 	// Use ordinary report shards so a seed never holds the writer for all automated cases at once.
 	const report = async (
 		who: Client,
@@ -397,14 +401,10 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			case "pipeline": {
 				const receipt = await report(ci, event.step, event.at, {
 					target: { ...event.target, repo: REPO },
-					job: "shop",
 					...(event.rerun ? { attempt: event.rerun.attempt } : {}),
-					results: pipelineResults(
-						event.failures,
-						event.jitter,
-						false,
-						event.rerun?.cases ?? null,
-						event.retried ?? [],
+					...shop(
+						event.at,
+						pipelineResults(event.failures, event.jitter, false, event.rerun?.cases ?? null, event.retried ?? []),
 					),
 				});
 				opened.set(event.step, stillOpen(receipt.questions));
@@ -540,15 +540,13 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const before = (ago: number): number => todayAt(since, ago);
 	await report(ci, "green", before(4.5 * HOUR), {
 		target: { commit: green, repo: REPO, branch: "main" },
-		job: "shop",
-		results: pipelineResults([], 0.5),
+		...shop(before(4.5 * HOUR), pipelineResults([], 0.5)),
 	});
 	// A demo with no history links its tests now, on the first report there is.
 	if (days === 0) await linkTests(before(4 * HOUR));
 	await report(ci, "red", before(3 * HOUR), {
 		target: { commit: red, repo: REPO, ...LANDED_CHANGE },
-		job: "shop",
-		results: pipelineResults(broken, 0.4, true),
+		...shop(before(3 * HOUR), pipelineResults(broken, 0.4, true)),
 	});
 	await write(ci, "change", "red-landing", before(3 * HOUR - MINUTE), {
 		change: `pr:${LANDED_CHANGE.pr}`,
@@ -562,8 +560,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			...REVIEW_CHANGE,
 			base: red,
 		},
-		job: "shop",
-		results: pipelineResults(broken, 0.6, true),
+		...shop(before(2 * HOUR), pipelineResults(broken, 0.6, true)),
 	});
 	// Another pull request, whose pipeline runs its tests in three shards: two have reported and pass, and its gate
 	// waits for the third (decision 0092). Its commit is drawn from a stream of its own, so nothing else moves.
@@ -581,9 +578,11 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 				title: "Show the shipping estimate in the cart",
 				files: ["src/cart.ts"],
 			},
-			job: "shop",
 			shard: { index, of: 3 },
-			results: shardResults.filter((_, n) => n % 3 === index - 1),
+			...shop(
+				before((80 - index * 5) * MINUTE),
+				shardResults.filter((_, n) => n % 3 === index - 1),
+			),
 		});
 	}
 	const checkout = suite.flatMap((item, index) => (item.folder.startsWith("Checkout") ? [refOf(index)] : []));

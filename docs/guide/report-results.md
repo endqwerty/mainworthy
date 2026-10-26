@@ -540,6 +540,41 @@ steps:
 A failure question waits for every shard too. Its question closes, or its answer ends, only when the commit's
 shards have all reported and every report of the commit has been applied. See [decide](./decide.md#when-the-fix-arrives).
 
+## Report when the tests ran
+
+A report can say when its runner started and ended its tests. A change run then shows a **reported test span**
+beside its test time: from the earliest start to the latest end of the reports its gate counts. These times are what
+the report says, by the runner's clock. Mainworthy still dates every report and result by its own clock when it
+receives them, and the span changes no verdict.
+
+`mainworthy report` reads the span from these formats, and from no others:
+
+| Format | Where the span comes from |
+| --- | --- |
+| Playwright JSON | `stats.startTime` and `stats.duration` |
+| Jest and Vitest JSON | the run's `startTime`, or its first file's, to the last file's `endTime`; every file must name both |
+| JUnit XML | each outermost `testsuite`'s `timestamp` and `time`, when every outermost suite with tests names both and the timestamp names a time zone, such as `2026-10-26T09:00:00Z` or `+02:00` |
+
+Nested JUnit suites run inside their parent and are not read. A JUnit timestamp without a zone, as Surefire and
+`jest-junit` write it, is a time on an unknown machine: the report keeps its results, has no span, and the command
+warns once. So does a report whose times cannot be read. `pytest-json-report` and TRX reports have no span yet.
+When one command uploads several files, the report has a span only when every file has one.
+
+Through the API, `report` takes the span as `span: { "startedAt": 1792040850012, "endedAt": 1792040852285 }`, in
+milliseconds since 1970, with `endedAt` no earlier than `startedAt`. A report sent again with other times is a new
+report, not a repeat of the first.
+
+A change run shows the span only when every report its gate counts named one, and when no declared shard and no
+accepted report is still to arrive. Otherwise it shows the test time alone. `mainworthy find --in results` returns the
+span as `reportedSpan`, or `null`. Read it with these limits:
+
+- It covers the reported test runs only, not checkout, builds or jobs that never reported.
+- Shards on machines whose clocks disagree move it.
+- When a retry reruns some tests and the first attempt's other results still count, the span runs from the first
+  attempt's start to the retry's end, and so includes the wait between them.
+
+The build's own duration stays in CI, on the build page a report names.
+
 ## Give a pipeline its own token
 
 To give a pipeline its own identity, follow these steps.

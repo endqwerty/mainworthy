@@ -130,6 +130,19 @@ export const TargetIn = z.union([
 ]);
 export type TargetIn = z.infer<typeof TargetIn>;
 
+const epochMs = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/**
+ * When a report's tests started and ended, by the runner's own clock: evidence the report carries, like a result's
+ * duration. It never sets the time of a write, which stays the server's (decision 0100, issue #722).
+ */
+export const ReportSpan = z
+	.strictObject({
+		startedAt: epochMs.describe("Milliseconds since 1970 when the runner started these tests, by its clock."),
+		endedAt: epochMs.describe("Milliseconds since 1970 when it ended them; not before startedAt."),
+	})
+	.refine((span) => span.endedAt >= span.startedAt, { message: "a span ends at or after its start" });
+export type ReportSpan = z.infer<typeof ReportSpan>;
+
 export const ReportInput = z
 	.object({
 		target: TargetIn.optional().describe("What was tested. Required unless `run` is given."),
@@ -154,6 +167,11 @@ export const ReportInput = z
 				"This report is one shard of its job: index of of. A commit's gate waits until every shard of the job has reported.",
 			),
 		buildUrl: z.string().max(500).optional(),
+		span: ReportSpan.optional()
+			.meta({ "x-mcp-hidden": true })
+			.describe(
+				"When the runner started and ended these tests, as the report says. A change run shows its reported test span only when every report it counts names one.",
+			),
 		results: z.array(ResultIn).max(100_000),
 		nothingRequired: z
 			.literal(true)

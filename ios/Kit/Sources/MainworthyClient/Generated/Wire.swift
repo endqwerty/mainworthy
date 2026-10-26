@@ -834,6 +834,14 @@ enum Wire {
 		let timed: Int
 	}
 
+	/// When the reports behind the counted rows started and ended, by their runners' clocks.
+	struct ReportedSpan: Decodable, Equatable, Sendable {
+		/// Milliseconds since 1970.
+		let startedAt: Int
+		/// Milliseconds since 1970.
+		let endedAt: Int
+	}
+
 	/// `find` in results: what a commit's gate counted, a page.
 	struct CountedResults: Decodable, Equatable, Sendable {
 		/// How many rows match the filter.
@@ -843,6 +851,8 @@ enum Wire {
 		/// Every row the gate counts, by standing, whatever the filter.
 		let tally: [String: Int]
 		let testTime: TestTime
+		/// None unless every report the gate counts named both and nothing declared is still to arrive.
+		let reportedSpan: ReportedSpan?
 	}
 
 	/// A result's attachment metadata.

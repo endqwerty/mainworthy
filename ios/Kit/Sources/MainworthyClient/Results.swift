@@ -58,6 +58,21 @@ public struct TestTime: Equatable, Sendable {
 	public let timed: Int
 }
 
+/// When the reports behind a change run's counted results started and ended, by their runners' clocks. The server
+/// sends one only when every one of those reports named both and nothing declared is still to arrive.
+public struct ReportedSpan: Equatable, Sendable {
+	/// Milliseconds since 1970.
+	public let startedAt: Int
+	public let endedAt: Int
+
+	public init(startedAt: Int, endedAt: Int) {
+		self.startedAt = startedAt
+		self.endedAt = endedAt
+	}
+
+	public var ms: Int { endedAt - startedAt }
+}
+
 /// A page of what a change's gate counted, with the whole tally whatever the page holds.
 package struct CountedPage: Equatable, Sendable {
 	package let rows: [CountedResult]
@@ -67,10 +82,12 @@ package struct CountedPage: Equatable, Sendable {
 	package let tally: [ResultStanding: Int]
 	/// The summed duration of every row the gate counts.
 	package let testTime: TestTime
+	/// The earliest start to the latest end the counted reports named, when the server gave one.
+	package let reportedSpan: ReportedSpan?
 	package let next: String?
 
 	/// The results of a commit nothing a gate counts was reported for.
-	package static let none = CountedPage(rows: [], count: 0, tally: [:], testTime: TestTime(ms: 0, timed: 0), next: nil)
+	package static let none = CountedPage(rows: [], count: 0, tally: [:], testTime: TestTime(ms: 0, timed: 0), reportedSpan: nil, next: nil)
 }
 
 /// An automated test the project has seen, with a case or without one.
@@ -203,7 +220,9 @@ extension ProjectClient {
 		}
 		return CountedPage(
 			rows: wire.items.map(CountedResult.init), count: wire.count, tally: tally,
-			testTime: TestTime(ms: wire.testTime.ms, timed: wire.testTime.timed), next: wire.cursor
+			testTime: TestTime(ms: wire.testTime.ms, timed: wire.testTime.timed),
+			reportedSpan: wire.reportedSpan.map { ReportedSpan(startedAt: $0.startedAt, endedAt: $0.endedAt) },
+			next: wire.cursor
 		)
 	}
 

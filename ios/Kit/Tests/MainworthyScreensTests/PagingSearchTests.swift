@@ -132,10 +132,12 @@ struct PagingSearchTests {
 		#expect(results.loading == .done && results.hasRead)
 		#expect(results.rows.map(\.name) == ["All"])
 		#expect(results.testTime.map { [$0.ms, $0.timed] } == [4200, 1])
+		#expect(results.reportedSpan == ReportedSpan(startedAt: 1_790_000_000_000, endedAt: 1_790_000_090_000))
 		let empty = ChangeResults(project: server.project("shop", identity: "shop-identity"), change: nil, run: nil)
 		await empty.load()
 		#expect(empty.loading == .done && empty.hasRead && empty.total == 0)
 		#expect(empty.testTime.map { [$0.ms, $0.timed] } == [0, 0])
+		#expect(empty.reportedSpan == nil)
 	}
 
 	@Test("a restored results query is capped before its first read")
@@ -195,7 +197,7 @@ private actor SearchReplies: Transport {
 		let row = results
 			? #"{"result":1,"test":"T-1","name":"\#(name)","file":null,"case":null,"outcome":"fail","standing":"unexplained","quarantined":false,"question":null,"attempt":1,"durationMs":null,"message":null,"job":"ci","by":"robin","model":null,"steps":null,"build":null}"#
 			: #"{"ref":"T-1","name":"\#(name)","file":null,"case":null,"quarantine":null}"#
-		let tally = results ? #", "count":1,"tally":{"unexplained":1},"testTime":{"ms":4200,"timed":1}"# : ""
+		let tally = results ? #", "count":1,"tally":{"unexplained":1},"testTime":{"ms":4200,"timed":1},"reportedSpan":{"startedAt":1790000000000,"endedAt":1790000090000}"# : ""
 		let body = #"{"ok":true,"result":{"items":[\#(row)],"cursor":null\#(tally)}}"#
 		return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
 	}

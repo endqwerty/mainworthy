@@ -7,7 +7,15 @@ import { createHash } from "node:crypto";
 import { caseNameAnnotation } from "../../core/case-annotation.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
-import type { ChangeInput, Outcome, ReportInput, ResultIn, ResultLocation, TargetIn } from "../../core/ops.ts";
+import type {
+	ChangeInput,
+	Outcome,
+	ReportInput,
+	ReportSpan,
+	ResultIn,
+	ResultLocation,
+	TargetIn,
+} from "../../core/ops.ts";
 import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
 import { attachmentType } from "../kernel/blobs.ts";
@@ -94,6 +102,9 @@ export type BatchRow = {
 	counts: string;
 	staged: string | null;
 	receipt: string | null;
+	/** When the report's tests started and ended, as it said: evidence, never the time of the write (`at`). */
+	started_at: number | null;
+	ended_at: number | null;
 	at: number;
 	seq: number;
 };
@@ -434,13 +445,15 @@ const Q = {
 			url: string | null;
 			counts: string;
 			staged: string;
+			startedAt: number | null;
+			endedAt: number | null;
 			at: number;
 			seq: number;
 		},
 		{ id: number }
 	>(
-		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, model, run, build_url, state, counts, staged, at, seq)
-		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $model, $run, $url, 'accepted', $counts, $staged, $at, $seq) RETURNING id`,
+		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, model, run, build_url, state, counts, staged, started_at, ended_at, at, seq)
+		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $model, $run, $url, 'accepted', $counts, $staged, $startedAt, $endedAt, $at, $seq) RETURNING id`,
 	),
 	// The shards a job of a target has reported, by the number of shards they said the job has. An agent's report
 	// under the job's name is not the job.
@@ -522,6 +535,11 @@ const Q = {
 		`SELECT greatest(0, least(coalesce(sum(r.duration_ms), 0), ${Number.MAX_SAFE_INTEGER}))::bigint AS ms,
 		        count(r.duration_ms) AS timed
 		 FROM unnest($results::bigint[]) AS requested(value) JOIN results r ON r.id = requested.value`,
+	),
+	reportedSpan: sql<{ results: readonly number[] }, { untimed: number; started: number | null; ended: number | null }>(
+		`SELECT count(*) FILTER (WHERE b.started_at IS NULL) AS untimed, min(b.started_at) AS started, max(b.ended_at) AS ended
+		 FROM batches b WHERE b.id IN (
+		   SELECT r.batch FROM unnest($results::bigint[]) AS requested(value) JOIN results r ON r.id = requested.value)`,
 	),
 	triesOf: sql<
 		{ results: readonly number[] },
@@ -1188,7 +1206,7 @@ export async function accept(
 		run: number | null;
 		report: Pick<
 			ReportInput,
-			"target" | "model" | "job" | "attempt" | "shard" | "buildUrl" | "results" | "cmd" | "nothingRequired"
+			"target" | "model" | "job" | "attempt" | "shard" | "buildUrl" | "span" | "results" | "cmd" | "nothingRequired"
 		>;
 		/**
 		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
@@ -1227,6 +1245,8 @@ export async function accept(
 		nonce: files ? null : input.nonce,
 		...(report.model !== undefined ? { model: report.model } : {}),
 		...(report.shard ? { shard: report.shard } : {}),
+		// Another span is other evidence: the same results sent again with new timing are another report.
+		...(report.span ? { span: report.span } : {}),
 		results: report.results,
 		...(report.target && "commit" in report.target && report.target.head !== undefined
 			? {
@@ -1295,6 +1315,8 @@ export async function accept(
 		url: report.buildUrl ?? null,
 		counts: JSON.stringify(countOutcomes(report.results)),
 		staged: JSON.stringify(report.results),
+		startedAt: report.span?.startedAt ?? null,
+		endedAt: report.span?.endedAt ?? null,
 		at: ctx.now,
 		seq: ctx.seq,
 	});
@@ -2016,6 +2038,18 @@ export const resultById = async (db: ReadDb, id: number): Promise<ResultRow | nu
  */
 export async function testTime(db: ReadDb, results: readonly number[]): Promise<{ ms: number; timed: number }> {
 	return (await db.get(Q.testTime, { results })) ?? { ms: 0, timed: 0 };
+}
+
+/**
+ * When the reports these results came from ran: the earliest start to the latest end they named. Null when there are
+ * none, or when any of them named no span: a total over some of them could leave out the first or the last work.
+ */
+export async function reportedSpan(db: ReadDb, results: readonly number[]): Promise<ReportSpan | null> {
+	if (results.length === 0) return null;
+	const row = await db.get(Q.reportedSpan, { results });
+	return row && row.untimed === 0 && row.started !== null && row.ended !== null
+		? { startedAt: row.started, endedAt: row.ended }
+		: null;
 }
 
 /**

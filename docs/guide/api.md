@@ -554,6 +554,9 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `shard.index` | `integer` | yes |  |
 | `shard.of` | `integer` | yes |  |
 | `buildUrl` | `string` | no |  |
+| `span` | `object` | no | When the runner started and ended these tests, as the report says. A change run shows its reported test span only when every report it counts names one. |
+| `span.startedAt` | `integer` | yes | Milliseconds since 1970 when the runner started these tests, by its clock. |
+| `span.endedAt` | `integer` | yes | Milliseconds since 1970 when it ended them; not before startedAt. |
 | `results` | `array<object>` | yes |  |
 | `results[].test` | `object` | yes |  |
 | `results[].test[1].key` | `string` | yes |  |

@@ -4879,7 +4879,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": "gpt-6.1-sol"
+						"model": "gpt-6.1-sol",
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 2,
@@ -4952,7 +4954,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 3,
@@ -5014,7 +5018,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 4,
@@ -5087,7 +5093,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 5,
@@ -5170,7 +5178,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 6,
@@ -5243,7 +5253,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 7,
@@ -5316,7 +5328,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 8,
@@ -5389,7 +5403,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 9,
@@ -5451,7 +5467,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 10,
@@ -5524,7 +5542,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 11,
@@ -5597,7 +5617,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 12,
@@ -5661,7 +5683,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 13,
@@ -5725,7 +5749,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					}
 				],
 				"assertion_seen": [
@@ -11156,7 +11182,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": "gpt-6.1-sol"
+						"model": "gpt-6.1-sol",
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 2,
@@ -11229,7 +11257,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 3,
@@ -11291,7 +11321,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 4,
@@ -11364,7 +11396,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 5,
@@ -11447,7 +11481,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 6,
@@ -11520,7 +11556,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 7,
@@ -11593,7 +11631,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 8,
@@ -11666,7 +11706,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 9,
@@ -11728,7 +11770,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 10,
@@ -11801,7 +11845,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 11,
@@ -11874,7 +11920,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 12,
@@ -11938,7 +11986,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					},
 					{
 						"id": 13,
@@ -12002,7 +12052,9 @@
 						"nothing_required": 0,
 						"shard": null,
 						"shards": null,
-						"model": null
+						"model": null,
+						"started_at": null,
+						"ended_at": null
 					}
 				],
 				"assertion_seen": [

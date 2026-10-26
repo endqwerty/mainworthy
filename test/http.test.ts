@@ -2738,6 +2738,18 @@ describe("the surface", () => {
 		});
 		await checked("find", { in: "deployments" });
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
+		// The demo's shop pipeline names when its runner started and ended (issue #722): its runs show a reported test
+		// span, and a run with a job that names none, or a shard still to come, shows none.
+		const changeRuns = rows.parse(await checked("find", { in: "runs", origin: "change", limit: 500 })).items;
+		const spans = await Array.fromAsync(
+			changeRuns,
+			async (run) =>
+				z
+					.object({ reportedSpan: z.object({ startedAt: z.number(), endedAt: z.number() }).nullable() })
+					.parse(await checked("find", { in: "results", run: z.string().parse(run.ref) })).reportedSpan,
+		);
+		expect(spans.filter((span) => span !== null).length).toBeGreaterThan(0);
+		expect(spans.filter((span) => span === null).length).toBeGreaterThan(0);
 		await checked("get", { refs: seeded.cases });
 		for (const ref of seeded.cases.slice(0, 1)) {
 			const doc = z.array(z.object({ etag: z.string() })).parse(await checked("get", { refs: [ref] }))[0];

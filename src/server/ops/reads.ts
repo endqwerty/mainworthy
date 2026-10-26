@@ -19,6 +19,7 @@ import {
 	InboxInput,
 	type InboxReply,
 	type Problem,
+	type ReportSpan,
 	SinceInput,
 	TimelineInput,
 } from "../../core/ops.ts";
@@ -70,6 +71,7 @@ import {
 	proofsOf,
 	type ResultRow,
 	recentChanges,
+	reportedSpan,
 	resultById,
 	resultFailedStep,
 	resultLocation,
@@ -118,6 +120,7 @@ import {
 	type SlotRow,
 	slotCount,
 	slotsPage,
+	stillArriving,
 	workIn,
 } from "../runs/runs.ts";
 import {
@@ -708,6 +711,7 @@ type Found = {
 	cursor: string | null;
 	tally?: Record<string, number>;
 	testTime?: { ms: number; timed: number };
+	reportedSpan?: ReportSpan | null;
 	flaky?: { flipped: number; failing: number; days: number };
 };
 
@@ -739,6 +743,14 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 		ctx.db,
 		counted.map((row) => row.result),
 	);
+	// Only once nothing declared is on its way: a shard still to report could start earlier or end later (#722).
+	const span =
+		run && counted.length > 0 && !(await stillArriving(ctx.db, run))
+			? await reportedSpan(
+					ctx.db,
+					counted.map((row) => row.result),
+				)
+			: null;
 
 	const rank = (row: CountedTest): number => 2 * RESULT_STANDINGS.indexOf(row.standing) + (row.flipped ? 0 : 1);
 	const text = input.text?.toLowerCase();
@@ -794,6 +806,7 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
 		testTime: time,
+		reportedSpan: span,
 		flaky: {
 			flipped: counted.filter((row) => row.flipped).length,
 			failing: failing.filter((row) => flips.has(row.test)).length,

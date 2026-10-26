@@ -8,6 +8,9 @@ of each selected table, including results, result_tries, findings, excuses and
 all four assertion tables. The scenario also writes attachments, model,
 failure step, trail, note, corrections and cross-batch assertion spreading.
 
+`batches.started_at` and `batches.ended_at` (migration 0005, issue #722) came after the reference. The
+scenario sends no span, so they were added to its batch rows as `null` by hand.
+
 The only normalization is `result_excuses.id`. This unreferenced surrogate is
 numbered in stored order because PostgreSQL consumes identity values for
 conflicting inserts. No column of results, result_tries, findings, excuses or

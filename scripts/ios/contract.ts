@@ -643,6 +643,15 @@ export const CountedResults = struct("CountedResults", "`find` in results: what 
 		ms: whole,
 		timed: [whole, "How many of the rows named a duration."],
 	}),
+	reportedSpan: [
+		maybe(
+			struct("ReportedSpan", "When the reports behind the counted rows started and ended, by their runners' clocks.", {
+				startedAt: [whole, "Milliseconds since 1970."],
+				endedAt: [whole, "Milliseconds since 1970."],
+			}),
+		),
+		"None unless every report the gate counts named both and nothing declared is still to arrive.",
+	],
 });
 
 const TestQuarantine = struct("TestQuarantine", "A quarantine a test is or was in.", {

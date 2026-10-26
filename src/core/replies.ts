@@ -618,6 +618,12 @@ export const FindReply = z.looseObject({
 	/** For results: the summed duration of every row the gate counts, and how many named one, whatever the filter. */
 	testTime: z.strictObject({ ms: whole, timed: whole }).optional(),
 	/**
+	 * For results, whatever the filter: the earliest start to the latest end the reports behind the counted rows
+	 * named, by their runners' clocks. Null unless every one of those reports named both and nothing declared is
+	 * still to arrive (issue #722).
+	 */
+	reportedSpan: z.strictObject({ startedAt: whole, endedAt: whole }).nullable().optional(),
+	/**
 	 * For results, whatever the filter: how many counted tests flipped on this commit, and how many of those that
 	 * fail its gate flipped on some commit in the last `days` days.
 	 */

@@ -5,6 +5,7 @@ import type { Outcome } from "../../core/ops.ts";
 import { ResultTrail, TRAIL_LIMITS } from "../../core/results.ts";
 import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport, reportIdentifier } from "./native.ts";
+import { SPAN_UNUSABLE, spanOf, zonedTime } from "./span.ts";
 
 const ErrorInfo = z.object({ message: z.string().optional(), stack: z.string().optional() });
 const RunnerStep = z.object({
@@ -49,7 +50,21 @@ const Suite = z.object({
 		}),
 	),
 });
-const Report = z.object({ suites: z.array(z.unknown()), errors: z.array(z.unknown()).optional() });
+const Report = z.object({
+	suites: z.array(z.unknown()),
+	errors: z.array(z.unknown()).optional(),
+	stats: z.unknown().optional(),
+});
+const Stats = z.object({ startTime: z.string(), duration: z.number().nonnegative() });
+
+/** The run's own start and length, as Playwright's stats give them. */
+function playwrightSpan(stats: unknown): ParsedReport["span"] | "unusable" {
+	if (stats === undefined) return undefined;
+	const parsed = Stats.safeParse(stats);
+	const start = parsed.success ? zonedTime(parsed.data.startTime) : undefined;
+	const span = parsed.success && typeof start === "number" ? spanOf(start, parsed.data.duration) : undefined;
+	return span ?? "unusable";
+}
 
 export function parsePlaywright(value: unknown): ParsedReport {
 	const report = Report.parse(value);
@@ -151,5 +166,8 @@ export function parsePlaywright(value: unknown): ParsedReport {
 		}
 		for (const child of (suite.suites ?? []).toReversed()) pending.push({ suite: child, path, root: false });
 	}
-	return { results, warnings: [] };
+	const span = playwrightSpan(report.stats);
+	return span === "unusable"
+		? { results, warnings: [SPAN_UNUSABLE] }
+		: { results, warnings: [], ...(span ? { span } : {}) };
 }
