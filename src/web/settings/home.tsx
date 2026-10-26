@@ -36,66 +36,62 @@ export function YourHome() {
 					);
 				}}
 			>
-				<label>
-					Home screen
-					<Select
-						aria-label="Home screen"
-						className="form-input"
-						value={home.kind}
-						onChange={(event) => {
-							const kind = event.target.value;
-							if (kind === "suite" || kind === "queue") changeHome({ kind });
-							else if (kind === "run") changeHome({ kind, ref: "" });
-							else if (kind === "search") changeHome({ kind, text: "", folder: "", tag: "" });
-						}}
-					>
-						<option value="suite">Suite</option>
-						<option value="queue">Queue</option>
-						<option value="run">A run</option>
-						<option value="search">A saved search</option>
-					</Select>
-				</label>
+				<label htmlFor="home-screen">Home screen</label>
+				<Select
+					id="home-screen"
+					className="form-input"
+					value={home.kind}
+					onChange={(event) => {
+						const kind = event.target.value;
+						if (kind === "suite" || kind === "queue") changeHome({ kind });
+						else if (kind === "run") changeHome({ kind, ref: "" });
+						else if (kind === "search") changeHome({ kind, text: "", folder: "", tag: "" });
+					}}
+				>
+					<option value="suite">Suite</option>
+					<option value="queue">Queue</option>
+					<option value="run">A run</option>
+					<option value="search">A saved search</option>
+				</Select>
 				{home.kind === "run" && (
-					<label>
-						Home run
+					<>
+						<label htmlFor="home-run">Home run</label>
 						<input
 							className="form-input"
+							id="home-run"
 							value={home.ref}
 							placeholder="R-1"
 							required
 							pattern="R-[1-9][0-9]*"
 							onChange={(event) => changeHome({ ...home, ref: event.target.value })}
 						/>
-					</label>
+					</>
 				)}
 				{home.kind === "search" && (
 					<>
-						<label>
-							Home search text
-							<input
-								className="form-input"
-								maxLength={1000}
-								value={home.text}
-								onChange={(event) => changeHome({ ...home, text: event.target.value })}
-							/>
-						</label>
-						<label>
-							Home search folder
-							<input
-								className="form-input"
-								maxLength={1000}
-								value={home.folder}
-								onChange={(event) => changeHome({ ...home, folder: event.target.value })}
-							/>
-						</label>
-						<label>
-							Home search tag
-							<input
-								className="form-input"
-								value={home.tag}
-								onChange={(event) => changeHome({ ...home, tag: event.target.value })}
-							/>
-						</label>
+						<label htmlFor="home-search-text">Home search text</label>
+						<input
+							className="form-input"
+							id="home-search-text"
+							maxLength={1000}
+							value={home.text}
+							onChange={(event) => changeHome({ ...home, text: event.target.value })}
+						/>
+						<label htmlFor="home-search-folder">Home search folder</label>
+						<input
+							className="form-input"
+							id="home-search-folder"
+							maxLength={1000}
+							value={home.folder}
+							onChange={(event) => changeHome({ ...home, folder: event.target.value })}
+						/>
+						<label htmlFor="home-search-tag">Home search tag</label>
+						<input
+							className="form-input"
+							id="home-search-tag"
+							value={home.tag}
+							onChange={(event) => changeHome({ ...home, tag: event.target.value })}
+						/>
 						<p className="dim">
 							The saved search keeps these filters and reads the current cases each time you go home.
 						</p>
