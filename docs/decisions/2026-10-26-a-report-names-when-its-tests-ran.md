@@ -3,6 +3,7 @@
 - Date: 2026-10-26
 - Status: proposed
 - Issue: https://github.com/endqwerty/mainworthy/issues/722
+- PR: https://github.com/endqwerty/mainworthy/pull/970
 
 The owner asked how long a change run took, not only the test time (the sum of the counted results' durations,
 which adds up results that ran side by side). The times Mainworthy stores are when the server received a report, so
