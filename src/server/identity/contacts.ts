@@ -23,6 +23,9 @@ const Q = {
 		`SELECT c.*, a.name FROM mail_contacts c JOIN actors a ON a.id = c.actor WHERE c.email = $email AND a.disabled_at IS NULL AND c.verified_at IS NOT NULL`,
 	),
 	owner: sql<{ email: string }, { actor: number }>("SELECT actor FROM mail_contacts WHERE email = $email"),
+	holders: sql<{ email: string }, { actor: number }>(
+		`SELECT c.actor FROM mail_contacts c JOIN actors a ON a.id = c.actor WHERE c.email = $email AND a.disabled_at IS NULL`,
+	),
 	person: sql<{ email: string }, { id: number; name: string }>(
 		`SELECT a.id, a.name FROM mail_contacts c JOIN actors a ON a.id = c.actor
 		 WHERE c.email = $email AND a.kind = 'human' AND a.disabled_at IS NULL`,
@@ -131,6 +134,11 @@ export async function setEmail(
 export async function personByEmail(db: ReadDb, text: string): Promise<{ id: number; name: string } | null> {
 	const email = EmailAddress.safeParse(text);
 	return email.success ? await db.get(Q.person, { email: email.data }) : null;
+}
+/** Who has `text` as their email address, verified or not: nobody, when it is no address. */
+export async function emailHolders(db: ReadDb, text: string): Promise<number[]> {
+	const email = EmailAddress.safeParse(text);
+	return email.success ? (await db.all(Q.holders, { email: email.data })).map((row) => row.actor) : [];
 }
 export async function verifyEmail(app: App, code: string, proven?: () => void): Promise<boolean> {
 	const first = await app.database.admissionRead(async (db) => find(app, db, code));

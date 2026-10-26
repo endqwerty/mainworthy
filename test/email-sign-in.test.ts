@@ -106,3 +106,34 @@ test("signing in through an address that reads as another person's name clears n
 	}
 	expect(blocked).toBe(true);
 });
+
+/** Raises the counter of `typed` with wrong passwords, a correct sign-in of `other` after every three, and says whether it held. */
+async function heldBetweenSignIns(
+	w: Awaited<ReturnType<typeof world>>,
+	typed: string,
+	other: { typed: string; password: string },
+): Promise<boolean> {
+	let client = 0;
+	for (let round = 0; round < 15; round++) {
+		for (let attempt = 0; attempt < 3; attempt++)
+			if ((await signIn(w, typed, "not the password at all", from(`198.51.100.${++client}`))).status === 429)
+				return true;
+		expect((await signIn(w, other.typed, other.password, from(`198.51.100.${++client}`))).status).toBe(200);
+	}
+	return false;
+}
+
+test("a sign-in by a name resets nothing that wrong passwords at another person's matching address raised", async () => {
+	const w = await world({ proxied: true });
+	await joined(w, "a@example.com", PASSWORD);
+	const b = await joined(w, "b", "b's own long password");
+	expect((await w.op("credential", { do: "email.set", email: "a@example.com" }, { cookie: b })).status).toBe(200);
+	expect(await heldBetweenSignIns(w, " A@example.com ", { typed: "a@example.com", password: PASSWORD })).toBe(true);
+});
+
+test("a sign-in by a name resets nothing that wrong passwords at a name differing only in case raised", async () => {
+	const w = await world({ proxied: true });
+	await joined(w, "Robin", PASSWORD);
+	await joined(w, "robin", "the other robin's long password");
+	expect(await heldBetweenSignIns(w, "robin", { typed: "Robin", password: PASSWORD })).toBe(true);
+});
