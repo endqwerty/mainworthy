@@ -258,8 +258,7 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 | Address | What it returns |
 | --- | --- |
-| `/health` | Whether the server is up, its software and API versions, and the commit it runs when it was told |
-| `/health` | The same answer, for a container's own health check and Cloud Run's startup probe. Cloud Run's front end answers `/health` from outside itself, so monitors and the CLI use `/health`. |
+| `/health` | Whether the server is up, its software and API versions, and the commit it runs when it was told. It needs no proxy proof either, so Cloud Run's startup probe can read it. (Not `/healthz`: Cloud Run's front end answers that path itself.) |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |
