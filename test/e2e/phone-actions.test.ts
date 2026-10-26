@@ -207,3 +207,66 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"desktop read view Escape returns focus to its list",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .ctitle").waitFor();
+			await page.locator("#detail .ctitle").focus();
+			await page.keyboard.press("Escape");
+			expect(await page.evaluate(() => document.activeElement?.closest("#list") !== null)).toBe(true);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"editor hints follow focused fields while the palette retains field commands",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .ctitle").waitFor();
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("An editor with accurate hints");
+			await page.keyboard.press("ControlOrMeta+k");
+			await palette(page).waitFor();
+			await command(page, "Filter").click();
+			await eventually(
+				() => page.evaluate(() => document.activeElement?.id),
+				(id) => id === "filter",
+			);
+			const hints = await page.locator("#hints").innerText();
+			expect(hints).not.toContain("First step");
+			expect(hints).not.toContain("Next new case");
+			await page.keyboard.press("ControlOrMeta+k");
+			await palette(page).waitFor();
+			expect(await command(page, "First step").count()).toBe(1);
+			expect(await command(page, "Next new case").count()).toBe(1);
+			await page.keyboard.press("Escape");
+			await title.focus();
+			await eventually(
+				() => page.locator("#hints").innerText(),
+				(text) => text.includes("First step"),
+			);
+			await page.locator("#filter").focus();
+			await eventually(
+				() => page.locator("#hints").innerText(),
+				(text) => !text.includes("First step"),
+			);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

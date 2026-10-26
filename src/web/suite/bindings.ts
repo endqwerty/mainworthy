@@ -69,7 +69,7 @@ export function useSuiteBindings({
 			key: "escape",
 			label: canRecord ? "Seal and leave editor" : "Leave editor",
 			handler: seal,
-			applies: () => hasDraft,
+			hidden: !hasDraft,
 		},
 		{ key: "mod+enter", label: "Record version", handler: seal, applies: () => canRecord },
 		action("x", "Select case", select),

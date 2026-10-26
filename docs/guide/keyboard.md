@@ -1,7 +1,7 @@
 # Keyboard
 
 This page lists the web app's keys by screen. <kbd>?</kbd> lists the keys for the current screen.
-The bar at the bottom shows common actions.
+The bar at the bottom shows common actions. Its editor hints follow the focused field.
 
 Tab shows a focus indicator on controls. Except for run progress dots, buttons and form controls have targets of at least 24 CSS pixels.
 Run progress dots select the same slots as their full-size list rows.
@@ -121,6 +121,7 @@ be read, the action changes nothing. Try again when the case is available.
 | <kbd>Shift</kbd> <kbd>↵</kbd> | Next new case. Records this one and starts another |
 | <kbd>⌘</kbd> <kbd>↵</kbd> | Record version now |
 | <kbd>Esc</kbd> | Seal and leave editor. Records the version and leaves |
+| <kbd>Esc</kbd> | Leave editor, or return focus to the list while reading. |
 
 [Write cases](./write-cases.md) explains the outline you type and when a version is recorded.
 
