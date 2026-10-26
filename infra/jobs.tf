@@ -57,10 +57,11 @@ resource "google_cloud_tasks_queue_iam_member" "enqueue" {
 }
 
 resource "google_cloud_run_v2_service" "jobs" {
-  project              = var.production_project
-  name                 = "mainworthy-jobs"
-  location             = local.region
-  deletion_protection  = true
+  project  = var.production_project
+  name     = "mainworthy-jobs"
+  location = local.region
+  # The public app takes over the job endpoint in the next change, which removes this service.
+  deletion_protection  = false
   ingress              = "INGRESS_TRAFFIC_ALL"
   invoker_iam_disabled = false
   labels               = local.labels
