@@ -47,6 +47,7 @@ import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
 	applyCoverChanges,
+	asTyped,
 	cardText,
 	carried,
 	carriedCovers,
@@ -1449,7 +1450,11 @@ export function SuiteScreen() {
 							...cleanTitle(outgoing),
 							body: recovered
 								? outgoing.body
-								: mergeBodies({ base: snapshot.body, mine: outgoing.body, theirs: cleaned.body }).merged,
+								: mergeBodies({
+										base: snapshot.body,
+										mine: outgoing.body,
+										theirs: asTyped({ typed: snapshot.body, stored: cleaned.body }),
+									}).merged,
 							sent,
 						};
 						liveDrafts.current.set(sending.id, sending);

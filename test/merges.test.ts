@@ -6,6 +6,7 @@ import type { CaseBody, ConflictAddress } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
 import {
 	allRecorded,
+	asTyped,
 	cardText,
 	carried,
 	caseHeld,
@@ -222,6 +223,34 @@ describe("a draft carried onto a version the page has read", () => {
 		const later = onto(emptied, { ...restored, title: "Coupon case theirs" }, restored);
 		expect(later.title).toBe("Coupon case theirs");
 		expect(recordable(later).steps).toEqual(first);
+	});
+
+	// Issue #927: saving trims text, on the page and on the server. The editor keeps it as typed, or the next word
+	// typed joins the last.
+	test("text a save only trimmed is kept as it was typed", () => {
+		const step = (action: string, expected: string | null) => ({ ...v1, steps: [{ id: "s1", action, expected }] });
+		const typed = { ...step("Apply the discount after ", " Total drops "), pre: "Logged in " };
+		const cleaned = { ...step("Apply the discount after", "Total drops"), pre: "Logged in " };
+		const stored = { ...cleaned, pre: "Logged in" };
+		expect(asTyped({ typed, stored: cleaned })).toEqual(typed);
+		expect(asTyped({ typed, stored })).toEqual(typed);
+		// A line break the person just typed: the page keeps it, and the server trims it.
+		expect(onto(step("Open the cart\n", null), step("Open the cart", null), step("Open the cart\n", null))).toEqual(
+			step("Open the cart\n", null),
+		);
+		// Typed further while the save was on its way: that stays.
+		expect(onto(step("Apply the discount after re", null), step("Apply the discount after", null), cleaned)).toEqual(
+			step("Apply the discount after re", null),
+		);
+		// A tag taken out of the text, or a colleague's words, are not the typed text trimmed, and stand.
+		expect(asTyped({ typed: step("Open the cart #smoke ", null), stored: step("Open the cart", null) })).toEqual(
+			step("Open the cart", null),
+		);
+		const theirs = step("Apply the coupon", "Total drops");
+		expect(asTyped({ typed, stored: { ...theirs, pre: "Logged in" } })).toEqual({
+			...step("Apply the coupon", " Total drops "),
+			pre: "Logged in ",
+		});
 	});
 
 	test("with no action typed since, nothing is left to record that the version does not hold", () => {
