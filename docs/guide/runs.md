@@ -149,9 +149,8 @@ While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd>
 3. Press the outcome key.
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
-Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots, including your earlier results.
-While a slot is still waiting for your first report, they pass over slots that only another producer has filled.
-When none is, or you cannot record, or the run is closed, they visit every slot.
+Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots, including your earlier results and slots another producer filled.
+Recording a result moves on to the next slot waiting for your first report and passes over the others.
 You can also click a slot to reopen it and correct your result.
 The header's "N left in run" counts unfinished slots across all people. Skipped and blocked slots stay in that count.
 "Nothing left for you to run" means no unfinished slot is waiting for your first report.
@@ -209,7 +208,7 @@ See [report results](./report-results.md#read-the-results-basis).
 
 The web app leaves slots filled by another producer for that producer's evidence, unless the
 slot is still missing a required person. Another admitted person can then record their result.
-The result controls and <kbd>j</kbd>/<kbd>k</kbd> navigation include those slots, including
+The result controls include those slots, and recording a result moves on to them, including
 ones with only skipped or blocked results. These results do not count toward the required people.
 
 ## Require CI jobs

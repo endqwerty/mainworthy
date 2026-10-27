@@ -6,4 +6,4 @@ issue: https://github.com/endqwerty/mainworthy/issues/816
 pr: https://github.com/endqwerty/mainworthy/pull/986
 ---
 
-In the run cockpit, <kbd>j</kbd> and <kbd>k</kbd> now move through every slot when no slot is waiting for your first report, when you cannot record, or when the run is closed. Before, they did not move at all in a run that other people, pipelines or agents had filled. Recording a result still advances only to a slot waiting for you.
+In the run cockpit, <kbd>j</kbd> and <kbd>k</kbd> now move through every slot, including slots other people, pipelines or agents filled. Before, they passed over those slots, so in a run others had filled completely they did not move at all. Recording a result still moves on only to a slot waiting for your first report.
