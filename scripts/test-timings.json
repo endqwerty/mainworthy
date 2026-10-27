@@ -210,7 +210,7 @@
 		"src/server/kernel/address.test.ts": 41,
 		"src/surfaces/formats/diagnostics.test.ts": 39,
 		"test/drafts.test.ts": 36,
-		"src/surfaces/formats/span.test.ts": 33,
+		"src/surfaces/formats/span.test.ts": 40,
 		"src/core/stakes.test.ts": 28,
 		"test/ci-rerun.test.ts": 27,
 		"src/server/identity/passwords.test.ts": 26,
