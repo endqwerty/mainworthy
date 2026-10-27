@@ -1,5 +1,5 @@
 ---
-id: 973-jest-timing-warning-order
+id: 973-jest-timing
 category: Fixed
 date: 2026-10-26
 issue: https://github.com/endqwerty/mainworthy/issues/973
