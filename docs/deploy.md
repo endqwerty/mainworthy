@@ -724,15 +724,23 @@ parents at a time. The drain keeps its place at every level of the chain from sl
 index order (the top one by `(project, id)`, a lower one by `(parent column, id)`), and a slice that finds a batch
 empty moves at most one row on at a level above. So a slice reads a bounded number of rows however many runs, slots,
 cases or results the demo has. Before, each slice gathered every one of the demo's parent ids again (for a lease,
-every slot of the batch's runs), which made the drain's work grow with the square of their number. Slices use index scans and never sort or use bitmap
-scans, so a slice's `LIMIT` stops the scan. On a copy with 20 seeded projects (1.06
+every slot of the batch's runs), which made the drain's work grow with the square of their number.
+
+A table whose rows refer to other rows of the same table (`folders.parent`, `decisions.supersedes`,
+`questions.prior`, `results.corrects`) first has those references set to null for the retired demo's rows, 256 rows a
+slice in `(project, id)` order, and is then deleted 32 rows a slice from batches of 256 read in the same order. A row another row referred to
+could only go after that one, so a chain of folders (someone with `produce` on the demo can make thousands with
+`propose`) let one row go per slice, each slice reading the whole chain to find it: 50 million rows and index entries
+read for a chain of 5,000. Now each row is read a fixed number of times. The last slice, before the project row goes,
+still reads once past the index entries of every row the drain removed, until PostgreSQL's maintenance clears them.
+Slices use index scans and never sort or use bitmap scans, so a slice's `LIMIT` stops the scan. On a copy with 20 seeded projects (1.06
 million results) and one retired default demo (102,304 rows, 28,000 of them results), the drain took 140 s before
 this, with a median slice of 35 ms, a longest of 289 ms, and plans that read up to 490,000 rows of other projects to
 find none; after it, 46 s, a median of 2.2 ms and a longest of 27 ms.
 
 Migration 6 builds the indexes the drain reads by with a plain `CREATE INDEX`: one each on `search_docs`,
 `slot_results` and `team_events`, and one on `(project, id)` for each table a slice reads in batches (`batches`,
-`cases`, `changes`, `decisions`, `merge_receipt_nodes`, `questions`, `requirements` and `runs`), and one on `slots`
+`cases`, `changes`, `decisions`, `folders`, `merge_receipt_nodes`, `questions`, `requirements` and `runs`), and one on `slots`
 `(run, id)` for leases, read through their slots. Each holds writes to
 its table until the migration commits. The new build runs it at startup,
 before it serves; an older instance still serving during the rollout waits that long to write to those tables. The

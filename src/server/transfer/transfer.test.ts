@@ -19,6 +19,7 @@ import {
 	importArchive as importWithBlobs,
 	linesOf,
 	linesOfStream,
+	removalPlan,
 	removeBootstrap,
 	removeProject,
 	removeProjectSlice,
@@ -1172,10 +1173,12 @@ describe("Mainworthy instance archives", () => {
 				db.exec(`
 				INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'remove'),(24,1,'other','Keep',1,'keep');
 				CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE,
-					parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE);
+					parent INTEGER ${retained ? "" : "NOT NULL"} REFERENCES slice_nodes(id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE);
 				CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
 			`),
 			);
+			// A nullable reference of a table to itself is cleared before its rows go, which breaks any cycle; one that
+			// cannot be null keeps the cycle, and a cycle larger than the slice is refused.
 			await db.transaction(async () => {
 				await db.exec("SET CONSTRAINTS ALL DEFERRED");
 				await db.exec(
@@ -1195,6 +1198,29 @@ describe("Mainworthy instance archives", () => {
 		const before = await allRows(db);
 		await expect(removeProjectSlice(db, "qa")).rejects.toThrow(/ownership/);
 		expect(await allRows(db)).toEqual(before);
+	});
+
+	test("project removal slices clear a nullable reference of a table to itself, so a cycle larger than a slice goes", async () => {
+		const db = await target();
+		await db.transaction(() =>
+			db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'remove'),(24,1,'other','Keep',1,'keep');
+			CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id) DEFERRABLE INITIALLY IMMEDIATE,
+				parent INTEGER REFERENCES slice_nodes(id) DEFERRABLE INITIALLY IMMEDIATE);
+			CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
+			CREATE INDEX slice_nodes_project_id ON slice_nodes(project, id);
+		`),
+		);
+		await db.transaction(async () => {
+			await db.exec("SET CONSTRAINTS ALL DEFERRED");
+			await db.exec("INSERT INTO slice_nodes VALUES (1,23,2),(2,23,3),(3,23,1),(4,24,NULL),(5,24,4)");
+		});
+		const plan = await removalPlan(db);
+		for (let i = 0; i < 30 && !(await removeProjectSlice(db, "qa", 2, plan)).done; i++);
+		expect(await db.allDynamic("SELECT id, project, parent FROM slice_nodes ORDER BY id")).toEqual([
+			{ id: 4, project: 24, parent: null },
+			{ id: 5, project: 24, parent: 4 },
+		]);
 	});
 
 	test("project removal slices join the caller transaction and never audit unrelated foreign keys", async () => {

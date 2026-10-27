@@ -1929,6 +1929,7 @@ index flips_test: CREATE INDEX flips_test ON public.flips USING btree (project, 
 index flips_test_reset: CREATE INDEX flips_test_reset ON public.flips USING btree (test)
 index folders_parent_reset: CREATE INDEX folders_parent_reset ON public.folders USING btree (parent) WHERE (parent IS NOT NULL)
 index folders_pkey: CREATE UNIQUE INDEX folders_pkey ON public.folders USING btree (id)
+index folders_project_id: CREATE INDEX folders_project_id ON public.folders USING btree (project, id)
 index folders_tree: CREATE INDEX folders_tree ON public.folders USING btree (project, parent, rank)
 index grants_pkey: CREATE UNIQUE INDEX grants_pkey ON public.grants USING btree (actor, project)
 index handoffs_order: CREATE UNIQUE INDEX handoffs_order ON public.handoffs USING btree (queue_order)

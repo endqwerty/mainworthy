@@ -6,11 +6,13 @@ CREATE INDEX slot_results_run ON slot_results (run);
 CREATE INDEX team_events_project ON team_events (project) WHERE project IS NOT NULL;
 -- A table owned through its parents is read one batch of parents at a time, from where the last slice stopped, at
 -- every level of its chain: the top ancestor in (project, id) order, a lower parent in (parent column, id) order.
--- `results` has such an index already (`results_assertion_rebuild`).
+-- A table that refers to itself (`folders`) is read the same way, by (project, id), to clear those references before
+-- its rows are deleted. `results` has such an index already (`results_assertion_rebuild`).
 CREATE INDEX batches_project_id ON batches (project, id);
 CREATE INDEX cases_project_id ON cases (project, id);
 CREATE INDEX changes_project_id ON changes (project, id);
 CREATE INDEX decisions_project_id ON decisions (project, id);
+CREATE INDEX folders_project_id ON folders (project, id);
 CREATE INDEX merge_receipt_nodes_project_id ON merge_receipt_nodes (project, id);
 CREATE INDEX questions_project_id ON questions (project, id);
 CREATE INDEX requirements_project_id ON requirements (project, id);

@@ -175,7 +175,7 @@ async function examined(db: WriteDb): Promise<number> {
 async function largestSlice(
 	fill: (db: WriteDb) => Promise<void>,
 	tables: readonly string[],
-): Promise<{ largest: number; slices: number }> {
+): Promise<{ largest: number; slices: number; total: number }> {
 	await using db = await writerDatabase();
 	await removalFixture(db, 1, 10);
 	await db.transaction(async () => {
@@ -184,6 +184,7 @@ async function largestSlice(
 	});
 	const plan = await removalPlan(db);
 	let largest = 0;
+	let total = 0;
 	let slices = 0;
 	for (let done = false; !done; )
 		await db.transaction(async () => {
@@ -192,11 +193,13 @@ async function largestSlice(
 			done = slice.done;
 			if (!tables.includes(slice.table ?? "")) return;
 			slices++;
-			largest = Math.max(largest, (await examined(db)) - before);
+			const read = (await examined(db)) - before;
+			largest = Math.max(largest, read);
+			total += read;
 		});
 	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
 	expect(await db.allDynamic("SELECT count(*) AS n FROM result_excuses")).toEqual([{ n: 10 }]);
-	return { largest, slices };
+	return { largest, slices, total };
 }
 
 /** `parents` more results of the demo, each with an excuse. */
@@ -244,6 +247,51 @@ const leasedSlots = (slots: number) => async (db: WriteDb) => {
 
 // Every level of a longer chain is read in batches too: a lease is owned through its slot, and the slot through its
 // run. Batching only the runs gathered every slot of the batch's runs again on every slice.
+/**
+ * One chain of `length` folders in the demo, each the parent of the next, with ids rising from the root to the leaf,
+ * as `propose` can make with folder edits: only the leaf has no folder under it.
+ */
+const folderChain = (length: number) => async (db: WriteDb) => {
+	await db.runDynamic(
+		`INSERT INTO folders (id, project, parent, name, rank, rev)
+		 SELECT 1000 + n, 900, CASE WHEN n = 1 THEN NULL ELSE 999 + n END, 'f' || n, 'a', 1 FROM generate_series(1, $1::bigint) n`,
+		[length],
+	);
+};
+
+// A row another row of its own table refers to (a folder's parent) waited until nothing referred to it. In a chain only
+// the leaf qualified, and a slice read the whole chain to find it, then the whole chain less one, and so on (#914).
+test("a slice of a table that refers to itself examines a bounded number of rows however long the chain", async () => {
+	const small = await largestSlice(folderChain(500), ["folders"]);
+	const large = await largestSlice(folderChain(5_000), ["folders"]);
+	console.log(
+		`folder chain: largest slice ${small.largest} and total ${small.total} rows and index entries for 500 folders (${small.slices} slices), ${large.largest} and ${large.total} for 5000 (${large.slices} slices)`,
+	);
+	expect(large.largest).toBeLessThan(small.largest * 1.5);
+	expect(large.largest).toBeLessThan(5_000);
+	expect(large.total).toBeLessThan(small.total * 15);
+}, 300_000);
+
+// The unlinking pass covers a reference only when it can: a nullable column of a project's own table. A reference of
+// any other kind, from a table a project owns to itself, would bring the chain back; this names what there is.
+test("every reference from a project's table to itself is one a drain clears before deleting", async () => {
+	await using db = await writerDatabase();
+	const plan = await removalPlan(db);
+	const cleared = plan.tables.flatMap((table) => table.selfReferences.map((column) => `${table.name}.${column}`));
+	const all = (await db.catalog()).flatMap((table) =>
+		plan.tables.find((each) => each.name === table.name)?.owner
+			? table.foreignKeys
+					.filter((reference) => reference.parent === table.name)
+					.map((reference) => `${table.name}.${reference.columns.join(",")}`)
+			: [],
+	);
+	expect(all.sort()).toEqual(["decisions.supersedes", "folders.parent", "questions.prior", "results.corrects"]);
+	expect(cleared.sort()).toEqual(all.sort());
+	expect(
+		plan.tables.filter((table) => table.selfReferences.length > 0 && table.owner?.by !== "project").map((t) => t.name),
+	).toEqual([]);
+});
+
 test("a slice of a table owned through two levels of parents examines a bounded number of rows however many there are", async () => {
 	const tables = ["slot_leases"];
 	const small = await largestSlice(leasedSlots(1_600), tables);
@@ -277,14 +325,10 @@ test("every level of parents a slice reads in batches has an index in that order
 	await using db = await writerDatabase();
 	const plan = await removalPlan(db);
 	const levels = new Set<string>();
-	for (const table of plan.tables) {
-		if (table.owner?.by !== "parents") continue;
-		const { chain } = table.owner;
-		chain.forEach((link, at) => {
-			levels.add(`${link.table}:${chain[at + 1]?.column ?? "project"}`);
-		});
-	}
-	expect([...levels]).toEqual(expect.arrayContaining(["runs:project", "slots:run"]));
+	// A parent-owned table walks its parents; a table that refers to itself walks its own rows.
+	for (const table of plan.tables)
+		for (const level of table.walk?.levels ?? []) levels.add(`${level.table}:${level.column}`);
+	expect([...levels]).toEqual(expect.arrayContaining(["runs:project", "slots:run", "folders:project"]));
 	const unordered: string[] = [];
 	await db.transaction(async () => {
 		await db.exec(
