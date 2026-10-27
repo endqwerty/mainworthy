@@ -36,7 +36,7 @@ owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
 
 `.github/workflows/check.yml` runs when a pull request opens, receives commits, reopens or becomes ready for review, and on every push to `main`. The ready-for-review run prevents a draft's `pr: pending` from carrying into a ready PR.
 A new run on a pull request cancels that pull request's older run if it is still going. A push to `main` is never
-cancelled, and a re-run cancels nothing: it waits until the newer run has finished.
+cancelled. A re-run of an older run is neither cancelled by a newer one nor cancels it: both run.
 
 | Job | Runs when | What it does |
 | --- | --- | --- |
