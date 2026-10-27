@@ -313,6 +313,7 @@ export async function renewDemoWork(
 	instance: Instance,
 	project: string,
 	seeded: Pick<SeedResult, "run" | "workSlot">,
+	signal?: AbortSignal,
 ): Promise<void> {
 	if (seeded.workSlot === null) return;
 	const read = await invoke(instance.app, OPS, {
@@ -325,10 +326,12 @@ export async function renewDemoWork(
 	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
 	const slot = slots.find((slot) => slot.id === seeded.workSlot);
 	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
+	// The write may wait for another writer of the demo; a stopping server does not wait with it.
 	await invoke(instance.app, OPS, {
 		op: "work",
 		project,
 		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },
 		actor: async () => instance.owner,
+		...(signal ? { signal } : {}),
 	});
 }

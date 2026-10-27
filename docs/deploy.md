@@ -684,6 +684,10 @@ so it cannot replay the retired project's commands. A seed interrupted after the
 project, time and command ids on the next start. Any earlier retirement drain finishes before that resumed
 seed runs, keeping the two heavy stages from overlapping. Completion is recorded only after seed token cleanup succeeds.
 Only marked demo data is disposable. Changes someone made in the demo are replaced on the next deployed revision.
+That is intended, not a defect to guard against. The owner, 2026-10-27: "Demo edits can be lost, it's meant to be
+a generated demo that the dev can play with without worry. In fact, edits should be lost on redeploy. If changes
+are needed to be kept, the demo seed would be updated." So the demo's state is never a reason for a stopping
+server to wait.
 
 Retired projects have no project-specific grants and are hidden from the project list. Instance-wide grants,
 including the owner's, still allow reads and writes by the retired key until cleanup deletes the data.
@@ -738,12 +742,19 @@ the swap's check is what keeps the demo. Moving refresh and drain to the durable
 (#821); several instances do not need it. Scheduled requests must replace the renewal timer when CPU is
 allocated only during requests.
 
-A stopping server does not wait for its demo work. On SIGTERM or SIGINT, `serve` aborts the refresh and the
-drain: the wait for the refresh lock ends, a statement waiting for a project writer's lock is cancelled, an
-unfinished seed's HTTP requests are aborted, and the open transaction rolls back. The seed token's revocation
-gets one more second, after which the token expires by itself within 15 minutes. With the drain waiting for a
-writer, `serve` exits in about 10 ms on a desktop, inside the 10 seconds Cloud Run allows before SIGKILL. What
-the refresh or drain left unfinished resumes on the next start.
+A stopping server does not wait for its demo work. On SIGTERM or SIGINT, `serve` aborts the refresh, the drain
+and the renewal of the demo's featured work: the wait for the refresh lock ends, a statement waiting for a
+project writer's lock is cancelled, an unfinished seed's HTTP requests are aborted, and the open transaction
+rolls back. The seed token's revocation gets one more second, after which the token expires by itself within 15
+minutes. With the drain or the renewal waiting for a writer, `serve` exits with code 0 in milliseconds. What the
+refresh or drain left unfinished resumes on the next start.
+
+Some work does not stop on the signal. A seed request the server is still handling, waiting for a writer's lock,
+keeps the server's own shutdown waiting for it. So `serve` gives the whole stop seven seconds, inside the ten Cloud
+Run allows before SIGKILL. At seven seconds it prints `mainworthy: stopping took longer than 7 s; exiting with
+<what> still running`, naming the step it was on (the demo refresh, demo work renewal, retired demo cleanup or
+the server's own shutdown), and exits with code 4. PostgreSQL rolls back the transactions still open when their
+connections close.
 
 This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
 remain useful to enforced transfer removal and cleanup. The PostgreSQL baseline includes only local operational demo state,

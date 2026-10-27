@@ -11,6 +11,9 @@ import { drainRetiredDemos, refreshDemo, renewDemoWork } from "../demo.ts";
 import { printError } from "../errors.ts";
 import { line, warning } from "../output.ts";
 
+/** How long a stopping server waits for its work before it exits anyway: well inside Cloud Run's ten seconds. */
+const STOP_DEADLINE_MS = 7_000;
+
 /** Starts Local or Server with the UI, MCP and archive routes, and releases the listener/database on either signal. */
 export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	assertPositionals(args, 0, 0, "serve");
@@ -65,10 +68,11 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 				(seeded) => {
 					const renew = () => {
 						renewing = renewing
-							.then(() => renewDemoWork(instance, demo, seeded))
-							.catch((error: unknown) =>
-								warning(`demo work renewal failed: ${error instanceof Error ? error.message : String(error)}`),
-							);
+							.then(() => renewDemoWork(instance, demo, seeded, refreshController.signal))
+							.catch((error: unknown) => {
+								if (!refreshController.signal.aborted)
+									warning(`demo work renewal failed: ${error instanceof Error ? error.message : String(error)}`);
+							});
 					};
 					renew();
 					workTimer = setInterval(renew, DEMO_WORK.renewEveryMs);
@@ -93,13 +97,25 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 		stopping = true;
 		refreshController.abort(new Error("server stopping"));
 		clearInterval(workTimer);
+		// Cloud Run sends SIGKILL ten seconds after SIGTERM. Whatever still runs at the deadline is left to the database,
+		// which rolls back the open transactions when the connections close; demo state is disposable (#914).
+		let running = "the demo refresh";
+		setTimeout(() => {
+			warning(
+				`mainworthy: stopping took longer than ${STOP_DEADLINE_MS / 1000} s; exiting with ${running} still running`,
+			);
+			process.exit(4);
+		}, STOP_DEADLINE_MS);
 		// The process ends here and not when its event loop empties: under `bun --watch` (`bun run dev`) the file
 		// watcher keeps the loop alive for good, and a server that had stopped would sit there ignoring the signal.
 		void refreshing
 			.then(async () => {
 				clearInterval(workTimer);
+				running = "demo work renewal";
 				await renewing;
+				running = "retired demo cleanup";
 				await cleaning;
+				running = "the server's own shutdown";
 				await instance.stop();
 			})
 			.then(
