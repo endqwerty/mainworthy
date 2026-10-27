@@ -49,18 +49,15 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 ## Working rules
 
-- Nothing here is fixed before 1.0, and the owner says when that is. Any rule, decision, test, budget, feature or
-  dependency may go when something better turns up: say what and why in the pull request. Nothing is compatible either:
-  break stored data, tokens, the API or the CLI when it simplifies the result, say so in the changelog, and build no
-  migration path. Safety, secrets, the public-repository rules and the owner's merge stay.
+- Before 1.0 (the owner says when), nothing is fixed or compatible: drop a rule, test or feature when something better
+  turns up, saying why in the pull request, and break stored data, tokens, the API or the CLI when it simplifies the
+  result, saying so in the changelog, with no migration path. Safety, secrets, the public-repository rules and the
+  owner's merge stay.
 - Behaviour changes need tests and a check on the real surface. A user-visible change adds a `.changes/` fragment.
   Secrets never enter the repository, logs or chat.
-- A decision record (a dated file in `docs/decisions/`) is only for a choice that is hard to reverse, would surprise a
-  reader and came from a real trade-off. A `proposed` record binds nothing. Quote the owner with how firm they were
-  ("maybe", "for now"); never cite them for an agent's choice.
+- A `proposed` decision record (`docs/decisions/`) binds nothing.
 - Until the Google Cloud cutover, Coolify is best-effort; check its `/health` only after migration or startup changes.
   After cutover, check that `https://mainworthy.com/health` names the commit after every landing.
-- Competitor claims in `docs/competitors.md` are hypotheses until verified.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
   rewrite. A reachable finding becomes a test. The goal: landing costs minutes.
@@ -69,27 +66,16 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 ## Issues, pull requests and the board
 
-The board is `https://github.com/users/endqwerty/projects/2`; a closing keyword in a pull request links it to its
-issue and GitHub's workflows move both. A task the owner gave in a thread needs no issue: the pull request is its card.
+The board is `https://github.com/users/endqwerty/projects/2`; the steps, labels and statuses are in
+`docs/development/ci-and-delivery.md`. A task the owner gave in a thread needs no issue: the pull request is its card.
 
-- **Filing an issue.** One of the board's milestones (each description says what belongs) and an `area:` label. A
-  test that fails by chance gets `flaky-test`, then is fixed or deleted (the owner, 2026-10-26: "Flaky tests are worse
-  than no test"). `decision` and `waiting-for-feedback` mark what an agent cannot finish alone. Copy no milestone's
-  issue list elsewhere.
-- **Starting.** Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the
-  pull request once it is open. `todo` and `done` set the other statuses; `board check` says when the ids in
-  `scripts/work/board.ts` no longer fit the board.
-- **Opening the pull request.** `Closes #123` on a line of its own only when the merge does all the issue asks;
-  `Part of #123` otherwise. Give it the issue's milestone (`gh pr create --milestone`). Run
-  `bun scripts/work.ts pr-body <number>`, as CI's `description` job does (after a fix, rerun that job). A keyword
-  counts only while the base is `main`; in a stack set the issue In Progress by hand and read the links again when
-  the pull request below has merged.
-- **Stopping without finishing.** `board todo <number>` and say on the issue what is left (also for a pull request
-  closed unmerged).
-- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A problem
-  found on the way gets its own issue.
-- **Only the owner** changes the board's workflows, renames or adds a milestone (the view's filter and `docs/roadmap.md`
-  together) and approves the `project` scope (`gh auth refresh -h github.com -s project`).
+- Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the pull request once
+  it is open; `board todo <number>` when you stop without finishing, saying on the issue what is left.
+- `Closes #123` on a line of its own only when the merge does all the issue asks, `Part of #123` otherwise, and the
+  issue's milestone on the pull request. `bun scripts/work.ts pr-body <number>` checks it, as CI's `description` job
+  does.
+- A test that fails by chance gets `flaky-test`, then is fixed or deleted (the owner, 2026-10-26: "Flaky tests are worse
+  than no test"). A problem found on the way gets its own issue.
 
 ## Model profile
 

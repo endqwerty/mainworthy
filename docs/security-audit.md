@@ -96,6 +96,9 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   imported archive or data an older version stored reaches what the normal writers never write.
 - Then audit the new head once the verifier has passed it, giving Daybreak its earlier issues and their answers. The
   pull request is ready to merge only when a round on the current head and base leaves no issue unaddressed.
+- Two rounds with an issue still open: stop and rethink the approach before the next, as `verify` does with its
+  findings (the owner, 2026-10-27: "limit reviewers to 2 rounds and if there are still issues, for the agent to pause
+  and rethink before trying again").
 - A new head or a new base needs another round: a rebase, a fix from review, or another pull request landing on
   `main` first. GitHub's rebase merge lands the head on `main` as it is then, which may not be the base the audit
   read.

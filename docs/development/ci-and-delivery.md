@@ -17,20 +17,39 @@ To deliver a change, follow these steps:
 1. If the change has an issue, move its card to In Progress before the first edit:
    `bun scripts/work.ts board start <number>`.
 2. Make the change on the worktree's branch and run `bun run check`.
-3. Get an independent verification from a model of another provider, as the `verify` skill asks.
-4. Open a non-draft pull request. Give it the issue's milestone. Put `Closes #123` on a line of its own only when
+3. Open a non-draft pull request. Give it the issue's milestone. Put `Closes #123` on a line of its own only when
    the merge makes everything the issue asks for true. Otherwise write `Part of #123`.
-5. Set `pr: <this PR's URL>` in each fragment this PR adds, commit and push that update, then run
+4. Set `pr: <this PR's URL>` in each fragment this PR adds, commit and push that update, then run
    `bun scripts/work.ts pr-body <number>`. It checks the linked issues, milestone and fragment PR references.
    CI's `description` job runs the same command; `pr: pending` is allowed only while the PR is a draft.
-6. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
-7. Once `gate` is green, run the Daybreak security audit on the head and its base, address every issue it declares,
-   and record the audit in the description: [docs/security-audit.md](../security-audit.md).
+5. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
+6. Get an independent verification from a model of another provider, as the `verify` skill asks, and run the
+   Daybreak security audit's first round beside it on the same head; fix what both find in one change. Audit again
+   on a head the verifier has passed, once `gate` is green, address every issue, and record each round in the
+   description: [docs/security-audit.md](../security-audit.md).
 
 The owner reviews every change and merges it by rebase (`gh pr merge --rebase`), only while the head and base are
-the pair the audit read. An agent stops after it opens
-the pull request, even when every check is green. A stack of dependent pull requests lands in one step when the
+the pair the audit read. An agent stops once the pull request has its verdict and audit, even when every check is
+green. A stack of dependent pull requests lands in one step when the
 owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
+
+## Keep the board right
+
+A closing keyword in a pull request links it to its issue, and GitHub's workflows move both cards.
+
+- **Filing an issue.** Give it one of the board's milestones (each description says what belongs) and an `area:`
+  label. A test that fails by chance gets `flaky-test`, then is fixed or deleted. `decision` and
+  `waiting-for-feedback` mark what an agent cannot finish alone. Copy no milestone's issue list elsewhere.
+- **Statuses.** `bun scripts/work.ts board start`, `todo` and `done` set a card's status; `board check` says when the
+  ids in `scripts/work/board.ts` no longer fit the board.
+- **A stack.** A closing keyword counts only while the base is `main`: set the issue In Progress by hand, and read
+  the links again when the pull request below has merged.
+- **Stopping without finishing.** `board todo <number>` and say on the issue what is left, also for a pull request
+  closed unmerged.
+- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A
+  problem found on the way gets its own issue.
+- **Only the owner** changes the board's workflows, renames or adds a milestone (the view's filter and
+  `docs/roadmap.md` together) and approves the `project` scope (`gh auth refresh -h github.com -s project`).
 
 ## Know what CI runs
 
