@@ -31,8 +31,8 @@ import {
 	targetsByIds,
 	testById,
 	testRef,
-	unlinkedIdsInFile,
 	unlinkedInFile,
+	unlinkedSetInFile,
 } from "../evidence/evidence.ts";
 import { setQuarantine, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { actorById, requirePolicyRoles } from "../identity/identity.ts";
@@ -72,6 +72,7 @@ import {
 	type DecisionRow,
 	decisionById,
 	type HoldTerm,
+	liveByFingerprint,
 	type QuestionRow,
 	questionById,
 	refsOf,
@@ -305,6 +306,9 @@ async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 	return question?.state === "decided" && question.decision === decisionId;
 }
 
+/** The most cases one `create` answer makes: as many tests as one report may carry. */
+export const CREATE_MAX = 100_000;
+
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
 export async function* raiseMapSteps(
 	ctx: Ctx,
@@ -313,8 +317,7 @@ export async function* raiseMapSteps(
 	producer: ActorKind,
 ): AsyncGenerator<undefined, Raised, void> {
 	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
-	const ids = await unlinkedIdsInFile(ctx.db, ctx.project.id, file);
-	const count = ids.length;
+	const { count, digest } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
 	return yield* raise(ctx, {
 		kind: "map",
 		key: `file:${file}`,
@@ -326,7 +329,7 @@ export async function* raiseMapSteps(
 			tests: tests.slice(0, 50).map((test) => ({ id: test.id, t: testRef(test), name: test.name })),
 			count,
 		},
-		material: { file, tests: ids },
+		material: { file, count, digest },
 		facts: [],
 		refs: tests.slice(0, 20).map(testRef),
 		runs: [],
@@ -355,15 +358,22 @@ const mapHandler: Handler<"map"> = {
 				// The answer settles the tests it names. The file's other tests with no case are asked about now,
 				// not when a new test next turns up in the file, which may be never.
 				const rest = await unlinkedInFile(ctx.db, ctx.project.id, file);
-				if (rest.length === 0) return { linked };
-				const raised = yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
-				return raised.s === "open" ? { linked, asked: raised.question.id } : { linked };
+				if (rest.length > 0) yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
+				return { linked };
 			}
 			case "create": {
 				// New cases go through the same adopt path as any edit. If policy does not adopt them now, the
 				// tests stay unlinked and this question is asked again when the proposal lands.
 				let tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
 				if (tests.length === 0) return { linked: [] };
+				// One answer is one transaction, which the database ends after two minutes. A report's worth of
+				// tests fits well inside it; a file that gathered more is answered in parts, by linking or
+				// tracking some of its tests first. Refused, the question stays open.
+				const { count } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
+				if (count > CREATE_MAX)
+					throw invalid(
+						`${file} has ${count} tests with no case, and one answer creates at most ${CREATE_MAX}: link some of them to cases first, then create the rest`,
+					);
 				// Creating and linking in one answer works only where the policy adopts this actor's new cases at
 				// once. Where a person must adopt them first, nothing is created here: saying so is better than
 				// pointing at a proposal that this answer's refusal would take away again.
@@ -442,21 +452,22 @@ const mapHandler: Handler<"map"> = {
 			}
 		}
 	},
-	async revert(ctx, _question, decision) {
+	async revert(ctx, question, decision) {
 		// Put back each link this decision made, and only those: a link a newer decision has since made stays. The
 		// earlier link returns only while the decision that made it still stands; otherwise the test is unlinked.
-		const { linked, asked } = json<{ linked?: Relinked[]; asked?: number }>(decision.effects);
+		const { linked } = json<{ linked?: Relinked[] }>(decision.effects);
 		for (const [testId, previous, by] of linked ?? []) {
 			const test = await testById(ctx.db, testId);
 			if (!test) continue;
 			const earlier = by != null && (await stands(ctx, by)) ? { caseId: previous, by } : { caseId: null, by: null };
 			await restoreLink(ctx, test, decision.id, earlier);
 		}
-		// A link opened a question about the file's other tests. Taken back, the file's own question asks about
-		// them again, so that one, still unanswered, is closed: one file is not asked about twice. A map question
-		// blocks no run, so no run is recomputed.
-		const rest = asked === undefined ? null : await questionById(ctx.db, asked);
-		if (rest?.state === "open") await setQuestionState(ctx, rest, "dissolved", null);
+		// A link opened a question about the rest of the file, and that one's link the next. Taken back or replaced,
+		// this question asks about every test of its file with no case again, so any other open question about the
+		// file is closed: one file is not asked about twice. A map question blocks no run, so none is recomputed.
+		if (json<{ is?: string }>(decision.answer).is !== "link") return;
+		for (const other of await liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint))
+			if (other.id !== question.id && other.state === "open") await setQuestionState(ctx, other, "dissolved", null);
 	},
 	// "Track" is a judgement about the file as it was: it is asked again when the file's tests with no case
 	// change. A link is about the tests it names: it does not carry to a test that turns up later in the file,
