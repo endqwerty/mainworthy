@@ -431,12 +431,13 @@ export function SuiteScreen() {
 	const undo = useRef<PlacementUndo | null>(null);
 	const folderCreation = useRef<RetainedProposal<Extract<Edit, { op: "folder" }>> | null>(null);
 	const versionRestore = useRef<RetainedProposal<Extract<Edit, { op: "restore" }>> | null>(null);
-	const commandStatus = useRef(0);
+	// A settled outcome takes the place of the line its own lookup wrote. A newer status (a tag, another command,
+	// the next screen) keeps its place, and the outcome is added after it rather than lost.
 	const settleRetained = useCallback(
 		async (action: RetainedProposal, subject: string): Promise<void> => {
 			if (!sessionCurrent(owner)) return;
-			const status = ++commandStatus.current;
-			setStatus(`${subject} is being checked. It will not be retried.`);
+			const pending = `${subject} is being checked. It will not be retried.`;
+			setStatus(pending);
 			let message: string;
 			try {
 				const fate = await call("command", { cmd: action.input.cmd }, { project, owner });
@@ -461,7 +462,10 @@ export function SuiteScreen() {
 				const reason = errorMessage(error, "Could not check the outcome.");
 				message = `${subject}: ${reason}${/[.!?]$/.test(reason) ? "" : "."} Outcome unknown. It will not be retried.`;
 			}
-			if (sessionCurrent(owner) && commandStatus.current === status) setStatus(message);
+			if (sessionCurrent(owner))
+				setStatus((shown) =>
+					shown.includes(pending) ? shown.replace(pending, () => message) : shown ? `${shown} ${message}` : message,
+				);
 		},
 		[project, owner, setStatus],
 	);
@@ -2250,7 +2254,6 @@ export function SuiteScreen() {
 				queued: false,
 			} satisfies RetainedProposal<Extract<Edit, { op: "folder" }>>);
 		folderCreation.current = action;
-		commandStatus.current++;
 		action.queued = true;
 		setStatus("Creating folder.");
 		try {
@@ -2304,7 +2307,6 @@ export function SuiteScreen() {
 			};
 		}
 		const action = versionRestore.current;
-		commandStatus.current++;
 		action.queued = true;
 		try {
 			const reply = await submitRetained(action, retry, () => versionRestore.current === action);

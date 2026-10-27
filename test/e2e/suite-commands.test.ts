@@ -473,14 +473,14 @@ for (const move of ["twice", "back", "new action"] as const) {
 			const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
 			held.release();
 			await response;
+			await page.locator("#stat").filter({ hasText: "Restore for C-2 was recorded." }).waitFor();
 			if (move === "new action") {
-				await page.evaluate(
-					() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+				expect(await page.locator("#stat").textContent()).toBe(
+					"Previous version restored as a new version. Restore for C-2 was recorded.",
 				);
-				expect(await page.locator("#stat").textContent()).toBe("Previous version restored as a new version.");
 				expect(requests).toHaveLength(2);
 			} else {
-				await page.locator("#stat").filter({ hasText: "Restore for C-2 was recorded." }).waitFor();
+				expect(await page.locator("#stat").textContent()).toBe("Restore for C-2 was recorded.");
 				expect(requests).toHaveLength(1);
 			}
 			expect(pending).toContain("C-2");
@@ -614,6 +614,63 @@ for (const path of ["normal", "departure"] as const) {
 				.waitFor();
 			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Second title", version: 2 });
 		} finally {
+			await harness.close();
+			await server.stop();
+		}
+	});
+}
+
+for (const [action, next] of [
+	["restore", "tag"],
+	["folder", "tag"],
+	["restore", "runs"],
+] as const) {
+	test.skipIf(!browserAvailable)(`a ${action} departure outcome keeps a newer status after ${next}`, async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const held = await holdCommand(harness);
+		try {
+			const { page } = harness;
+			await begin(harness, action);
+			if (action === "restore") await page.locator("#detail .ctitle").filter({ hasText: "Second title" }).waitFor();
+			const requests = await loseFirstReply(harness);
+			await submit(harness, action);
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			if (action === "folder") await page.keyboard.press("Escape");
+			if (next === "runs") await page.keyboard.type("gr");
+			else await page.getByRole("option").filter({ hasText: "Other case" }).click();
+			await held.ready;
+			const outcome = action === "folder" ? 'Folder "New folder" was recorded.' : "Restore for C-1 was recorded.";
+			if (next === "runs") {
+				await page.waitForURL(/\/p\/scratch\/runs/);
+				held.release();
+				await page.locator("#stat").filter({ hasText: outcome }).waitFor();
+				expect(await page.locator("#stat").textContent()).toBe(outcome);
+			} else {
+				await page.keyboard.press("t");
+				await page.getByRole("textbox", { name: "Tag selected cases" }).fill("alpha");
+				await page.keyboard.press("Enter");
+				const tagged = "1 case changed. Press u to undo.";
+				await page.locator("#stat").filter({ hasText: tagged }).waitFor();
+				const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
+				held.release();
+				await response;
+				await page.locator("#stat").filter({ hasText: outcome }).waitFor();
+				expect(await page.locator("#stat").textContent()).toBe(`${tagged} ${outcome}`);
+				expect((await server.api("get", { refs: ["C-2"] }))[0]?.tags).toEqual(["alpha"]);
+				await page.keyboard.press("u");
+				await page.locator("#stat").filter({ hasText: "Undone. The inverse is recorded." }).waitFor();
+				expect((await server.api("get", { refs: ["C-2"] }))[0]?.tags).toEqual([]);
+			}
+			// The undo looks up its own command afterwards; the first lookup is the departed command's.
+			expect(held.commands[0]).toEqual({ cmd: Request.parse(requests[0]).cmd });
+		} finally {
+			held.release();
 			await harness.close();
 			await server.stop();
 		}
