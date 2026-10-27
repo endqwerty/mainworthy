@@ -575,6 +575,8 @@ receives them, and the span changes no verdict.
 Nested JUnit suites run inside their parent and are not read. A JUnit timestamp without a zone, as Surefire and
 `jest-junit` write it, is a time on an unknown machine: the report keeps its results, has no span, and the command
 warns once. So does a report whose times cannot be read. `pytest-json-report` and TRX reports have no span yet.
+Jest and Vitest reports warn about a file whose end precedes its start even when another file omits timing,
+in either file order. The results stay intact, and the report has no span.
 When one command uploads several files, the report has a span only when every file has one.
 
 Through the API, `report` takes the span as `span: { "startedAt": 1792040850012, "endedAt": 1792040852285 }`, in
