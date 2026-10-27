@@ -5,8 +5,9 @@ criteria; a phase ends when they are met and recorded, not on a date. Phases
 0 and 1 overlap on purpose: research needs no stack, and the benchmark needs
 no design.
 
-This file keeps the phases and milestone goals. [Issue #64](https://github.com/endqwerty/mainworthy/issues/64)
-keeps the current work order and the per-issue lists. Update both when the plan changes.
+This file keeps the phases and milestone goals. The [project board](https://github.com/users/endqwerty/projects/2)
+shows what is open in each milestone and its status; [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
+keeps the order to work in. Neither this file nor #64 copies a milestone's issue list.
 
 **Status, 2026-10-12.** The owner asked for the MVP and answered the open questions
 (decision 0009), so phases 0 to 2 were compressed into one night:
@@ -69,28 +70,14 @@ tests, case field values and policy presets also narrow the work left to do.
 ### Start next
 
 Follow [issue #64, "Start next"](https://github.com/endqwerty/mainworthy/issues/64#start-next)
-for the individual issues, their order and dependencies:
-
-1. Reduce test maintenance and repeated pull-request work in
-   [#77](https://github.com/endqwerty/mainworthy/issues/77): remove redundant assertions,
-   repeated fixtures and unused setup while keeping meaningful failure evidence.
-2. Fix the bounded command-identity, hidden-selection, navigation, native lease and fixture-readiness
-   defects listed in issue #64.
-3. Finish the PostgreSQL hosting transition in
-   [#821](https://github.com/endqwerty/mainworthy/issues/821), including shared state, deployment
-   gating, off-host backups and a recorded restore drill. Demo cleanup remains
-   [#914](https://github.com/endqwerty/mainworthy/issues/914).
-4. Then put projects under teams, milestone [M8](https://github.com/endqwerty/mainworthy/milestone/10):
-   the decision in [#948](https://github.com/endqwerty/mainworthy/issues/948) first, then ownership, roles,
-   team administration, invitations, team-owned agents and pipelines, the web screens, and the removal of
-   grant-set teams ([#949](https://github.com/endqwerty/mainworthy/issues/949) to
-   [#955](https://github.com/endqwerty/mainworthy/issues/955)). M6 keeps SSO, compliance and the hosted tier.
+for the individual issues, their order and dependencies. In outline: bounded defects and flaky tests first, then
+lower pull-request feedback cost, then what remains of the hosting transition, then projects under teams
+(milestone M8). M6 keeps SSO, compliance and the hosted tier.
 
 Issue #64 and each feature issue distinguish shipped source from remaining work. Optional features
 need a concrete workflow; they are not all prerequisites for this reliability and developer-experience cleanup.
 
-In parallel, confirm TestFlight installation, settle the private contact, and
-gather sign-in and phone evidence on real devices. Public-source research for the
+In parallel, gather sign-in and phone evidence on real devices. Public-source research for the
 1.0 audits can also proceed before every organisation feature is complete.
 
 Correctness and recovery come first because later capabilities depend on decisions

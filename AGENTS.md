@@ -74,8 +74,8 @@ issue and GitHub's workflows move both. A task the owner gave in a thread needs 
 
 - **Filing an issue.** One of the board's milestones (each description says what belongs) and an `area:` label. A
   test that fails by chance gets `flaky-test`, then is fixed or deleted (the owner, 2026-10-26: "Flaky tests are worse
-  than no test"). `decision` and `waiting-for-feedback` mark what an agent cannot finish alone. Copy no issue list
-  elsewhere.
+  than no test"). `decision` and `waiting-for-feedback` mark what an agent cannot finish alone. Copy no milestone's
+  issue list elsewhere.
 - **Starting.** Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the
   pull request once it is open. `todo` and `done` set the other statuses; `board check` says when the ids in
   `scripts/work/board.ts` no longer fit the board.
