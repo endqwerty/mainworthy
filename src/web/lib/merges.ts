@@ -106,6 +106,7 @@ export function holdsUnfinishedStep(body: Draft["body"]): boolean {
  * issue #86, B1). So the recorded step stands. An expected result the draft's step holds and the recorded one
  * does not is kept as a step of its own, under a new id from `newId`; a step with nothing of its own goes. A
  * step emptied after `sent` went out is in `sent`: that is the person's removal of it, and is left to the merge.
+ * Text `recorded` holds as `sent` trimmed is taken as `sent` had it (`asTyped`).
  */
 export function carried({
 	sent,
@@ -129,7 +130,29 @@ export function carried({
 		taken.add(id);
 		return [{ ...step, id }];
 	});
-	return mergeBodies({ base: sent, mine: { ...live, steps }, theirs: recorded }).merged;
+	return mergeBodies({ base: sent, mine: { ...live, steps }, theirs: asTyped({ typed: sent, stored: recorded }) })
+		.merged;
+}
+/**
+ * `stored`, with each text that differs from `typed` only in its spaces and line breaks given back as typed. Saving
+ * trims text, on the page (`cleanTitle`) and on the server (`cleanBody`). The editor keeps what was typed, or a
+ * word typed after a trailing space or line break would join the last (issue #927). Text the save changed in
+ * another way, such as a tag taken out of it, is as stored.
+ */
+export function asTyped<T extends Draft["body"]>({ typed, stored }: { typed: Draft["body"]; stored: T }): T {
+	const spaced = (text: string | null): string => (text ?? "").replace(/\s+/g, " ").trim();
+	const kept = <V extends string | null>(text: V, as: V): V => (spaced(text) === spaced(as) ? as : text);
+	const steps = new Map(typed.steps.map((step) => [step.id, step]));
+	return {
+		...stored,
+		title: kept(stored.title, typed.title),
+		pre: kept(stored.pre, typed.pre),
+		steps: stored.steps.map((step) => {
+			const own = steps.get(step.id);
+			if (step.use || !own || own.use) return step;
+			return { ...step, action: kept(step.action, own.action), expected: kept(step.expected, own.expected) };
+		}),
+	};
 }
 /** Whether the draft holds text the card was not made of. The editor is closed while a card is open, so this is rare. */
 const beyondCard = ({ draft, conflict }: { draft: Draft; conflict: DraftConflict }): boolean =>

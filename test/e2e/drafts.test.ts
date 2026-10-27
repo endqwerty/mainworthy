@@ -434,6 +434,58 @@ test.skipIf(!browserAvailable)(
 	45_000,
 );
 
+// Issue #927: a save trims a step's text, and the idle save wrote that back into the field being typed in.
+test.skipIf(!browserAvailable)(
+	"an idle save keeps a step's trailing space, so the next word typed stays apart",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Spacing case", steps: [{ id: "a1", action: "Open cart", expected: null }] } },
+			],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			await page.getByRole("button", { name: "Spacing case", exact: true }).waitFor();
+			await page.clock.install();
+			await page.clock.pauseAt(new Date(Date.now() + 1000));
+			await page.keyboard.press("e");
+			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await step.fill("Apply the discount after ");
+			const recorded = page.waitForResponse((response) => response.url().endsWith("/propose"));
+			await page.clock.fastForward(30_001);
+			await recorded;
+			await page.clock.resume();
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v2"));
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				steps: [{ action: "Apply the discount after" }],
+			});
+			expect(await step.inputValue()).toBe("Apply the discount after ");
+			expect(
+				await step.evaluate((node) =>
+					node instanceof HTMLTextAreaElement
+						? { focused: document.activeElement === node, caret: node.selectionStart }
+						: null,
+				),
+			).toEqual({ focused: true, caret: 25 });
+			await page.keyboard.type("reload");
+			expect(await step.inputValue()).toBe("Apply the discount after reload");
+			await page.keyboard.press("Control+Enter");
+			await page.locator("#stat").filter({ hasText: "Version 3, by you" }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				version: 3,
+				steps: [{ action: "Apply the discount after reload" }],
+			});
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	45_000,
+);
+
 test.skipIf(!browserAvailable)(
 	"full device storage still accepts capture and reports the draft honestly",
 	async () => {
