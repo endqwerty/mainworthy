@@ -3,8 +3,10 @@
 // together do. What is refused keeps its question open, instead of a command that could outlast the transaction: a
 // policy that never changes, or under the `create` rule a report that never applies.
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { CREATE_MAX } from "../src/server/decisions/kinds.ts";
+import { UNLINKED_PAGE, unlinkedSetInFile } from "../src/server/evidence/evidence.ts";
 import { sql } from "../src/server/kernel/db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -112,6 +114,32 @@ test("a report under the `create` rule makes what fits and applies; a file past 
 		expect(receipt.counts.total).toBe(2);
 		expect(await cases(h)).toBe(1);
 		expect((await openMap(h)).map((item) => (item.evidence as { file: string }).file)).toEqual([large]);
+	} finally {
+		await h.close();
+	}
+});
+
+test("a large file's question stands on a digest of exactly which tests have no case", async () => {
+	const h = await harness({ unlinked: "ask" });
+	try {
+		const file = "tests/checkout/digest.spec.ts";
+		await backlog(h, file, UNLINKED_PAGE + 1);
+		const { ids, set } = await h.app.database.read(async (db) => {
+			const project = await db.one(sql<readonly [], { id: number }>("SELECT id FROM projects WHERE key = 'scratch'"));
+			if (!project) throw new Error("expected the scratch project");
+			const rows = await db.all(
+				sql<{ project: number; file: string }, { id: number }>(
+					"SELECT id FROM tests WHERE project = $project AND file = $file ORDER BY id",
+				),
+				{ project: project.id, file },
+			);
+			return { ids: rows.map((row) => row.id), set: await unlinkedSetInFile(db, project.id, file) };
+		});
+		// SHA-256 of the ordered ids: no other set of tests gives the same digest, unlike a sum or an XOR of hashes.
+		expect(set).toEqual({
+			count: UNLINKED_PAGE + 1,
+			digest: createHash("sha256").update(ids.join(",")).digest("hex"),
+		});
 	} finally {
 		await h.close();
 	}

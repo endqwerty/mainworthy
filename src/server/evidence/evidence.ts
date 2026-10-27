@@ -522,11 +522,11 @@ const Q = {
 		`SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
 	),
 	unlinkedSetInFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
-		`SELECT count(*) AS n, bit_xor(hashint8extended(id, 0))::text AS digest
+		`SELECT count(*) AS n, encode(sha256(convert_to(string_agg(id::text, ',' ORDER BY id), 'UTF8')), 'hex') AS digest
 		 FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto'`,
 	),
 	unlinkedSetWithoutFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
-		`SELECT count(*) AS n, bit_xor(hashint8extended(id, 0))::text AS digest
+		`SELECT count(*) AS n, encode(sha256(convert_to(string_agg(id::text, ',' ORDER BY id), 'UTF8')), 'hex') AS digest
 		 FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto'`,
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
@@ -2040,8 +2040,9 @@ export const NO_FILE = "(no file)";
 export const unlinkedInFile = async (db: ReadDb, project: number, file: string, after = 0): Promise<TestRow[]> =>
 	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file, after });
 /**
- * How many tests `unlinkedInFile` pages through, and a digest of which: it changes when a test joins or leaves the
- * set. Both are computed in the database, so a file with a million such tests costs the server no more than one.
+ * How many tests `unlinkedInFile` pages through, and a digest of which: SHA-256 of their ordered ids, so another set
+ * cannot be made to give the same one. Both are computed in the database, so a file with a million such tests costs
+ * the server no more than one.
  */
 export async function unlinkedSetInFile(
 	db: ReadDb,
