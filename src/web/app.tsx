@@ -926,7 +926,7 @@ function Workbench({
 					</div>
 					{notice !== null && (
 						<p id="notice" role="status">
-							<span>{notice}</span>
+							<span className="notice-text">{notice}</span>
 							<button type="button" className="notice-dismiss" onClick={() => setNotice(null)}>
 								Dismiss
 							</button>

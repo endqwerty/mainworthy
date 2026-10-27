@@ -728,6 +728,47 @@ test.skipIf(!browserAvailable)("a late outcome behind a newer status stays reada
 	}
 });
 
+test.skipIf(!browserAvailable)(
+	"a late outcome naming a long folder wraps, Dismiss included, at 1024 by 900",
+	async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+		const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const held = await holdCommand(harness);
+		const name = "a".repeat(120);
+		try {
+			const { page } = harness;
+			await page.setViewportSize({ width: 1024, height: 900 });
+			await page.getByRole("button", { name: "Second title", exact: true }).waitFor();
+			await page.keyboard.type("nf");
+			await page.getByRole("textbox", { name: "New folder name" }).fill(name);
+			await loseFirstReply(harness);
+			await page.keyboard.press("Enter");
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await page.keyboard.press("Escape");
+			await page.getByRole("option").filter({ hasText: "Other case" }).click();
+			await held.ready;
+			await page.keyboard.press("t");
+			await page.getByRole("textbox", { name: "Tag selected cases" }).fill("alpha");
+			await page.keyboard.press("Enter");
+			await page.locator("#stat").filter({ hasText: "1 case changed. Press u to undo." }).waitFor();
+			held.release();
+			const outcome = `Folder "${name}" was recorded.`;
+			await page.locator("#notice").filter({ hasText: outcome }).waitFor();
+			expect(await readable(harness, outcome)).toEqual({ inside: true, clipped: false });
+			expect(await readable(harness, "Dismiss")).toEqual({ inside: true, clipped: false });
+		} finally {
+			held.release();
+			await harness.close();
+			await server.stop();
+		}
+	},
+);
+
 test.skipIf(!browserAvailable)("two departed restores of one case each settle only their own status", async () => {
 	const server = await startServer();
 	for (let i = 1; i <= 3; i++) {
