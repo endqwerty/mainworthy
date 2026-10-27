@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { startAddressKey } from "../src/server/identity/limiter.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { provider, stopProviders } from "./oidc-support.ts";
 import {
@@ -10,6 +11,7 @@ import {
 	must,
 	PUBLIC,
 	said,
+	sha256,
 	signIn,
 	type World,
 	world,
@@ -35,7 +37,8 @@ const starts = [
 	{ name: "web passkey", path: "/api/login/challenge", body: {} },
 	{ name: "native passkey", path: "/api/login/challenge", body: { native: true } },
 ];
-const client = from("203.0.113.10");
+const CLIENT = "203.0.113.10";
+const client = from(CLIENT);
 const other = from("203.0.113.11");
 const PASSWORD = "correct horse battery staple";
 
@@ -89,23 +92,44 @@ test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protoco
 test("G4: four /64s refilling every minute cannot deny another person's starts for ten minutes", async () => {
 	const idp = await provider();
 	const w = await world({ oidc: idp.config(), proxied: true });
-	const outcomes: number[] = [];
-	for (let second = 0; second < 600; second++) {
-		if (second % 60 === 0) {
-			for (let count = 0; count < 1000; count += 100)
-				await Promise.all(
-					Array.from({ length: 100 }, (_, n) =>
-						w.post("/api/login/challenge", { native: true }, from(`2001:db8:0:${(count + n) % 4}::1`)),
-					),
-				);
-		}
-		if (second % 7 === 0)
-			for (const start of starts) outcomes.push((await w.post(start.path, start.body, other)).status);
-		w.clock.advance(1000);
+	const subscriber = (net: number) => from(`2001:db8:0:${net}::1`);
+	const owner = sha256(startAddressKey("2001:db8:0:0::1") ?? "");
+	const held: number[] = [];
+	const outcomes: string[] = [];
+	for (let minute = 0; minute < 10; minute++) {
+		// One begin opens the /56's window and makes a real ceremony. Copies of that ceremony and the window's count
+		// stand for the other 299 begins it is allowed this minute, which the fixed-window tests admit one by one.
+		expect(said(await w.post("/api/login/challenge", { native: true }, subscriber(minute % 4)))).toBe("200");
+		await w.instance.app.database.write((db) =>
+			db.transaction(() =>
+				db.runDynamic(
+					`INSERT INTO identity_ceremonies (kind,key,owner,deadline,generation,payload)
+SELECT kind,key || '-' || n,owner,deadline,generation,payload
+FROM (SELECT * FROM identity_ceremonies WHERE owner = $1 ORDER BY deadline DESC LIMIT 1) newest
+CROSS JOIN generate_series(1,299) n`,
+					[owner],
+				),
+			),
+		);
+		await used(w, "2001:db8:0:0::1", 300);
+		const refused = await Promise.all(
+			[0, 1, 2, 3].map((net) => w.post("/api/login/challenge", { native: true }, subscriber(net))),
+		);
+		expect(refused.map(said)).toEqual(Array(4).fill("429 limited, retry after 60"));
+		for (const start of starts) outcomes.push(said(await w.post(start.path, start.body, other)));
+		held.push(
+			(
+				await w.rows<{ count: number }>(
+					`SELECT count(*)::integer AS count FROM identity_ceremonies WHERE owner = '${owner}'`,
+				)
+			)[0]?.count ?? 0,
+		);
+		w.clock.advance(60_000);
 	}
-	expect(outcomes).toHaveLength(86 * starts.length);
-	expect(outcomes.filter((status) => status === 200)).toHaveLength(outcomes.length);
-}, 30_000);
+	// A ceremony's slot is free again after five minutes, so the subscriber's share of the 10,000 levels off.
+	expect(held).toEqual([300, 600, 900, 1200, 1500, 1500, 1500, 1500, 1500, 1500]);
+	expect(outcomes).toEqual(Array(10 * starts.length).fill("200"));
+});
 
 test.each(["passkey", "provider"])(
 	"G1: the shared %s cap refuses new ceremonies and preserves pending proofs",
@@ -372,14 +396,9 @@ test.each(starts)(
 		const idp = await provider();
 		const w = await world({ oidc: idp.config(), proxied: true });
 		await joined(w, "robin", PASSWORD);
-		const replies = [];
-		for (let count = 0; count < 303; count += 32)
-			replies.push(
-				...(await Promise.all(
-					Array.from({ length: Math.min(32, 303 - count) }, () => w.post(start.path, start.body, client)),
-				)),
-			);
-		expect(replies.filter((reply) => reply.status === 200)).toHaveLength(300);
+		await used(w, CLIENT, 290);
+		const replies = await Promise.all(Array.from({ length: 13 }, () => w.post(start.path, start.body, client)));
+		expect(replies.filter((reply) => reply.status === 200)).toHaveLength(10);
 		const blocked = replies.filter((reply) => reply.status !== 200);
 		expect(blocked.map(said)).toEqual(Array(3).fill("429 limited, retry after 60"));
 		expect(blocked.every((reply) => reply.setCookies.length === 0)).toBe(true);
@@ -393,10 +412,27 @@ test.each(starts)(
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 30");
 		expect(said(await w.post(start.path, start.body, other))).toBe("200");
 		w.clock.advance(30_000);
-		for (let count = 0; count < 300; count++) expect(said(await w.post(start.path, start.body, client))).toBe("200");
+		expect(said(await w.post(start.path, start.body, client))).toBe("200");
+		await used(w, CLIENT, 299);
+		expect(said(await w.post(start.path, start.body, client))).toBe("200");
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
 	},
 );
+
+/**
+ * Sets the count of `address`'s start window, opening it now when it has none, as G1 fills the ceremonies
+ * directly: what a test gives this way costs no requests, and real begins then cross the window's boundary.
+ */
+async function used(w: World, address: string, count: number): Promise<void> {
+	await w.instance.app.database.write((db) =>
+		db.transaction(() =>
+			db.runDynamic(
+				"INSERT INTO identity_starts (key,since,count) VALUES ($1,$2,$3) ON CONFLICT(key) DO UPDATE SET count = excluded.count",
+				[sha256(startAddressKey(address) ?? ""), w.clock.now(), count],
+			),
+		),
+	);
+}
 
 async function flood(w: World, path: string, body: Record<string, unknown>) {
 	const statuses = new Set<number>();
