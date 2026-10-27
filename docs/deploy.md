@@ -247,7 +247,7 @@ sending the token itself.
 | `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_APPLE_APPS` | not set | The iPhone apps the site vouches for, so a phone offers the logins it keeps for this site (its own passwords, or a password manager's such as 1Password) on the app's sign-in screen: each a team id and a bundle identifier, `ABCDE12345.com.mainworthy.app.ABCDE12345`, separated by commas. `bun scripts/ios.ts install` prints the one it built when it signs the app with that site (a paid Apple developer team only: `docs/guide/iphone.md`). The server lists them at `/.well-known/apple-app-site-association`, where Apple reads them; the app names the site in its entitlements (`ios/App/Mainworthy.entitlements`, `mainworthy.com`). Not set: that address is not found, and the app's sign-in screen is offered no login. An entry that is not an app's name stops the start with a line that names the variable. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
-| `MAINWORTHY_DEMO` | not set | Paused since 2026-10-24 (#914): the server leaves the demo as it is. A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds over HTTP. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
+| `MAINWORTHY_DEMO` | not set | A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds over HTTP. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/health` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
 A container waiting for the data-directory lock ignores `docker stop` until Docker sends SIGKILL after its default 10 seconds, which is harmless with Compose's stop-then-create replacement.
@@ -668,8 +668,6 @@ required check reads are under "Checks a deployment must wait for" below.
 
 ### Demo deployment and cleanup
 
-**Paused since 2026-10-24 ([#914](https://github.com/endqwerty/mainworthy/issues/914)):** `mainworthy serve` runs neither the demo refresh nor the retired-demo cleanup; the demo stays as it is. On the instance's data one cleanup slice held the server's thread for hours. What follows describes them as they will run again.
-
 `compose.coolify.yaml` keeps `MAINWORTHY_DEMO=demo` by default. Coolify supplies the deployed image's full
 `SOURCE_COMMIT`, or the image's `MAINWORTHY_COMMIT` takes precedence. No separate host, service, database or
 operator action is needed. The demo remains at `/p/demo`, with the same people and personal and team grants.
@@ -698,13 +696,21 @@ unbounded accumulation across deployments. Normal completion retains no retired 
 Whole-instance exports are refused with a retry message while retired marks remain, because those marks do not
 travel in an archive. Active-project exports remain available.
 
+A slice reads only the retired project's own rows, by index, so what it costs follows the size of the retired demo,
+not of the other projects on the instance (#914). A drain reads the schema once and skips the tables it has already
+emptied; one last pass over every table runs before the project row goes. On a copy with 20 seeded projects (1.06
+million results) and one retired default demo (102,304 rows, 28,000 of them results), the drain took 140 s before
+this, with a median slice of 35 ms, a longest of 289 ms, and plans that read up to 490,000 rows of other projects to
+find none; after it, 46 s, a median of 2.2 ms and a longest of 27 ms.
+
 No whole-database audit or worker retry runs under the demo gate. Each swap and deletion slice is checked against
 a 500 ms acceptance ceiling, alongside successful unrelated HTTP reads, writes and token sign-ins on a populated
 local database. Half a second is an interactive ceiling, not an infrastructure latency guarantee. Logs identify
 a cleanup slice exceeding 100 ms. PostgreSQL indexes and foreign-key checks still cost time, including shared CPU
 and disk contention; the rehearsal evidence belongs in the pull request.
 
-This port holds PostgreSQL's database-wide advisory writer lock for each swap and cleanup slice. In-process
+Each swap and cleanup slice holds the identity lock and the locks of the projects it changes for its one short
+transaction. In-process
 refresh calls also serialize and reread persisted state. The accepted Cloud Run design keeps this shared database and moves refresh/drain to
 its job/lease interface. That port must fence swap, seeding and completion against stale lease holders, then use
 project locks for the live and retired projects. Scheduled requests must replace the renewal timer when CPU is

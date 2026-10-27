@@ -161,8 +161,9 @@ An upload waiting behind a deletion refreshes or recreates the row before puttin
 move behind unchecked candidates so a bounded prune slice makes progress. Object ages survive archive import because
 they describe the shared byte store; jobs do not survive import. Neither table is exported.
 
-Demo refresh and retired-demo cleanup stay paused at startup. Their manual CLI helpers remain as they were; this
-job change does not certify or re-enable that workload for issue #914.
+Demo refresh and retired-demo cleanup run in the serving process after it listens, not as durable jobs. Each
+cleanup slice is one short write transaction that reads only the retired project's rows, by index (issue #914);
+`deploy.md` ("Demo deployment and cleanup") has the measurements.
 
 ## Who may call
 

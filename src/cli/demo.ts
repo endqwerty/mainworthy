@@ -25,7 +25,7 @@ import { Busy } from "../server/kernel/db.ts";
 import { createProject } from "../server/ops/admin.ts";
 import { OPS } from "../server/ops/index.ts";
 import { invoke } from "../server/ops/registry.ts";
-import { removeProjectSlice } from "../server/transfer/transfer.ts";
+import { type RemovalPlan, removalPlan, removeProjectSlice } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
@@ -189,6 +189,7 @@ export function drainRetiredDemos(
 	if (active !== undefined) return active;
 	const work = (async () => {
 		const { app } = instance;
+		let plan: RemovalPlan | undefined;
 		for (;;) {
 			options.signal?.throwIfAborted();
 			const slice = await app.database.write((db) =>
@@ -197,8 +198,9 @@ export function drainRetiredDemos(
 					const retired = (await retiredDemos(db))[0];
 					if (!retired) return null;
 					await lockProjectAuthority(db, retired.id, instance.owner.id);
+					plan ??= await removalPlan(db);
 					const began = performance.now();
-					const result = await removeProjectSlice(db, retired.key, 32);
+					const result = await removeProjectSlice(db, retired.key, 32, plan);
 					return { ...result, ms: performance.now() - began };
 				}),
 			);

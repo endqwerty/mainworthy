@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { removeProject } from "../src/server/transfer/transfer.ts";
+import type { SqlValue } from "../src/server/kernel/db.ts";
+import { removalPlan, removeProject, removeProjectSlice } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import { writerDatabase } from "./pg-scopes.ts";
 
@@ -93,4 +94,62 @@ test("every incoming reset reference has an index for its foreign key lookup", a
 			}
 	});
 	expect(probes.has("change_ends.receipt -> merge_receipts")).toBe(true);
+});
+
+// A slice that scans a whole table reads every other project's rows too, on every later slice (#914).
+test("every statement a removal slice issues reads by index, never by a scan of the whole table", async () => {
+	await using db = await writerDatabase();
+	await removalFixture(db, 40);
+	const plan = await removalPlan(db);
+	const scans = new Set<string>();
+	let explained = 0;
+	const explain = async (text: string, params: readonly SqlValue[] = []) => {
+		// The slice's own reads and deletes, under its planner settings; not the settings it sets and restores.
+		if (!/^\s*(SELECT|DELETE)\b/.test(text) || /current_setting|set_config/.test(text)) return;
+		explained++;
+		for (const { "QUERY PLAN": line } of await db.allDynamic<{ "QUERY PLAN": string }>(`EXPLAIN ${text}`, params))
+			if (line.includes("Seq Scan")) scans.add(`${line.trim()}: ${text.slice(0, 160)}`);
+	};
+	const traced = new Proxy(db, {
+		get(target, name, receiver) {
+			if (name === "allDynamic")
+				return async (text: string, params?: readonly SqlValue[]) => {
+					await explain(text, params);
+					return target.allDynamic(text, params);
+				};
+			if (name === "runDynamic")
+				return async (text: string, params?: readonly SqlValue[]) => {
+					await explain(text, params);
+					return target.runDynamic(text, params);
+				};
+			const value: unknown = Reflect.get(target, name, receiver);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	let slices = 0;
+	while (!(await removeProjectSlice(traced, "removing", 16, plan)).done) slices++;
+	expect(slices).toBeGreaterThan(3);
+	expect(explained).toBeGreaterThan(100);
+	expect([...scans]).toEqual([]);
+	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
+});
+
+// A drain skips tables it has emptied. A row written to one meanwhile would stop the project's own deletion, or, in a
+// table no foreign key ties to the project (as `search_docs`), outlive it, if nothing read that table again.
+test("a drain that skips emptied tables still removes a row written to one before the project goes", async () => {
+	await using db = await writerDatabase();
+	await removalFixture(db, 8);
+	await db.transaction(() =>
+		db.exec(`CREATE TABLE a_note (id bigint PRIMARY KEY, project bigint NOT NULL REFERENCES projects (id) DEFERRABLE);
+			CREATE INDEX a_note_project ON a_note (project);
+			INSERT INTO a_note VALUES (1, 900)`),
+	);
+	const plan = await removalPlan(db);
+	while (!plan.empty.has("a_note")) expect((await removeProjectSlice(db, "removing", 4, plan)).done).toBe(false);
+	await db.transaction(() => db.exec("INSERT INTO a_note VALUES (2, 900)"));
+	let slices = 0;
+	while (!(await removeProjectSlice(db, "removing", 4, plan)).done) slices++;
+	expect(slices).toBeGreaterThan(0);
+	expect(await db.allDynamic("SELECT id FROM a_note")).toEqual([]);
+	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
 });

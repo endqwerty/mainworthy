@@ -898,7 +898,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			child.kill("SIGTERM");
 			await child.exited;
 		}
-		// Complete one deployment through the real refresh/HTTP flow. Serve must leave its retired project alone (#914).
+		// Complete one deployment through the real refresh/HTTP flow. Leave its retired project for serve to drain.
 		const revision = "a".repeat(40);
 		const prepared = await start(
 			{
@@ -943,12 +943,13 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			const reader = restarted.stdout.getReader();
 			const decoder = new TextDecoder();
 			let printed = "";
-			while (!printed.includes('demo "demo" refresh is paused')) {
+			while (!printed.includes('demo "demo" ready for revision')) {
 				const chunk = await reader.read();
-				if (chunk.done) throw new Error("the compiled executable stopped before it started serving");
+				if (chunk.done) throw new Error("the compiled executable stopped before making its demo ready");
 				printed += decoder.decode(chunk.value, { stream: true });
 			}
 			reader.releaseLock();
+			expect(printed).toContain("30 cases");
 			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(printed)?.[0] ?? "";
 			expect((await fetch(`${url}/health`)).status).toBe(200);
 			const demo = new Client({ url, token: TOKEN, project: "demo" });
@@ -961,8 +962,10 @@ describe("the executable, built the way `bun run build` builds it", () => {
 							db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'"),
 						)
 					)[0]?.n ?? 0;
-				// Startup runs no cleanup: the retired project stays until #914 moves cleanup off the server's thread.
-				expect(await remaining()).toBe(1);
+				// Startup drains the retired project in bounded slices while the server answers (#914).
+				const deadline = Date.now() + 10_000;
+				while ((await remaining()) > 0 && Date.now() < deadline) await Bun.sleep(10);
+				expect(await remaining()).toBe(0);
 			} finally {
 				await retiring.close();
 			}
