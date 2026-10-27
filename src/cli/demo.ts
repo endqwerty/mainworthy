@@ -1,13 +1,8 @@
 // A deployment swaps the visible demo once per revision. Retired data drains in separate gate turns.
 import { z } from "zod";
 import type { Instance } from "../app/start.ts";
-import {
-	createToken,
-	lockActors,
-	lockProjectAuthority,
-	moveProjectGrants,
-	revokeToken,
-} from "../server/identity/identity.ts";
+import { API_VERSION, AT_HEADER, VERSION } from "../core/version.ts";
+import { admit, lockActors, lockProjectAuthority, moveProjectGrants } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import {
 	demoDeployment,
@@ -25,7 +20,7 @@ import {
 import { Busy } from "../server/kernel/db.ts";
 import { createProject } from "../server/ops/admin.ts";
 import { OPS } from "../server/ops/index.ts";
-import { invoke } from "../server/ops/registry.ts";
+import { type Call, invoke } from "../server/ops/registry.ts";
 import { type RemovalPlan, removalPlan, removeProjectSlice } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
 import { DEMO_WORK } from "./demo/work.ts";
@@ -42,7 +37,6 @@ import {
 	seed,
 } from "./seed.ts";
 
-const LASTS_MS = 15 * 60_000;
 const refreshing = new WeakMap<App, Promise<unknown>>();
 const draining = new WeakMap<App, Promise<void>>();
 type Options = {
@@ -128,119 +122,138 @@ async function refreshAlone(
 		signal.throwIfAborted();
 		warning(`retired demo cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
 	});
-	const issued = await app.database.write(
-		(db) =>
-			db.transaction(async () => {
-				signal.throwIfAborted();
-				return createToken(
-					app,
-					{
-						actor: owner.name,
-						kind: "human",
-						can: [],
-						project: 0,
-						label: `demo seed of ${project}`,
-						lastsMs: LASTS_MS,
-						madeBy: owner.id,
-					},
-					null,
-					db,
-				);
-			}),
-		{ signal },
-	);
-	let seeded: SeedResult;
-	let target: number;
-	try {
-		const client = new Client({
-			url: instance.url,
-			token: issued.secret,
-			project,
-			request: (url, init) =>
-				fetch(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }),
-		});
-		await refuseProducers(client);
-		const chosen = await app.database.write(
-			async (db) => {
-				const began = performance.now();
-				try {
-					// The fence: deciding and swapping happen in one transaction, under the demo's key lock (in
-					// lockProjectAuthority or lockProjectKey), whether or not this refresh still holds `exclusive`.
-					return await db.transaction(async () => {
-						signal.throwIfAborted();
-						const hint = await findProject(db, project);
-						if (hint) await lockProjectAuthority(db, hint.id, owner.id);
-						else {
-							await lockActors(db, [owner.id]);
-							await lockProjectKey(db, project);
-							if (await findProject(db, project)) throw new Busy();
-						}
-						const old = await lockNamedProject(db, project);
-						const current = old ? await demoDeployment(db, old.id) : null;
-						// Another instance finished this revision while this one had lost its lock: keep its demo.
-						if (old && current?.kind === "ready" && current.revision === revision)
-							return { kind: "ready" as const, seeded: current.seeded };
-						if (old && current?.kind === "seeding" && current.revision === revision)
-							return { kind: "seed" as const, id: old.id, size: current.size };
-						if (old && (await demoSince(db, old.id)) === null)
+	// The seed runs in this process as the owner, through the registry: no token is made for it, and none of its
+	// requests leaves the process, so no secret travels to the address `MAINWORTHY_HOST` names, and a proxy's secret
+	// (`MAINWORTHY_PROXY_SECRET`), which guards requests from outside, has nothing to check (#914).
+	const client = new Client({ url: IN_PROCESS, token: undefined, project, request: inProcess(instance, options) });
+	await refuseProducers(client);
+	const chosen = await app.database.write(
+		async (db) => {
+			const began = performance.now();
+			try {
+				// The fence: deciding and swapping happen in one transaction, under the demo's key lock (in
+				// lockProjectAuthority or lockProjectKey), whether or not this refresh still holds `exclusive`.
+				return await db.transaction(async () => {
+					signal.throwIfAborted();
+					const hint = await findProject(db, project);
+					if (hint) await lockProjectAuthority(db, hint.id, owner.id);
+					else {
+						await lockActors(db, [owner.id]);
+						await lockProjectKey(db, project);
+						if (await findProject(db, project)) throw new Busy();
+					}
+					const old = await lockNamedProject(db, project);
+					const current = old ? await demoDeployment(db, old.id) : null;
+					// Another instance finished this revision while this one had lost its lock: keep its demo.
+					if (old && current?.kind === "ready" && current.revision === revision)
+						return { kind: "ready" as const, seeded: current.seeded };
+					if (old && current?.kind === "seeding" && current.revision === revision)
+						return { kind: "seed" as const, id: old.id, identity: old.identity, size: current.size };
+					if (old && (await demoSince(db, old.id)) === null)
+						throw new CliError(
+							"conflict",
+							`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
+						);
+					if (old) {
+						const waiting = (await retiredDemos(db)).length;
+						if (waiting >= RETIRED_DEMOS_WAITING)
 							throw new CliError(
 								"conflict",
-								`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
+								`${waiting} retired demos are still waiting for cleanup, so the demo keeps its earlier revision until cleanup removes one`,
 							);
-						if (old) {
-							const waiting = (await retiredDemos(db)).length;
-							if (waiting >= RETIRED_DEMOS_WAITING)
-								throw new CliError(
-									"conflict",
-									`${waiting} retired demos are still waiting for cleanup, so the demo keeps its earlier revision until cleanup removes one`,
-								);
-							await retireDemo(db, old);
-						}
-						await createProject(
-							{ app, db, actor: owner, now: app.now(), session: null, context: null },
-							{ key: project },
-						);
-						const fresh = await findProject(db, project);
-						if (!fresh || (await markDemo(db, fresh, app.now())) === null)
-							throw new Error("the fresh demo could not be marked");
-						await setDemoDeployment(db, fresh.id, { kind: "seeding", revision, size: requested });
-						if (old) await moveProjectGrants(db, old.id, fresh.id);
-						return { kind: "seed" as const, id: fresh.id, size: requested };
-					});
-				} finally {
-					options.held?.("swap", performance.now() - began);
-				}
-			},
-			{ signal },
-		);
-		if (chosen.kind === "ready") return chosen.seeded;
-		target = chosen.id;
-		await options.step?.("swapped");
-		signal.throwIfAborted();
-		seeded = await seed(client, { project, ...chosen.size });
-		signal.throwIfAborted();
-		await options.step?.("seeded");
-	} finally {
-		// A stopping server still revokes the seed's token. If that waits for a lock, the server's stop deadline cuts it
-		// off, and the token expires on its own.
-		await app.database.write((db) => db.transaction(() => revokeToken(app, db, issued.id)));
-	}
+						await retireDemo(db, old);
+					}
+					await createProject(
+						{ app, db, actor: owner, now: app.now(), session: null, context: null },
+						{ key: project },
+					);
+					const fresh = await findProject(db, project);
+					if (!fresh || (await markDemo(db, fresh, app.now())) === null)
+						throw new Error("the fresh demo could not be marked");
+					await setDemoDeployment(db, fresh.id, { kind: "seeding", revision, size: requested });
+					if (old) await moveProjectGrants(db, old.id, fresh.id);
+					return { kind: "seed" as const, id: fresh.id, identity: fresh.identity, size: requested };
+				});
+			} finally {
+				options.held?.("swap", performance.now() - began);
+			}
+		},
+		{ signal },
+	);
+	if (chosen.kind === "ready") return chosen.seeded;
+	await options.step?.("swapped");
+	signal.throwIfAborted();
+	// Every write of the seed names the project chosen here. A refresh that lost its lock while another revision
+	// replaced the demo has its next write refused, and stops before it marks anything ready (#914).
+	const seeded = await seed(client, { project, ...chosen.size, projectIdentity: chosen.identity });
+	signal.throwIfAborted();
+	await options.step?.("seeded");
 	return await app.database.write(
 		(db) =>
 			db.transaction(async () => {
 				signal.throwIfAborted();
 				await lockActors(db, [owner.id]);
-				if (!(await lockProject(db, target))) throw new CliError("conflict", "demo project changed while seeding");
-				const current = await demoDeployment(db, target);
+				if (!(await lockProject(db, chosen.id))) throw new CliError("conflict", "demo project changed while seeding");
+				const current = await demoDeployment(db, chosen.id);
 				// Two refreshes seed one project only after one lost its lock; the seed's command ids make that safe.
 				if (current?.kind === "ready" && current.revision === revision) return current.seeded;
 				if (current?.kind !== "seeding" || current.revision !== revision)
 					throw new CliError("conflict", "demo deployment changed while seeding");
-				await setDemoDeployment(db, target, { kind: "ready", revision, seeded });
+				await setDemoDeployment(db, chosen.id, { kind: "ready", revision, seeded });
 				return seeded;
 			}),
 		{ signal },
 	);
+}
+
+/** The address the seed's client names. Nothing listens there and nothing is sent there: see `inProcess`. */
+const IN_PROCESS = "http://127.0.0.1:0";
+
+/**
+ * The seed's requests, answered in this process by the registry, as HTTP would answer them: `/health`, and an
+ * operation at `/api/<op>` or `/api/p/<project>/<op>`. A request with no token is the instance's owner, as for a
+ * person on this machine in local mode; one with a token (the pipeline's and the reviewer's, which the seed makes) is
+ * whoever `admit` says it is. Each request first passes `step` (`request <op>`), for a test to stop it there.
+ */
+function inProcess(
+	instance: Instance,
+	options: Options & { signal: AbortSignal },
+): (url: string, init?: RequestInit) => Promise<Response> {
+	const { app, owner } = instance;
+	const { signal } = options;
+	return async (url, init = {}) => {
+		signal.throwIfAborted();
+		const { pathname } = new URL(url);
+		if (pathname === "/health")
+			return Response.json({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
+		const route = /^\/api\/(?:p\/([^/]+)\/)?([^/]+)$/.exec(pathname);
+		if (!route?.[2] || init.method !== "POST" || typeof init.body !== "string")
+			throw new Error(`the demo seed asked for ${init.method ?? "GET"} ${pathname}, which is not an operation`);
+		const op = decodeURIComponent(route[2]);
+		const headers = new Headers(init.headers);
+		const bearer = headers.get("authorization")?.replace(/^Bearer /, "") ?? null;
+		const at = headers.get(AT_HEADER);
+		await options.step?.(`request ${op}`);
+		signal.throwIfAborted();
+		let caller: Pick<Call, "actor" | "reference"> = { actor: async () => owner };
+		if (bearer !== null) {
+			const admission = await admit(app, { bearer, cookie: null, sameOrigin: false, localOwner: null, address: null });
+			if (admission.kind !== "admitted")
+				return Response.json({ ok: false, error: { code: "unauthenticated", message: "a token is required" } });
+			const { session } = admission;
+			caller = { actor: session.actor, ...(session.reference ? { reference: session.reference() } : {}) };
+		}
+		return Response.json(
+			await invoke(app, OPS, {
+				op,
+				project: route[1] === undefined ? null : decodeURIComponent(route[1]),
+				input: JSON.parse(init.body),
+				...caller,
+				...(at === null ? {} : { at: Number(at) }),
+				signal,
+			}),
+		);
+	};
 }
 
 /** Each slice commits and releases the writer before yielding, including after a process restart. */

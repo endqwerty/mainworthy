@@ -474,6 +474,111 @@ test("a refresh that lost its lock keeps the demo another instance made ready fo
 	});
 }, 60_000);
 
+/** What a project holds, counted, to tell one seed's demo from two seeds' mixed. */
+const holdings = (app: App, project: number) =>
+	app.database.read((db) =>
+		db.allDynamic<{ cases: number; results: number; questions: number; runs: number }>(
+			`SELECT (SELECT count(*) FROM cases WHERE project = $1) AS cases, (SELECT count(*) FROM results WHERE project = $1) AS results,
+			 (SELECT count(*) FROM questions WHERE project = $1) AS questions, (SELECT count(*) FROM runs WHERE project = $1) AS runs`,
+			[project],
+		),
+	);
+
+test("a refresh that lost its lock while another revision replaced the demo has its next write refused", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		app.config.commit = A;
+		await withSecond(instance, async (second) => {
+			second.app.config.commit = B;
+			const paused = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			let proposals = 0;
+			// Revision A stops before its seed's first cases, with its policy and folders written to its project.
+			const late = refreshDemo(instance, "demo", small, {
+				step: async (step) => {
+					if (step !== "request propose" || ++proposals !== 4) return;
+					paused.resolve();
+					await resume.promise;
+				},
+			});
+			try {
+				await Promise.race([paused.promise, late]);
+				expect(proposals).toBe(4);
+				const replaced = await app.database.read((db) => findProject(db, "demo"));
+				expect(await endRefreshLock(app, "demo")).toEqual([true]);
+				const seeded = await refreshDemo(second, "demo", { cases: 20, unlinkedFiles: 1, days: 1 });
+				const project = await app.database.read((db) => findProject(db, "demo"));
+				if (!project) throw new Error("revision B left no demo");
+				expect(project.id).not.toBe(replaced?.id);
+				const held = await holdings(app, project.id);
+				resume.resolve();
+				const refused = await late.then(
+					() => "ready",
+					(error: unknown) => (error instanceof Error ? error.message : String(error)),
+				);
+				expect(await holdings(app, project.id)).toEqual(held);
+				expect(refused).toContain("was replaced since this seed was started for it");
+				expect(held[0]?.cases).toBe(seeded.cases.length);
+				expect(await app.database.read((db) => demoDeployment(db, project.id))).toMatchObject({
+					kind: "ready",
+					revision: B,
+				});
+			} finally {
+				resume.resolve();
+				await late.catch(() => undefined);
+			}
+		});
+	});
+}, 60_000);
+
+test("behind a proxy secret, a refresh seeds the demo in this process and sends no request", async () => {
+	const settings = {
+		mode: "server" as const,
+		env: {
+			MAINWORTHY_PROXY_SECRET: "a proxy secret of at least 32 characters",
+			MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-client-address",
+			MAINWORTHY_JOB_RUNNER: "0",
+		},
+	};
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		app.config.commit = A;
+		// Every request that would leave the process goes through `fetch`; the server refuses one without the secret.
+		const real = globalThis.fetch;
+		const sent: { url: string; bearer: boolean }[] = [];
+		globalThis.fetch = Object.assign(
+			(input: string | URL | Request, init?: RequestInit) => {
+				const request = new Request(input, init);
+				sent.push({ url: request.url, bearer: request.headers.has("authorization") });
+				return real(input, init);
+			},
+			{ preconnect: real.preconnect },
+		);
+		let seeded: Awaited<ReturnType<typeof refreshDemo>>;
+		try {
+			seeded = await refreshDemo(instance, "demo", small);
+		} finally {
+			globalThis.fetch = real;
+		}
+		expect(sent).toEqual([]);
+		expect(seeded.cases).toHaveLength(30);
+		const project = await app.database.read((db) => findProject(db, "demo"));
+		expect(await app.database.read((db) => demoDeployment(db, project?.id ?? 0))).toMatchObject({
+			kind: "ready",
+			revision: A,
+		});
+		// No token was made for the seed to sign in with; its pipeline and reviewer tokens are revoked.
+		const tokens = await app.database.read((db) =>
+			db.allDynamic<{ label: string; revoked: boolean }>(
+				"SELECT label, revoked_at IS NOT NULL AS revoked FROM tokens ORDER BY id",
+			),
+		);
+		expect(tokens.filter((token) => token.label.startsWith("demo seed"))).toEqual([]);
+		expect(tokens.filter((token) => token.label.startsWith("Demo ") && !token.revoked)).toEqual([]);
+		expect((await real(`${instance.url}/api/session`)).status).toBe(403);
+	}, settings);
+}, 60_000);
+
 test("retired demos that cannot be removed stop at two: later revisions keep the demo they have", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
@@ -715,7 +820,7 @@ test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits f
 		const { app } = instance;
 		app.config.commit = A;
 		await refreshDemo(instance, "demo", { cases: 1, unlinkedFiles: 0, days: 0 });
-		// Nothing but the seed writes cases: the swap, the token and the drain go ahead, and the seed's request waits.
+		// Nothing but the seed writes cases: the swap and the drain go ahead, and the seed's write waits.
 		const writer = await holdWriter(app, (db) => db.exec("LOCK TABLE cases IN SHARE ROW EXCLUSIVE MODE"));
 		try {
 			const ended = await stopServe(instance, { MAINWORTHY_DEMO: "demo", MAINWORTHY_COMMIT: B }, async () => {
@@ -727,8 +832,7 @@ test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits f
 				});
 			});
 			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
-			// The aborted refresh revokes its seed token, which waits for the owner's actor row that the seed's request
-			// holds while it waits for the cases lock.
+			// The seed's write, in the server's process, waits for the cases lock past the deadline.
 			expect(ended.stderr).toContain(cutOff("the demo refresh"));
 		} finally {
 			await writer.release();

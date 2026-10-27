@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { SqlValue } from "../src/server/kernel/db.ts";
+import type { SqlValue, WriteDb } from "../src/server/kernel/db.ts";
 import { removalPlan, removeProject, removeProjectSlice } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import { writerDatabase } from "./pg-scopes.ts";
@@ -152,4 +152,94 @@ test("a drain that skips emptied tables still removes a row written to one befor
 	expect(slices).toBeGreaterThan(0);
 	expect(await db.allDynamic("SELECT id FROM a_note")).toEqual([]);
 	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
+});
+
+/**
+ * The index entries and rows the current transaction has read from the database's own tables, by PostgreSQL's
+ * counters for the transaction: what a statement examined, whatever plan it took.
+ */
+async function examined(db: WriteDb): Promise<number> {
+	const [row] = await db.allDynamic<{ n: string }>(
+		`SELECT coalesce(sum(pg_stat_get_xact_tuples_returned(c.oid) + pg_stat_get_xact_tuples_fetched(c.oid)), 0)::text AS n
+		 FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
+		 WHERE c.relkind IN ('r', 'i') AND s.nspname NOT IN ('pg_catalog', 'information_schema') AND s.nspname NOT LIKE 'pg_toast%'`,
+	);
+	return Number(row?.n ?? 0);
+}
+
+/**
+ * The most a drain's slice of a table owned through `results` examines, removing a demo whose `parents` results each
+ * have an excuse. The slices of other tables are not counted: removing the results themselves, and the first look past
+ * their removed index entries, are work in proportion to the demo's own rows, once.
+ */
+async function largestSlice(parents: number): Promise<{ largest: number; slices: number }> {
+	await using db = await writerDatabase();
+	await removalFixture(db, parents, 10);
+	await db.transaction(async () => {
+		await db.exec(`
+			INSERT INTO questions (id, project, no, kind, subject, fingerprint, title, producer, evidence,
+				evidence_hash, basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
+				VALUES (901, 900, 1, 'failure', '{}', 'failure', 'Failure', 'ci', '{}', 'hash', '{}',
+				1, 1, '{}', '[]', 1, 'decided', 1, 1);
+			INSERT INTO decisions (id, project, question, kind, answer, signers, basis, holds, at, seq)
+				VALUES (901, 900, 901, 'failure', '{}', '[]', '{}', '{}', 1, 1);`);
+		await db.runDynamic(
+			"INSERT INTO result_excuses (result, decision, class) SELECT n, 901, 'excused' FROM generate_series(1, $1::bigint) n",
+			[parents],
+		);
+		await db.exec("ANALYZE");
+	});
+	const plan = await removalPlan(db);
+	let largest = 0;
+	let slices = 0;
+	for (let done = false; !done; )
+		await db.transaction(async () => {
+			const before = await examined(db);
+			const slice = await removeProjectSlice(db, "removing", 32, plan);
+			done = slice.done;
+			if (slice.table !== "result_excuses" && slice.table !== "attachments") return;
+			slices++;
+			largest = Math.max(largest, (await examined(db)) - before);
+		});
+	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
+	expect(await db.allDynamic("SELECT count(*) AS n FROM result_excuses")).toEqual([{ n: 10 }]);
+	return { largest, slices };
+}
+
+// A table owned through a parent (an excuse through its result) was read as `result = ANY(ARRAY(SELECT id FROM results
+// WHERE project = $1))`: every slice gathered all the demo's parents again, so the work grew with their square.
+test("a slice of a table owned through its parents examines a bounded number of rows however many parents there are", async () => {
+	const small = await largestSlice(400);
+	const large = await largestSlice(4_000);
+	console.log(
+		`largest slice of a parent-owned table: ${small.largest} rows and index entries for 400 parents (${small.slices} slices), ${large.largest} for 4000 (${large.slices} slices)`,
+	);
+	expect(large.slices).toBeGreaterThan(small.slices * 5);
+	expect(large.largest).toBeLessThan(small.largest * 1.5);
+	expect(large.largest).toBeLessThan(2_000);
+}, 120_000);
+
+// The batch of ancestors a slice reads must come from an index in (project, id) order, so it stops at the batch's end:
+// otherwise it sorts every one of the project's ancestors, or walks the primary key past every other project's rows.
+test("every ancestor a slice reads in batches has an index in project and id order", async () => {
+	await using db = await writerDatabase();
+	const plan = await removalPlan(db);
+	const ancestors = [
+		...new Set(plan.tables.flatMap((table) => (table.owner?.by === "parents" ? [table.owner.ancestor] : []))),
+	].sort();
+	expect(ancestors).toContain("runs");
+	const unordered: string[] = [];
+	await db.transaction(async () => {
+		await db.exec("SET LOCAL enable_seqscan = off; SET LOCAL enable_bitmapscan = off");
+		for (const ancestor of ancestors) {
+			const lines = (
+				await db.allDynamic<{ "QUERY PLAN": string }>(
+					`EXPLAIN SELECT id FROM ${identifier(ancestor)} WHERE project = 1 AND id > 0 ORDER BY project, id LIMIT 256`,
+				)
+			).map((row) => row["QUERY PLAN"]);
+			if (lines.some((line) => /Sort/.test(line)) || !lines.some((line) => /Index Cond: .*project = /.test(line)))
+				unordered.push(`${ancestor}: ${lines.join(" / ")}`);
+		}
+	});
+	expect(unordered).toEqual([]);
 });
