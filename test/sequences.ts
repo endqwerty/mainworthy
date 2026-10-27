@@ -37,7 +37,8 @@ import type { Actor } from "../src/server/kernel/ctx.ts";
 // 14. Every automatic inherited excuse names a currently effective base failure of the same test and cause,
 //     in the change's own repository. A person's broad inherited judgment keeps its existing build-only hold.
 //
-// The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
+// The tests are in `sequences-loose-1.test.ts`, `-2`, and the same for `standard` and `strict`: each preset's seeds in
+// two halves, so that no file is longer than a CI shard should be.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
 import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
@@ -938,10 +939,10 @@ function literalTransitions(): void {
 	});
 }
 
-/** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
-export function sequences(preset: "loose" | "standard" | "strict"): void {
-	if (preset === "loose") literalTransitions();
-	if (preset === "loose")
+/** One half of a policy preset's seeds. Each half has a file of its own, so the six run side by side. */
+export function sequences(preset: "loose" | "standard" | "strict", half: 1 | 2): void {
+	if (preset === "loose" && half === 1) literalTransitions();
+	if (preset === "loose" && half === 1)
 		test("the audit resolves broad and exact-result standing independently", async () => {
 			const fixture = await testDatabase({ schema: "empty" });
 			const database = await Database.open({ url: fixture.url });
@@ -972,7 +973,8 @@ export function sequences(preset: "loose" | "standard" | "strict"): void {
 			}
 		});
 
-	for (let seed = 1; seed <= SEEDS; seed++) {
+	const middle = Math.ceil(SEEDS / 2);
+	for (let seed = half === 1 ? 1 : middle + 1; seed <= (half === 1 ? middle : SEEDS); seed++) {
 		test(`random sequence ${seed}/${SEEDS} under the ${preset} policy keeps every invariant`, async () => {
 			let firstPlan = -1;
 			let auditStatements = 0;
