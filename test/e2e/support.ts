@@ -153,8 +153,8 @@ export async function startServer({
 		(stopping ??= (async () => {
 			child.stdin.end();
 			// The supervisor stops a blocked fixture inside 1.5 seconds. Its own cleanup then drops the fixture's
-			// database, which takes several seconds on a cluster that has just started (#961), so it gets longer.
-			// Both bounds only catch a supervisor failure: teardown must not await a child forever.
+			// database, about 7 seconds on a cluster that has just started (#961), so it gets longer, but less than
+			// the 20-second test timeout (test/preflight.ts). Both bounds only catch a supervisor failure.
 			const fixture = setTimeout(() => {
 				try {
 					const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
@@ -165,7 +165,7 @@ export async function startServer({
 				try {
 					process.kill(-child.pid, "SIGKILL");
 				} catch {}
-			}, 30_000);
+			}, 15_000);
 			try {
 				const code = await child.exited;
 				if (code !== 0) throw new Error(`Mainworthy e2e supervisor exited with ${code}`);
