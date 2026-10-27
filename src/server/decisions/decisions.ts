@@ -1054,6 +1054,21 @@ async function askAgain(
 	);
 }
 
+/** A question about a file's tests with no case, given the file's evidence and basis as they are now. */
+async function withCurrentFile(ctx: Ctx, question: QuestionRow): Promise<QuestionRow> {
+	if (question.kind === "failure") return question;
+	const r = await mapRaise(ctx, json<{ file: string }>(question.subject).file, question.producer);
+	const basis = contentHash(r.material);
+	return await attachEvidence(ctx, question, {
+		title: r.title,
+		evidence: stored(r),
+		hash: seenHash(basis, undefined),
+		basis,
+		blocks: [],
+		refs: r.refs,
+	});
+}
+
 /**
  * Withdraws the current decision on a question and opens it again. The withdrawal is itself a decision in the
  * ledger, superseding the one it withdraws, so both remain (commitment L6: undo never erases).
@@ -1089,9 +1104,13 @@ export async function undo(
 	if (standing !== "counts") return reply(question, "forbidden", { needs: describeAsk(ask) });
 	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
 	await handler.revert(ctx, question, prior);
+	// Tests of the file may have been linked or left since the answer, by later questions about it: open again, the
+	// question shows the file as it is now, so it offers no test another answer has since linked. The withdrawal
+	// stands on that evidence, so a rule stays away until the file changes after it (`heldOpen`).
+	const current = question.kind === "map" ? await withCurrentFile(ctx, question) : question;
 	const signer: Signer = { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null };
 	const decision = await insertDecision(ctx, {
-		question,
+		question: current,
 		answer: { is: "withdrawn" },
 		signers: [signer],
 		holds: [],
@@ -1106,20 +1125,6 @@ export async function undo(
 		});
 	}
 	await setQuestionState(ctx, question, "open", null);
-	// Tests of the file may have been linked or left since the answer, by later questions about it: open again, the
-	// question shows the file as it is now, so it offers no test another answer has since linked.
-	if (question.kind === "map") {
-		const r = await mapRaise(ctx, json<{ file: string }>(question.subject).file, question.producer);
-		const basis = contentHash(r.material);
-		await attachEvidence(ctx, question, {
-			title: r.title,
-			evidence: stored(r),
-			hash: seenHash(basis, undefined),
-			basis,
-			blocks: [],
-			refs: r.refs,
-		});
-	}
 	// Open again, it asks what any question of its kind asks. Where that is a rule, a person now decides: the
 	// rule does not answer again behind the back of whoever withdrew its answer.
 	const general = clauseFor(policy, { kind: question.kind, facts }).ask;

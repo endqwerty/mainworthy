@@ -317,7 +317,10 @@ export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKi
 		kind: "map",
 		key: `file:${file}`,
 		subject: { file },
-		title: `${count || "Some"} test${count === 1 ? "" : "s"} in ${file} ${count === 1 ? "has" : "have"} no case`,
+		title:
+			count === 0
+				? `No test in ${file} is left without a case`
+				: `${count} test${count === 1 ? "" : "s"} in ${file} ${count === 1 ? "has" : "have"} no case`,
 		producer,
 		evidence: {
 			file,
