@@ -849,6 +849,11 @@ b.st2 {
 	color: var(--ink);
 	white-space: normal;
 }
+/* A folder name may be one long word: break it rather than push Dismiss out of the bar. */
+.notice-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
 .notice-dismiss {
 	flex: none;
 	border: 1px solid var(--line);
