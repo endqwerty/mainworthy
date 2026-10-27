@@ -2021,8 +2021,18 @@ describe("unlinked tests", () => {
 		await link(["T-2", "C-2"]);
 		expect((await queue({ kind: "map", state: "open" })).items).toHaveLength(1);
 		await h.call("decide", { undo: firstLink.q });
-		expect((await queue({ kind: "map", state: "open" })).items.map((item) => item.q)).toEqual([firstLink.q]);
+		const open = (await queue({ kind: "map", state: "open" })).items;
+		expect(open.map((item) => item.q)).toEqual([firstLink.q]);
 		expect(await unlinkedTests()).toBe(2);
+		// The reopened question shows the file as it is now: T-2 keeps the later link and is not offered again.
+		const reopened = first(open);
+		expect(reopened.title).toBe(`2 tests in ${file} have no case`);
+		expect((reopened.evidence as { tests: { t: string }[] }).tests.map((test) => test.t)).toEqual(["T-1", "T-3"]);
+		await h.call("decide", { q: reopened.q, onEvidence: reopened.evidenceHash, answer: { is: "track" } });
+		expect(await unlinkedTests()).toBe(2);
+		expect((await h.call<{ tests: { t: string }[] }[]>("get", { refs: ["C-2"] }))[0]?.tests.map((t) => t.t)).toEqual([
+			"T-2",
+		]);
 	});
 
 	test("a person who answered while people were asked overruled no rule: a rule the policy gets later answers", async () => {

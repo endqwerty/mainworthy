@@ -309,16 +309,11 @@ async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 /** The most cases `create` answers make in one command: as many tests as one report may carry. */
 export const CREATE_MAX = 100_000;
 
-/** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
-export async function* raiseMapSteps(
-	ctx: Ctx,
-	raise: Tools["raiseSteps"],
-	file: string,
-	producer: ActorKind,
-): AsyncGenerator<undefined, Raised, void> {
+/** The question about a file's tests with no case, as they are now: what raising it, or opening it again, shows. */
+export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKind): Promise<Raise> {
 	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
 	const { count, digest } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
-	return yield* raise(ctx, {
+	return {
 		kind: "map",
 		key: `file:${file}`,
 		subject: { file },
@@ -333,7 +328,17 @@ export async function* raiseMapSteps(
 		facts: [],
 		refs: tests.slice(0, 20).map(testRef),
 		runs: [],
-	});
+	};
+}
+
+/** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
+export async function* raiseMapSteps(
+	ctx: Ctx,
+	raise: Tools["raiseSteps"],
+	file: string,
+	producer: ActorKind,
+): AsyncGenerator<undefined, Raised, void> {
+	return yield* raise(ctx, await mapRaise(ctx, file, producer));
 }
 
 /** A link a `map` decision replaced: the test, the case it was linked to, and the decision that had linked it. */

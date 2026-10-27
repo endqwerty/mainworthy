@@ -93,7 +93,7 @@ import {
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef, proposalById, resolvedOf, scopeFactsSteps } from "../suite/suite.ts";
-import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
+import { disputeParties, HANDLERS, mapRaise, runsAbout } from "./kinds.ts";
 import {
 	addQuestionParties,
 	alsoAbout,
@@ -1106,6 +1106,20 @@ export async function undo(
 		});
 	}
 	await setQuestionState(ctx, question, "open", null);
+	// Tests of the file may have been linked or left since the answer, by later questions about it: open again, the
+	// question shows the file as it is now, so it offers no test another answer has since linked.
+	if (question.kind === "map") {
+		const r = await mapRaise(ctx, json<{ file: string }>(question.subject).file, question.producer);
+		const basis = contentHash(r.material);
+		await attachEvidence(ctx, question, {
+			title: r.title,
+			evidence: stored(r),
+			hash: seenHash(basis, undefined),
+			basis,
+			blocks: [],
+			refs: r.refs,
+		});
+	}
 	// Open again, it asks what any question of its kind asks. Where that is a rule, a person now decides: the
 	// rule does not answer again behind the back of whoever withdrew its answer.
 	const general = clauseFor(policy, { kind: question.kind, facts }).ask;
