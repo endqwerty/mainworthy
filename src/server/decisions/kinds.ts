@@ -318,7 +318,7 @@ const mapHandler: Handler<"map"> = {
 			case "create": {
 				// New cases go through the same adopt path as any edit. If policy does not adopt them now, the
 				// tests stay unlinked and this question is asked again when the proposal lands.
-				const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
+				let tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
 				if (tests.length === 0) return { linked: [] };
 				// Creating and linking in one answer works only where the policy adopts this actor's new cases at
 				// once. Where a person must adopt them first, nothing is created here: saying so is better than
@@ -338,37 +338,46 @@ const mapHandler: Handler<"map"> = {
 						"this policy does not accept new cases automatically: change the adoption rule, or propose the cases, have them adopted, then link",
 					);
 				const folder = answer.folder ?? folderFor(file);
-				const edits: Edit[] = tests.map((test) => ({
-					op: "create",
-					body: { title: test.name, methods: ["auto"] },
-					folder,
-				}));
-				const sealed = yield* sealSteps(ctx, { edits, reason: `Cases for the tests in ${file}` });
-				if (!sealed) return { linked: [] };
-				const raised = yield* await raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
-				if (raised.s !== "decided")
-					throw invalid("the new cases need a person to adopt them first; accept that proposal, then link");
-				const created = raised.effects.created;
-				if (!Array.isArray(created) || created.length !== tests.length)
-					throw invalid("the adoption rule did not create every requested case; no tests were linked");
-				const refs = created.map((ref) => {
-					if (typeof ref !== "string")
-						throw invalid("the adoption rule did not create every requested case; no tests were linked");
-					return ref;
-				});
-				const cases = await findCases(ctx.db, ctx.project.id, refs);
 				const linked: Relinked[] = [];
-				for (let at = 0; at < tests.length; at += 200) {
-					const links = tests.slice(at, at + 200).map((test, offset) => {
-						const ref = refs[at + offset];
-						const row = ref === undefined ? null : cases.get(ref);
-						if (!row) throw notFound(`case ${ref}`);
-						linked.push([test.id, null, null]);
-						return { test, caseId: row.id };
+				const created: string[] = [];
+				// The answer is about the whole file: each page of its tests is one proposal, adopted and linked
+				// before the next page is read.
+				while (tests.length > 0) {
+					const edits: Edit[] = tests.map((test) => ({
+						op: "create",
+						body: { title: test.name, methods: ["auto"] },
+						folder,
+					}));
+					const sealed = yield* sealSteps(ctx, { edits, reason: `Cases for the tests in ${file}` });
+					if (!sealed) break;
+					const raised = yield* await raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
+					if (raised.s !== "decided")
+						throw invalid("the new cases need a person to adopt them first; accept that proposal, then link");
+					const made = raised.effects.created;
+					if (!Array.isArray(made) || made.length !== tests.length)
+						throw invalid("the adoption rule did not create every requested case; no tests were linked");
+					const refs = made.map((ref) => {
+						if (typeof ref !== "string")
+							throw invalid("the adoption rule did not create every requested case; no tests were linked");
+						return ref;
 					});
-					await linkTests(ctx, witness, links);
-					if (links.length === 200) yield;
+					const cases = await findCases(ctx.db, ctx.project.id, refs);
+					for (let at = 0; at < tests.length; at += 200) {
+						const links = tests.slice(at, at + 200).map((test, offset) => {
+							const ref = refs[at + offset];
+							const row = ref === undefined ? null : cases.get(ref);
+							if (!row) throw notFound(`case ${ref}`);
+							linked.push([test.id, null, null]);
+							return { test, caseId: row.id };
+						});
+						await linkTests(ctx, witness, links);
+						if (links.length === 200) yield;
+					}
+					created.push(...refs);
+					const last = tests.at(-1);
+					tests = last ? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id) : [];
 				}
+				if (created.length === 0) return { linked: [] };
 				return { linked, created };
 			}
 			case "track":

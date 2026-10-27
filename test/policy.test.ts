@@ -1871,6 +1871,42 @@ describe("unlinked tests", () => {
 		expect(await unlinkedTests()).toBe(3);
 	});
 
+	test("`create` makes a case for every test in a file larger than one page, by rule or by a person", async () => {
+		const file = "tests/checkout/bulk.spec.ts";
+		await use("loose", "create");
+		const ruled = await h.call<ReportReceipt>("report", ciReport({ commit: "bulk0001", n: 501, file }));
+		expect(ruled.counts.total).toBe(501);
+		expect((await h.call<{ count: number }>("find", { in: "cases" })).count).toBe(501);
+		expect(await unlinkedTests()).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
+
+		await use("standard", "ask");
+		await h.call("report", ciReport({ commit: "bulk0002", n: 501, file }));
+		const q = first((await queue({ kind: "map" })).items);
+		expect(q.title).toBe(`501 tests in ${file} have no case`);
+		expect(q.evidence).toMatchObject({ count: 501 });
+		const decided = await h.call<{ status: string; effects: { created: string[] } }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "create" },
+		});
+		expect(decided[0]?.status).toBe("decided");
+		expect(decided[0]?.effects.created).toHaveLength(501);
+		expect(await unlinkedTests()).toBe(0);
+		await h.call("decide", { undo: q.q });
+		expect(await unlinkedTests()).toBe(501);
+
+		// `track` stands on every test of the file, not on the first page: one more test is asked about.
+		await use("standard", "ask");
+		await h.call("report", ciReport({ commit: "bulk0003", n: 501, file }));
+		const tracked = first((await queue({ kind: "map" })).items);
+		await h.call("decide", { q: tracked.q, onEvidence: tracked.evidenceHash, answer: { is: "track" } });
+		expect((await queue()).counts.open).toBe(0);
+		await h.call("report", ciReport({ commit: "bulk0004", n: 502, file }));
+		expect((await queue()).counts.open).toBe(1);
+		expect(first((await queue({ kind: "map" })).items).evidence).toMatchObject({ count: 502 });
+	});
+
 	test("tests that name no file are asked about as a group, the question lists them, and `create` makes their cases", async () => {
 		await use("standard", "ask");
 		const bare = (i: number) => ({
