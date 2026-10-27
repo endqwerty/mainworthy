@@ -171,7 +171,10 @@ export type Call = {
 	 * was given. It is part of what a command id names: the same request at another time is another request.
 	 */
 	at?: number;
-	/** Stops a write, also one waiting for a lock; the write rolls back and `invoke` throws the signal's reason. */
+	/**
+	 * Stops a write at its next statement: the write rolls back and `invoke` throws the signal's reason. A statement
+	 * already sent, such as one waiting for a lock, runs to its end first.
+	 */
 	signal?: AbortSignal;
 };
 

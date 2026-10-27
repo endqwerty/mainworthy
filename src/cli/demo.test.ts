@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { budget } from "../../scripts/budget.ts";
 import { type Instance, start } from "../app/start.ts";
 import { lockIdentity } from "../server/identity/identity.ts";
 import { type App, defaultConfig } from "../server/kernel/app.ts";
@@ -606,7 +605,7 @@ async function waitingFor(app: App, text: string, ms: number): Promise<void> {
 const holdSlotLeases = (app: App) =>
 	holdWriter(app, (db) => db.exec("LOCK TABLE slot_leases IN SHARE ROW EXCLUSIVE MODE"));
 
-test("an aborted demo work renewal comes back as the abort, not as a failed or finished operation", async () => {
+test("a demo work renewal aborted while it waits for a writer comes back as the abort and takes nothing", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		app.config.commit = A;
@@ -617,7 +616,18 @@ test("an aborted demo work renewal comes back as the abort, not as a failed or f
 		console.error = (...args: unknown[]) => {
 			logged.push(args.map(String).join(" "));
 		};
+		const leases = async () =>
+			Number(
+				(
+					await app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM slot_leases WHERE slot = $1", [
+							seeded.workSlot ?? 0,
+						]),
+					)
+				)[0]?.n,
+			);
 		try {
+			const before = await leases();
 			const controller = new AbortController();
 			const reason = new Error("renewal stopped by the test");
 			const renewing = renewDemoWork(instance, "demo", seeded, controller.signal).then(
@@ -626,7 +636,10 @@ test("an aborted demo work renewal comes back as the abort, not as a failed or f
 			);
 			await waitingFor(app, "INSERT INTO slot_leases", 10_000);
 			controller.abort(reason);
+			// The insert already sent waits for the writer; once it has run, the operation stops before committing.
+			await writer.release();
 			expect(await renewing).toBe(reason);
+			expect(await leases()).toBe(before);
 			expect(logged).toEqual([]);
 		} finally {
 			console.error = original;
@@ -635,7 +648,25 @@ test("an aborted demo work renewal comes back as the abort, not as a failed or f
 	});
 }, 30_000);
 
-test("serve exits soon after SIGTERM while its cleanup waits for a project writer", async () => {
+/** Waits until no statement containing `text` waits for a lock any more, and says whether that happened in time. */
+async function stoppedWaiting(app: App, text: string, ms: number): Promise<boolean> {
+	const end = performance.now() + ms;
+	while (performance.now() < end) {
+		const rows = await app.database.read((db) =>
+			db.allDynamic<{ query: string }>(
+				"SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+			),
+		);
+		if (!rows.some((row) => row.query.includes(text))) return true;
+		await Bun.sleep(50);
+	}
+	return false;
+}
+
+/** The line a stopping `serve` prints when its deadline cuts `step` off. */
+const cutOff = (step: string) => `mainworthy: stopping took longer than 7 s; exiting with ${step} still running`;
+
+test("serve exits at its deadline after SIGTERM while its cleanup waits for a project writer", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
@@ -645,13 +676,14 @@ test("serve exits soon after SIGTERM while its cleanup waits for a project write
 		await refreshDemo(instance, "demo", tiny);
 		const [retired] = await app.database.read(retiredDemos);
 		if (!retired) throw new Error("revision B left no retired demo");
+		const slice = "FROM projects WHERE id = $1 FOR UPDATE";
 		const writer = await holdWriter(app, (db) => lockProject(db, retired.id));
 		try {
-			const ended = await stopServe(instance, {}, () =>
-				waitingFor(app, "FROM projects WHERE id = $1 FOR UPDATE", 20_000),
-			);
-			expect({ ...ended, ms: undefined }).toEqual({ killed: false, code: 0, stderr: "", ms: undefined });
-			budget("serve exit after SIGTERM with cleanup waiting on a writer", ended.ms, 500, "ms");
+			const ended = await stopServe(instance, {}, () => waitingFor(app, slice, 20_000));
+			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
+			expect(ended.stderr).toContain(cutOff("retired demo cleanup"));
+			// The writer still holds its lock, but the slice's backend sees that serve has gone, and rolls back.
+			expect(await stoppedWaiting(app, slice, 5_000)).toBe(true);
 		} finally {
 			await writer.release();
 		}
@@ -659,7 +691,7 @@ test("serve exits soon after SIGTERM while its cleanup waits for a project write
 	});
 }, 60_000);
 
-test("serve exits soon after SIGTERM while renewing a same-revision demo's work waits for a writer", async () => {
+test("serve exits at its deadline after SIGTERM while renewing a same-revision demo's work waits for a writer", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		app.config.commit = A;
@@ -670,8 +702,8 @@ test("serve exits soon after SIGTERM while renewing a same-revision demo's work 
 			const ended = await stopServe(instance, { MAINWORTHY_DEMO: "demo", MAINWORTHY_COMMIT: A }, () =>
 				waitingFor(app, "INSERT INTO slot_leases", 20_000),
 			);
-			expect({ ...ended, ms: undefined }).toEqual({ killed: false, code: 0, stderr: "", ms: undefined });
-			budget("serve exit after SIGTERM with demo work renewal waiting on a writer", ended.ms, 500, "ms");
+			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
+			expect(ended.stderr).toContain(cutOff("demo work renewal"));
 		} finally {
 			await writer.release();
 		}
@@ -695,9 +727,9 @@ test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits f
 				});
 			});
 			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
-			expect(ended.stderr).toContain(
-				"mainworthy: stopping took longer than 7 s; exiting with the server's own shutdown still running",
-			);
+			// The aborted refresh revokes its seed token, which waits for the owner's actor row that the seed's request
+			// holds while it waits for the cases lock.
+			expect(ended.stderr).toContain(cutOff("the demo refresh"));
 		} finally {
 			await writer.release();
 		}

@@ -154,6 +154,7 @@ export class Busy extends Error {
 }
 export const MIGRATION_LOCK = 0x4d574d4947520001n;
 const EXCLUSIVE_POLL_MS = 200;
+const CLIENT_CHECK_MS = 1_000;
 export function sqlState(error: unknown): string | null {
 	if (typeof error !== "object" || error === null) return null;
 	const state: unknown = Reflect.get(error, "errno");
@@ -276,7 +277,10 @@ type Lease = {
 	poisoned: boolean;
 	tx: Transaction | null;
 	statements: () => void;
-	/** The caller's signal: it cancels a statement in flight, such as one waiting for a lock, and refuses the next. */
+	/**
+	 * The caller's signal: once it aborts, the next statement is refused and the transaction does not commit. A
+	 * statement already sent runs to its end, also one waiting for a lock.
+	 */
 	signal?: AbortSignal | undefined;
 };
 async function query<R>(
@@ -289,19 +293,12 @@ async function query<R>(
 	if (!lease.alive) throw new Error("database scope has ended");
 	if (lease.lost) throw lease.lost;
 	if (!control && lease.tx?.aborted) throw new TransactionAborted(lease.tx.aborted.error);
-	// Ending a transaction is never cancelled, so an abort cannot leave its outcome unknown.
-	const signal = control ? undefined : lease.signal;
-	signal?.throwIfAborted();
+	// Ending a transaction is never refused, so an abort cannot leave its outcome unknown.
+	if (!control) lease.signal?.throwIfAborted();
 	const values = params.map(encode);
 	lease.statements();
-	let cancel = () => {};
 	try {
 		const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
-		// `cancel` returns the query; returned from a listener it would be a second, unhandled rejection.
-		cancel = () => {
-			pending.cancel();
-		};
-		signal?.addEventListener("abort", cancel, { once: true });
 		return await (simple ? pending.simple() : pending);
 	} catch (error) {
 		if (lost(error) || ["25P03", "25P04"].includes(sqlState(error) ?? "")) {
@@ -310,10 +307,7 @@ async function query<R>(
 			throw lease.lost;
 		}
 		if (lease.tx && !lease.tx.aborted) lease.tx.aborted = { error };
-		if (signal?.aborted) throw signal.reason;
 		throw error;
-	} finally {
-		signal?.removeEventListener("abort", cancel);
 	}
 }
 
@@ -371,8 +365,8 @@ class Scope implements WriteDb {
 		if (tx.aborted) throw new TransactionAborted(tx.aborted.error);
 		for (const effect of tx.queues[0] ?? []) if (effect.phase === "before") await effect.run();
 		this.checkAborted(tx);
-		// A transaction its caller stopped does not commit, even if what ran in it caught the cancellation; once
-		// sent, COMMIT is not cancelled.
+		// A transaction its caller stopped does not commit, even if what ran in it caught the abort; once sent,
+		// COMMIT runs to its end.
 		this.lease.signal?.throwIfAborted();
 		await query(this.lease, "COMMIT", [], true);
 		this.lease.tx = null;
@@ -729,12 +723,16 @@ export class Database {
 		lease.signal = options.signal;
 		const db = new Scope(lease, true);
 		try {
+			// A process that exits mid-statement, as a stopping server does at its deadline, leaves the statement running;
+			// checking the client every second lets one waiting for a lock see the closed connection and roll back,
+			// releasing the locks it holds, instead of waiting for the lock first (#914).
 			await query(
 				lease,
 				`SET lock_timeout = '${this.options.lockWaitMs ?? LOCK_WAIT_MS}ms';
  SET statement_timeout = '${LOCK_WAIT_MS}ms';
  SET transaction_timeout = '${LOCK_WAIT_MS}ms';
- SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms'`,
+ SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms';
+ SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'`,
 				[],
 				false,
 				true,

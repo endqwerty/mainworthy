@@ -101,15 +101,6 @@ async function refresh(
 /** How many retired demos may wait for cleanup before a new revision stops retiring another (#914). */
 export const RETIRED_DEMOS_WAITING = 2;
 
-/** Aborts `ms` after `signal` does: for the cleanup a stopping refresh still owes, but not for long. */
-function grace(signal: AbortSignal, ms: number): AbortSignal {
-	const controller = new AbortController();
-	const fire = () => setTimeout(() => controller.abort(signal.reason), ms).unref();
-	if (signal.aborted) fire();
-	else signal.addEventListener("abort", fire, { once: true });
-	return controller.signal;
-}
-
 async function refreshAlone(
 	instance: Instance,
 	project: string,
@@ -118,7 +109,8 @@ async function refreshAlone(
 	options: Options & { signal: AbortSignal },
 ): Promise<SeedResult> {
 	const { app, owner } = instance;
-	// Every wait below stops when `signal` aborts: a stopping server has ten seconds on Cloud Run (#914).
+	// When `signal` aborts, the refresh stops at its next statement or request: a stopping server has ten seconds on
+	// Cloud Run, and its deadline covers a statement still waiting for a lock (#914).
 	const { signal } = options;
 	const state = await app.database.read(
 		async (db) => {
@@ -229,12 +221,9 @@ async function refreshAlone(
 		signal.throwIfAborted();
 		await options.step?.("seeded");
 	} finally {
-		// A stopping server still revokes the seed's token, for a second at most: the token expires on its own.
-		await app.database
-			.write((db) => db.transaction(() => revokeToken(app, db, issued.id)), { signal: grace(signal, 1_000) })
-			.catch((error: unknown) => {
-				if (!signal.aborted) throw error;
-			});
+		// A stopping server still revokes the seed's token. If that waits for a lock, the server's stop deadline cuts it
+		// off, and the token expires on its own.
+		await app.database.write((db) => db.transaction(() => revokeToken(app, db, issued.id)));
 	}
 	return await app.database.write(
 		(db) =>
@@ -267,7 +256,7 @@ export function drainRetiredDemos(
 	const work = (async () => {
 		const { app } = instance;
 		let plan: RemovalPlan | undefined;
-		// The signal also cancels a slice waiting for a project writer's lock, so a stopping server is not held.
+		// The signal also stops a slice at its next statement, and an aborted slice does not commit.
 		const signal = options.signal ? { signal: options.signal } : {};
 		for (;;) {
 			options.signal?.throwIfAborted();
@@ -327,8 +316,8 @@ export async function renewDemoWork(
 	const slot = slots.find((slot) => slot.id === seeded.workSlot);
 	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
 	signal?.throwIfAborted();
-	// The write may wait for another writer of the demo; a stopping server does not wait with it, and `invoke` then
-	// throws the signal's reason.
+	// Aborted, the write stops at its next statement and does not commit, and `invoke` throws the signal's reason. A
+	// statement waiting for another writer of the demo waits on; a stopping server's deadline covers that.
 	const taken = await invoke(instance.app, OPS, {
 		op: "work",
 		project,
