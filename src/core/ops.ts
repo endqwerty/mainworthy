@@ -485,6 +485,7 @@ export const AdminInput = z.discriminatedUnion("do", [
 			.describe(
 				"Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone.",
 			),
+		projectIdentity: projectCommand.projectIdentity,
 		cmd,
 	}),
 	z.object({
@@ -498,6 +499,7 @@ export const AdminInput = z.discriminatedUnion("do", [
 				"What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set.",
 			),
 		project: z.string().optional().describe("Limit the grant to one project. Absent: every project."),
+		projectIdentity: projectCommand.projectIdentity,
 		label: z.string().max(120).optional(),
 		expires: z
 			.string()
@@ -515,6 +517,7 @@ export const AdminInput = z.discriminatedUnion("do", [
 		do: z.literal("grant.set"),
 		actor: z.string(),
 		project: z.string().optional().describe("The project the grant is for. Absent: every project."),
+		projectIdentity: projectCommand.projectIdentity,
 		can: z.array(Capability).min(1).describe("What the actor may do there from now on, in place of what it could."),
 		roles: z
 			.array(Role)
@@ -527,6 +530,7 @@ export const AdminInput = z.discriminatedUnion("do", [
 		do: z.literal("grant.remove"),
 		actor: z.string(),
 		project: z.string().optional().describe("The project the grant is for. Absent: the grant on every project."),
+		projectIdentity: projectCommand.projectIdentity,
 		cmd,
 	}),
 	z.object({

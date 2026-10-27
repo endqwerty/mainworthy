@@ -686,8 +686,10 @@ no request leaves the process. Nothing is sent to the address `MAINWORTHY_HOST` 
 `MAINWORTHY_PROXY_SECRET`, which every request from outside must prove, has nothing to check. The pipeline's and
 reviewer's tokens the seed makes are admitted in the same process and revoked when it ends. Its command ids include
 the project identity, so it cannot replay the retired project's commands, and every write it makes names the
-identity of the project the swap chose (`projectIdentity`): a refresh that lost its lock while another revision
-replaced the demo has its next write refused, stops, and marks nothing ready. A seed interrupted after the swap
+identity of the project the swap chose (`projectIdentity`), its administrative ones too (marking the demo, the
+pipeline's and reviewer's grants and tokens), each checked in the write's own transaction. A refresh that lost its
+lock while another revision replaced the demo has its next write refused, so it changes nothing in the new demo or
+in who may use it, stops, and marks nothing ready. A seed interrupted after the swap
 resumes that same marked project, time and command ids on the next start. Any earlier retirement drain finishes
 before that resumed seed runs, keeping the two heavy stages from overlapping.
 Only marked demo data is disposable. Changes someone made in the demo are replaced on the next deployed revision.
@@ -717,18 +719,21 @@ travel in an archive. Active-project exports remain available.
 A slice reads only the retired project's own rows, by index, so what it costs follows the size of the retired demo,
 not of the other projects on the instance (#914). A drain reads the schema once and skips the tables it has already
 emptied; one last pass over every table runs before the project row goes. A table owned through its parents (a
-result's excuses, a run's slots) is read under one batch of 256 of the demo's ancestors at a time, in their
-`(project, id)` index order, and the drain keeps its place from slice to slice, so a slice reads a bounded number of
-rows however many runs, cases or results the demo has. Before, each slice gathered every one of the demo's parent ids
-again, which made the drain's work grow with the square of their number. Slices use index scans, not bitmap scans,
-so a slice's `LIMIT` stops the scan. On a copy with 20 seeded projects (1.06
+result's excuses, a run's slots, a slot's lease through its slot and run) is read under one batch of 256 of its own
+parents at a time. The drain keeps its place at every level of the chain from slice to slice, reading each level in
+index order (the top one by `(project, id)`, a lower one by `(parent column, id)`), and a slice that finds a batch
+empty moves at most one row on at a level above. So a slice reads a bounded number of rows however many runs, slots,
+cases or results the demo has. Before, each slice gathered every one of the demo's parent ids again (for a lease,
+every slot of the batch's runs), which made the drain's work grow with the square of their number. Slices use index scans and never sort or use bitmap
+scans, so a slice's `LIMIT` stops the scan. On a copy with 20 seeded projects (1.06
 million results) and one retired default demo (102,304 rows, 28,000 of them results), the drain took 140 s before
 this, with a median slice of 35 ms, a longest of 289 ms, and plans that read up to 490,000 rows of other projects to
 find none; after it, 46 s, a median of 2.2 ms and a longest of 27 ms.
 
 Migration 6 builds the indexes the drain reads by with a plain `CREATE INDEX`: one each on `search_docs`,
 `slot_results` and `team_events`, and one on `(project, id)` for each table a slice reads in batches (`batches`,
-`cases`, `changes`, `decisions`, `merge_receipt_nodes`, `questions`, `requirements` and `runs`). Each holds writes to
+`cases`, `changes`, `decisions`, `merge_receipt_nodes`, `questions`, `requirements` and `runs`), and one on `slots`
+`(run, id)` for leases, read through their slots. Each holds writes to
 its table until the migration commits. The new build runs it at startup,
 before it serves; an older instance still serving during the rollout waits that long to write to those tables. The
 build time follows their row count: about 0.15 s per index for a million rows on a desktop, and the instance's

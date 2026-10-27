@@ -213,7 +213,8 @@ const IN_PROCESS = "http://127.0.0.1:0";
  * The seed's requests, answered in this process by the registry, as HTTP would answer them: `/health`, and an
  * operation at `/api/<op>` or `/api/p/<project>/<op>`. A request with no token is the instance's owner, as for a
  * person on this machine in local mode; one with a token (the pipeline's and the reviewer's, which the seed makes) is
- * whoever `admit` says it is. Each request first passes `step` (`request <op>`), for a test to stop it there.
+ * whoever `admit` says it is. Each request first passes `step` (`request <op>`, and the action an `admin` request names), for a test to stop
+ * it there.
  */
 function inProcess(
 	instance: Instance,
@@ -233,7 +234,9 @@ function inProcess(
 		const headers = new Headers(init.headers);
 		const bearer = headers.get("authorization")?.replace(/^Bearer /, "") ?? null;
 		const at = headers.get(AT_HEADER);
-		await options.step?.(`request ${op}`);
+		const input: unknown = JSON.parse(init.body);
+		const action = op === "admin" ? z.object({ do: z.string() }).safeParse(input).data?.do : undefined;
+		await options.step?.(`request ${op}${action === undefined ? "" : ` ${action}`}`);
 		signal.throwIfAborted();
 		let caller: Pick<Call, "actor" | "reference"> = { actor: async () => owner };
 		if (bearer !== null) {
@@ -247,7 +250,7 @@ function inProcess(
 			await invoke(app, OPS, {
 				op,
 				project: route[1] === undefined ? null : decodeURIComponent(route[1]),
-				input: JSON.parse(init.body),
+				input,
 				...caller,
 				...(at === null ? {} : { at: Number(at) }),
 				signal,

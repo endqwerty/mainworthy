@@ -170,20 +170,41 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		`project ${project} already holds cases, tests or runs; seed fills a new project or an empty one`,
 	);
 	if (exists && !begun && (await holdsWork(owner))) throw taken;
+	// A conflict from a write that names the project's identity, once another project has the key, is that project
+	// replacing this one, and the write changed nothing.
+	const fenced = async (error: unknown, otherwise: unknown = error): Promise<never> => {
+		if (error instanceof CliError && error.code === "conflict" && (await identityNow()) !== identity) throw replaced;
+		throw otherwise;
+	};
 	// The moment the project became a demo, by the server's clock: today, for this demo, however often it is sent.
 	const { since } = Demo.parse(
-		await owner.call("admin", { do: "project.demo", key: project }).catch((error: unknown) => {
+		await owner.call("admin", { do: "project.demo", key: project, projectIdentity: identity }).catch((error: unknown) =>
 			// It holds no case, test or run, and something was written to it all the same: a folder, a policy.
-			throw error instanceof CliError && error.code === "conflict" ? taken : error;
-		}),
+			fenced(error, error instanceof CliError && error.code === "conflict" ? taken : error),
+		),
 	);
 	const signIn = async (producer: Producer) => {
 		const { actor, kind, can } = producer;
 		const label = labelOf(producer, project);
-		// A new token names the grant its actor holds. An actor from an earlier seed is given this project's first.
-		if (known(producer)) await owner.call("admin", { do: "grant.set", actor, project, can });
+		// A new token names the grant its actor holds. An actor from an earlier seed is given this project's first. Both
+		// writes name the project's identity, so neither changes a project that has taken this one's key.
+		if (known(producer))
+			await owner
+				.call("admin", { do: "grant.set", actor, project, projectIdentity: identity, can })
+				.catch((error: unknown) => fenced(error));
 		const token = Token.parse(
-			await owner.call("admin", { do: "token.create", actor, kind, can, project, label, expires: "1h" }),
+			await owner
+				.call("admin", {
+					do: "token.create",
+					actor,
+					kind,
+					can,
+					project,
+					projectIdentity: identity,
+					label,
+					expires: "1h",
+				})
+				.catch((error: unknown) => fenced(error)),
 		);
 		issued.push(token.id);
 		return as(token.token);
@@ -204,16 +225,19 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		at: number,
 		input: Api[N]["input"],
 	): Promise<Api[N]["reply"]> =>
-		who.call(op, { ...input, cmd: id(step), projectIdentity: identity }, at).catch(async (error: unknown) => {
-			if (!(error instanceof CliError && error.code === "conflict")) throw error;
-			if ((await identityNow()) !== identity) throw replaced;
-			if (begun)
-				throw new CliError(
-					"conflict",
-					`project ${project} was seeded with another number of cases, another seed or other days; send those again, or seed another project`,
-				);
-			throw error;
-		});
+		who
+			.call(op, { ...input, cmd: id(step), projectIdentity: identity }, at)
+			.catch((error: unknown) =>
+				fenced(
+					error,
+					begun && error instanceof CliError && error.code === "conflict"
+						? new CliError(
+								"conflict",
+								`project ${project} was seeded with another number of cases, another seed or other days; send those again, or seed another project`,
+							)
+						: error,
+				),
+			);
 
 	/** A person's answer to each of these questions. One answered by an earlier attempt of this seed is left as it is. */
 	const answer = async (

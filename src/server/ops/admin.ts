@@ -94,12 +94,22 @@ export async function createProject(
 	return { key: project.key, identity: project.identity, name: project.name, policy: preset };
 }
 
-/** The id of the project a grant names, or 0 when it names none: every project. */
-export async function projectOf(db: ReadDb, key: string | undefined): Promise<number> {
+/**
+ * The id of the project a grant names, or 0 when it names none: every project. With `identity`, only while the key
+ * still names that project: a caller that read the project before another took its key (a demo refresh that lost its
+ * lock while a newer revision replaced the demo) changes nothing about the new one.
+ */
+export async function projectOf(db: ReadDb, key: string | undefined, identity?: string): Promise<number> {
 	if (key === undefined) return 0;
 	const project = await findProject(db, key);
 	if (!project) throw notFound(`project ${key}`);
+	refuseObsolete(project, identity);
 	return project.id;
+}
+
+function refuseObsolete(project: { identity: string }, identity: string | undefined): void {
+	if (identity !== undefined && project.identity !== identity)
+		throw conflict("This request belongs to an obsolete project. Read the current project before trying again.");
 }
 
 /** Every actor with its grants as a person reads them: each names its project by key, and every project as `*`. */
@@ -179,6 +189,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 		case "project.demo": {
 			const project = await findProject(db, input.key);
 			if (!project) throw notFound(`project ${input.key}`);
+			refuseObsolete(project, input.projectIdentity);
 			const current = await lockProject(db, project.id);
 			if (!current) throw notFound(`project ${input.key}`);
 			const since = await markDemo(db, current, env.now);
@@ -189,7 +200,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 			return { key: project.key, since };
 		}
 		case "token.create": {
-			const project = await projectOf(db, input.project);
+			const project = await projectOf(db, input.project, input.projectIdentity);
 			const existing = await actorByName(db, input.actor, project);
 			refuseToken(env, input, existing);
 			// A new actor is given what was asked, or its kind's default. One that exists keeps its grants, and
@@ -249,7 +260,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 				throw invalid("you cannot change what you yourself may do; another admin must do it");
 			if (input.actor === owner)
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
-			const project = await projectOf(db, input.project);
+			const project = await projectOf(db, input.project, input.projectIdentity);
 			if (input.do === "grant.remove")
 				return { removed: await removeGrant(env.app, db, { actor: input.actor, project }) };
 			const roles = await setGrant(
