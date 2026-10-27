@@ -129,6 +129,9 @@ function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] | "unusa
 	if (
 		times.some(
 			(value) => value !== undefined && !(typeof value === "number" && value >= 0 && value <= Number.MAX_SAFE_INTEGER),
+		) ||
+		report.testResults.some(
+			(file) => typeof file.startTime === "number" && typeof file.endTime === "number" && file.endTime < file.startTime,
 		)
 	)
 		return "unusable";
@@ -136,7 +139,6 @@ function jestSpan(report: z.infer<typeof Report>): ParsedReport["span"] | "unusa
 	let end = Number.NEGATIVE_INFINITY;
 	for (const file of report.testResults) {
 		if (typeof file.startTime !== "number" || typeof file.endTime !== "number") return undefined;
-		if (file.endTime < file.startTime) return "unusable";
 		start = Math.min(start, file.startTime);
 		end = Math.max(end, file.endTime);
 	}
