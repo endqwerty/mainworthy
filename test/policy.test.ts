@@ -2002,6 +2002,29 @@ describe("unlinked tests", () => {
 		expect((await queue()).counts.open).toBe(0);
 	});
 
+	test("undoing the first of two partial links leaves its file asked about once", async () => {
+		await use("standard", "ask");
+		const file = "tests/checkout/coupon.spec.ts";
+		await h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "Coupon applies" } },
+				{ op: "create", body: { title: "Coupon expires" } },
+			],
+		});
+		await h.call("report", ciReport({ commit: "bbbb0021", n: 3, file }));
+		const link = async (pair: [string, string]) => {
+			const asked = first((await queue({ kind: "map", state: "open" })).items);
+			await h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "link", pairs: [pair] } });
+			return asked;
+		};
+		const firstLink = await link(["T-1", "C-1"]);
+		await link(["T-2", "C-2"]);
+		expect((await queue({ kind: "map", state: "open" })).items).toHaveLength(1);
+		await h.call("decide", { undo: firstLink.q });
+		expect((await queue({ kind: "map", state: "open" })).items.map((item) => item.q)).toEqual([firstLink.q]);
+		expect(await unlinkedTests()).toBe(2);
+	});
+
 	test("a person who answered while people were asked overruled no rule: a rule the policy gets later answers", async () => {
 		await use("standard", "ask");
 		const file = "tests/checkout/coupon.spec.ts";

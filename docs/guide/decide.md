@@ -293,7 +293,7 @@ A rule leaves a file's question open if a person took back its answer or answere
 Under `standard` with "Create a case for each test", an agent's reported tests also wait for a person to adopt their new cases.
 See [policy](./policy.md#tests-with-no-case).
 "Link to a case" makes future results count for the chosen case.
-"Create cases" creates one case per test and links each test to its case, for every test of the file with no case, also those past the 50 the question lists.
+"Create cases" creates one case per test and links each test to its case, for every test of the file with no case, also those past the 50 the question lists. One answer creates at most 100,000 cases, as many tests as one report carries. For a file with more, link some of its tests first; the question stays open until then.
 "Create cases" works where the policy adopts your new case by rule, under `loose` or for a person under `standard`.
 Under `strict`, or for an agent under `standard`, a person must adopt each new case. Mainworthy refuses "Create cases" in those situations.
 To link tests when a person must adopt new cases, follow these steps.

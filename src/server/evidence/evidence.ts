@@ -518,11 +518,13 @@ const Q = {
 	unlinkedWithoutFile: sql<{ project: number; file: string; after: number }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT 500",
 	),
-	unlinkedIdsInFile: sql<{ project: number; file: string }, { id: number }>(
-		"SELECT id FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id",
+	unlinkedSetInFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
+		`SELECT count(*) AS n, bit_xor(hashint8extended(id, 0))::text AS digest
+		 FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto'`,
 	),
-	unlinkedIdsWithoutFile: sql<{ project: number; file: string }, { id: number }>(
-		"SELECT id FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' ORDER BY id",
+	unlinkedSetWithoutFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
+		`SELECT count(*) AS n, bit_xor(hashint8extended(id, 0))::text AS digest
+		 FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto'`,
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
@@ -2034,11 +2036,18 @@ export const NO_FILE = "(no file)";
  */
 export const unlinkedInFile = async (db: ReadDb, project: number, file: string, after = 0): Promise<TestRow[]> =>
 	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file, after });
-/** The ids of every test `unlinkedInFile` pages through, in the same order. */
-export const unlinkedIdsInFile = async (db: ReadDb, project: number, file: string): Promise<number[]> =>
-	(await db.all(file === NO_FILE ? Q.unlinkedIdsWithoutFile : Q.unlinkedIdsInFile, { project, file })).map(
-		(row) => row.id,
-	);
+/**
+ * How many tests `unlinkedInFile` pages through, and a digest of which: it changes when a test joins or leaves the
+ * set. Both are computed in the database, so a file with a million such tests costs the server no more than one.
+ */
+export async function unlinkedSetInFile(
+	db: ReadDb,
+	project: number,
+	file: string,
+): Promise<{ count: number; digest: string }> {
+	const row = await db.get(file === NO_FILE ? Q.unlinkedSetWithoutFile : Q.unlinkedSetInFile, { project, file });
+	return { count: Number(row?.n ?? 0), digest: row?.digest ?? "" };
+}
 export const unlinkedCount = async (db: ReadDb, project: number): Promise<number> =>
 	(await db.get(Q.unlinkedCount, { project }))?.n ?? 0;
 export const resultById = async (db: ReadDb, id: number): Promise<ResultRow | null> =>
