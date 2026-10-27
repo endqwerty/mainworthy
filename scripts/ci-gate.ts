@@ -214,10 +214,14 @@ export async function runCiGate(
 	console.log(`\n${chosen}`);
 	if (gate !== 0) {
 		console.log(`The gate did not pass (exit ${gate}).`);
-		// The session that pushed the commit fixes it; this is how it reads what failed (scripts/work/ci.ts).
+		// PR sessions use the repository helper; commit-only reads stay scoped to the chosen project.
 		const pr = /^refs\/pull\/(\d+)\//.exec(env.GITHUB_REF ?? "")?.[1];
-		if (choice.use === "deployed")
-			console.log(`What failed, from the instance: bun scripts/work.ts ci ${pr ?? env.GITHUB_SHA ?? ""}`.trim());
+		if (choice.use === "deployed") {
+			const command = pr
+				? `bun scripts/work.ts ci ${pr}`
+				: `mainworthy --project ${choice.project} gate --commit ${env.GITHUB_SHA ?? ""}`;
+			console.log(`What failed, from the instance: ${command}`.trim());
+		}
 	} else if (problems.length > 0) console.log("The gate passed on what it was told, and that was not everything.");
 	return gate !== 0 ? gate : problems.length > 0 ? 1 : 0;
 }
