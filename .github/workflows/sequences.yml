@@ -1,0 +1,74 @@
+# Daily exploration is separate from the required `check / gate` on pull requests.
+# Preserve the real source SHA and build URL, but report into a logical repository namespace:
+# a commit run is keyed by repository + SHA, so a branch/job name alone would still alter the PR gate.
+name: sequences
+
+on:
+  schedule:
+    - cron: '17 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sequences:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    # Forty seeds per preset preserves the former ~8 minute workload; leave room for setup and reporting.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - name: Start PostgreSQL for sequences
+        run: bash scripts/ci-postgres.sh --only=parallel
+      - name: Sequences
+        id: sequences
+        # Report even failed tests; the last step preserves the test exit regardless of configuration or policy.
+        continue-on-error: true
+        run: |
+          count=$(bun -e 'import { SEQUENCE_SEEDS } from "./test/sequence-config.ts"; process.stdout.write(String(SEQUENCE_SEEDS.daily))')
+          MAINWORTHY_SEQUENCE_SEEDS="$count" bun scripts/check.ts test --only=parallel --junit=test-results/sequences.xml test/sequences-{loose,standard,strict,extended-loose,extended-standard,extended-strict}.test.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-sequences-attempt-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Join the tailnet the deployed Mainworthy is on
+        if: ${{ always() && vars.MAINWORTHY_URL != '' && vars.TS_OAUTH_CLIENT_ID != '' }}
+        continue-on-error: true
+        uses: tailscale/github-action@99a8333667fff04fdd6cffb46dfd409f8329a7bf # v4.3.0
+        with:
+          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
+          tags: tag:ci
+      - name: Report sequences to Mainworthy, then the gate
+        if: always()
+        env:
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
+          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
+          MAINWORTHY_REPO: ${{ format('{0}-sequences', github.repository) }}
+          MAINWORTHY_BRANCH: sequences
+        # Reuse the ordinary report validation, deployed-instance selection, fallback, report and gate commands.
+        run: bun scripts/ci-gate.ts test-results sequences --files=test/sequences-loose.test.ts,test/sequences-standard.test.ts,test/sequences-strict.test.ts,test/sequences-extended-loose.test.ts,test/sequences-extended-standard.test.ts,test/sequences-extended-strict.test.ts
+      - name: PostgreSQL logs and cleanup
+        if: always()
+        run: |
+          if docker container inspect postgres >/dev/null 2>&1; then
+            docker logs postgres
+            docker rm --force postgres
+          fi
+      - name: The sequence tests passed
+        if: always()
+        run: test '${{ steps.sequences.outcome }}' = success
