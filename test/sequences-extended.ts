@@ -29,7 +29,8 @@ import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel
 // New actions: a person's typed result into a run sometimes carries a job name and a skipped automated key; an
 // agent sometimes reports a commit nobody has reported yet, as trunk or as the change, before the pipeline does.
 //
-// The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
+// The tests are in `sequences-extended-loose-1.test.ts`, `-2`, and the same for `standard` and `strict`: each
+// preset's seeds in two halves. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
 import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
@@ -893,9 +894,9 @@ export async function sequence(
 	}
 }
 
-/** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
-export function extendedSequences(preset: "loose" | "standard" | "strict"): void {
-	if (preset === "loose")
+/** One half of a policy preset's seeds. Each half has a file of its own, so the six run side by side. */
+export function extendedSequences(preset: "loose" | "standard" | "strict", half: 1 | 2): void {
+	if (preset === "loose" && half === 1)
 		test("the job audit excludes corrected-only evidence in a fixed sequence", async () => {
 			const h = await harness({ preset });
 			try {
@@ -951,20 +952,24 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 			}
 		});
 
-	test("extended sequence audits keep database snapshots bounded", async () => {
-		const reads = spyOn(Database.prototype, "read");
-		try {
-			expect(await sequence(1, preset, 10)).toBeNull();
-			expect(reads.mock.calls.length).toBeLessThan(200);
-		} finally {
-			reads.mockRestore();
-		}
-	});
+	if (half === 1)
+		test("extended sequence audits keep database snapshots bounded", async () => {
+			const reads = spyOn(Database.prototype, "read");
+			try {
+				expect(await sequence(1, preset, 10)).toBeNull();
+				expect(reads.mock.calls.length).toBeLessThan(200);
+			} finally {
+				reads.mockRestore();
+			}
+		});
 
-	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, async () => {
+	const middle = Math.ceil(SEEDS / 2);
+	const first = half === 1 ? FIRST : FIRST + middle;
+	const count = half === 1 ? middle : SEEDS - middle;
+	test(`${count} extended random sequences from seed ${first} under the ${preset} policy keep every invariant`, async () => {
 		const problems: Problem[] = [];
 		let auditStatements = 0;
-		for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
+		for (let seed = first; seed < first + count && problems.length < 3; seed++) {
 			const problem = await sequence(seed, preset, STEPS, ({ statements }) => {
 				auditStatements = Math.max(auditStatements, statements);
 			});
