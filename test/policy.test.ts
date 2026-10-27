@@ -1994,6 +1994,12 @@ describe("unlinked tests", () => {
 			status: "reopened",
 		});
 		expect(await unlinkedTests()).toBe(3);
+		// Taking the link back takes back the question it opened about the rest: the file is asked about once.
+		const open = (await queue({ kind: "map", state: "open" })).items;
+		expect(open.map((item) => item.q)).toEqual([asked.q]);
+		await h.call("decide", { q: asked.q, onEvidence: first(open).evidenceHash, answer: { is: "create" } });
+		expect(await unlinkedTests()).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 	});
 
 	test("a person who answered while people were asked overruled no rule: a rule the policy gets later answers", async () => {
