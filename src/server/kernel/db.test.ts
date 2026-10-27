@@ -665,3 +665,24 @@ test("closing stops an exclusive callback's write waiting for a lock, and return
 		await closing.close();
 	}
 });
+
+test("a write whose signal aborted does not commit, even when its callback caught the cancellation", async () => {
+	const controller = new AbortController();
+	const reason = new Error("stopped by the test");
+	const outcome = await database
+		.write(
+			(db) =>
+				db.transaction(async () => {
+					await db.run(Q.insert, { id: 9_141, text: "before the abort" });
+					controller.abort(reason);
+					await db.savepoint((inner) => inner.one(Q.count)).catch(() => undefined);
+				}),
+			{ signal: controller.signal },
+		)
+		.then(
+			() => "committed",
+			(error: unknown) => error,
+		);
+	expect(outcome).toBe(reason);
+	expect(await database.read((db) => db.get(Q.select, { id: 9_141 }))).toBeNull();
+});
