@@ -2035,6 +2035,56 @@ describe("unlinked tests", () => {
 		]);
 	});
 
+	test("a withdrawn answer keeps the rule away until the file changes, also when tests changed before it", async () => {
+		await use("standard", "track");
+		const file = "tests/checkout/coupon.spec.ts";
+		const other = "tests/checkout/other.spec.ts";
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Coupon applies" } }] });
+		await h.call("report", ciReport({ commit: "bbbb0031", n: 3, file }));
+		await h.call("report", ciReport({ commit: "bbbb0031", job: "other", n: 1, file: other }));
+		const tracked = (await queue({ kind: "map", state: "decided" })).items;
+		const mine = tracked.find((item) => item.title.includes(file));
+		const theirs = tracked.find((item) => item.title.includes(other));
+		if (!mine || !theirs) throw new Error("expected both files tracked by the rule");
+		// Another file's answer links T-2 of this file: this file's tests with no case change before the withdrawal.
+		await h.call("decide", {
+			q: theirs.q,
+			onEvidence: theirs.evidenceHash,
+			answer: {
+				is: "link",
+				pairs: [
+					["T-2", "C-1"],
+					["T-4", "C-1"],
+				],
+			},
+		});
+		await h.call("decide", { undo: mine.q });
+		expect(await setUnlinked("create")).toMatchObject({ status: "decided" });
+		expect((await queue({ kind: "map", state: "open" })).items.map((item) => item.q)).toEqual([mine.q]);
+		expect(await unlinkedTests()).toBe(2);
+	});
+
+	test("a question opened again after every test of its file was linked elsewhere says none is left", async () => {
+		await use("standard", "track");
+		const file = "tests/checkout/coupon.spec.ts";
+		const other = "tests/checkout/other.spec.ts";
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Coupon applies" } }] });
+		await h.call("report", ciReport({ commit: "bbbb0041", n: 1, file }));
+		await h.call("report", ciReport({ commit: "bbbb0041", job: "other", n: 1, file: other }));
+		const tracked = (await queue({ kind: "map", state: "decided" })).items;
+		const mine = tracked.find((item) => item.title.includes(file));
+		const theirs = tracked.find((item) => item.title.includes(other));
+		if (!mine || !theirs) throw new Error("expected both files tracked by the rule");
+		await h.call("decide", {
+			q: theirs.q,
+			onEvidence: theirs.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		await h.call("decide", { undo: mine.q });
+		const reopened = (await queue({ kind: "map", state: "open" })).items.find((item) => item.q === mine.q);
+		expect(reopened).toMatchObject({ title: `No test in ${file} is left without a case`, evidence: { count: 0 } });
+	});
+
 	test("a person who answered while people were asked overruled no rule: a rule the policy gets later answers", async () => {
 		await use("standard", "ask");
 		const file = "tests/checkout/coupon.spec.ts";
