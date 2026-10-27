@@ -36,6 +36,33 @@ describe("a report's span", () => {
 		expect(parsed.warnings.filter((line) => line.includes("span"))).toEqual([]);
 	});
 
+	test.each([
+		["jest", "missing first"],
+		["jest", "reversed first"],
+		["vitest", "missing first"],
+		["vitest", "reversed first"],
+	] as const)("%s warns about reversed times beside missing times: %s", (format, order) => {
+		const assertionResults = [{ title: "adds", ancestorTitles: [], status: "passed" }];
+		const reversed = { name: "reversed.test.ts", status: "passed", assertionResults, startTime: 20, endTime: 10 };
+		for (const timing of [{}, { startTime: 10 }, { endTime: 20 }]) {
+			const missing = { name: "missing.test.ts", status: "passed", assertionResults, ...timing };
+			const files = order === "missing first" ? [missing, reversed] : [reversed, missing];
+			const parsed = parseReport(JSON.stringify({ testResults: files }), {
+				file: "report.json",
+				format,
+				rootDir: "/repo",
+			});
+			expect(parsed.span).toBeUndefined();
+			expect(parsed.results).toEqual(
+				files.map((file) => ({
+					test: { key: `${file.name}::adds`, name: "adds", file: file.name },
+					outcome: "pass",
+				})),
+			);
+			expect(parsed.warnings).toEqual(["the report's start and end times are unusable; no reported span is kept"]);
+		}
+	});
+
 	test("Jest or Vitest JSON with a time that is no time has none, says so once and keeps its results", async () => {
 		const options = { file: "report.json", rootDir: "/home/robin/project" };
 		for (const [name, change] of [
