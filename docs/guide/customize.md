@@ -118,8 +118,6 @@ A seeded project is a demo project, and stays one. Only a demo project accepts a
 `seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone. The command revokes the pipeline and agent tokens when seeding ends. If seeding stops early, those tokens expire after an hour.
 
 You cannot delete a project yet, so a manually seeded demo stays until you start with a new data directory.
-**Paused since 2026-10-24 ([#914](https://github.com/endqwerty/mainworthy/issues/914)):** `mainworthy serve` runs neither the demo refresh nor the retired-demo cleanup; the demo stays as it is. On the instance's data one cleanup slice held the server's thread for hours. What follows describes them as they will run again.
-
 For a demo that follows deployments, set `MAINWORTHY_DEMO=demo`. Once the server listens, it compares its
 `MAINWORTHY_COMMIT` or Coolify `SOURCE_COMMIT` with the revision on the demo mark. A restart of a completed
 revision preserves your demo edits. A new deployed revision atomically swaps in a fresh demo at the same URL,

@@ -787,6 +787,53 @@ type SliceTable = {
 	incoming: SliceReference[];
 	parents: string[];
 };
+/**
+ * What one drain carries from slice to slice: the tables in visiting order, read once (the schema does not change
+ * while serving), and the tables already found empty for the project being removed. A slice skips those, so it reads
+ * only the table it deletes from, not every table the project once had (#914). Before the project row goes, one pass
+ * reads every table again, so a row written meanwhile is still found.
+ */
+export type RemovalPlan = {
+	readonly tables: readonly SliceTable[];
+	project: string | null;
+	readonly empty: Set<string>;
+};
+export async function removalPlan(db: ReadDb): Promise<RemovalPlan> {
+	return { tables: await slicePlan(db), project: null, empty: new Set() };
+}
+
+/**
+ * Planner settings for a slice. Its statements are prepared, and a generic plan expects an average project's rows
+ * behind `project = $1`: once the retired project's rows of a table were gone, `LIMIT 1` scanned every other
+ * project's rows to find none, on every later slice (#914). A custom plan sees the retired project's own share, and
+ * without sequential scans, hash or merge joins each query walks that project's index entries and probes its
+ * dependants by index. A table without a usable index still gets its sequential scan;
+ * `test/demo-removal-indexes.test.ts` holds every table a slice reads to having one.
+ */
+const SLICE_SETTINGS: readonly (readonly [string, string])[] = [
+	["plan_cache_mode", "force_custom_plan"],
+	["enable_seqscan", "off"],
+	["enable_hashjoin", "off"],
+	["enable_mergejoin", "off"],
+	["max_parallel_workers_per_gather", "0"],
+];
+
+/**
+ * `ownedBy` for a slice. A parent's rows are read on their own into an array, by the parent's project index, and the
+ * table is then read by its own index on the parent column: as `col IN (subquery)` under a LIMIT, the planner could
+ * walk the parent's whole primary key instead, every other project's rows included.
+ */
+function sliceOwned(table: { name: string; columns: readonly string[] }): string {
+	if (table.name === "projects") return "id = $1::bigint";
+	if (table.columns.includes("project")) return "project = $1::bigint";
+	const parent = PROJECT_PARENT[table.name];
+	if (!parent) throw invalid(`removing a project has no ownership rule for table ${table.name}`);
+	const filter = sliceOwned({ name: parent.table, columns: PROJECT_PARENT[parent.table] ? [] : ["project"] });
+	return `${identifier(parent.column)} = ANY(ARRAY(SELECT id FROM ${identifier(parent.table)} WHERE ${filter}))`;
+}
+const setLocal = (count: number): string =>
+	`SELECT ${Array.from({ length: count }, (_, i) => `set_config($${2 * i + 1}, $${2 * i + 2}, true)`).join(", ")}`;
+
 async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
 	const catalog = await db.catalog();
 	const tables = new Map<string, SliceTable>();
@@ -796,11 +843,7 @@ async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
 			keys: [...table.primary],
 			owned: INSTANCE_TABLES.includes(table.name)
 				? null
-				: ownedBy(
-						{ name: table.name, columns: table.columns.map((column) => column.name) },
-						"$1::bigint",
-						"removing a project",
-					).slice(6),
+				: sliceOwned({ name: table.name, columns: table.columns.map((column) => column.name) }),
 			incoming: [],
 			parents: table.foreignKeys.map((reference) => reference.parent),
 		});
@@ -851,7 +894,8 @@ function sliceIdentity(table: SliceTable, alias = "", first = 2): string {
 /**
  * Removes at most `limit` owned rows, including incoming FK dependants, in an enforced transaction.
  * A caller may supply its transaction to hold authority and project locks. Commit and yield between slices. No persistent cursor or whole-instance audit is
- * needed. Leaf rows go first, so cascades cannot turn a small slice into a large deletion. A bounded incoming
+ * needed; a drain passes one `removalPlan` to every slice so each reads only the table it is emptying. Leaf rows go
+ * first, so cascades cannot turn a small slice into a large deletion. A bounded incoming
  * closure handles cycles; a larger cycle or a reference from retained data refuses the slice unchanged.
  * The last transaction deletes the demo mark and project together (at most two rows, even for limit=1).
  * `rows` counts deleted owned rows, including the mark and cascades; FTS shadow writes and trigger work are additional.
@@ -860,114 +904,146 @@ export async function removeProjectSlice(
 	db: WriteDb,
 	key: string,
 	limit = 128,
+	plan?: RemovalPlan,
 ): Promise<{ done: boolean; table: string | null; rows: number }> {
 	if (!Number.isSafeInteger(limit) || limit < 1)
 		throw invalid("project removal slice limit must be a positive safe integer");
 	return db.transaction(() =>
 		db.checkedBulk(async () => {
-			const project = (
-				await db.allDynamic<{ id: string }>("SELECT id::text AS id FROM projects WHERE key=$1", [key])
-			)[0];
-			if (!project) return { done: true, table: null, rows: 0 };
-			const tables = await slicePlan(db);
-			const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
-			let blocked: string | null = null;
-			for (const table of ordinary) {
-				const blockers = table.incoming.map(({ child, columns }) => {
-					const matches = columns
-						.map(({ from, to }) => `c.${identifier(from)} = ${identifier(table.name)}.${identifier(to)}`)
-						.join(" AND ");
-					const same =
-						child === table
-							? ` AND NOT (${table.keys.map((key) => `c.${identifier(key)} = ${identifier(table.name)}.${identifier(key)}`).join(" AND ")})`
-							: "";
-					return `NOT EXISTS (SELECT 1 FROM ${identifier(child.name)} c WHERE ${matches}${same})`;
-				});
-				const roots = await db.allDynamic<{ keys: string }>(
-					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned}${blockers.length ? ` AND ${blockers.join(" AND ")}` : ""} LIMIT $2::bigint`,
-					[project.id, limit],
-				);
-				if (roots.length > 0) {
-					const identity = `(${table.keys.map(identifier).join(",")})`;
-					const selected = roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys)));
-					const placeholders = selected
-						.map((keys, row) => `(${keys.map((_, i) => `$${2 + row * table.keys.length + i}`).join(",")})`)
-						.join(",");
-					await db.runDynamic(
-						`DELETE FROM ${identifier(table.name)} WHERE ${table.owned} AND ${identity} IN (${placeholders})`,
-						[project.id, ...selected.flat()],
-					);
-					return { done: false, table: table.name, rows: roots.length };
-				}
-				const root = (
-					await db.allDynamic<{ keys: string }>(
-						`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned} LIMIT 1`,
-						[project.id],
-					)
-				)[0];
-				if (!root) continue;
-				const pending = [{ table, keys: z.array(z.string()).parse(JSON.parse(root.keys)) }];
-				const included = new Set([`${table.name}:${root.keys}`]);
-				let oversized = false;
-				for (let at = 0; at < pending.length && !oversized; at++) {
-					const row = pending[at];
-					if (!row) continue;
-					for (const { child, columns } of row.table.incoming) {
-						const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
-						const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
-						const dependants = await db.allDynamic<{ keys: string; owned: boolean }>(
-							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "FALSE"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE (${row.table.owned}) AND ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
-							[project.id, ...row.keys],
-						);
-						for (const dependant of dependants) {
-							if (!dependant.owned || child.name === "projects" || child.name === "demo_projects")
-								throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
-							const identity = `${child.name}:${dependant.keys}`;
-							if (included.has(identity)) continue;
-							included.add(identity);
-							pending.push({ table: child, keys: z.array(z.string()).parse(JSON.parse(dependant.keys)) });
-							if (pending.length > limit) {
-								oversized = true;
-								break;
-							}
-						}
-						if (oversized) break;
-					}
-				}
-				if (oversized) {
-					blocked = table.name;
-					continue;
-				}
-				for (const row of pending.reverse())
-					await db.runDynamic(
-						`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table, "", 1)}`,
-						row.keys,
-					);
-				return { done: false, table: table.name, rows: pending.length };
-			}
-			if (blocked)
-				throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
-			for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
-				for (const { child, columns } of table.incoming) {
-					if (child.name === "demo_projects") continue;
-					const from = columns.map((column) => identifier(column.from)).join(",");
-					const to = columns.map((column) => identifier(column.to)).join(",");
-					if (
-						(
-							await db.allDynamic(
-								`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${table.owned}) LIMIT 1`,
-								[project.id],
-							)
-						)[0]
-					)
-						throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
-				}
-			}
-			let rows = (await db.runDynamic("DELETE FROM demo_projects WHERE project=$1", [project.id])).changes;
-			rows += (await db.runDynamic("DELETE FROM projects WHERE id=$1", [project.id])).changes;
-			return { done: true, table: "projects", rows };
+			// A failed slice rolls its savepoint back, settings included; a finished one gives the caller its own back.
+			const before = await db.allDynamic<{ name: string; setting: string }>(
+				"SELECT name, current_setting(name) AS setting FROM unnest($1::text[]) name",
+				[arrayLiteral(SLICE_SETTINGS.map(([name]) => name))],
+			);
+			await db.allDynamic(setLocal(SLICE_SETTINGS.length), SLICE_SETTINGS.flat());
+			const result = await slice(db, key, limit, plan);
+			await db.allDynamic(
+				setLocal(before.length),
+				before.flatMap(({ name, setting }) => [name, setting]),
+			);
+			return result;
 		}),
 	);
+}
+
+async function slice(
+	db: WriteDb,
+	key: string,
+	limit: number,
+	plan: RemovalPlan | undefined,
+	skip = true,
+): Promise<{ done: boolean; table: string | null; rows: number }> {
+	const project = (await db.allDynamic<{ id: string }>("SELECT id::text AS id FROM projects WHERE key=$1", [key]))[0];
+	if (!project) return { done: true, table: null, rows: 0 };
+	if (plan && plan.project !== `${key}:${project.id}`) {
+		plan.project = `${key}:${project.id}`;
+		plan.empty.clear();
+	}
+	const tables = plan?.tables ?? (await slicePlan(db));
+	const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
+	let blocked: string | null = null;
+	for (const table of ordinary) {
+		if (skip && plan?.empty.has(table.name)) continue;
+		const blockers = table.incoming.map(({ child, columns }) => {
+			const matches = columns
+				.map(({ from, to }) => `c.${identifier(from)} = ${identifier(table.name)}.${identifier(to)}`)
+				.join(" AND ");
+			const same =
+				child === table
+					? ` AND NOT (${table.keys.map((key) => `c.${identifier(key)} = ${identifier(table.name)}.${identifier(key)}`).join(" AND ")})`
+					: "";
+			return `NOT EXISTS (SELECT 1 FROM ${identifier(child.name)} c WHERE ${matches}${same})`;
+		});
+		const roots = await db.allDynamic<{ keys: string }>(
+			`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned}${blockers.length ? ` AND ${blockers.join(" AND ")}` : ""} LIMIT $2::bigint`,
+			[project.id, limit],
+		);
+		if (roots.length > 0) {
+			const identity = `(${table.keys.map(identifier).join(",")})`;
+			const selected = roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys)));
+			const placeholders = selected
+				.map((keys, row) => `(${keys.map((_, i) => `$${2 + row * table.keys.length + i}`).join(",")})`)
+				.join(",");
+			await db.runDynamic(
+				`DELETE FROM ${identifier(table.name)} WHERE ${table.owned} AND ${identity} IN (${placeholders})`,
+				[project.id, ...selected.flat()],
+			);
+			return { done: false, table: table.name, rows: roots.length };
+		}
+		const root = (
+			await db.allDynamic<{ keys: string }>(
+				`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned} LIMIT 1`,
+				[project.id],
+			)
+		)[0];
+		if (!root) {
+			plan?.empty.add(table.name);
+			continue;
+		}
+		const pending = [{ table, keys: z.array(z.string()).parse(JSON.parse(root.keys)) }];
+		const included = new Set([`${table.name}:${root.keys}`]);
+		let oversized = false;
+		for (let at = 0; at < pending.length && !oversized; at++) {
+			const row = pending[at];
+			if (!row) continue;
+			for (const { child, columns } of row.table.incoming) {
+				const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
+				const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
+				const dependants = await db.allDynamic<{ keys: string; owned: boolean }>(
+					`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "FALSE"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE (${row.table.owned}) AND ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
+					[project.id, ...row.keys],
+				);
+				for (const dependant of dependants) {
+					if (!dependant.owned || child.name === "projects" || child.name === "demo_projects")
+						throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
+					const identity = `${child.name}:${dependant.keys}`;
+					if (included.has(identity)) continue;
+					included.add(identity);
+					pending.push({ table: child, keys: z.array(z.string()).parse(JSON.parse(dependant.keys)) });
+					if (pending.length > limit) {
+						oversized = true;
+						break;
+					}
+				}
+				if (oversized) break;
+			}
+		}
+		if (oversized) {
+			blocked = table.name;
+			continue;
+		}
+		for (const row of pending.reverse())
+			await db.runDynamic(
+				`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table, "", 1)}`,
+				row.keys,
+			);
+		return { done: false, table: table.name, rows: pending.length };
+	}
+	if (skip && plan?.empty.size) {
+		plan.empty.clear();
+		return slice(db, key, limit, plan, false);
+	}
+	if (blocked)
+		throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
+	for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
+		for (const { child, columns } of table.incoming) {
+			if (child.name === "demo_projects") continue;
+			const from = columns.map((column) => identifier(column.from)).join(",");
+			const to = columns.map((column) => identifier(column.to)).join(",");
+			if (
+				(
+					await db.allDynamic(
+						`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${table.owned}) LIMIT 1`,
+						[project.id],
+					)
+				)[0]
+			)
+				throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
+		}
+	}
+	let rows = (await db.runDynamic("DELETE FROM demo_projects WHERE project=$1", [project.id])).changes;
+	rows += (await db.runDynamic("DELETE FROM projects WHERE id=$1", [project.id])).changes;
+	return { done: true, table: "projects", rows };
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */
