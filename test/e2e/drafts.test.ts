@@ -469,13 +469,30 @@ test.skipIf(!browserAvailable)(
 						: null,
 				),
 			).toEqual({ focused: true, caret: 25 });
-			await page.keyboard.type("reload");
-			expect(await step.inputValue()).toBe("Apply the discount after reload");
+			await page.keyboard.type("reload ");
+			expect(await step.inputValue()).toBe("Apply the discount after reload ");
 			await page.keyboard.press("Control+Enter");
 			await page.locator("#stat").filter({ hasText: "Version 3, by you" }).waitFor();
 			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
 				version: 3,
 				steps: [{ action: "Apply the discount after reload" }],
+			});
+			// The space kept is no edit of this page's: a colleague's later words in the step are shown, and the next
+			// save of another field keeps them (the independent check of this change, F1).
+			expect(await step.inputValue()).toBe("Apply the discount after reload ");
+			await server.api("propose", {
+				edits: [
+					{ op: "edit", case: "C-1", base: 3, body: { steps: [{ id: "a1", action: "Remote words", expected: null }] } },
+				],
+			});
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v4"));
+			expect(await step.inputValue()).toBe("Remote words");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Spacing case revised");
+			await page.keyboard.press("Control+Enter");
+			await page.locator("#stat").filter({ hasText: "Version 5, by you" }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				title: "Spacing case revised",
+				steps: [{ action: "Remote words" }],
 			});
 			expect(browser.errors).toEqual([]);
 		} finally {

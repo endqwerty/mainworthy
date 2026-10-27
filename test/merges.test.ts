@@ -253,6 +253,26 @@ describe("a draft carried onto a version the page has read", () => {
 		});
 	});
 
+	// The independent check of the change for #927. Spacing a save took out is no edit of the person's: a colleague's
+	// later words in that field stand (F1). A line break where a space was is the colleague's edit (F2).
+	test("spacing kept as typed gives way to a later version's words", () => {
+		const step = (action: string) => ({ ...v1, steps: [{ id: "s1", action, expected: null }] });
+		expect(onto(step("Local saved action "), step("Remote changed action"), step("Local saved action"))).toEqual(
+			step("Remote changed action"),
+		);
+		expect(onto(step("Open cart"), step("Open\ncart"), step("Open cart"))).toEqual(step("Open\ncart"));
+		// Lines indented and ended with spaces are each trimmed on saving, and stay as typed.
+		const lines = { ...step("  Open cart  \n  Apply coupon \n"), pre: "  Logged in \n  Cart ready " };
+		expect(
+			asTyped({ typed: lines, stored: { ...step("Open cart\nApply coupon"), pre: "Logged in \n  Cart ready" } }),
+		).toEqual(lines);
+		// With nothing else changed, the spacing stays as typed.
+		expect(onto(step("Open cart "), { ...step("Open cart"), title: "Theirs" }, step("Open cart"))).toEqual({
+			...step("Open cart "),
+			title: "Theirs",
+		});
+	});
+
 	test("with no action typed since, nothing is left to record that the version does not hold", () => {
 		for (const live of [
 			holding(),
