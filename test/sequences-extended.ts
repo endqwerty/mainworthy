@@ -31,17 +31,18 @@ import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel
 //
 // The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
-// More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
+// Default seeds 1–8, daily seeds 1–40 (sequence-config.ts). Both accept MAINWORTHY_SEQUENCE_FIRST and
+// MAINWORTHY_SEQUENCE_SEEDS overrides; failures print the command for exactly one seed and policy.
 import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
 import { auditRelations } from "./sequence-audit.ts";
+import { sequenceFailure, sequenceSeeds } from "./sequence-config.ts";
 import { type AuditMeasurement, auditExcuses, seedPlan } from "./sequences.ts";
 
-const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
+const SEEDS = sequenceSeeds(process.env);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
-const FIRST = Number(process.env.MAINWORTHY_SEQUENCE_FIRST ?? 1);
 
 async function auditJobs(db: ReadDb): Promise<{ job: string; target: number }[]> {
 	return await db.all(
@@ -961,18 +962,27 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 		}
 	});
 
-	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, async () => {
-		const problems: Problem[] = [];
-		let auditStatements = 0;
-		for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
-			const problem = await sequence(seed, preset, STEPS, ({ statements }) => {
-				auditStatements = Math.max(auditStatements, statements);
-			});
-			if (problem) problems.push(problem);
-		}
-		expect(problems).toEqual([]);
-		expect(auditStatements).toBeLessThanOrEqual(4);
-	}, 600_000);
+	for (const seed of SEEDS) {
+		test(`extended random sequence seed ${seed} under the ${preset} policy keeps every invariant`, async () => {
+			try {
+				let auditStatements = 0;
+				const problem = await sequence(seed, preset, STEPS, ({ statements }) => {
+					auditStatements = Math.max(auditStatements, statements);
+				});
+				expect(problem).toBeNull();
+				expect(auditStatements).toBeLessThanOrEqual(4);
+			} catch (error) {
+				throw new Error(
+					sequenceFailure(
+						`test/sequences-extended-${preset}.test.ts`,
+						seed,
+						error instanceof Error ? error.message : error,
+					),
+					{ cause: error },
+				);
+			}
+		}, 120_000);
+	}
 }
 
 async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {

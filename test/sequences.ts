@@ -38,14 +38,16 @@ import type { Actor } from "../src/server/kernel/ctx.ts";
 //     in the change's own repository. A person's broad inherited judgment keeps its existing build-only hold.
 //
 // The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
-// More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
+// Default seeds 1–8, daily seeds 1–40 (sequence-config.ts). Both accept MAINWORTHY_SEQUENCE_FIRST and
+// MAINWORTHY_SEQUENCE_SEEDS overrides; failures print the command for exactly one seed and policy.
 import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
 import { testDatabase } from "./db.ts";
 import { harness } from "./helpers.ts";
 import { auditRelations } from "./sequence-audit.ts";
+import { sequenceFailure, sequenceSeeds } from "./sequence-config.ts";
 
-const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
+const SEEDS = sequenceSeeds(process.env);
 const STEPS = 80;
 
 export const seedPlan = {
@@ -972,23 +974,30 @@ export function sequences(preset: "loose" | "standard" | "strict"): void {
 			}
 		});
 
-	for (let seed = 1; seed <= SEEDS; seed++) {
-		test(`random sequence ${seed}/${SEEDS} under the ${preset} policy keeps every invariant`, async () => {
-			let firstPlan = -1;
-			let auditStatements = 0;
-			const problem = await sequence(
-				seed,
-				preset,
-				(step) => {
-					firstPlan = step;
-				},
-				({ statements }) => {
-					auditStatements = Math.max(auditStatements, statements);
-				},
-			);
-			expect(problem).toBeNull();
-			expect(firstPlan).toBeGreaterThanOrEqual(0);
-			expect(auditStatements).toBeLessThanOrEqual(4);
+	for (const seed of SEEDS) {
+		test(`random sequence seed ${seed} under the ${preset} policy keeps every invariant`, async () => {
+			try {
+				let firstPlan = -1;
+				let auditStatements = 0;
+				const problem = await sequence(
+					seed,
+					preset,
+					(step) => {
+						firstPlan = step;
+					},
+					({ statements }) => {
+						auditStatements = Math.max(auditStatements, statements);
+					},
+				);
+				expect(problem).toBeNull();
+				expect(firstPlan).toBeGreaterThanOrEqual(0);
+				expect(auditStatements).toBeLessThanOrEqual(4);
+			} catch (error) {
+				throw new Error(
+					sequenceFailure(`test/sequences-${preset}.test.ts`, seed, error instanceof Error ? error.message : error),
+					{ cause: error },
+				);
+			}
 		}, 120_000);
 	}
 }
