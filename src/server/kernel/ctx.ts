@@ -53,6 +53,11 @@ export type Ctx<D extends ReadDb = WriteDb> = {
 	 * stopped with an error instead of holding the server's one writer for ever.
 	 */
 	raised: Map<string, number>;
+	/**
+	 * How many cases this command's answers have made for tests with no case. Shared by every copy of the context, so
+	 * the answers of one command together stay inside the bound on one transaction's work.
+	 */
+	mapped: { created: number };
 	/** Reserves count refs (one by default) and returns the last number in that range. */
 	nextNo: (name: CounterName, count?: number) => Promise<number>;
 	/** A counter that grows within the command, to order rows that share a seq. */
@@ -353,6 +358,7 @@ export function makeCtx<D extends ReadDb>(
 		dissolveStale: false,
 		changedBases: new Set(),
 		raised: new Map(),
+		mapped: { created: 0 },
 		async nextNo(name, count = 1) {
 			if (!Number.isSafeInteger(count) || count < 1)
 				throw new Error("a ref reservation needs a positive safe integer count");
