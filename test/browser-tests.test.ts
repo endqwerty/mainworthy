@@ -62,7 +62,7 @@ test("text inside strings, templates, regular expressions and comments declares 
 		"const quote = '\\'test(\"no\")';",
 	].join("\n");
 	expect(testDeclarations(source)).toBe(2);
-	expect(codeOnly('a("x\\"y") + `b${c("z")}d`')).toBe('a("") + `` c("")');
+	expect(codeOnly('a("x\\"y") + `b${c("z")}d`')).toBe('a("") + ``{c("")');
 });
 
 test("a test added beside a route glob is counted", () => {
@@ -71,4 +71,18 @@ test("a test added beside a route glob is counted", () => {
 	expect(at).toBeGreaterThan(0);
 	const added = `${file.slice(0, at)}test.skipIf(!browserAvailable)("a new journey", async () => {});\n${file.slice(at)}`;
 	expect(testDeclarations(added)).toBe(testDeclarations(file) + 1);
+});
+
+test("a regular expression that opens a template's substitution is not a division", () => {
+	// The shape src/cli/invite.test.ts uses. Read as a division, the apostrophe began a string, the `${` was never
+	// closed, and the `}` after it read the rest of the file as a template.
+	const source = [
+		'test("a title preserves its apostrophe", () => {',
+		'\tconst title = "owner\'s project";',
+		"\texpect(title).toBe(`${/owner's project/.exec(title)?.[0]}`);",
+		"});",
+		'test("it\'s counted", async () => {});',
+		'test("so is this", async () => {});',
+	].join("\n");
+	expect(testDeclarations(source)).toBe(3);
 });
