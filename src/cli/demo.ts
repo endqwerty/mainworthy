@@ -322,16 +322,19 @@ export async function renewDemoWork(
 		input: { in: "slots", run: seeded.run, limit: 200 },
 		actor: async () => instance.owner,
 	});
-	if (!read.ok) return;
+	if (!read.ok) throw new CliError(read.error.code, read.error.message);
 	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
 	const slot = slots.find((slot) => slot.id === seeded.workSlot);
 	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
-	// The write may wait for another writer of the demo; a stopping server does not wait with it.
-	await invoke(instance.app, OPS, {
+	signal?.throwIfAborted();
+	// The write may wait for another writer of the demo; a stopping server does not wait with it, and `invoke` then
+	// throws the signal's reason.
+	const taken = await invoke(instance.app, OPS, {
 		op: "work",
 		project,
 		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },
 		actor: async () => instance.owner,
 		...(signal ? { signal } : {}),
 	});
+	if (!taken.ok) throw new CliError(taken.error.code, taken.error.message);
 }

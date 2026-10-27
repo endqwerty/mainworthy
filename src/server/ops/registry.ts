@@ -475,8 +475,9 @@ async function executeInSnapshot(
 			throw error;
 		}
 	} catch (error) {
-		// A failed read statement aborts its snapshot; let the scope roll back before making the reply.
-		if (op.effect === "read") throw error;
+		// A failed read statement aborts its snapshot; let the scope roll back before making the reply. A call its
+		// caller stopped is no failure of the operation: `invoke` hands the caller its own reason.
+		if (op.effect === "read" || call.signal?.aborted) throw error;
 		return failure(op.name, error);
 	}
 }

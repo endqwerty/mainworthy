@@ -30,7 +30,7 @@ import {
 	retiredDemos,
 	setDemoDeployment,
 } from "../server/kernel/ctx.ts";
-import { drainRetiredDemos, refreshDemo } from "./demo.ts";
+import { drainRetiredDemos, refreshDemo, renewDemoWork } from "./demo.ts";
 import { seed } from "./seed.ts";
 import { CLI_ENTRY, withInstance } from "./test-support.ts";
 
@@ -526,8 +526,9 @@ async function holdWriter(app: App, take: (db: WriteDb) => Promise<unknown>) {
 }
 
 /**
- * Starts `serve` on the instance's database, sends it SIGTERM once `ready` resolves, and says how it ended. Like
- * Cloud Run, it sends SIGKILL ten seconds after SIGTERM.
+ * Starts `serve` on the instance's database and waits for the line it prints just before it handles SIGTERM, then
+ * for `ready`. Then it sends SIGTERM and says how the process ended. Like Cloud Run, it sends SIGKILL ten seconds
+ * after SIGTERM.
  */
 async function stopServe(
 	instance: Instance,
@@ -546,7 +547,7 @@ async function stopServe(
 			MAINWORTHY_MODE: "local",
 			...env,
 		},
-		stdout: "ignore",
+		stdout: "pipe",
 		stderr: "pipe",
 		stdin: "ignore",
 	});
@@ -554,6 +555,17 @@ async function stopServe(
 	let killed = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
+		// serve installs its SIGTERM handler in the same turn as it prints its project line, with no wait between.
+		const reader = child.stdout.getReader();
+		const decoder = new TextDecoder();
+		let printed = "";
+		while (!printed.includes(" · policy: ")) {
+			const chunk = await reader.read();
+			if (chunk.done) throw new Error(`serve stopped before it was ready: ${await stderr}`);
+			printed += decoder.decode(chunk.value, { stream: true });
+		}
+		reader.releaseLock();
+		void child.stdout.pipeTo(new WritableStream()).catch(() => {});
 		await ready();
 		const began = performance.now();
 		child.kill("SIGTERM");
@@ -571,20 +583,53 @@ async function stopServe(
 	}
 }
 
-/** What the statement waiting for a lock was running, once one waits. */
-async function waitingStatement(app: App, ms: number): Promise<string> {
+/** Waits until a statement containing `text` waits for a lock. */
+async function waitingFor(app: App, text: string, ms: number): Promise<void> {
 	const end = performance.now() + ms;
 	while (performance.now() < end) {
-		const [row] = await app.database.read((db) =>
+		const rows = await app.database.read((db) =>
 			db.allDynamic<{ query: string }>(
-				"SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' LIMIT 1",
+				"SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
 			),
 		);
-		if (row) return row.query;
+		if (rows.some((row) => row.query.includes(text))) return;
 		await Bun.sleep(20);
 	}
-	throw new Error("nothing waited for a lock");
+	throw new Error(`no statement with ${text} waited for a lock`);
 }
+
+/** Only taking demo work inserts into slot_leases: holding the table makes that insert, and nothing else, wait. */
+const holdSlotLeases = (app: App) =>
+	holdWriter(app, (db) => db.exec("LOCK TABLE slot_leases IN SHARE ROW EXCLUSIVE MODE"));
+
+test("an aborted demo work renewal comes back as the abort, not as a failed or finished operation", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		app.config.commit = A;
+		const seeded = await refreshDemo(instance, "demo", small);
+		const writer = await holdSlotLeases(app);
+		const logged: string[] = [];
+		const original = console.error;
+		console.error = (...args: unknown[]) => {
+			logged.push(args.map(String).join(" "));
+		};
+		try {
+			const controller = new AbortController();
+			const reason = new Error("renewal stopped by the test");
+			const renewing = renewDemoWork(instance, "demo", seeded, controller.signal).then(
+				() => "finished",
+				(error: unknown) => error,
+			);
+			await waitingFor(app, "INSERT INTO slot_leases", 10_000);
+			controller.abort(reason);
+			expect(await renewing).toBe(reason);
+			expect(logged).toEqual([]);
+		} finally {
+			console.error = original;
+			await writer.release();
+		}
+	});
+}, 30_000);
 
 test("serve exits soon after SIGTERM while its cleanup waits for a project writer", async () => {
 	await withInstance(async ({ instance }) => {
@@ -598,7 +643,9 @@ test("serve exits soon after SIGTERM while its cleanup waits for a project write
 		if (!retired) throw new Error("revision B left no retired demo");
 		const writer = await holdWriter(app, (db) => lockProject(db, retired.id));
 		try {
-			const ended = await stopServe(instance, {}, () => waitingForLock(app, 20_000));
+			const ended = await stopServe(instance, {}, () =>
+				waitingFor(app, "FROM projects WHERE id = $1 FOR UPDATE", 20_000),
+			);
 			expect({ ...ended, ms: undefined }).toEqual({ killed: false, code: 0, stderr: "", ms: undefined });
 			budget("serve exit after SIGTERM with cleanup waiting on a writer", ended.ms, 500, "ms");
 		} finally {
@@ -608,18 +655,16 @@ test("serve exits soon after SIGTERM while its cleanup waits for a project write
 	});
 }, 60_000);
 
-test("serve exits soon after SIGTERM while renewing a same-revision demo's work waits for a project writer", async () => {
+test("serve exits soon after SIGTERM while renewing a same-revision demo's work waits for a writer", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		app.config.commit = A;
 		const seeded = await refreshDemo(instance, "demo", small);
 		expect(seeded.workSlot).not.toBeNull();
-		const project = await app.database.read((db) => findProject(db, "demo"));
-		if (!project) throw new Error("missing demo");
-		const writer = await holdWriter(app, (db) => lockProject(db, project.id));
+		const writer = await holdSlotLeases(app);
 		try {
 			const ended = await stopServe(instance, { MAINWORTHY_DEMO: "demo", MAINWORTHY_COMMIT: A }, () =>
-				waitingForLock(app, 20_000),
+				waitingFor(app, "INSERT INTO slot_leases", 20_000),
 			);
 			expect({ ...ended, ms: undefined }).toEqual({ killed: false, code: 0, stderr: "", ms: undefined });
 			budget("serve exit after SIGTERM with demo work renewal waiting on a writer", ended.ms, 500, "ms");
@@ -638,7 +683,7 @@ test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits f
 		const writer = await holdWriter(app, (db) => db.exec("LOCK TABLE cases IN SHARE ROW EXCLUSIVE MODE"));
 		try {
 			const ended = await stopServe(instance, { MAINWORTHY_DEMO: "demo", MAINWORTHY_COMMIT: B }, async () => {
-				expect(await waitingStatement(app, 30_000)).toContain("cases");
+				await waitingFor(app, "cases", 30_000);
 				const project = await app.database.read((db) => findProject(db, "demo"));
 				expect(await app.database.read((db) => demoDeployment(db, project?.id ?? 0))).toMatchObject({
 					kind: "seeding",

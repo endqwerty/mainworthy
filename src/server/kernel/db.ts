@@ -371,6 +371,9 @@ class Scope implements WriteDb {
 		if (tx.aborted) throw new TransactionAborted(tx.aborted.error);
 		for (const effect of tx.queues[0] ?? []) if (effect.phase === "before") await effect.run();
 		this.checkAborted(tx);
+		// A transaction its caller stopped does not commit, even if what ran in it caught the cancellation; once
+		// sent, COMMIT is not cancelled.
+		this.lease.signal?.throwIfAborted();
 		await query(this.lease, "COMMIT", [], true);
 		this.lease.tx = null;
 		for (const effect of tx.queues[0] ?? []) {
