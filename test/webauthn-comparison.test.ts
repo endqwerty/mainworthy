@@ -974,8 +974,9 @@ const CASES: Case[] = [
 	get(
 		"client data that is not UTF-8",
 		assertion(ES256, (p) => {
-			const json = Buffer.from(JSON.stringify(clientData("webauthn.get", { note: "x" })));
-			const at = json.indexOf("x");
+			const json = Buffer.from(JSON.stringify(clientData("webauthn.get", { note: "~" })));
+			// The note's own byte: a random challenge in base64url never holds a tilde.
+			const at = json.indexOf('"note":"~"') + '"note":"'.length;
 			json[at] = 0xff;
 			p.clientData = json;
 		}),
