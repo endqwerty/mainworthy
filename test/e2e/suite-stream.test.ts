@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answer, browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
+import { answer, browserAvailable, eventually, fetched, foldersShown, openPage, startServer } from "./support.ts";
 
 for (const outcome of ["adopted", "failed"] as const) {
 	test.skipIf(!browserAvailable)(
@@ -76,6 +76,7 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = h;
 			await page.getByRole("button", { name: "Pending move", exact: true }).waitFor();
+			await foldersShown(page, "Destination");
 			const held = new Promise<void>((resolve) => {
 				release = resolve;
 			});
@@ -590,6 +591,7 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = h;
 			await page.getByRole("button", { name: "Two moves", exact: true }).waitFor();
+			await foldersShown(page, "Second");
 			let first = true;
 			await page.route("**/api/p/scratch/propose", async (route) => {
 				if (!first) return route.continue();

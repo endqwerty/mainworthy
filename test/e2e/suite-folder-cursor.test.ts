@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, foldersShown, openPage, startServer } from "./support.ts";
 
 for (const next of [true, false]) {
 	test.skipIf(!browserAvailable)(
@@ -26,6 +26,7 @@ for (const next of [true, false]) {
 			try {
 				const { page } = h;
 				await page.getByRole("button", { name: `${from} last`, exact: true }).waitFor();
+				await foldersShown(page, to);
 				await page.keyboard.press("x");
 				let requested = false;
 				await page.context().route("**/api/p/scratch/find", async (route) => {
@@ -104,6 +105,7 @@ for (const next of [true, false]) {
 			try {
 				const { page } = h;
 				await page.getByRole("button", { name: `Match ${from}`, exact: true }).waitFor();
+				await foldersShown(page, to);
 				await page.keyboard.press(next ? "]" : "Alt+[");
 				await page.waitForURL((url) => url.searchParams.get("folder") === to);
 				const params = new URL(page.url()).searchParams;

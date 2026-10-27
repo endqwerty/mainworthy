@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, eventually, foldersShown, openPage, type Server, startServer } from "./support.ts";
 
 const folders = async (server: Server) =>
 	z
@@ -9,6 +9,7 @@ const folders = async (server: Server) =>
 		.map((row) => ({ folder: row.folder.path, version: row.version }));
 
 async function move(page: Awaited<ReturnType<typeof openPage>>["page"]) {
+	await foldersShown(page, "Destination");
 	await page.keyboard.press("m");
 	await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
 	await page.keyboard.press("Enter");
