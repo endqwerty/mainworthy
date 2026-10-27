@@ -81,6 +81,10 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
   variables, Actions, Variables), the name `bun scripts/ios.ts install` prints; the repository holds no team id. An
   apply without it fails: the site would serve no `/.well-known/apple-app-site-association`, and the app could use
   no passkey or saved login for it.
+- The owner: `MAINWORTHY_OWNER` comes from the repository variable of that name, so the repository does not hold
+  the owner's name. An apply without it fails: the server would name the owner `owner` and, on every start, give a
+  person of that name every capability, making them if nobody has the name. Set it to the owner's name exactly as it
+  is on the instance; a name nobody has makes a new person who holds every capability.
 - Cloudflare's proof: the organisation forbids `allUsers`, so the invoker check is off and the app refuses every
   request without `x-mainworthy-proxy` set to the proxy secret, except `/health` and the token-checked `/api/job`.
   Only requests with it are read for `cf-connecting-ip`.

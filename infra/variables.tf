@@ -27,6 +27,16 @@ variable "apple_apps" {
   }
 }
 
+variable "owner" {
+  description = "MAINWORTHY_OWNER, the owner's name on mainworthy.com, from the repository variable of that name: the repository does not hold the owner's name."
+  type        = string
+  # Unset, the server would name the owner `owner` and give a person of that name every capability on each start.
+  validation {
+    condition     = trimspace(var.owner) != ""
+    error_message = "owner is empty: set the repository variable MAINWORTHY_OWNER (docs/deploy.md)."
+  }
+}
+
 variable "attachments_bucket" {
   description = "Globally unique bucket name, supplied by CI."
   type        = string

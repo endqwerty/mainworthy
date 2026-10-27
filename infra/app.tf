@@ -63,6 +63,8 @@ resource "google_cloud_run_v2_service" "app" {
           MAINWORTHY_PUBLIC_URL            = "https://mainworthy.com"
           MAINWORTHY_CLIENT_ADDRESS_HEADER = "cf-connecting-ip"
           MAINWORTHY_APPLE_APPS            = var.apple_apps
+          # Every start gives this person every capability, and makes them if nobody has the name.
+          MAINWORTHY_OWNER = var.owner
           # Jobs run in the Scheduler's minute request (and any sign-in's own), not on a timer.
           MAINWORTHY_JOB_RUNNER   = "0"
           MAINWORTHY_JOB_AUDIENCE = local.app_url
