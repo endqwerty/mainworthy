@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import type { App } from "../server/kernel/app.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Instance, start } from "../app/start.ts";
+import { lockIdentity } from "../server/identity/identity.ts";
+import { type App, defaultConfig } from "../server/kernel/app.ts";
+import { removeProjectSlice } from "../server/transfer/transfer.ts";
 
 async function snapshot(app: App) {
 	return app.database.read(async (db) => {
@@ -28,7 +34,8 @@ import { withInstance } from "./test-support.ts";
 
 const small = { cases: 30, unlinkedFiles: 2, days: 1 };
 const A = "a".repeat(40),
-	B = "b".repeat(40);
+	B = "b".repeat(40),
+	C = "c".repeat(40);
 
 test("the same revision preserves edits; a new revision swaps grants and drains only its retired demo", async () => {
 	const settings = { env: { MAINWORTHY_JOB_RUNNER: "0" } };
@@ -241,8 +248,8 @@ test("a stale read snapshot cannot make a completed revision refresh again", asy
 	});
 }, 30_000);
 
-async function waitingForLock(app: App): Promise<void> {
-	const end = performance.now() + 1000;
+async function waitingForLock(app: App, ms = 1000): Promise<void> {
+	const end = performance.now() + ms;
 	while (performance.now() < end) {
 		const waiting = await app.database.read((db) =>
 			db.allDynamic<{ n: number }>(
@@ -314,3 +321,103 @@ for (const phase of ["swap", "ready", "drain"] as const)
 			if (phase === "drain") expect(await app.database.read(retiredDemos)).toEqual([]);
 		});
 	});
+
+/** A second server on the first one's database, as during a rollout with two instances. */
+async function withSecond<T>(first: Instance, run: (second: Instance) => Promise<T>): Promise<T> {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-second-"));
+	const second = await start(
+		defaultConfig({
+			MAINWORTHY_DATABASE_URL: first.app.config.databaseUrl,
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: first.owner.name,
+			MAINWORTHY_MODE: "local",
+		}),
+		() => ({ ui: null }),
+	);
+	try {
+		return await run(second);
+	} finally {
+		await second.stop();
+		await rm(directory, { recursive: true, force: true });
+	}
+}
+
+test("a second instance refreshing the same revision keeps the first one's demo and an edit made in it", async () => {
+	await withInstance(async ({ instance, client }) => {
+		instance.app.config.commit = A;
+		await withSecond(instance, async (second) => {
+			second.app.config.commit = A;
+			const swapped = Promise.withResolvers<void>();
+			const first = refreshDemo(instance, "demo", small, {
+				step: async (step) => {
+					if (step === "swapped") swapped.resolve();
+				},
+			});
+			await swapped.promise;
+			// The second instance starts while the first seeds, and reaches its swap only after the first has finished.
+			const edited = Promise.withResolvers<void>();
+			const late = refreshDemo(second, "demo", small, {
+				step: async (step) => {
+					if (step === "checked") await edited.promise;
+				},
+			});
+			try {
+				const seeded = await first;
+				const project = await instance.app.database.read((db) => findProject(db, "demo"));
+				const demo = client.with({ project: "demo" });
+				await demo.call("propose", { edits: [{ op: "create", body: { title: "An edit between two refreshes" } }] });
+				edited.resolve();
+				expect(await late).toEqual(seeded);
+				expect((await instance.app.database.read((db) => findProject(db, "demo")))?.id).toBe(project?.id);
+				expect(await instance.app.database.read(retiredDemos)).toEqual([]);
+				expect((await demo.call("find", { text: "An edit between two refreshes" })).items).toHaveLength(1);
+			} finally {
+				edited.resolve();
+				await late.catch(() => undefined);
+			}
+		});
+	});
+}, 60_000);
+
+test("a retired demo another instance removed first does not stop the new revision's refresh", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		app.config.commit = A;
+		await refreshDemo(instance, "demo", small);
+		app.config.commit = B;
+		// The swap retires the revision-A demo; nothing drains it until the second instance refreshes.
+		await refreshDemo(instance, "demo", small);
+		const [retired] = await app.database.read(retiredDemos);
+		if (!retired) throw new Error("revision B left no retired demo");
+		await withSecond(instance, async (second) => {
+			second.app.config.commit = C;
+			const holding = Promise.withResolvers<void>();
+			const removed = Promise.withResolvers<void>();
+			// The first instance takes the identity lock, so the second, having read the retired project, waits for it.
+			const removing = app.database.write((db) =>
+				db.transaction(async () => {
+					await lockIdentity(db);
+					holding.resolve();
+					await removed.promise;
+					while (!(await removeProjectSlice(db, retired.key, 10_000)).done);
+				}),
+			);
+			await holding.promise;
+			const refreshing = refreshDemo(second, "demo", small);
+			try {
+				await waitingForLock(app, 10_000);
+			} finally {
+				removed.resolve();
+				await removing;
+			}
+			expect((await refreshing).cases).toHaveLength(30);
+			const project = await app.database.read((db) => findProject(db, "demo"));
+			expect(await app.database.read((db) => demoDeployment(db, project?.id ?? 0))).toMatchObject({
+				kind: "ready",
+				revision: C,
+			});
+			expect((await app.database.read(retiredDemos)).map((row) => row.id)).not.toContain(retired.id);
+		});
+	});
+}, 60_000);
