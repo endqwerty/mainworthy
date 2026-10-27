@@ -76,10 +76,12 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 						`demo "${demo}" ready for revision ${config.commit} in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
 					);
 				},
-				(error: unknown) =>
-					warning(
-						`mainworthy: demo "${demo}" is not ready for this revision: ${error instanceof Error ? error.message : String(error)}`,
-					),
+				(error: unknown) => {
+					if (!refreshController.signal.aborted)
+						warning(
+							`mainworthy: demo "${demo}" is not ready for this revision: ${error instanceof Error ? error.message : String(error)}`,
+						);
+				},
 			)
 			.finally(() => {
 				cleaning = cleanup();

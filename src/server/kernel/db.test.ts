@@ -622,3 +622,46 @@ test("a queued write returns Busy when acquiring a connection exceeds its bound"
 		await queued.close();
 	}
 });
+
+test("closing stops an exclusive callback's write waiting for a lock, and returns once the callback has settled", async () => {
+	const closing = await Database.open({ url: fixture.url, writePool: 1 });
+	const entered = barrier();
+	const finish = barrier();
+	const holding = database.write((db) =>
+		db.transaction(async () => {
+			await db.allDynamic("SELECT pg_advisory_xact_lock(4242)");
+			entered.release();
+			await finish.promise;
+		}),
+	);
+	const order: string[] = [];
+	try {
+		await entered.promise;
+		const work = closing
+			.exclusive("db test", (signal) =>
+				closing.write((db) => db.transaction(() => db.allDynamic("SELECT pg_advisory_xact_lock(4242)")), { signal }),
+			)
+			.finally(() => order.push("callback settled"));
+		for (let waiting = 0; waiting === 0; ) {
+			await Bun.sleep(10);
+			waiting = await databaseAdmin(adminUrl, async (admin) =>
+				Number(
+					(
+						await admin.all<{ n: number }>(
+							"SELECT count(*) AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
+							[new URL(fixture.url).pathname.slice(1)],
+						)
+					)[0]?.n ?? 0,
+				),
+			);
+		}
+		// The lock is held until the end of the test: only the cancelled wait lets the callback, and `close`, finish.
+		await closing.close().then(() => order.push("closed"));
+		await expect(work).rejects.toThrow("database is closed");
+		expect(order).toEqual(["callback settled", "closed"]);
+	} finally {
+		finish.release();
+		await holding;
+		await closing.close();
+	}
+});

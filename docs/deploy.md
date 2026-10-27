@@ -693,8 +693,13 @@ with foreign keys enforced, then yields to foreground work. A final transaction 
 together. An interrupted drain continues from remaining rows. A failed slice rolls back and logs the failure;
 its retired mark remains for retry. A new swap first drains earlier retirements, so the heavy stages do not
 overlap; a drain that fails there is logged and the swap goes ahead, so the new revision still gets its demo, and
-the retired project waits for the next start's drain. A retired project another instance removed first counts as
-removed. Normal completion retains no retired project. PostgreSQL reuses deleted storage through its ordinary maintenance; cleanup does not promise immediate disk shrinkage.
+the retired project waits for the next start's drain. Drains take the oldest retired project first, so one that
+fails every time also holds back the ones retired after it. That is bounded: while two retired projects wait, a
+new revision retires no third. Its refresh stops before the swap with the warning `mainworthy: demo "demo" is not ready for
+this revision: 2 retired demos are still waiting for cleanup, so the demo keeps its earlier revision until
+cleanup removes one`, and the demo stays as it was, edits included. Each later start retries the drain and,
+once fewer than two wait, the swap. A retired project another instance removed first counts as removed. Normal
+completion retains no retired project. PostgreSQL reuses deleted storage through its ordinary maintenance; cleanup does not promise immediate disk shrinkage.
 Whole-instance exports are refused with a retry message while retired marks remain, because those marks do not
 travel in an archive. Active-project exports remain available.
 
@@ -718,12 +723,27 @@ a cleanup slice exceeding 100 ms. PostgreSQL indexes and foreign-key checks stil
 and disk contention; the rehearsal evidence belongs in the pull request.
 
 Each swap and cleanup slice holds the identity lock and the locks of the projects it changes for its one short
-transaction. A whole refresh runs under a PostgreSQL session lock named for the demo (`Database.exclusive`), which
-every instance on the database takes: during a rollout with two instances the second waits, then reads the first's
-finished seed for the same revision and keeps it, edits made in it included. The lock ends with its connection, so
-an instance that dies mid-seed frees it, and the next start resumes the marked seed. Moving refresh and drain to
-the durable job interface remains open (#821); several instances do not need it. Scheduled requests must
-replace the renewal timer when CPU is allocated only during requests.
+transaction. The swap's transaction also decides: under the demo key's transaction lock it reads the demo's mark,
+and if the demo is already ready for this revision it keeps it, edits included, and the refresh ends there; if it is
+seeding this revision, the refresh resumes that seed. Only otherwise does it retire the demo. Since that check
+and the swap commit together, no refresh replaces a demo another instance finished for the same revision.
+
+A whole refresh also runs under a PostgreSQL session lock named for the demo (`Database.exclusive`), which every
+instance on the database takes: during a rollout with two instances the second waits, then finds the first's
+finished seed and does not seed again. The lock ends with its connection: when an instance dies mid-seed, the
+next start resumes the marked seed. It also ends when only that connection is lost, and the refresh holding it
+carries on without knowing. Two instances may then seed the same project at once, which the seed's command ids
+make harmless, and whichever finishes second finds the demo ready and keeps it. So the lock saves seeding twice;
+the swap's check is what keeps the demo. Moving refresh and drain to the durable job interface remains open
+(#821); several instances do not need it. Scheduled requests must replace the renewal timer when CPU is
+allocated only during requests.
+
+A stopping server does not wait for its demo work. On SIGTERM or SIGINT, `serve` aborts the refresh and the
+drain: the wait for the refresh lock ends, a statement waiting for a project writer's lock is cancelled, an
+unfinished seed's HTTP requests are aborted, and the open transaction rolls back. The seed token's revocation
+gets one more second, after which the token expires by itself within 15 minutes. With the drain waiting for a
+writer, `serve` exits in about 10 ms on a desktop, inside the 10 seconds Cloud Run allows before SIGKILL. What
+the refresh or drain left unfinished resumes on the next start.
 
 This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
 remain useful to enforced transfer removal and cleanup. The PostgreSQL baseline includes only local operational demo state,

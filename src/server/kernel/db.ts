@@ -276,6 +276,8 @@ type Lease = {
 	poisoned: boolean;
 	tx: Transaction | null;
 	statements: () => void;
+	/** The caller's signal: it cancels a statement in flight, such as one waiting for a lock, and refuses the next. */
+	signal?: AbortSignal | undefined;
 };
 async function query<R>(
 	lease: Lease,
@@ -287,10 +289,19 @@ async function query<R>(
 	if (!lease.alive) throw new Error("database scope has ended");
 	if (lease.lost) throw lease.lost;
 	if (!control && lease.tx?.aborted) throw new TransactionAborted(lease.tx.aborted.error);
+	// Ending a transaction is never cancelled, so an abort cannot leave its outcome unknown.
+	const signal = control ? undefined : lease.signal;
+	signal?.throwIfAborted();
 	const values = params.map(encode);
 	lease.statements();
+	let cancel = () => {};
 	try {
 		const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
+		// `cancel` returns the query; returned from a listener it would be a second, unhandled rejection.
+		cancel = () => {
+			pending.cancel();
+		};
+		signal?.addEventListener("abort", cancel, { once: true });
 		return await (simple ? pending.simple() : pending);
 	} catch (error) {
 		if (lost(error) || ["25P03", "25P04"].includes(sqlState(error) ?? "")) {
@@ -299,7 +310,10 @@ async function query<R>(
 			throw lease.lost;
 		}
 		if (lease.tx && !lease.tx.aborted) lease.tx.aborted = { error };
+		if (signal?.aborted) throw signal.reason;
 		throw error;
+	} finally {
+		signal?.removeEventListener("abort", cancel);
 	}
 }
 
@@ -643,6 +657,7 @@ export class Database {
 		options: { signal?: AbortSignal },
 	): Promise<T> {
 		const lease = await this.lease(pool, options.signal);
+		lease.signal = options.signal;
 		try {
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
 			lease.tx = { aborted: null, queues: [[]], kept: new Map() };
@@ -708,6 +723,7 @@ export class Database {
 				throw new Busy(error);
 			throw error;
 		});
+		lease.signal = options.signal;
 		const db = new Scope(lease, true);
 		try {
 			await query(
@@ -734,12 +750,16 @@ export class Database {
 	}
 
 	/**
-	 * Runs `fn` while this process holds the PostgreSQL session lock named `name`, so one process at a time, across
-	 * every instance on the database, runs work under that name, however long it takes and however many transactions
-	 * it commits. The lock lives on a connection of its own and ends with it, also when the process dies. The wait
-	 * polls, so `signal` and closing the database stop it.
+	 * Runs `fn` while this process holds the PostgreSQL session lock named `name`, so that, as a rule, one process at a
+	 * time across every instance on the database runs work under that name, however many transactions it commits. The
+	 * lock lives on a connection of its own and ends with it: when the process dies, and also when only that connection
+	 * is lost while `fn` runs on, which `fn` is not told. So the lock saves doing work twice, and whatever must not
+	 * happen twice checks for itself in the transaction that does it. The wait polls; `signal` and closing the database
+	 * stop it, and `fn` is given a signal that either aborts. `close` waits for `fn` to settle.
 	 */
-	async exclusive<T>(name: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+	async exclusive<T>(name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+		const finished = Promise.withResolvers<void>();
+		this.activeWrites.add(finished.promise);
 		const dedicated = new SQL(this.options.url, { bigint: true, max: 1 });
 		try {
 			const lease = await this.lease(dedicated, signal);
@@ -763,13 +783,15 @@ export class Database {
 						stop.addEventListener("abort", done, { once: true });
 					});
 				}
-				return await fn();
+				return await fn(stop);
 			} finally {
 				// Closing the connection below ends its session, and the lock with it, whatever state it is in.
 				await this.dispose(lease);
 			}
 		} finally {
 			await dedicated.close();
+			finished.resolve();
+			this.activeWrites.delete(finished.promise);
 		}
 	}
 

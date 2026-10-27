@@ -2,9 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { budget } from "../../scripts/budget.ts";
 import { type Instance, start } from "../app/start.ts";
 import { lockIdentity } from "../server/identity/identity.ts";
 import { type App, defaultConfig } from "../server/kernel/app.ts";
+import { databaseAdmin } from "../server/kernel/db.ts";
 import { removeProjectSlice } from "../server/transfer/transfer.ts";
 
 async function snapshot(app: App) {
@@ -30,7 +32,7 @@ import {
 } from "../server/kernel/ctx.ts";
 import { drainRetiredDemos, refreshDemo } from "./demo.ts";
 import { seed } from "./seed.ts";
-import { withInstance } from "./test-support.ts";
+import { CLI_ENTRY, withInstance } from "./test-support.ts";
 
 const small = { cases: 30, unlinkedFiles: 2, days: 1 };
 const A = "a".repeat(40),
@@ -419,5 +421,151 @@ test("a retired demo another instance removed first does not stop the new revisi
 			});
 			expect((await app.database.read(retiredDemos)).map((row) => row.id)).not.toContain(retired.id);
 		});
+	});
+}, 60_000);
+
+/** Ends the session that holds the refresh lock, as a lost connection or a restarted database server would. */
+async function endRefreshLock(app: App, project: string): Promise<boolean[]> {
+	const rows = await app.database.read((db) =>
+		db.allDynamic<{ ended: boolean }>(
+			`SELECT pg_terminate_backend(pid) AS ended FROM pg_locks, hashtextextended($1::text, 914) AS k(key)
+			 WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			   AND classid::bigint = (key >> 32) & 4294967295 AND objid::bigint = key & 4294967295`,
+			[`demo refresh ${project}`],
+		),
+	);
+	return rows.map((row) => row.ended);
+}
+
+test("a refresh that lost its lock keeps the demo another instance made ready for the revision, and its edit", async () => {
+	await withInstance(async ({ instance, client }) => {
+		instance.app.config.commit = A;
+		await withSecond(instance, async (second) => {
+			second.app.config.commit = A;
+			const checked = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			const late = refreshDemo(instance, "demo", small, {
+				step: async (step) => {
+					if (step !== "checked") return;
+					checked.resolve();
+					await resume.promise;
+				},
+			});
+			try {
+				await checked.promise;
+				expect(await endRefreshLock(instance.app, "demo")).toEqual([true]);
+				const seeded = await refreshDemo(second, "demo", small);
+				const project = await instance.app.database.read((db) => findProject(db, "demo"));
+				const demo = client.with({ project: "demo" });
+				await demo.call("propose", { edits: [{ op: "create", body: { title: "An edit after the lock was lost" } }] });
+				resume.resolve();
+				expect(await late).toEqual(seeded);
+				expect((await instance.app.database.read((db) => findProject(db, "demo")))?.id).toBe(project?.id);
+				expect(await instance.app.database.read(retiredDemos)).toEqual([]);
+				expect((await demo.call("find", { text: "An edit after the lock was lost" })).items).toHaveLength(1);
+			} finally {
+				resume.resolve();
+				await late.catch(() => undefined);
+			}
+		});
+	});
+}, 60_000);
+
+test("retired demos that cannot be removed stop at two: later revisions keep the demo they have", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
+		// Every removal fails at its last step, deleting the project row, as a persistent fault would.
+		await databaseAdmin(app.config.databaseUrl, (admin) =>
+			admin.exec(`CREATE FUNCTION refuse_project_delete() RETURNS trigger LANGUAGE plpgsql
+				AS $$ BEGIN RAISE EXCEPTION 'injected deletion failure'; END $$;
+				CREATE TRIGGER refuse_project_delete BEFORE DELETE ON projects
+				FOR EACH ROW EXECUTE FUNCTION refuse_project_delete()`),
+		);
+		const retired: number[] = [];
+		const outcomes: string[] = [];
+		for (const revision of [A, B, C, "d".repeat(40), "e".repeat(40)]) {
+			app.config.commit = revision;
+			outcomes.push(
+				await refreshDemo(instance, "demo", tiny).then(
+					() => "ready",
+					(error: unknown) => (error instanceof Error ? error.message : String(error)),
+				),
+			);
+			retired.push((await app.database.read(retiredDemos)).length);
+		}
+		expect(retired).toEqual([0, 1, 2, 2, 2]);
+		expect(outcomes.slice(0, 3)).toEqual(["ready", "ready", "ready"]);
+		expect(outcomes[3]).toContain("2 retired demos are still waiting for cleanup");
+		const project = await app.database.read((db) => findProject(db, "demo"));
+		expect(await app.database.read((db) => demoDeployment(db, project?.id ?? 0))).toMatchObject({
+			kind: "ready",
+			revision: C,
+		});
+	});
+}, 60_000);
+
+test("serve exits soon after SIGTERM while its cleanup waits for a project writer", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
+		app.config.commit = A;
+		await refreshDemo(instance, "demo", tiny);
+		app.config.commit = B;
+		await refreshDemo(instance, "demo", tiny);
+		const [retired] = await app.database.read(retiredDemos);
+		if (!retired) throw new Error("revision B left no retired demo");
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const holding = app.database.write((db) =>
+			db.transaction(async () => {
+				await lockProject(db, retired.id);
+				entered.resolve();
+				await release.promise;
+			}),
+		);
+		const home = await mkdtemp(join(tmpdir(), "mainworthy-serve-stop-"));
+		try {
+			await entered.promise;
+			const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+				cwd: home,
+				env: {
+					PATH: process.env.PATH ?? "",
+					MAINWORTHY_DATABASE_URL: app.config.databaseUrl,
+					HOME: home,
+					USER: instance.owner.name,
+					MAINWORTHY_PORT: "0",
+					MAINWORTHY_MODE: "local",
+				},
+				stdout: "ignore",
+				stderr: "pipe",
+				stdin: "ignore",
+			});
+			// Cloud Run sends SIGKILL ten seconds after SIGTERM.
+			let killed = false;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			try {
+				await waitingForLock(app, 20_000);
+				const began = performance.now();
+				child.kill("SIGTERM");
+				timer = setTimeout(() => {
+					killed = true;
+					child.kill("SIGKILL");
+				}, 10_000);
+				const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+				const ms = Math.round(performance.now() - began);
+				expect({ killed, code, stderr }).toEqual({ killed: false, code: 0, stderr: "" });
+				budget("serve exit after SIGTERM with cleanup waiting on a writer", ms, 500, "ms");
+			} finally {
+				clearTimeout(timer);
+				child.kill("SIGKILL");
+				await child.exited;
+			}
+		} finally {
+			release.resolve();
+			await holding;
+			await rm(home, { recursive: true, force: true });
+		}
+		expect((await app.database.read(retiredDemos)).map((row) => row.id)).toEqual([retired.id]);
 	});
 }, 60_000);
