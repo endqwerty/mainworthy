@@ -1,6 +1,6 @@
 # Daily exploration is separate from the required `check / gate` on pull requests.
-# Preserve the real source SHA and build URL, but report into a logical repository namespace:
-# a commit run is keyed by repository + SHA, so a branch/job name alone would still alter the PR gate.
+# A separate project keeps daily evidence and triage apart from the CI project's gate and failure policy.
+# Preserve the real repository, branch, source SHA and build URL.
 name: sequences
 
 on:
@@ -55,11 +55,10 @@ jobs:
       - name: Report sequences to Mainworthy, then the gate
         if: always()
         env:
-          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
-          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
-          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
-          MAINWORTHY_REPO: ${{ format('{0}-sequences', github.repository) }}
-          MAINWORTHY_BRANCH: sequences
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_SEQUENCES_PROJECT != '' && vars.MAINWORTHY_URL || '' }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_SEQUENCES_TOKEN || secrets.MAINWORTHY_TOKEN }}
+          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_SEQUENCES_PROJECT }}
+        # No sequences project means no deployed URL, so selection cannot default to the CI project.
         # Reuse the ordinary report validation, deployed-instance selection, fallback, report and gate commands.
         run: bun scripts/ci-gate.ts test-results sequences --files=test/sequences-loose.test.ts,test/sequences-standard.test.ts,test/sequences-strict.test.ts,test/sequences-extended-loose.test.ts,test/sequences-extended-standard.test.ts,test/sequences-extended-strict.test.ts
       - name: PostgreSQL logs and cleanup

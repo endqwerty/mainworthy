@@ -167,15 +167,38 @@ the workflow allows 25 minutes for tests, setup and reporting. Its JUnit and out
 `test-results/sequences.xml` and `.json` convention. The workflow reuses `scripts/ci-postgres.sh` and
 `scripts/ci-gate.ts`, including the deployed-instance selection and disposable fallback.
 
-Configure the same `MAINWORTHY_URL`, `MAINWORTHY_PROJECT`, `MAINWORTHY_TOKEN`, `TS_OAUTH_CLIENT_ID` and
-`TS_AUDIENCE` settings as the [check workflow](../../.github/workflows/check.yml). The token reaches only the report step.
-Daily evidence keeps the real SHA and GitHub run URL, with the logical repository identity
-`endqwerty/mainworthy-sequences` and branch `sequences`. A separate repository identity matters because Mainworthy
-keys a commit run by repository and SHA; a different job or branch alone would still alter that commit's PR gate.
-An unexplained failure on this separate line becomes an inbox question with the seed and reproduce command.
-The workflow has no pull request trigger or dependency from `check / gate`. With no deployment URL it uses the
-ordinary disposable fallback. It still fails if a sequence test failed, even if policy excuses it.
-An unreachable deployment cannot receive an inbox question; its fallback warning appears in the run summary.
+Daily reports use their own Mainworthy project, selected by `MAINWORTHY_SEQUENCES_PROJECT`, with the real
+repository, branch, SHA and GitHub run URL. Commit lookups are scoped per project, so daily evidence leaves the
+main project's gate and commit-only reads unchanged. Keep the daily project's default policy: an unexplained
+failure opens an inbox question with the seed and reproduce command. The main project's
+[CI policy](../deploy.md#what-changes-for-a-pull-request), which answers failures by rule, stays on the main project.
+
+### Set up once
+
+On the deployed instance, as an administrator:
+
+1. Create a separate project with its default policy, for example
+   `mainworthy admin --json '{"do":"project.create","key":"mainworthy-sequences"}'`. Do not run `ci-policy` on it.
+2. Grant the pipeline actor permission to record on that project:
+   `mainworthy actor grant github-actions --project mainworthy-sequences --can record`.
+   The `record` grant allows reports and gate reads; the pipeline needs no `answer`, `produce` or `admin` grant.
+   To use a separate actor, issue `mainworthy token new --ci github-actions-sequences --project mainworthy-sequences`
+   and save its token as the repository Actions secret `MAINWORTHY_SEQUENCES_TOKEN`.
+3. Set the repository Actions variable `MAINWORTHY_SEQUENCES_PROJECT=mainworthy-sequences`.
+   Reuse `MAINWORTHY_URL`, `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE` from the
+   [check workflow](../../.github/workflows/check.yml). The optional `MAINWORTHY_SEQUENCES_TOKEN` secret takes
+   precedence over `MAINWORTHY_TOKEN`; whichever actor it names needs `record` on the daily project.
+
+The token reaches only the report step. Until the project variable is set, the daily workflow uses a disposable
+instance even when the main deployment URL and token are configured. With no deployment URL, or an unreachable
+or incompatible deployment, it also uses the ordinary disposable fallback. Those runs cannot create a deployed
+inbox question. An unreachable deployment produces a warning in the run summary. The tests still run and a
+failure still fails the job, even if policy excuses it. The workflow has no pull request trigger or dependency
+from `check / gate`.
+
+For a deployed daily failure, `ci-gate` prints `mainworthy --project <daily-project> gate --commit <sha>`.
+Run it against the configured `MAINWORTHY_URL` with a token for that project, then triage its open question there.
+`bun scripts/work.ts ci <sha>` continues to read the main project's ordinary CI evidence.
 
 A failure starts with the command for its seed and policy. For example:
 
