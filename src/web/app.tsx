@@ -41,7 +41,7 @@ import { MailEntry } from "./signin/mail.tsx";
 import { OIDC_PATH, OidcReturn } from "./signin/oidc.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { TestsScreen } from "./tests/index.tsx";
-import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
+import { AppContext, type PaletteItem, type PaletteOptions, type StatusMark } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
 
 const missingHomeStatus = "Your home was not found. Opened Suite.";
@@ -351,9 +351,30 @@ function Workbench({
 }) {
 	const route = useRoute();
 	const project = route.project;
-	const [status, setStatus] = useState(
-		initialStatus ??
+	const [status, setStatusLine] = useState(() => ({
+		text:
+			initialStatus ??
 			"Drafts stay on this device. A version is recorded when you leave, press ⌘↵, or pause for 30 seconds.",
+		mark: Symbol("status"),
+	}));
+	// What the line holds as each write is made, so a write learns its mark before React renders it.
+	const statusNow = useRef(status);
+	const setStatus = useCallback((text: string | ((shown: string) => string)): StatusMark => {
+		const shown = statusNow.current;
+		const next = typeof text === "function" ? text(shown.text) : text;
+		if (typeof text === "function" && next === shown.text) return shown.mark;
+		statusNow.current = { text: next, mark: Symbol("status") };
+		setStatusLine(statusNow.current);
+		return statusNow.current.mark;
+	}, []);
+	// An answer that came after a newer status took the line. The next such answer replaces it.
+	const [notice, setNotice] = useState<string | null>(null);
+	const settleStatus = useCallback(
+		(mark: StatusMark, text: string): void => {
+			if (statusNow.current.mark === mark) setStatus(text);
+			else setNotice(text);
+		},
+		[setStatus],
 	);
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
 	// Counts the openings. A choice in the palette may open it again (a second case to link, the projects), and
@@ -478,7 +499,7 @@ function Workbench({
 			if (!sessionCurrent(owner) || navigationToken() !== navigation) return;
 			setStatus(error instanceof Error ? error.message : "Cannot read your home. Try again.");
 		}
-	}, [project]);
+	}, [project, setStatus]);
 	const filterSuite = (changes: { folder?: string | null; tag?: string | null; state?: string | null }): void => {
 		const params = new URLSearchParams(location.search);
 		for (const [key, value] of Object.entries(changes)) {
@@ -626,6 +647,7 @@ function Workbench({
 				session: { ...info, can: info.projects.find((entry) => entry.key === project)?.can ?? [] },
 				instanceCan: info.can,
 				setStatus,
+				settleStatus,
 				openPalette,
 				refreshSession,
 				requestSignOut: leave,
@@ -893,7 +915,7 @@ function Workbench({
 				</aside>
 				<ScreenComponent key={project} />
 				<footer id="bar">
-					<StatusLine>{status}</StatusLine>
+					<StatusLine>{status.text}</StatusLine>
 					<div id="hints">
 						{hints.map((binding) => (
 							<span key={binding.key}>
@@ -902,6 +924,14 @@ function Workbench({
 							</span>
 						))}
 					</div>
+					{notice !== null && (
+						<p id="notice" role="status">
+							<span>{notice}</span>
+							<button type="button" className="notice-dismiss" onClick={() => setNotice(null)}>
+								Dismiss
+							</button>
+						</p>
+					)}
 				</footer>
 			</div>
 			{signOutOpen && <SignOutDialog person={info.actor} stay={stay} choose={confirmSignOut} />}

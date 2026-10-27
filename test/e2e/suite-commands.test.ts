@@ -473,11 +473,10 @@ for (const move of ["twice", "back", "new action"] as const) {
 			const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
 			held.release();
 			await response;
-			await page.locator("#stat").filter({ hasText: "Restore for C-2 was recorded." }).waitFor();
+			await page.getByText("Restore for C-2 was recorded.").first().waitFor();
 			if (move === "new action") {
-				expect(await page.locator("#stat").textContent()).toBe(
-					"Previous version restored as a new version. Restore for C-2 was recorded.",
-				);
+				expect(await page.locator("#stat").textContent()).toBe("Previous version restored as a new version.");
+				expect(await page.locator("#notice span").textContent()).toBe("Restore for C-2 was recorded.");
 				expect(requests).toHaveLength(2);
 			} else {
 				expect(await page.locator("#stat").textContent()).toBe("Restore for C-2 was recorded.");
@@ -660,8 +659,8 @@ for (const [action, next] of [
 				const response = page.waitForResponse((reply) => reply.url().endsWith("/command"));
 				held.release();
 				await response;
-				await page.locator("#stat").filter({ hasText: outcome }).waitFor();
-				expect(await page.locator("#stat").textContent()).toBe(`${tagged} ${outcome}`);
+				await page.locator("#notice").filter({ hasText: outcome }).waitFor();
+				expect(await page.locator("#stat").textContent()).toBe(tagged);
 				expect((await server.api("get", { refs: ["C-2"] }))[0]?.tags).toEqual(["alpha"]);
 				await page.keyboard.press("u");
 				await page.locator("#stat").filter({ hasText: "Undone. The inverse is recorded." }).waitFor();
@@ -676,3 +675,118 @@ for (const [action, next] of [
 		}
 	});
 }
+
+/** Whether all of an element is on the screen: inside the window and not cut off by itself or a box around it. */
+async function readable(harness: PageHarness, text: string) {
+	return harness.page
+		.getByText(text)
+		.first()
+		.evaluate((element) => {
+			const box = element.getBoundingClientRect();
+			let clipped = element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight;
+			for (let around = element.parentElement; around; around = around.parentElement) {
+				if (getComputedStyle(around).overflow === "visible") continue;
+				const frame = around.getBoundingClientRect();
+				if (box.left < frame.left || box.right > frame.right || box.top < frame.top || box.bottom > frame.bottom)
+					clipped = true;
+			}
+			const inside = box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+			return { inside, clipped };
+		});
+}
+
+test.skipIf(!browserAvailable)("a late outcome behind a newer status stays readable at 1024 by 900", async () => {
+	const server = await startServer();
+	await twoVersions(server);
+	await server.api("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+	const harness = await openPage(server, { path: "/p/scratch/suite/c/1" });
+	const held = await holdCommand(harness);
+	try {
+		const { page } = harness;
+		await page.setViewportSize({ width: 1024, height: 900 });
+		await begin(harness, "restore");
+		await page.locator("#detail .ctitle").filter({ hasText: "Second title" }).waitFor();
+		await loseFirstReply(harness);
+		await page.keyboard.press("u");
+		await page
+			.locator("#stat")
+			.filter({ hasText: /check it and retry/ })
+			.waitFor();
+		await page.getByRole("option").filter({ hasText: "Other case" }).click();
+		await held.ready;
+		await page.keyboard.press("t");
+		await page.getByRole("textbox", { name: "Tag selected cases" }).fill("alpha");
+		await page.keyboard.press("Enter");
+		await page.locator("#stat").filter({ hasText: "1 case changed. Press u to undo." }).waitFor();
+		held.release();
+		await page.getByText("Restore for C-1 was recorded.").first().waitFor();
+		expect(await readable(harness, "Restore for C-1 was recorded.")).toEqual({ inside: true, clipped: false });
+	} finally {
+		held.release();
+		await harness.close();
+		await server.stop();
+	}
+});
+
+test.skipIf(!browserAvailable)("two departed restores of one case each settle only their own status", async () => {
+	const server = await startServer();
+	for (let i = 1; i <= 3; i++) {
+		await server.api("propose", { edits: [{ op: "create", body: { title: `Case ${i} one` } }] });
+		await server.api("propose", { edits: [{ op: "edit", case: `C-${i}`, base: 1, body: { title: `Case ${i} two` } }] });
+	}
+	const harness = await openPage(server, { path: "/p/scratch/suite/c/2" });
+	const gates: (() => void)[] = [];
+	const asked: Promise<void>[] = [];
+	const answered: (() => void)[] = [];
+	for (let i = 0; i < 2; i++) {
+		asked.push(new Promise<void>((resolve) => answered.push(resolve)));
+	}
+	const lookups: Promise<void>[] = [0, 1].map((i) => new Promise<void>((resolve) => (gates[i] = resolve)));
+	let lookup = 0;
+	await harness.context.route("**/api/p/scratch/command", async (route) => {
+		const index = lookup++;
+		const response = await route.fetch();
+		answered[index]?.();
+		await lookups[index];
+		await route.fulfill({ response });
+	});
+	let writes = 0;
+	await harness.context.route("**/api/p/scratch/propose", async (route) => {
+		if (++writes > 2) return route.continue();
+		await route.fetch();
+		await route.abort("failed");
+	});
+	const pending = "Restore for C-2 is being checked. It will not be retried.";
+	try {
+		const { page } = harness;
+		await page.locator("#detail .ctitle").filter({ hasText: "Case 2 two" }).waitFor();
+		for (const index of [0, 1]) {
+			await page.keyboard.press("u");
+			await page
+				.locator("#stat")
+				.filter({ hasText: /check it and retry/ })
+				.waitFor();
+			await page.keyboard.press("j");
+			await asked[index];
+			await page.locator("#stat").filter({ hasText: pending }).waitFor();
+			if (index === 0) {
+				await page.keyboard.press("k");
+				await page.locator("#detail .ctitle").filter({ hasText: "Case 2 one" }).waitFor();
+			}
+		}
+		const first = page.waitForResponse((reply) => reply.url().endsWith("/command"));
+		gates[0]?.();
+		await first;
+		await page.getByText("Restore for C-2 was recorded.").first().waitFor();
+		expect(await page.locator("#stat").textContent()).toBe(pending);
+		expect(await page.locator("#notice span").textContent()).toBe("Restore for C-2 was recorded.");
+		gates[1]?.();
+		await page.locator("#stat").filter({ hasText: "C-2" }).filter({ hasNotText: pending }).waitFor();
+		expect(writes).toBe(2);
+		expect((await server.api("get", { refs: ["C-2"] }))[0]?.version).toBe(4);
+	} finally {
+		for (const gate of gates) gate();
+		await harness.close();
+		await server.stop();
+	}
+});

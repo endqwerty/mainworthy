@@ -125,7 +125,7 @@ kbd {
 	--side-freed: calc(var(--side-open) - var(--side-width));
 	display: grid;
 	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(420px, calc(max(420px, 38%) + var(--side-freed)));
-	grid-template-rows: minmax(0, 1fr) 28px;
+	grid-template-rows: minmax(0, 1fr) auto;
 	height: 100vh;
 }
 #app.zoom {
@@ -809,8 +809,10 @@ b.st2 {
 #bar {
 	grid-column: 2 / 4;
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
-	gap: 16px;
+	gap: 0 16px;
+	min-height: 28px;
 	padding: 0 12px;
 	border-top: 1px solid var(--line);
 	background: var(--side);
@@ -835,6 +837,24 @@ b.st2 {
 	display: flex;
 	gap: 14px;
 	flex: none;
+}
+/* A late answer whose status a newer one took: a line of its own under the status, wrapped rather than cut off. */
+#notice {
+	flex-basis: 100%;
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+	margin: 0;
+	padding: 2px 0 6px;
+	color: var(--ink);
+	white-space: normal;
+}
+.notice-dismiss {
+	flex: none;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	color: var(--dim);
+	padding: 0 6px;
 }
 :where(#hints) kbd {
 	margin-right: 3px;
