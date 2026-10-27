@@ -116,6 +116,8 @@ export type Boot = {
 	/** An identity provider people may sign in through (`test/oidc-support.ts` makes one). */
 	oidc?: Config["oidc"];
 	requireAdminMfa?: boolean;
+	/** Run background jobs on their timers. Off by default: a job's write would count in `waitingAtGate` (#971). */
+	jobRunner?: boolean;
 };
 /** A server-mode instance whose owner signs in with `TOKEN`. Passwords are hashed at a cost a test can afford. */
 export async function world(options: Boot = {}): Promise<World> {
@@ -140,6 +142,7 @@ export async function world(options: Boot = {}): Promise<World> {
 						.proxy
 				: null,
 			passwordCost: { memoryCost: 8, timeCost: 1 },
+			jobRunner: options.jobRunner ?? false,
 			...(publicUrl === null ? {} : { publicUrl }),
 			...(options.oidc ? { oidc: options.oidc } : {}),
 			...(options.requireAdminMfa ? { requireAdminMfa: true } : {}),
