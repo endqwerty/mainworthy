@@ -1283,8 +1283,7 @@ for (const mode of ["open", "closed", "read-only"] as const)
 		30_000,
 	);
 
-// j and k skip a slot only another producer filled while a slot is still open to this person; with none open, they
-// read every slot (#816). Automatic advance after a record keeps skipping such evidence.
+// j and k visit every slot, whoever filled it (#816). Advancing after a record skips evidence left to its producer.
 async function active(page: Page) {
 	return page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document");
 }
@@ -1314,7 +1313,6 @@ for (const viewer of ["read-only", "reporter"] as const)
 				await ready(page);
 				if (viewer === "read-only") await screenshot(page, 816);
 				expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
-				expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
 				await page.keyboard.press("j");
 				expect(await active(page)).toBe("C-2");
 				await page.keyboard.press("j");
@@ -1331,7 +1329,7 @@ for (const viewer of ["read-only", "reporter"] as const)
 	);
 
 check(
-	"automatic advance skips another producer's slot and j reaches it once none is left to record (#816)",
+	"j and k visit another producer's slot while automatic advance skips it (#816)",
 	async () => {
 		const { server, run, path } = await fixture(3);
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -1350,7 +1348,8 @@ check(
 			const { page } = view;
 			await ready(page);
 			await page.keyboard.press("j");
-			expect(await active(page)).toBe("C-3");
+			expect(await active(page)).toBe("C-2");
+			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
 			await page.keyboard.press("k");
 			expect(await active(page)).toBe("C-1");
 			await page.keyboard.press("p");
@@ -1364,7 +1363,6 @@ check(
 			expect(await active(page)).toBe("C-3");
 			await page.keyboard.press("k");
 			expect(await active(page)).toBe("C-2");
-			expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
 			await page.keyboard.press("k");
 			expect(await active(page)).toBe("C-1");
 			expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.by === "reviewer"))).toEqual([
@@ -1402,7 +1400,6 @@ check(
 			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
 			await page.keyboard.press("j");
 			expect(await active(page)).toBe("C-2");
-			expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
 		} finally {
 			await view?.close();
 			await server.stop();

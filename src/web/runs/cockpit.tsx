@@ -346,18 +346,16 @@ function ProjectRunCockpit({
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const { body: currentBody } = usePinnedCase(current);
-	const runAdmitsMethod = !!run?.require.some(
-		(obligation) => obligation.kind === "exercise" && obligation.methods.includes(method),
+	const admittedMethod = !!(
+		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
+		(!currentBody || currentBody.methods.includes(method))
 	);
-	const admittedMethod = runAdmitsMethod && (!currentBody || currentBody.methods.includes(method));
 	const canRecord = !!(
 		current &&
 		canReport &&
 		(uncertain.has(current.id) || (!external(current) && isOpen && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
-	// j and k pass over evidence left to its producer only while this person has a slot of their own to report.
-	const skipsExternal = canReport && isOpen && runAdmitsMethod && hasAvailable;
 	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
@@ -378,17 +376,12 @@ function ProjectRunCockpit({
 		}
 	}
 
+	// j and k visit every slot; only advancing after a record skips evidence left to its producer.
 	function move(delta: number): void {
-		const start = current ? currentIndex : delta > 0 ? -1 : slots.length;
-		for (let distance = 1; distance <= slots.length; distance++) {
-			const candidate = slots[start + distance * delta];
-			if (!candidate) return;
-			if (!skipsExternal || !external(candidate)) {
-				setCursor(candidate.id);
-				setNoting(null);
-				return;
-			}
-		}
+		const candidate = slots[(current ? currentIndex : delta > 0 ? -1 : slots.length) + delta];
+		if (!candidate) return;
+		setCursor(candidate.id);
+		setNoting(null);
 	}
 	function assertReportOwner(): void {
 		if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
@@ -440,9 +433,7 @@ function ProjectRunCockpit({
 		const slotId = slot.id;
 		slot = slots.find((item) => item.id === slotId) ?? slot;
 		if (external(slot)) {
-			setStatus(
-				`This slot is already filled by another producer. Your note is kept.${skipsExternal ? " j moves to the next slot for you." : ""}`,
-			);
+			setStatus("This slot is already filled by another producer. Your note is kept.");
 			return null;
 		}
 		for (const file of files) consumedFiles.current.add(file);
@@ -962,7 +953,6 @@ function ProjectRunCockpit({
 									{fill.model && ` · ${fill.model}`} · {fill.outcome} · basis {fill.admitted}
 								</span>
 							))}
-							{skipsExternal && <span>j skips to your next slot.</span>}
 						</div>
 					)}
 					{current && currentBody && !admittedMethod && (
