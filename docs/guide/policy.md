@@ -218,7 +218,7 @@ A custom policy that rejects a pipeline's new cases by rule also refuses `create
 
 Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception. An agent's new case waits for a person, so the rule makes none and the file's question stays open.
 
-A link holds for the tests it names. When another test turns up in the same file, Mainworthy asks about or creates a case for only the new test. A "track" answer covers the file as it was. Mainworthy checks the file again when its tests with no case change. Under `track` the rule answers again and you see no question.
+A link holds for the tests it names. Mainworthy asks at once about the file's tests it leaves without a case, and again when another test turns up in the same file. Under `create` the rule makes their cases instead. A "track" answer covers the file as it was. Mainworthy checks the file again when its tests with no case change. Under `track` the rule answers again and you see no question.
 
 A custom policy reads the choice only if its clauses test `unlinked:track` or `unlinked:create`. Settings offers the choice under a preset.
 
