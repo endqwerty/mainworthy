@@ -800,13 +800,14 @@ async function* settleSteps(
 			await handler.revert(ctx, question, prior);
 			supersedes = prior.id;
 			// What the earlier answer did is undone, and later answers about the file stand: the new one is about
-			// the file as it is now. When that is not what the person read, they read it again.
+			// the file as it is now. When that is not what the person read, the answer is refused and nothing is
+			// kept, the refreshed evidence included, so no evidence hash would let it through: undoing the answer
+			// shows the file as it is, and the answer is given on that.
 			if (question.kind === "map") {
 				const current = await withCurrentFile(ctx, question);
 				if (current.evidence_hash !== question.evidence_hash)
 					throw conflict(
 						"the file's tests with no case changed since this question was answered: undo its answer, then answer the question on its current evidence",
-						{ evidence: current.evidence_hash },
 					);
 				question = current;
 			}

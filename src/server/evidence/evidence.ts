@@ -221,6 +221,9 @@ type FlipWrite = {
 
 type Columns<T> = { [K in keyof T]: readonly T[K][] };
 
+/** How many of a file's tests with no case `unlinkedInFile` reads at once. */
+export const UNLINKED_PAGE = 500;
+
 const Q = {
 	anyTest: sql<{ project: number }, { id: number }>("SELECT id FROM tests WHERE project = $project LIMIT 1"),
 	caseResultsOnTargets: sql<{ caseId: number; targets: readonly number[] }, ResultRow>(`
@@ -513,10 +516,10 @@ const Q = {
 		 FROM unnest($ids::bigint[], $cases::bigint[]) AS asked(id, case_id) WHERE tests.id = asked.id`,
 	),
 	unlinkedInFile: sql<{ project: number; file: string; after: number }, TestRow>(
-		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT 500",
+		`SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
 	),
 	unlinkedWithoutFile: sql<{ project: number; file: string; after: number }, TestRow>(
-		"SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT 500",
+		`SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
 	),
 	unlinkedSetInFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
 		`SELECT count(*) AS n, bit_xor(hashint8extended(id, 0))::text AS digest

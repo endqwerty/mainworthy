@@ -31,6 +31,7 @@ import {
 	targetsByIds,
 	testById,
 	testRef,
+	UNLINKED_PAGE,
 	unlinkedInFile,
 	unlinkedSetInFile,
 } from "../evidence/evidence.ts";
@@ -312,7 +313,12 @@ export const CREATE_MAX = 100_000;
 /** The question about a file's tests with no case, as they are now: what raising it, or opening it again, shows. */
 export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKind): Promise<Raise> {
 	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
-	const { count, digest } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
+	// A page that is not full holds the whole set, and the question stands on its tests. Only a larger file is
+	// counted and hashed by the database, which costs a second read.
+	const whole = tests.length < UNLINKED_PAGE;
+	const { count, digest } = whole
+		? { count: tests.length, digest: "" }
+		: await unlinkedSetInFile(ctx.db, ctx.project.id, file);
 	return {
 		kind: "map",
 		key: `file:${file}`,
@@ -327,7 +333,7 @@ export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKi
 			tests: tests.slice(0, 50).map((test) => ({ id: test.id, t: testRef(test), name: test.name })),
 			count,
 		},
-		material: { file, count, digest },
+		material: whole ? { file, tests: tests.map((test) => test.id) } : { file, count, digest },
 		facts: [],
 		refs: tests.slice(0, 20).map(testRef),
 		runs: [],
@@ -379,7 +385,8 @@ const mapHandler: Handler<"map"> = {
 				// question at once). A file that gathered more is answered in parts, by linking some of its tests
 				// first; one that does not fit beside the files before it waits for the next command. Refused, the
 				// question stays open.
-				const { count } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
+				const count =
+					tests.length < UNLINKED_PAGE ? tests.length : (await unlinkedSetInFile(ctx.db, ctx.project.id, file)).count;
 				if (count > CREATE_MAX)
 					throw invalid(
 						`${file} has ${count} tests with no case, and one answer creates at most ${CREATE_MAX}: link some of them to cases first, then create the rest`,
@@ -443,7 +450,8 @@ const mapHandler: Handler<"map"> = {
 					}
 					created.push(...refs);
 					const last = tests.at(-1);
-					tests = last ? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id) : [];
+					tests =
+						last && tests.length === UNLINKED_PAGE ? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id) : [];
 				}
 				ctx.mapped.created += created.length;
 				if (created.length === 0) return { linked: [] };
