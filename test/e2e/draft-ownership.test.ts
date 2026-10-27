@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -888,4 +889,73 @@ check(
 		}
 	},
 	30_000,
+);
+
+// Kept in the browser (#1017 review): the page's storage work per keystroke, which a unit test of one writer misses.
+check(
+	"confirmed ownership adds no copy reads or writes per keystroke",
+	async () => {
+		const w = await windows();
+		try {
+			const { a, b } = w;
+			await b.close();
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case warm");
+			await a.waitForFunction(() => {
+				const owner = sessionStorage.getItem("mainworthy:draft-window");
+				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+				return (
+					key &&
+					JSON.parse(localStorage.getItem(key) ?? "null")?.owner === owner &&
+					!Object.keys(localStorage).some((key) => key.includes(":draft-copy:"))
+				);
+			});
+			await title(a).press("End");
+			await a.evaluate(() => {
+				for (let index = 0; index < 100; index++) localStorage.setItem(`unrelated:${index}`, "other data");
+				const counts = { reads: 0, writes: 0, keys: 0, copyReads: 0, copyWrites: 0 };
+				const get = Storage.prototype.getItem;
+				const set = Storage.prototype.setItem;
+				const keyAt = Storage.prototype.key;
+				Storage.prototype.getItem = function (key) {
+					if (this === localStorage) {
+						counts.reads++;
+						if (key.includes(":draft-copy:")) counts.copyReads++;
+					}
+					return get.call(this, key);
+				};
+				Storage.prototype.setItem = function (key, value) {
+					if (this === localStorage) {
+						counts.writes++;
+						if (key.includes(":draft-copy:")) counts.copyWrites++;
+					}
+					set.call(this, key, value);
+				};
+				Storage.prototype.key = function (index) {
+					if (this === localStorage) counts.keys++;
+					return keyAt.call(this, index);
+				};
+				Object.assign(window, { draftStorageCounts: counts });
+			});
+			await a.keyboard.type("0123456789", { delay: 10 });
+			expect(await title(a).inputValue()).toBe("Coupon case warm0123456789");
+			const counts = z
+				.object({
+					reads: z.number(),
+					writes: z.number(),
+					keys: z.number(),
+					copyReads: z.number(),
+					copyWrites: z.number(),
+				})
+				.parse(await a.evaluate(() => Reflect.get(window, "draftStorageCounts")));
+			console.log(`Draft storage operations for 10 accepted keys: ${JSON.stringify(counts)}`);
+			expect((await stored(a)).body.title).toBe("Coupon case warm0123456789");
+			expect(counts.copyWrites).toBe(0);
+			budget("draft copy reads for 10 accepted keys", counts.copyReads, 0, "reads");
+			budget("draft key enumerations for 10 accepted keys", counts.keys, 0, "enumerations");
+		} finally {
+			await w.close();
+		}
+	},
+	30000,
 );
