@@ -1,5 +1,5 @@
 ---
-id: 1009-owner-on-cloud-run
+id: 1009-owner
 category: Fixed
 date: 2026-10-27
 issue: https://github.com/endqwerty/mainworthy/issues/1009
