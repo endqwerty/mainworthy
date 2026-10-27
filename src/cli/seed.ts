@@ -115,7 +115,18 @@ export async function seed(client: Client, options: SeedOptions): Promise<SeedRe
 	}
 }
 
-type SeedOptions = { project: string; cases: number; seed?: number; days?: number; unlinkedFiles?: number };
+type SeedOptions = {
+	project: string;
+	cases: number;
+	seed?: number;
+	days?: number;
+	unlinkedFiles?: number;
+	/**
+	 * The identity of the project this seed is for, when its caller chose the project (a demo refresh). A seed that finds
+	 * another project under the key is refused before it writes anything, and makes none.
+	 */
+	projectIdentity?: string;
+};
 
 /** A repeatable seed write, scoped to the project's identity so a replacement cannot replay its predecessor. */
 export function seedCommandId(identity: string, step: string): string {
@@ -142,12 +153,16 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const owner = as(client.options.token);
 	const actors = await refuseProducers(owner);
 	const known = (producer: Producer) => actors.find((row) => row.name === producer.actor);
-	const exists = Projects.parse(await owner.call("admin", { do: "project.list" })).some((row) => row.key === project);
+	const identityNow = async () =>
+		Projects.parse(await owner.call("admin", { do: "project.list" })).find((row) => row.key === project)?.identity;
+	const replaced = new CliError("conflict", `project ${project} was replaced since this seed was started for it`);
+	const listed = await identityNow();
+	if (options.projectIdentity !== undefined && listed !== options.projectIdentity) throw replaced;
+	const exists = listed !== undefined;
 	if (!exists) await owner.call("admin", { do: "project.create", key: project });
-	const identity = Projects.parse(await owner.call("admin", { do: "project.list" })).find(
-		(row) => row.key === project,
-	)?.identity;
+	const identity = await identityNow();
 	if (!identity) throw new CliError("conflict", "the demo project no longer exists");
+	if (options.projectIdentity !== undefined && identity !== options.projectIdentity) throw replaced;
 	const id = (step: string) => seedCommandId(identity, step);
 	const begun = exists && (await owner.call("command", { cmd: id("folders") })).state !== "none";
 	const taken = new CliError(
@@ -177,9 +192,10 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const agent = await signIn(REVIEWER);
 
 	/**
-	 * One write of the demo: under its own command id, at the time it happened. The id is bound to the request, so
-	 * a seed sent again with other cases, another seed or other days is another request, and is refused here in
-	 * words about the seed.
+	 * One write of the demo: under its own command id, at the time it happened, and only into the project the seed
+	 * began in: a project made in its place under the same key refuses it (`projectIdentity`), so one seed's writes
+	 * never land in another's demo. The id is bound to the request, so a seed sent again with other cases, another
+	 * seed or other days is another request, and is refused here in words about the seed.
 	 */
 	const write = async <N extends "propose" | "report" | "claim" | "plan" | "decide" | "change">(
 		who: Client,
@@ -188,8 +204,10 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		at: number,
 		input: Api[N]["input"],
 	): Promise<Api[N]["reply"]> =>
-		who.call(op, { ...input, cmd: id(step) }, at).catch((error: unknown) => {
-			if (begun && error instanceof CliError && error.code === "conflict")
+		who.call(op, { ...input, cmd: id(step), projectIdentity: identity }, at).catch(async (error: unknown) => {
+			if (!(error instanceof CliError && error.code === "conflict")) throw error;
+			if ((await identityNow()) !== identity) throw replaced;
+			if (begun)
 				throw new CliError(
 					"conflict",
 					`project ${project} was seeded with another number of cases, another seed or other days; send those again, or seed another project`,
@@ -716,7 +734,13 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const working =
 		workSlot === undefined
 			? null
-			: await owner.call("work", { do: "take", run: planned.run, slot: workSlot, seconds: DEMO_WORK.seconds });
+			: await owner.call("work", {
+					do: "take",
+					run: planned.run,
+					slot: workSlot,
+					seconds: DEMO_WORK.seconds,
+					projectIdentity: identity,
+				});
 	return {
 		cases: refs,
 		run: planned.run,

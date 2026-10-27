@@ -204,7 +204,7 @@ describe("the module map", () => {
 		const exceptions: Record<string, string[]> = {
 			// The HTTP client shares the sign-in token length bound.
 			"src/cli/client.ts": ["server/identity"],
-			// Demo deployment issues a short-lived token and drains retired storage after swapping.
+			// Demo deployment admits its seed's own tokens in process and drains retired storage after swapping.
 			"src/cli/demo.ts": ["server/identity", "server/transfer"],
 		};
 		const offenders: string[] = [];
