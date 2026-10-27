@@ -9,6 +9,7 @@ import {
 	accountKey,
 	addressKey,
 	createLimiter,
+	createStartLimiter,
 	isGeneratedSecret,
 	type LimiterAnswer,
 	prefixKey,
@@ -30,6 +31,23 @@ test("start keys group a subscriber's /56 without changing failed-proof /64 keys
 	expect(startAddressKey("203.0.113.10")).not.toBe(startAddressKey("203.0.113.11"));
 	expect(startAddressKey(null)).toBeNull();
 	expect(startAddressKey("127.0.0.1")).toBeNull();
+});
+
+test("the local start ceiling gives a /56 300 starts a fixed minute, refills it, and leaves other sources alone", () => {
+	const take = createStartLimiter();
+	const subscriber = (net: number) => startAddressKey(`2001:db8:0:${net}::1`);
+	const other = startAddressKey("203.0.113.11");
+	let now = START;
+	for (let minute = 0; minute < 10; minute++) {
+		const answers = Array.from({ length: 1000 }, (_, n) => take(subscriber(n % 4), now));
+		expect(answers.slice(0, 300)).toEqual(Array(300).fill(FREE));
+		expect(answers.slice(300)).toEqual(Array(700).fill(blocked(60)));
+		now += 30 * SECOND;
+		expect(take(subscriber(minute % 4), now)).toEqual(blocked(30));
+		expect(take(other, now)).toEqual(FREE);
+		expect(take(null, now)).toEqual(FREE);
+		now += 30 * SECOND;
+	}
 });
 
 /** A limiter and the clock it is told. Nothing sleeps: time passes when a test says so. */
