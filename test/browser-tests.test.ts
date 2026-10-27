@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { opensBrowser, testDeclarations } from "../scripts/browser-tests.ts";
+import { codeOnly, opensBrowser, testDeclarations } from "../scripts/browser-tests.ts";
 
 // What a file reads to open Chromium: its own source, or a helper beside it other than the shared `support.ts`,
 // which also starts servers for the browserless tests.
@@ -45,4 +45,30 @@ test("test declarations are counted as the browser tests write them", () => {
 	].join("\n");
 	expect(testDeclarations(source)).toBe(5);
 	expect(testDeclarations("")).toBe(0);
+});
+
+test("text inside strings, templates, regular expressions and comments declares nothing", () => {
+	// A route glob opens no comment (test/e2e/execution.test.ts), and a test written into a fixture is not a test
+	// of this file (test/check.test.ts).
+	const source = [
+		'await page.route("**/api/p/*/report", (route) => route.abort());',
+		'test("after the glob", async () => {});',
+		"const fixture = `",
+		'test("inside a fixture", () => {});',
+		'${tests.map((t) => `test(${JSON.stringify(t)}, () => {});`).join("\\n")}',
+		"`;",
+		'const pattern = /test\\("x"\\)/g; // a pattern, not a test',
+		'const ratio = total / count / 2; test("after a division", () => {});',
+		"const quote = '\\'test(\"no\")';",
+	].join("\n");
+	expect(testDeclarations(source)).toBe(2);
+	expect(codeOnly('a("x\\"y") + `b${c("z")}d`')).toBe('a("") + `` c("")');
+});
+
+test("a test added beside a route glob is counted", () => {
+	const file = readFileSync("test/e2e/execution.test.ts", "utf8");
+	const at = file.indexOf("(browserAvailable ? test : test.skip)(", file.indexOf("**/api/p/*/report"));
+	expect(at).toBeGreaterThan(0);
+	const added = `${file.slice(0, at)}test.skipIf(!browserAvailable)("a new journey", async () => {});\n${file.slice(at)}`;
+	expect(testDeclarations(added)).toBe(testDeclarations(file) + 1);
 });
