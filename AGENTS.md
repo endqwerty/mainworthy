@@ -5,9 +5,8 @@ GitHub; the owner is `endqwerty`, the person your global instructions name. Your
 too.
 
 Read [README.md](README.md), then `docs/product-vision.md`, `docs/competitors.md` and `docs/open-questions.md`.
-Where it stands: `docs/roadmap.md`, `docs/decisions/` and [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
-(the work order); how it fits together: `docs/architecture.md`. The instance at
-`https://mainworthy.com` follows `main` (`docs/deploy.md`).
+Where it stands: the board (below), `docs/roadmap.md` and `docs/decisions/`; how it fits together:
+`docs/architecture.md`. The instance at `https://mainworthy.com` follows `main` (`docs/deploy.md`).
 
 A rule here names what enforces it; one that nothing enforces is a judgment call. A mistake that happens twice is
 fixed in code, a check or a script, not noted here (decision 0091). This file stays under 12,000 bytes.
@@ -64,7 +63,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - Competitor claims in `docs/competitors.md` are hypotheses until verified.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
-  rewrite. A finding becomes a test. The goal (#77): landing costs minutes.
+  rewrite. A finding becomes a test. The goal: landing costs minutes.
 - `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
   rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
 
@@ -73,9 +72,10 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 The board is `https://github.com/users/endqwerty/projects/2`; a closing keyword in a pull request links it to its
 issue and GitHub's workflows move both. A task the owner gave in a thread needs no issue: the pull request is its card.
 
-- **Filing an issue.** One milestone (M1 to M7, `docs/roadmap.md`; each description says what belongs) and an `area:`
-  label. A test that fails by chance gets `flaky-test` and M1; `decision` and `waiting-for-feedback` mark what an
-  agent cannot finish alone. Add it to its list in #64.
+- **Filing an issue.** One of the board's milestones (each description says what belongs) and an `area:` label. A
+  test that fails by chance gets `flaky-test`, then is fixed or deleted (the owner, 2026-10-26: "Flaky tests are worse
+  than no test"). `decision` and `waiting-for-feedback` mark what an agent cannot finish alone. Copy no issue list
+  elsewhere.
 - **Starting.** Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the
   pull request once it is open. `todo` and `done` set the other statuses; `board check` says when the ids in
   `scripts/work/board.ts` no longer fit the board.
@@ -88,8 +88,8 @@ issue and GitHub's workflows move both. A task the owner gave in a thread needs 
   closed unmerged).
 - **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A problem
   found on the way gets its own issue.
-- **Only the owner** changes the board's workflows, renames or adds a milestone (the view's filter, `docs/roadmap.md`
-  and #64 together) and approves the `project` scope (`gh auth refresh -h github.com -s project`).
+- **Only the owner** changes the board's workflows, renames or adds a milestone (the view's filter and `docs/roadmap.md`
+  together) and approves the `project` scope (`gh auth refresh -h github.com -s project`).
 
 ## Model profile
 
