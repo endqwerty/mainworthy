@@ -47,6 +47,8 @@ The [keyboard guide](./keyboard.md) lists the remaining editor keys.
 Put tags in the title with `#tag`. A space separates the tag from the title text.
 Mainworthy removes recognized tags from the title and keeps them as tags.
 In the web editor, inline tags and `@REQ-123` links also work in actions and expected results.
+A save cleans only the fields you changed: a title or step you left alone is saved exactly as it was stored, spacing included,
+and a `#tag` or `@REQ-123` written into it as text stays text until you edit that field.
 Tokens can follow whitespace such as tabs, nonbreaking spaces, figure spaces, and full-width spaces.
 
 ```text
