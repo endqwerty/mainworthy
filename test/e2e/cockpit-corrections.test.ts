@@ -1379,3 +1379,34 @@ check(
 	},
 	30_000,
 );
+
+check(
+	"j and k visit another producer's slot for an agent the run does not admit (#816)",
+	async () => {
+		const { server, run, path } = await fixture(3);
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("report", { run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
+			const { token } = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "reviewer-agent",
+					kind: "agent",
+					can: ["read", "record"],
+					project: "scratch",
+				}),
+			);
+			view = await openPage({ ...server, token }, { path });
+			const { page } = view;
+			await ready(page);
+			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
+			await page.keyboard.press("j");
+			expect(await active(page)).toBe("C-2");
+			expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
