@@ -17,6 +17,8 @@ on:
         required: true
       GCP_INFRA_PLAN_ACCOUNT:
         required: true
+      MAINWORTHY_OWNER:
+        required: true
 
 permissions:
   contents: read
@@ -41,8 +43,8 @@ jobs:
       TF_VAR_attachments_bucket: ${{ secrets.GCP_ATTACHMENTS_BUCKET }}
       # Public (the site serves it), so a variable: the repository holds no team id.
       TF_VAR_apple_apps: ${{ vars.MAINWORTHY_APPLE_APPS }}
-      # A variable too: the repository does not hold the owner's name.
-      TF_VAR_owner: ${{ vars.MAINWORTHY_OWNER }}
+      # The repository variable, carried as a secret so the step logs mask the owner's name.
+      TF_VAR_owner: ${{ secrets.MAINWORTHY_OWNER }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_INFRA_DEPLOY_ACCOUNT: ${{ secrets.GCP_INFRA_DEPLOY_ACCOUNT }}
       GCP_INFRA_PLAN_ACCOUNT: ${{ secrets.GCP_INFRA_PLAN_ACCOUNT }}
