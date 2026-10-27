@@ -12,7 +12,7 @@ import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
 import { ProposeReply } from "../../core/replies.ts";
 import { optionalFlag as schemaOptionalFlag, text as schemaText, texts as schemaTexts } from "../../core/schema.ts";
-import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
+import { conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -29,6 +29,7 @@ import {
 } from "../lib/draft-copies.ts";
 import {
 	activeDraft,
+	cleanTitle,
 	type Draft,
 	draftKey,
 	draftTags,

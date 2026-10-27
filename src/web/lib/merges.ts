@@ -147,8 +147,9 @@ const serverSaved: Rule = {
 };
 /**
  * What saving leaves of each text, on the page and then the server. The page trims each line of a step and joins
- * its spaces, and makes a title one line (`cleanTitle`). Preconditions only the server trims, so spacing inside
- * them is the text's own (F3).
+ * its spaces, and makes a title one line (`cleanTitle`), where the draft changed it since its version; text it
+ * left as stored keeps its spacing (issue #992). Preconditions only the server trims, so spacing inside them is
+ * the text's own (F3).
  */
 const saved: Rule = {
 	...serverSaved,

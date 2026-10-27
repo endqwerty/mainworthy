@@ -16,6 +16,7 @@ import {
 import {
 	addDraftTags,
 	claimDraft,
+	cleanTitle,
 	type Draft,
 	draftKey,
 	draftTags,
@@ -577,4 +578,24 @@ test("draft emptiness includes every typed field and pinned steps", () => {
 	expect(hasDraftText({ ...empty, body: { ...empty.body, steps: [{ id: "s1", action: "", expected: "" }] } })).toBe(
 		false,
 	);
+});
+
+test("cleaning a draft for a save leaves the spacing of steps nobody changed since its version (issue #992)", () => {
+	const open = { id: "s1", action: "Open  cart", expected: "Total\n  drops" };
+	const original = { ...emptyBody("Coupon case"), steps: [open, { id: "s2", action: "Pay", expected: null }] };
+	const edited = {
+		...original,
+		title: "Coupon  case renamed #checkout",
+		steps: [open, { id: "s2", action: "Pay  now @REQ-1", expected: "  Paid  " }],
+	};
+	const cleaned = cleanTitle(draft({ body: edited, original }));
+	expect(cleaned.body.title).toBe("Coupon case renamed");
+	expect(cleaned.body.steps).toEqual([open, { id: "s2", action: "Pay now", expected: "Paid" }]);
+	expect(cleaned.tagChanges.add).toEqual(["checkout"]);
+	expect(cleaned.covers).toEqual(["REQ-1"]);
+	// A new step has no earlier text, so it is cleaned as typed.
+	const added = { id: "s3", action: "Leave  #later", expected: null };
+	const more = cleanTitle(draft({ body: { ...original, steps: [...original.steps, added] }, original }));
+	expect(more.body.steps).toEqual([...original.steps, { ...added, action: "Leave" }]);
+	expect(more.tagChanges.add).toEqual(["later"]);
 });

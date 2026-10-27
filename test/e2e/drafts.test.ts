@@ -503,6 +503,42 @@ test.skipIf(!browserAvailable)(
 	45_000,
 );
 
+// Issue #992: a save cleaned the spacing of every step, so changing the title rewrote steps nobody had edited.
+test.skipIf(!browserAvailable)(
+	"a save of the title keeps the spacing another session stored inside a step",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Spacing case", steps: [{ id: "a1", action: "Open cart", expected: null }] } },
+			],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			await page.getByRole("button", { name: "Spacing case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			const steps = [{ id: "a1", action: "Open  cart", expected: "Total\n  drops" }];
+			await server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { steps } }] });
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v2"));
+			expect(await page.getByRole("textbox", { name: "Step 1", exact: true }).inputValue()).toBe("Open  cart");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Spacing case revised");
+			await page.keyboard.press("Control+Enter");
+			await page.locator("#stat").filter({ hasText: "Version 3, by you" }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				version: 3,
+				title: "Spacing case revised",
+				steps,
+			});
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	45_000,
+);
+
 test.skipIf(!browserAvailable)(
 	"full device storage still accepts capture and reports the draft honestly",
 	async () => {

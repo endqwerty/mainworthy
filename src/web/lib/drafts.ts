@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CaseBody, CaseKind, ConflictAddress, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
+import { parseBodyInline } from "../../core/outline.ts";
 import { ProposeInput } from "../../core/proposals.ts";
 import {
 	flag as schemaFlag,
@@ -145,6 +146,20 @@ export function addDraftTags(draft: Draft, added: string[]): Draft {
 			add: [...new Set([...draft.tagChanges.add, ...added.filter((tag) => !draft.originalTags.includes(tag))])],
 			remove: draft.tagChanges.remove.filter((tag) => !added.includes(tag)),
 		},
+	};
+}
+
+/**
+ * The draft as a save sends it: tags and links typed inline are taken out into its lists, and the spacing of each
+ * line it cleans is joined. Text that reads as it did in the version the draft is on (`original`) was not typed
+ * here and is left as stored, spacing included, or a save of the title would rewrite every step (issue #992).
+ */
+export function cleanTitle(draft: Draft): Draft {
+	const parsed = parseBodyInline(draft.body, [draft.original]);
+	return {
+		...addDraftTags(draft, parsed.tags),
+		body: parsed.body,
+		covers: [...new Set([...draft.covers, ...parsed.covers])],
 	};
 }
 
