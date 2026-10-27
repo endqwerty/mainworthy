@@ -122,6 +122,22 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 | `test/ios-contract.test.ts`, `test/licences.test.ts`, `test/demo-time.test.ts`, `test/work.test.ts` | the iPhone contract, the licence notices, the server's clock, and `scripts/work.ts` |
 | `test/e2e/` | journeys in a real Chromium against a real server |
 
+### Put a test at the cheapest layer that reaches it
+
+A reachable finding or a behaviour change gets the cheapest test that would catch it again (the owner, 2026-10-27,
+on [#1010](https://github.com/endqwerty/mainworthy/issues/1010): "4 is critical"). On 2026-10-27, unit tests were 32
+of 231 files and 0.2% of the test time; browser tests were 39% of it and most of the `flaky-test` issues.
+
+- **Pure logic** (a rule, a parser, a merge, a verdict): a unit test beside the code in `src/`, with no database.
+- **What needs SQL, a transaction, the registry or a policy**: a test in `test/<area>.test.ts`.
+- **What needs a server or the command line** (a route, a header, a process): a server test, starting the command once.
+- **What only a browser shows**: focus, keys, rendering, several windows, the content security policy, the order a
+  page receives replies in. A browser test checks the journey once; the conditions behind it go a layer down.
+
+Extend an existing test before adding a file. A pull request that adds a browser test says why on a line of its
+description starting `Browser tests:`; the `description` job (`bun scripts/work.ts pr-body`) asks for that line and
+names each test it found.
+
 ## Keep tests independent
 
 Tests run beside each other. A test that fails only next to others shares something with them. Fix the sharing.
