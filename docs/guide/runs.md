@@ -150,6 +150,8 @@ While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd>
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots, including your earlier results.
+While a slot is still waiting for your first report, they pass over slots that only another producer has filled.
+When none is, or you cannot record, or the run is closed, they visit every slot.
 You can also click a slot to reopen it and correct your result.
 The header's "N left in run" counts unfinished slots across all people. Skipped and blocked slots stay in that count.
 "Nothing left for you to run" means no unfinished slot is waiting for your first report.
