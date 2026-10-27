@@ -130,6 +130,12 @@ export interface WriteDb extends ReadDb {
 	readonly inTransaction: boolean;
 	beforeCommit(effect: () => void | Promise<void>): void;
 	afterCommit(effect: () => void | Promise<void>): void;
+	/**
+	 * What `make` returns, kept under `key` for the rest of the open write transaction, so a later call returns the
+	 * same value. Whatever is kept is dropped when a savepoint rolls back, since it may describe rows the rollback
+	 * took away. Outside a write transaction nothing is kept and every call makes a new value.
+	 */
+	kept<T>(key: symbol, make: () => T): T;
 }
 
 // Selected from the supported-report measurement in docs/development/concurrency.md.
@@ -261,7 +267,7 @@ export function json<T>(text: string): T {
 
 type Effect = () => void | Promise<void>;
 type QueuedEffect = { phase: "before" | "after"; run: Effect };
-type Transaction = { aborted: { error: unknown } | null; queues: QueuedEffect[][] };
+type Transaction = { aborted: { error: unknown } | null; queues: QueuedEffect[][]; kept: Map<symbol, unknown> };
 type Lease = {
 	conn: ReservedSQL;
 	alive: boolean;
@@ -342,7 +348,7 @@ class Scope implements WriteDb {
 		if (!this.writable) throw new Error("a read scope cannot write");
 		if (this.lease.tx) throw new Error("transaction already open");
 		await query(this.lease, "BEGIN", [], true);
-		this.lease.tx = { aborted: null, queues: [[]] };
+		this.lease.tx = { aborted: null, queues: [[]], kept: new Map() };
 	}
 	async commit(): Promise<void> {
 		const tx = this.requireWrite();
@@ -383,6 +389,12 @@ class Scope implements WriteDb {
 		const queue = tx.queues.at(-1);
 		if (!queue) throw new Error("transaction effect queue missing");
 		queue.push({ phase: "after", run: effect });
+	}
+	kept<T>(key: symbol, make: () => T): T {
+		const tx = this.writable ? this.lease.tx : null;
+		if (!tx) return make();
+		if (!tx.kept.has(key)) tx.kept.set(key, make());
+		return tx.kept.get(key) as T;
 	}
 	async transaction<T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
 		if (this.lease.tx) {
@@ -432,6 +444,7 @@ class Scope implements WriteDb {
 					await query(this.lease, `ROLLBACK TO SAVEPOINT ${name}`, [], true);
 					await query(this.lease, `RELEASE SAVEPOINT ${name}`, [], true);
 					tx.aborted = null;
+					tx.kept.clear();
 				} catch (error) {
 					this.lease.poisoned = true;
 					throw error;
@@ -631,7 +644,7 @@ export class Database {
 		const lease = await this.lease(pool, options.signal);
 		try {
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
-			lease.tx = { aborted: null, queues: [[]] };
+			lease.tx = { aborted: null, queues: [[]], kept: new Map() };
 			const result = await fn(new Scope(lease, false));
 			if (lease.tx.aborted) throw new TransactionAborted(lease.tx.aborted.error);
 			await query(lease, "COMMIT", [], true);

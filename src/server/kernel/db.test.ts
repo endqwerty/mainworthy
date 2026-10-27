@@ -345,6 +345,30 @@ test("savepoints recover aborted statements, report the first failure and discar
 	await cleanWriter();
 });
 
+test("a kept value lasts the write transaction, through a released savepoint, and goes when one rolls back", async () => {
+	const key = Symbol("test");
+	let made = 0;
+	const make = () => ++made;
+	await database.write(async (db) => {
+		expect([db.kept(key, make), db.kept(key, make)]).toEqual([1, 2]);
+		await db.transaction(async () => {
+			expect([db.kept(key, make), db.kept(key, make)]).toEqual([3, 3]);
+			await db.savepoint(async () => expect(db.kept(key, make)).toBe(3));
+			await expect(
+				db.savepoint(async () => {
+					db.kept(key, make);
+					throw new Error("rolled back");
+				}),
+			).rejects.toThrow("rolled back");
+			expect(db.kept(key, make)).toBe(4);
+		});
+		await db.transaction(async () => expect(db.kept(key, make)).toBe(5));
+	});
+	expect(await database.read(async (db) => [(db as WriteDb).kept(key, make), (db as WriteDb).kept(key, make)])).toEqual(
+		[6, 7],
+	);
+});
+
 test("async generator savepoints roll back on iterator return and preserve yields/results", async () => {
 	await database.write((db) =>
 		db.transaction(async () => {

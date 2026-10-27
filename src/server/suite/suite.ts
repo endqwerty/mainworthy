@@ -30,7 +30,7 @@ import { parseOutline } from "../../core/outline.ts";
 import type { PlacementEdit } from "../../core/proposals.ts";
 import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
-import { json, type ReadDb, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
@@ -503,6 +503,67 @@ function indexFolders<T extends Pick<FolderRow, "id" | "parent" | "name">>(rows:
 	return { byId, path, paths, byPath, ambiguous };
 }
 
+// A write transaction reads a project's folders once and keeps them, in the order `Q.folders` reads them. A report
+// under the `create` rule seals and adopts one proposal per file, and each would otherwise read every folder again,
+// and again for each part of the path it creates (#979). `ensureFolder` adds the folders it creates to what is kept;
+// `applyFolder`, which moves, renames and archives folders, drops it. The database drops it when the transaction ends
+// or a savepoint rolls back. An index handed out is never changed afterwards: `lookup`, which only `ensureFolder`
+// reads, takes the folders it creates, and the next index handed out is built again from the rows.
+type KeptFolders = { rows: FolderRow[]; index: FolderIndex | null; lookup: Lookup | null };
+type Lookup = ReturnType<typeof indexFolders<FolderRow>>;
+const KEPT_FOLDERS = Symbol("folders");
+
+const writing = (db: ReadDb): db is WriteDb => "kept" in db;
+
+async function keptFolders(db: ReadDb, project: number): Promise<KeptFolders> {
+	const byProject = writing(db)
+		? db.kept(KEPT_FOLDERS, () => new Map<number, Promise<KeptFolders>>())
+		: new Map<number, Promise<KeptFolders>>();
+	let kept = byProject.get(project);
+	if (!kept) {
+		kept = db.all(Q.folders, { project }).then((rows) => ({ rows, index: null, lookup: null }));
+		byProject.set(project, kept);
+	}
+	return await kept;
+}
+
+/** The project's folders as this transaction has them: read once per write transaction, otherwise per call. */
+async function currentFolders(db: ReadDb, project: number): Promise<FolderIndex> {
+	const kept = await keptFolders(db, project);
+	kept.index ??= indexFolders(kept.rows);
+	return kept.index;
+}
+
+function forgetFolders(ctx: Ctx): void {
+	ctx.db.kept(KEPT_FOLDERS, () => new Map<number, Promise<KeptFolders>>()).delete(ctx.project.id);
+}
+
+/** `Q.folders` order: parent first (none before any), then rank in byte order (`COLLATE "C"`), then id. */
+function folderOrder(a: FolderRow, b: FolderRow): number {
+	if (a.parent !== b.parent) return a.parent === null ? -1 : b.parent === null ? 1 : a.parent - b.parent;
+	return Buffer.compare(Buffer.from(a.rank), Buffer.from(b.rank)) || a.id - b.id;
+}
+
+function keepCreated(kept: KeptFolders, row: FolderRow): void {
+	let low = 0;
+	let high = kept.rows.length;
+	while (low < high) {
+		const middle = (low + high) >> 1;
+		const at = kept.rows[middle];
+		if (at && folderOrder(at, row) < 0) low = middle + 1;
+		else high = middle;
+	}
+	kept.rows.splice(low, 0, row);
+	kept.index = null;
+	const lookup = kept.lookup;
+	if (!lookup) return;
+	lookup.byId.set(row.id, row);
+	const key = cleanPath(lookup.path(row.id)).join("/").toLowerCase();
+	// A path two folders share resolves to the later one in `Q.folders` order, so that is worked out again.
+	if (lookup.byPath.has(key)) kept.lookup = null;
+	else lookup.byPath.set(key, row);
+}
+
 function folderTarget(index: FolderIndex, target: number | string): FolderTarget {
 	if (typeof target === "number") {
 		if (!index.byId.has(target)) throw notFound(`folder ${target}`);
@@ -518,18 +579,23 @@ function folderTarget(index: FolderIndex, target: number | string): FolderTarget
 /** The folder an adopted edit lands in, creating any part of the path that does not exist yet. */
 async function ensureFolder(ctx: Ctx, target: FolderTarget): Promise<number> {
 	if ("id" in target) return target.id;
+	const kept = await keptFolders(ctx.db, ctx.project.id);
 	let parent: number | null = null;
 	let walked = "";
 	for (const name of cleanPath(target.path)) {
 		walked = walked ? `${walked}/${name}` : name;
-		const existing = (await folderIndex(ctx.db, ctx.project.id)).byPath.get(walked.toLowerCase());
+		kept.lookup ??= indexFolders(kept.rows);
+		const existing = kept.lookup.byPath.get(walked.toLowerCase());
 		if (existing) {
 			parent = existing.id;
 			continue;
 		}
 		const last = await ctx.db.get(Q.lastFolderRank, { project: ctx.project.id, parent });
 		const rank = generateKeyBetween(last?.rank ?? null, null);
-		parent = (await ctx.db.one(Q.insertFolder, { project: ctx.project.id, parent, name, rank, rev: ctx.seq })).id;
+		const row: Omit<FolderRow, "id" | "state"> = { project: ctx.project.id, parent, name, rank, rev: ctx.seq };
+		const { id } = await ctx.db.one(Q.insertFolder, row);
+		keepCreated(kept, { ...row, id, state: "active" });
+		parent = id;
 	}
 	if (parent === null) throw invalid("a folder path cannot be empty");
 	return parent;
@@ -722,7 +788,7 @@ export async function* sealSteps(
 		);
 	if (input.edits.some((edit) => edit.op === "quarantine") && (input.edits.length !== 1 || !input.reason?.trim()))
 		throw invalid("a quarantine edit stands alone and needs a reason");
-	const index = await folderIndex(ctx.db, ctx.project.id);
+	const index = await currentFolders(ctx.db, ctx.project.id);
 	const resolved: Resolved[] = [];
 	const conflicts: Sealed["conflicts"] = [];
 	const cases = new Set<string>();
@@ -1356,7 +1422,7 @@ export async function* scopeFactsSteps(
 	edits: readonly Resolved[],
 	projection?: FolderProjection,
 ): AsyncGenerator<undefined, string[], void> {
-	const index = await folderIndex(db, project);
+	const index = await currentFolders(db, project);
 	const { after, targets, placed, touched, paths, refusal } = projection ?? (yield* projectFoldersSteps(index, edits));
 	const facts = new Set<string>();
 	if (refusal) facts.add("replay:refused");
@@ -1520,7 +1586,7 @@ export async function* adoptSteps(
 	};
 	const author = proposal.author;
 	const edits = resolvedOf(proposal);
-	const index = await folderIndex(ctx.db, ctx.project.id);
+	const index = await currentFolders(ctx.db, ctx.project.id);
 	const folders = yield* projectFoldersSteps(index, edits);
 	if (folders.refusal) throw invalid(folders.refusal.message);
 	validateFolderPaths(index, folders);
@@ -2077,6 +2143,7 @@ async function applyFolder(ctx: Ctx, witness: Witness, edit: Extract<Resolved, {
 			rev: ctx.seq,
 		});
 	}
+	forgetFolders(ctx);
 	ctx.touched.add("folders");
 }
 

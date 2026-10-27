@@ -116,6 +116,7 @@
 		"src/cli/import-cases.test.ts": 2539,
 		"test/e2e/suite-archive-selection.test.ts": 2320,
 		"test/e2e/teams.test.ts": 2290,
+		"test/report-folders.test.ts": 2270,
 		"test/e2e/suite-folder-cursor.test.ts": 2257,
 		"test/shared-identity.test.ts": 2207,
 		"test/csv-import.test.ts": 2205,
