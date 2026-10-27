@@ -311,9 +311,19 @@ export async function cluster(): Promise<Cluster> {
 				"--locale=C",
 			]);
 		}
+		// Disposable, like CI's functional shards (scripts/ci-postgres.sh): DROP DATABASE forces a checkpoint, and
+		// with fsync on it syncs every file the clones dirtied, seconds on a busy machine (#984).
 		writeFileSync(
 			join(data, "postgresql.auto.conf"),
-			"listen_addresses = '127.0.0.1'\nunix_socket_directories = ''\nmax_connections = 300\n",
+			[
+				"listen_addresses = '127.0.0.1'",
+				"unix_socket_directories = ''",
+				"max_connections = 300",
+				"fsync = off",
+				"synchronous_commit = off",
+				"full_page_writes = off",
+				"",
+			].join("\n"),
 		);
 		state.port = await freePort();
 		state.bin = bin;

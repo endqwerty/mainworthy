@@ -7,6 +7,9 @@ the check does, how the tests are arranged and what keeps them from interfering 
 
 Tests need PostgreSQL 18. The fixture starts one checkout cluster on demand and clones a database for each
 harness or server. Set `MAINWORTHY_TEST_PG` to use an existing PostgreSQL admin URL instead, as CI does.
+The checkout cluster is disposable and runs with `fsync`, `synchronous_commit` and `full_page_writes` off, like
+CI's functional shards: every dropped database forces a checkpoint, and with `fsync` on that took seconds on a
+busy machine (#984). CI's performance job alone measures on durable PostgreSQL.
 Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fallback remains.
 
 ## Clean up checkout PostgreSQL
