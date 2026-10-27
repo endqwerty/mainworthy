@@ -11,6 +11,7 @@ import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
+import { lockNamedProject } from "../src/server/kernel/ctx.ts";
 import type { WriteDb } from "../src/server/kernel/db.ts";
 import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
@@ -837,7 +838,11 @@ describe("what ends a session", () => {
 			const reading = post(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
 			try {
 				await pause.reached;
-				await withWrite(instance.app, async (db) => await removeProject(db, "scratch"));
+				await withWrite(instance.app, async (db) => {
+					// The assertion-index job takes this lock too, so it writes no rows for the project meanwhile (#975).
+					await lockNamedProject(db, "scratch");
+					await removeProject(db, "scratch");
+				});
 				if (replacement) expect((await admin(instance, { do: "project.create", key: "scratch" })).status).toBe(200);
 				pause.release();
 				const response = await reading;

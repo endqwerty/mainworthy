@@ -24,6 +24,7 @@ import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
 import { lockAllActors, waitMail } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
+import { lockNamedProject } from "../src/server/kernel/ctx.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
@@ -1106,7 +1107,13 @@ describe("local mode", () => {
 					await client.call("admin", { do: "team.member.remove", team: "Quality", person: "viewer" });
 				else if (change === "token") await client.call("admin", { do: "token.revoke", id: viewer.id });
 				else {
-					await instance.app.database.write((db) => db.transaction(() => removeProject(db, "scratch")));
+					await instance.app.database.write((db) =>
+						db.transaction(async () => {
+							// The assertion-index job takes this lock too, so it writes no rows for the project meanwhile (#975).
+							await lockNamedProject(db, "scratch");
+							await removeProject(db, "scratch");
+						}),
+					);
 					await client.call("admin", { do: "project.create", key: "scratch", name: "Recreated scratch" });
 				}
 				finish.resolve();
