@@ -38,7 +38,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0100). Put no write time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
 | **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). After adding or splitting tests, refresh `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
-| **Guard only what is critical.** Before adding a check, test or audit fix, name who reaches the state; if the design rules it out or the code does not have it yet, say so and add nothing (the owner, 2026-10-25: "Only guard if it's absolutely critical to do so") | review judgment |
+| **Guard only what is critical.** Before adding a check, test or audit fix, name what reaches the state; if nothing does yet, say so, add nothing (the owner, 2026-10-25: "Only guard if it's absolutely critical to do so") | the audit brief (`test/security-audit.test.ts`); review judgment |
 | **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Timing and database process cleanup tests run alone with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
 | **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` holds the failure question's sentence to the server; other screen copy is review judgment |
@@ -63,7 +63,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - Competitor claims in `docs/competitors.md` are hypotheses until verified.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
-  rewrite. A finding becomes a test. The goal: landing costs minutes.
+  rewrite. A reachable finding becomes a test. The goal: landing costs minutes.
 - `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
   rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
 
@@ -104,8 +104,8 @@ verification `verify` asks for, open a non-draft pull request with a standalone 
 link it to the thread, run the Daybreak audit every merge needs (`docs/security-audit.md`) and stop. Do not merge, arm
 auto-merge, close it or push to `main`, even when checks are green. Only the owner saying, in the current thread, to
 merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the branch). A stack lands in
-one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and `autopilot-stack`
-nothing merges.
+one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build` and `babysit` nothing
+merges.
 
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
 the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
