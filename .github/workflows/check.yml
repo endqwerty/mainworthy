@@ -36,6 +36,7 @@
 #
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
 # and when the type-check, the lint, the image, the iPhone app or the description failed.
+# CI timing experiment control (throwaway, not for merge).
 name: check
 
 on:
