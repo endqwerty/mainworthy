@@ -243,6 +243,8 @@ test("a start block reports attempts without claiming that authentication failed
 		ok: false,
 		error: { code: "limited", message: "too many attempts; try again in 60 seconds" },
 	});
+	// The App's own ceiling refused it before the shared count, which would have stored 301, was touched.
+	expect(await stored(w, CLIENT)).toBe(300);
 });
 
 test("one source cannot exhaust another source's allowance, including unknown peers", async () => {
@@ -413,6 +415,8 @@ test.each(starts)(
 		expect(said(await w.post(start.path, start.body, other))).toBe("200");
 		w.clock.advance(30_000);
 		expect(said(await w.post(start.path, start.body, client))).toBe("200");
+		// A new window starts from this one begin, so all 300 of it are left to give.
+		expect(await stored(w, CLIENT)).toBe(1);
 		await used(w, CLIENT, 299);
 		expect(said(await w.post(start.path, start.body, client))).toBe("200");
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
@@ -432,6 +436,14 @@ async function used(w: World, address: string, count: number): Promise<void> {
 			),
 		),
 	);
+}
+
+/** The count the shared accounting holds for `address`'s window, or null when it holds none. */
+async function stored(w: World, address: string): Promise<number | null> {
+	const rows = await w.rows<{ count: number }>(
+		`SELECT count::integer AS count FROM identity_starts WHERE key = '${sha256(startAddressKey(address) ?? "")}'`,
+	);
+	return rows[0]?.count ?? null;
 }
 
 async function flood(w: World, path: string, body: Record<string, unknown>) {
