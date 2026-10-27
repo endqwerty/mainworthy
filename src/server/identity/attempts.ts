@@ -63,7 +63,8 @@ const Q = {
  SELECT key FROM identity_starts ORDER BY since LIMIT greatest(0, (SELECT count(*) FROM identity_starts) - 9999) FOR UPDATE SKIP LOCKED)`),
 };
 const starts = new WeakMap<App, ReturnType<typeof createStartLimiter>>();
-function localStarts(app: App) {
+/** The App's own ceiling on anonymous starts, keyed as `takeStart` keys it: the SHA-256 of `startAddressKey`. */
+export function localStarts(app: App) {
 	let limiter = starts.get(app);
 	if (!limiter) {
 		limiter = createStartLimiter();
