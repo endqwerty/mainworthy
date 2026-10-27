@@ -75,6 +75,7 @@ import {
 	type QuestionRow,
 	questionById,
 	refsOf,
+	setQuestionState,
 } from "./questions.ts";
 
 type Tools = {
@@ -354,8 +355,9 @@ const mapHandler: Handler<"map"> = {
 				// The answer settles the tests it names. The file's other tests with no case are asked about now,
 				// not when a new test next turns up in the file, which may be never.
 				const rest = await unlinkedInFile(ctx.db, ctx.project.id, file);
-				if (rest.length > 0) yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
-				return { linked };
+				if (rest.length === 0) return { linked };
+				const raised = yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
+				return raised.s === "open" ? { linked, asked: raised.question.id } : { linked };
 			}
 			case "create": {
 				// New cases go through the same adopt path as any edit. If policy does not adopt them now, the
@@ -443,13 +445,18 @@ const mapHandler: Handler<"map"> = {
 	async revert(ctx, _question, decision) {
 		// Put back each link this decision made, and only those: a link a newer decision has since made stays. The
 		// earlier link returns only while the decision that made it still stands; otherwise the test is unlinked.
-		const { linked } = json<{ linked?: Relinked[] }>(decision.effects);
+		const { linked, asked } = json<{ linked?: Relinked[]; asked?: number }>(decision.effects);
 		for (const [testId, previous, by] of linked ?? []) {
 			const test = await testById(ctx.db, testId);
 			if (!test) continue;
 			const earlier = by != null && (await stands(ctx, by)) ? { caseId: previous, by } : { caseId: null, by: null };
 			await restoreLink(ctx, test, decision.id, earlier);
 		}
+		// A link opened a question about the file's other tests. Taken back, the file's own question asks about
+		// them again, so that one, still unanswered, is closed: one file is not asked about twice. A map question
+		// blocks no run, so no run is recomputed.
+		const rest = asked === undefined ? null : await questionById(ctx.db, asked);
+		if (rest?.state === "open") await setQuestionState(ctx, rest, "dissolved", null);
 	},
 	// "Track" is a judgement about the file as it was: it is asked again when the file's tests with no case
 	// change. A link is about the tests it names: it does not carry to a test that turns up later in the file,

@@ -975,7 +975,7 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 			`),
 			),
 		);
-		expect(links).toEqual({ tests: 503, cases: 502, linked: 502, decisions: 2 });
+		expect(links).toEqual({ tests: 503, cases: 503, linked: 503, decisions: 2 });
 		expect(await gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
 		expect(await open()).toEqual([]);
 		const all = await readCi(call, { commit: "main0002" });
