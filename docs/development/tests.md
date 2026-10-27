@@ -138,7 +138,8 @@ Extend an existing test before adding a file. A pull request that adds a browser
 description starting `Browser tests:`. The `description` job (`bun scripts/work.ts pr-body`) asks for that line when
 a browser test file declares more tests at the head than at the base, and names each file with both counts. Which
 files open a browser is listed in `scripts/browser-tests.ts`; `test/browser-tests.test.ts` holds the list to what each
-file opens.
+file opens. The count reads code only: a test written into a string or a fixture is not one. A test added to a
+browser file counts even when it opens no browser, because such a test belongs in a cheaper file.
 
 ## Keep tests independent
 
