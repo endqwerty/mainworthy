@@ -65,9 +65,11 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   `curl` "Could not resolve host"). Do not run it as a T3 Code child task: a child inherits the thread's full access.
 - **What it is asked.** The brief names the head, the base, the export and the diff, says to read nothing else, and
   lists what to look at: who a request is, the HTTP and browser boundary, the writers, SQL, CI, dependencies and what
-  a public repository must not hold. Each issue names what reaches it in the head: a state the head cannot reach, or
-  one only a later change could create, is not an issue, since that change is audited in turn. The list and that rule
-  are in the script, so the audit and this page cannot drift apart.
+  a public repository must not hold. Each issue names what reaches it in the head, in any configuration the head's
+  code accepts (an environment variable an operator sets without a commit counts; who may open a pull request is the
+  trust model above, not a setting): a state none of them reaches, or one only a later commit could create, is not
+  an issue, since that commit is audited in turn. The list and that
+  rule are in the script, so the audit and this page cannot drift apart.
 - **What it returns.** Each issue with its file and line, what reaches it, a concrete case that goes wrong, its
   severity and a fix, in `findings.md`. The sandbox cannot write files, so that is the run's last message, written by
   Codex. A run cut off keeps its partial output in `log.txt`. Sessions in the temporary Codex home are removed with
@@ -89,7 +91,7 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
 
 - Fix it, and the fix comes with a test. An issue that is not a defect gets an answer in the pull request with the
   evidence (the code path, a test, a probe). One that names nothing reaching it in the head is answered by saying
-  what rules it out (the type, the owning module, the setting), and needs no fix or test. Count every writer: an
+  what rules it out (the type, the owning module, a value no configuration can set), and needs no fix or test. Count every writer: an
   imported archive or data an older version stored reaches what the normal writers never write.
 - Then audit the new head, giving Daybreak its earlier issues and their answers. The pull request is ready to merge
   only when a round on the current head and base leaves no issue unaddressed.

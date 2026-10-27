@@ -278,7 +278,9 @@ test("the brief names the head, the base, what to read and what to look at", () 
 test("the brief asks each issue for what reaches it in this head", () => {
 	const text = briefFor(["a.ts"]);
 	expect(text).toContain("what reaches it in this head");
-	expect(text).toContain("only a later change could create");
+	expect(text).toContain("only a later commit could create");
+	expect(text).toContain("Every configuration the head's code accepts counts");
+	expect(text).toContain("Who may push or open a pull request is not such a");
 });
 
 test("a change to the audit's own files is called out first", () => {
