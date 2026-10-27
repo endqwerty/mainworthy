@@ -1896,6 +1896,21 @@ describe("unlinked tests", () => {
 		await h.call("decide", { undo: q.q });
 		expect(await unlinkedTests()).toBe(501);
 
+		// A `link` answer settles the tests it names; the rest of the file is asked about at once.
+		await use("standard", "ask");
+		await h.call("propose", { edits: [{ op: "create", outline: "Bulk checkout\n  Pay > Paid" }] });
+		await h.call("report", ciReport({ commit: "bulk0005", n: 501, file }));
+		const asked = first((await queue({ kind: "map" })).items);
+		await h.call("decide", {
+			q: asked.q,
+			onEvidence: asked.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		expect(await unlinkedTests()).toBe(500);
+		const rest = first((await queue({ kind: "map", state: "open" })).items);
+		expect(rest).toMatchObject({ title: `500 tests in ${file} have no case`, evidence: { count: 500 } });
+		expect(rest.q).not.toBe(asked.q);
+
 		// `track` stands on every test of the file, not on the first page: one more test is asked about.
 		await use("standard", "ask");
 		await h.call("report", ciReport({ commit: "bulk0003", n: 501, file }));

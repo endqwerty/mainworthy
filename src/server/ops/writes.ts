@@ -1,7 +1,7 @@
 // The operations that produce evidence, request it, or decide: propose, report, claim, plan, decide.
 // Each composes the owning modules; none of them writes a table itself.
 import { contentHash } from "../../core/hash.ts";
-import { type ActorKind, Ask, describeAsk } from "../../core/kinds.ts";
+import { Ask, describeAsk } from "../../core/kinds.ts";
 import {
 	AnnounceInput,
 	ChangeInput,
@@ -36,7 +36,7 @@ import {
 	stopAskingAbout,
 	undo,
 } from "../decisions/decisions.ts";
-import { raiseAdopt } from "../decisions/kinds.ts";
+import { raiseAdopt, raiseMapSteps } from "../decisions/kinds.ts";
 import { decisionById, type QuestionRow, questionRef } from "../decisions/questions.ts";
 import {
 	accept,
@@ -57,9 +57,6 @@ import {
 	scopeEnded,
 	setChangeEnded,
 	type TargetRow,
-	testRef,
-	unlinkedIdsInFile,
-	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
 import { recordQuarantines, validateQuarantineEdit } from "../evidence/quarantine.ts";
@@ -326,7 +323,7 @@ export async function* processBatchSteps(
 			files.add(result.test.file ?? NO_FILE);
 	}
 	for (const file of files) {
-		yield* raiseMapSteps(ctx, file, producer);
+		yield* raiseMapSteps(ctx, raiseSteps, file, producer);
 		yield;
 	}
 
@@ -399,29 +396,6 @@ async function brief(ctx: Ctx, raised: Raised, tests: number): Promise<QuestionB
 		by: signer ? (await actorLabel(ctx.db, signer.by)).name : null,
 		tests,
 	};
-}
-
-/** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
-async function* raiseMapSteps(ctx: Ctx, file: string, producer: ActorKind): AsyncGenerator<undefined, Raised, void> {
-	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
-	const ids = await unlinkedIdsInFile(ctx.db, ctx.project.id, file);
-	const count = ids.length;
-	return yield* raiseSteps(ctx, {
-		kind: "map",
-		key: `file:${file}`,
-		subject: { file },
-		title: `${count || "Some"} test${count === 1 ? "" : "s"} in ${file} ${count === 1 ? "has" : "have"} no case`,
-		producer,
-		evidence: {
-			file,
-			tests: tests.slice(0, 50).map((test) => ({ id: test.id, t: testRef(test), name: test.name })),
-			count,
-		},
-		material: { file, tests: ids },
-		facts: [],
-		refs: tests.slice(0, 20).map(testRef),
-		runs: [],
-	});
 }
 
 /** `processBatchSteps` run to the end without pausing: for start-up recovery and tests. */

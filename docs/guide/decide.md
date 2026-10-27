@@ -293,7 +293,7 @@ A rule leaves a file's question open if a person took back its answer or answere
 Under `standard` with "Create a case for each test", an agent's reported tests also wait for a person to adopt their new cases.
 See [policy](./policy.md#tests-with-no-case).
 "Link to a case" makes future results count for the chosen case.
-"Create cases" creates one case per test and links each test to its case.
+"Create cases" creates one case per test and links each test to its case, for every test of the file with no case, also those past the 50 the question lists.
 "Create cases" works where the policy adopts your new case by rule, under `loose` or for a person under `standard`.
 Under `strict`, or for an agent under `standard`, a person must adopt each new case. Mainworthy refuses "Create cases" in those situations.
 To link tests when a person must adopt new cases, follow these steps.
@@ -305,14 +305,14 @@ To link tests when a person must adopt new cases, follow these steps.
 "Track without a case" keeps the test without a case. The test still gates the build.
 
 Tests reported with neither a file nor a class name share one question under the file "(no file)".
-The question lists those tests like any other file's tests. Every answer acts on the listed tests.
+The question lists those tests like any other file's tests, and its answers act on them the same way.
 
 To answer several files now, [select them](#answer-several-questions-at-once) and give one answer.
 To give every file the same answer from now on, change the project's choice instead of answering each row.
 Open Policy in Settings. Under "Tests with no case", choose "Track without a case" or "Create a case for each test". The rule then answers every open question about a file at once.
 
-A link holds for the tests it names. A test that turns up later in the same file is a new
-question, and the earlier links stay. "Track without a case" is about the file as it was.
+A link holds for the tests it names. The file's tests it leaves without a case are asked about
+at once in a new question, and so is a test that turns up later in the same file. The earlier links stay. "Track without a case" is about the file as it was.
 When the file's tests with no case change, the file is asked about again.
 
 These choices settle the mapping question. They do not turn a failed result into a pass.

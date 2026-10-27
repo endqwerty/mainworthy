@@ -3,7 +3,15 @@
 //
 // `effect` is the only place a standing writer is called (it receives the witness). `revert` undoes exactly what
 // `effect` recorded, for a withdrawn or expired decision. `holds` says how long the decision carries forward.
-import { ANSWERS, type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
+import {
+	type ActorKind,
+	ANSWERS,
+	type AnswerOf,
+	type AnyAnswer,
+	failureClass,
+	type Kind,
+	type Policy,
+} from "../../core/kinds.ts";
 import { type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
@@ -22,6 +30,8 @@ import {
 	setResultExcuses,
 	targetsByIds,
 	testById,
+	testRef,
+	unlinkedIdsInFile,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { setQuarantine, validateQuarantineEdit } from "../evidence/quarantine.ts";
@@ -294,6 +304,34 @@ async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 	return question?.state === "decided" && question.decision === decisionId;
 }
 
+/** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
+export async function* raiseMapSteps(
+	ctx: Ctx,
+	raise: Tools["raiseSteps"],
+	file: string,
+	producer: ActorKind,
+): AsyncGenerator<undefined, Raised, void> {
+	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
+	const ids = await unlinkedIdsInFile(ctx.db, ctx.project.id, file);
+	const count = ids.length;
+	return yield* raise(ctx, {
+		kind: "map",
+		key: `file:${file}`,
+		subject: { file },
+		title: `${count || "Some"} test${count === 1 ? "" : "s"} in ${file} ${count === 1 ? "has" : "have"} no case`,
+		producer,
+		evidence: {
+			file,
+			tests: tests.slice(0, 50).map((test) => ({ id: test.id, t: testRef(test), name: test.name })),
+			count,
+		},
+		material: { file, tests: ids },
+		facts: [],
+		refs: tests.slice(0, 20).map(testRef),
+		runs: [],
+	});
+}
+
 /** A link a `map` decision replaced: the test, the case it was linked to, and the decision that had linked it. */
 type Relinked = [test: number, previous: number | null, by?: number | null];
 
@@ -313,6 +351,10 @@ const mapHandler: Handler<"map"> = {
 					await linkTest(ctx, witness, test, row.id);
 					ctx.touched.add(`C-${row.no}`);
 				}
+				// The answer settles the tests it names. The file's other tests with no case are asked about now,
+				// not when a new test next turns up in the file, which may be never.
+				const rest = await unlinkedInFile(ctx.db, ctx.project.id, file);
+				if (rest.length > 0) yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
 				return { linked };
 			}
 			case "create": {
