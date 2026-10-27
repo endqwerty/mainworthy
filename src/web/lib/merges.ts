@@ -106,9 +106,10 @@ export function holdsUnfinishedStep(body: Draft["body"]): boolean {
  * issue #86, B1). So the recorded step stands. An expected result the draft's step holds and the recorded one
  * does not is kept as a step of its own, under a new id from `newId`; a step with nothing of its own goes. A
  * step emptied after `sent` went out is in `sent`: that is the person's removal of it, and is left to the merge.
- * Spacing a save takes out is not merged as anyone's edit (`asTyped`): the draft's spacing gives way to a version's
- * other words in that field, and is kept as typed where the field ends as the draft has it (the independent check
- * of the change for issue #927, F1).
+ * Spacing a save takes out is no one's edit. The merge's base is `sent` as the draft has it typed (`asTyped`), and
+ * `recorded` is that base where it is only the server's trimming of `sent`. So the draft's spacing stays where
+ * nobody changed the words, and gives way to anyone's other change, spacing included (the independent checks of
+ * the change for issue #927, F1 to F3).
  */
 export function carried({
 	sent,
@@ -132,43 +133,71 @@ export function carried({
 		taken.add(id);
 		return [{ ...step, id }];
 	});
-	const typed = { ...live, steps };
-	const merged = mergeBodies({
-		base: sent,
-		mine: asTyped({ typed: sent, stored: typed }),
-		theirs: asTyped({ typed: sent, stored: recorded }),
-	}).merged;
-	return asTyped({ typed, stored: merged });
+	const mine = { ...live, steps };
+	const base = asTyped({ typed: mine, stored: sent });
+	const theirs = overlay({ stored: recorded, against: sent, given: base, rule: serverSaved });
+	return mergeBodies({ base, mine, theirs }).merged;
 }
+type Rule = Record<"title" | "pre" | "step", (text: string) => string>;
+/** What the server leaves of each text (`cleanBody`). */
+const serverSaved: Rule = {
+	title: (text) => text.replace(/\s+/g, " ").trim(),
+	pre: (text) => text.trim(),
+	step: (text) => text.trim(),
+};
 /**
- * Text as saving leaves it, but for what it takes out: the page trims each line and joins its spaces
- * (`cleanTitle`, which also makes a title one line), and the server trims the whole (`cleanBody`).
+ * What saving leaves of each text, on the page and then the server. The page trims each line of a step and joins
+ * its spaces, and makes a title one line (`cleanTitle`). Preconditions only the server trims, so spacing inside
+ * them is the text's own (F3).
  */
-const saved = (text: string | null): string =>
-	(text ?? "")
-		.split(/\r\n|\n|\r/)
-		.map((line) => line.trim().replace(/[ \t]+/g, " "))
-		.join("\n")
-		.trim();
+const saved: Rule = {
+	...serverSaved,
+	step: (text) =>
+		text
+			.split(/\r\n|\n|\r/)
+			.map((line) => line.trim().replace(/[ \t]+/g, " "))
+			.join("\n")
+			.trim(),
+};
+/** `stored`, with each text that `rule` makes the same as `against`'s given as `given` has it. Steps match by id. */
+function overlay<T extends Draft["body"]>({
+	stored,
+	against,
+	given,
+	rule,
+}: {
+	stored: T;
+	against: Draft["body"];
+	given: Draft["body"];
+	rule: Rule;
+}): T {
+	const same = (field: keyof Rule, text: string | null, as: string | null | undefined): boolean =>
+		as !== undefined && rule[field](text ?? "") === rule[field](as ?? "");
+	const steps = new Map(against.steps.map((step) => [step.id, step]));
+	const givenSteps = new Map(given.steps.map((step) => [step.id, step]));
+	return {
+		...stored,
+		title: same("title", stored.title, against.title) ? given.title : stored.title,
+		pre: same("pre", stored.pre, against.pre) ? given.pre : stored.pre,
+		steps: stored.steps.map((step) => {
+			const own = steps.get(step.id);
+			const as = givenSteps.get(step.id);
+			if (step.use || !own || own.use || !as || as.use) return step;
+			return {
+				...step,
+				action: same("step", step.action, own.action) ? as.action : step.action,
+				expected: same("step", step.expected, own.expected) ? as.expected : step.expected,
+			};
+		}),
+	};
+}
 /**
  * `stored`, with each text that saving would make the same as `typed`'s given back as typed. The editor keeps what
  * was typed, or a word typed after a trailing space or line break would join the last (issue #927). Text the save
  * changed in another way, such as a tag taken out of it, or a line break where a space was, is as stored.
  */
 export function asTyped<T extends Draft["body"]>({ typed, stored }: { typed: Draft["body"]; stored: T }): T {
-	const kept = <V extends string | null>(text: V, as: V, line = (value: string) => value): V =>
-		saved(line(text ?? "")) === saved(line(as ?? "")) ? as : text;
-	const steps = new Map(typed.steps.map((step) => [step.id, step]));
-	return {
-		...stored,
-		title: kept(stored.title, typed.title, (title) => title.replace(/\s+/g, " ")),
-		pre: kept(stored.pre, typed.pre),
-		steps: stored.steps.map((step) => {
-			const own = steps.get(step.id);
-			if (step.use || !own || own.use) return step;
-			return { ...step, action: kept(step.action, own.action), expected: kept(step.expected, own.expected) };
-		}),
-	};
+	return overlay({ stored, against: typed, given: typed, rule: saved });
 }
 /** Whether the draft holds text the card was not made of. The editor is closed while a card is open, so this is rare. */
 const beyondCard = ({ draft, conflict }: { draft: Draft; conflict: DraftConflict }): boolean =>
