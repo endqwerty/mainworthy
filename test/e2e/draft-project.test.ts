@@ -243,6 +243,9 @@ for (const attempt of ["save", "merge"] as const)
 										response.url().endsWith(`/${attempt === "merge" ? "get" : operation}`) && response.status() === 409,
 								)
 							: null;
+					// Teardown closes the page, which rejects this waiter: handled here, an earlier step's error is the
+					// one reported (#855). Awaiting it below still fails on its own rejection.
+					void refusal?.catch(() => {});
 					if (project !== "unbound") {
 						await instance.app.database.write(async (db) => {
 							await db.transaction(async () => {
@@ -344,6 +347,11 @@ for (const attempt of ["save", "merge"] as const)
 						expect(await preserved.inputValue()).toContain(before.body.title);
 						await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
 					}
+					// The status line can show the saved version before the editor has released its draft and protective
+					// copy; a reload in between finds that copy (#977). Reload once nothing is held.
+					await page.waitForFunction(() =>
+						Object.keys(localStorage).every((key) => !key.includes(":draft:") && !key.includes(":draft-copy:")),
+					);
 					await page.reload();
 					await page.getByRole("button", { name: "Current project's fresh edit", exact: true }).waitFor();
 					expect(await page.locator(".preserved-draft").count()).toBe(0);
