@@ -1282,3 +1282,100 @@ for (const mode of ["open", "closed", "read-only"] as const)
 		},
 		30_000,
 	);
+
+// j and k skip a slot only another producer filled while a slot is still open to this person; with none open, they
+// read every slot (#816). Automatic advance after a record keeps skipping such evidence.
+async function active(page: Page) {
+	return page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document");
+}
+
+for (const viewer of ["read-only", "reporter"] as const)
+	check(
+		`j and k visit every slot of a run another producer filled, for a ${viewer} viewer (#816)`,
+		async () => {
+			const { server, run, path } = await fixture(3);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("report", {
+					run,
+					results: [1, 2, 3].map((id) => ({ test: { case: `C-${id}` }, outcome: "pass" })),
+				});
+				const { token } = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "reviewer",
+						kind: "human",
+						can: viewer === "read-only" ? ["read"] : ["read", "record"],
+						project: "scratch",
+					}),
+				);
+				view = await openPage({ ...server, token }, { path });
+				const { page } = view;
+				await ready(page);
+				if (viewer === "read-only") await screenshot(page, 816);
+				expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
+				expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
+				await page.keyboard.press("j");
+				expect(await active(page)).toBe("C-2");
+				await page.keyboard.press("j");
+				expect(await active(page)).toBe("C-3");
+				await page.keyboard.press("k");
+				await page.keyboard.press("k");
+				expect(await active(page)).toBe("C-1");
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+check(
+	"automatic advance skips another producer's slot and j reaches it once none is left to record (#816)",
+	async () => {
+		const { server, run, path } = await fixture(3);
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("report", { run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
+			const { token } = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "reviewer",
+					kind: "human",
+					can: ["read", "record"],
+					project: "scratch",
+				}),
+			);
+			view = await openPage({ ...server, token }, { path });
+			const { page } = view;
+			await ready(page);
+			await page.keyboard.press("j");
+			expect(await active(page)).toBe("C-3");
+			await page.keyboard.press("k");
+			expect(await active(page)).toBe("C-1");
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			await page.locator('[data-run-document="C-3"][data-active="true"][data-ready="true"]').waitFor();
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-3 pass recorded" }).waitFor();
+			await page
+				.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+				.waitFor();
+			expect(await active(page)).toBe("C-3");
+			await page.keyboard.press("k");
+			expect(await active(page)).toBe("C-2");
+			expect(await page.getByText("j skips to your next slot.", { exact: true }).count()).toBe(0);
+			await page.keyboard.press("k");
+			expect(await active(page)).toBe("C-1");
+			expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.by === "reviewer"))).toEqual([
+				[true],
+				[false],
+				[true],
+			]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

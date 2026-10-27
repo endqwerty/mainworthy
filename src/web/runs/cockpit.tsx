@@ -356,6 +356,8 @@ function ProjectRunCockpit({
 		(uncertain.has(current.id) || (!external(current) && isOpen && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
+	// j and k pass over evidence left to its producer only while this person has a slot of their own to report.
+	const skipsExternal = canReport && isOpen && hasAvailable;
 	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
@@ -381,7 +383,7 @@ function ProjectRunCockpit({
 		for (let distance = 1; distance <= slots.length; distance++) {
 			const candidate = slots[start + distance * delta];
 			if (!candidate) return;
-			if (!external(candidate)) {
+			if (!skipsExternal || !external(candidate)) {
 				setCursor(candidate.id);
 				setNoting(null);
 				return;
@@ -439,7 +441,7 @@ function ProjectRunCockpit({
 		slot = slots.find((item) => item.id === slotId) ?? slot;
 		if (external(slot)) {
 			setStatus(
-				"This slot is already filled by another producer. Your note is kept. j moves to the next slot for you.",
+				`This slot is already filled by another producer. Your note is kept.${skipsExternal ? " j moves to the next slot for you." : ""}`,
 			);
 			return null;
 		}
@@ -960,7 +962,7 @@ function ProjectRunCockpit({
 									{fill.model && ` · ${fill.model}`} · {fill.outcome} · basis {fill.admitted}
 								</span>
 							))}
-							<span>j skips to your next slot.</span>
+							{skipsExternal && <span>j skips to your next slot.</span>}
 						</div>
 					)}
 					{current && currentBody && !admittedMethod && (
