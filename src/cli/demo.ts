@@ -17,6 +17,7 @@ import {
 	lockProject,
 	lockProjectKey,
 	markDemo,
+	projectById,
 	retireDemo,
 	retiredDemos,
 	setDemoDeployment,
@@ -69,7 +70,7 @@ async function refresh(
 	size: { cases: number; unlinkedFiles: number; days?: number },
 	options: Options,
 ): Promise<SeedResult> {
-	const { app, owner } = instance;
+	const { app } = instance;
 	const revision = app.config.commit;
 	if (revision === null)
 		throw new CliError("invalid", "demo refresh requires a known MAINWORTHY_COMMIT or SOURCE_COMMIT");
@@ -87,13 +88,35 @@ async function refresh(
 		requested.unlinkedFiles > MAX_SEED_UNLINKED_FILES
 	)
 		throw new CliError("invalid", "invalid demo seed size");
+	// Every instance on the database refreshes under one lock, so a second one, during a rollout, reads the first's
+	// finished seed below and keeps it instead of swapping it out (#914).
+	return await app.database.exclusive(
+		`demo refresh ${project}`,
+		() => refreshAlone(instance, project, revision, requested, options),
+		options.signal,
+	);
+}
+
+async function refreshAlone(
+	instance: Instance,
+	project: string,
+	revision: string,
+	requested: { cases: number; unlinkedFiles: number; days: number },
+	options: Options,
+): Promise<SeedResult> {
+	const { app, owner } = instance;
 	const state = await app.database.read(async (db) => {
 		const found = await findProject(db, project);
 		return found ? await demoDeployment(db, found.id) : null;
 	});
 	if (state?.kind === "ready" && state.revision === revision) return state.seeded;
-	// Finish earlier retirements before another seed, so the heavy stages never overlap.
-	await drainRetiredDemos(instance, { signal: options.signal });
+	await options.step?.("checked");
+	// Finish earlier retirements before another seed, so the heavy stages never overlap. A cleanup that fails still
+	// leaves this revision its demo: the retired project waits for the next drain, at the next start or swap.
+	await drainRetiredDemos(instance, { signal: options.signal }).catch((error: unknown) => {
+		options.signal?.throwIfAborted();
+		warning(`retired demo cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+	});
 	const issued = await app.database.write((db) =>
 		db.transaction(async () => {
 			options.signal?.throwIfAborted();
@@ -197,7 +220,13 @@ export function drainRetiredDemos(
 					options.signal?.throwIfAborted();
 					const retired = (await retiredDemos(db))[0];
 					if (!retired) return null;
-					await lockProjectAuthority(db, retired.id, instance.owner.id);
+					try {
+						await lockProjectAuthority(db, retired.id, instance.owner.id);
+					} catch (error) {
+						// Another instance removed it between the read and the lock: nothing of it is left to remove.
+						if (error instanceof Busy && !(await projectById(db, retired.id))) return "gone";
+						throw error;
+					}
 					plan ??= await removalPlan(db);
 					const began = performance.now();
 					const result = await removeProjectSlice(db, retired.key, 32, plan);
@@ -205,6 +234,7 @@ export function drainRetiredDemos(
 				}),
 			);
 			if (slice === null) return;
+			if (slice === "gone") continue;
 			await options.onSlice?.(slice);
 			if (slice.ms > 100)
 				warning(`[mainworthy] retired demo: ${slice.table} removed ${slice.rows} rows in ${slice.ms.toFixed(1)} ms`);

@@ -153,6 +153,7 @@ export class Busy extends Error {
 	}
 }
 export const MIGRATION_LOCK = 0x4d574d4947520001n;
+const EXCLUSIVE_POLL_MS = 200;
 export function sqlState(error: unknown): string | null {
 	if (typeof error !== "object" || error === null) return null;
 	const state: unknown = Reflect.get(error, "errno");
@@ -729,6 +730,46 @@ export class Database {
 			} finally {
 				await this.dispose(lease);
 			}
+		}
+	}
+
+	/**
+	 * Runs `fn` while this process holds the PostgreSQL session lock named `name`, so one process at a time, across
+	 * every instance on the database, runs work under that name, however long it takes and however many transactions
+	 * it commits. The lock lives on a connection of its own and ends with it, also when the process dies. The wait
+	 * polls, so `signal` and closing the database stop it.
+	 */
+	async exclusive<T>(name: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		const dedicated = new SQL(this.options.url, { bigint: true, max: 1 });
+		try {
+			const lease = await this.lease(dedicated, signal);
+			try {
+				const stop = AbortSignal.any([this.shutdown.signal, ...(signal ? [signal] : [])]);
+				for (;;) {
+					stop.throwIfAborted();
+					const [row] = await query<{ held: boolean }>(
+						lease,
+						"SELECT pg_try_advisory_lock(hashtextextended($1::text, 914)) AS held",
+						[name],
+					);
+					if (row?.held) break;
+					await new Promise<void>((resolve) => {
+						const timer = setTimeout(done, EXCLUSIVE_POLL_MS);
+						function done() {
+							clearTimeout(timer);
+							stop.removeEventListener("abort", done);
+							resolve();
+						}
+						stop.addEventListener("abort", done, { once: true });
+					});
+				}
+				return await fn();
+			} finally {
+				// Closing the connection below ends its session, and the lock with it, whatever state it is in.
+				await this.dispose(lease);
+			}
+		} finally {
+			await dedicated.close();
 		}
 	}
 

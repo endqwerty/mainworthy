@@ -691,8 +691,10 @@ Cleanup runs on start and after refresh, including when MAINWORTHY_DEMO is unset
 rows per gate turn and transaction,
 with foreign keys enforced, then yields to foreground work. A final transaction deletes the mark and project
 together. An interrupted drain continues from remaining rows. A failed slice rolls back and logs the failure;
-its retired mark remains for retry. A new swap first drains earlier retirements, so failed cleanup prevents
-unbounded accumulation across deployments. Normal completion retains no retired project. PostgreSQL reuses deleted storage through its ordinary maintenance; cleanup does not promise immediate disk shrinkage.
+its retired mark remains for retry. A new swap first drains earlier retirements, so the heavy stages do not
+overlap; a drain that fails there is logged and the swap goes ahead, so the new revision still gets its demo, and
+the retired project waits for the next start's drain. A retired project another instance removed first counts as
+removed. Normal completion retains no retired project. PostgreSQL reuses deleted storage through its ordinary maintenance; cleanup does not promise immediate disk shrinkage.
 Whole-instance exports are refused with a retry message while retired marks remain, because those marks do not
 travel in an archive. Active-project exports remain available.
 
@@ -703,6 +705,12 @@ million results) and one retired default demo (102,304 rows, 28,000 of them resu
 this, with a median slice of 35 ms, a longest of 289 ms, and plans that read up to 490,000 rows of other projects to
 find none; after it, 46 s, a median of 2.2 ms and a longest of 27 ms.
 
+Migration 6 builds the three indexes the drain reads by with a plain `CREATE INDEX`, which holds writes to
+`search_docs`, `slot_results` and `team_events` until the migration commits. The new build runs it at startup,
+before it serves; an older instance still serving during the rollout waits that long to write to those tables. The
+build time follows their row count: about 0.15 s per index for a million rows on a desktop, and the instance's
+tables hold far fewer.
+
 No whole-database audit or worker retry runs under the demo gate. Each swap and deletion slice is checked against
 a 500 ms acceptance ceiling, alongside successful unrelated HTTP reads, writes and token sign-ins on a populated
 local database. Half a second is an interactive ceiling, not an infrastructure latency guarantee. Logs identify
@@ -710,11 +718,12 @@ a cleanup slice exceeding 100 ms. PostgreSQL indexes and foreign-key checks stil
 and disk contention; the rehearsal evidence belongs in the pull request.
 
 Each swap and cleanup slice holds the identity lock and the locks of the projects it changes for its one short
-transaction. In-process
-refresh calls also serialize and reread persisted state. The accepted Cloud Run design keeps this shared database and moves refresh/drain to
-its job/lease interface. That port must fence swap, seeding and completion against stale lease holders, then use
-project locks for the live and retired projects. Scheduled requests must replace the renewal timer when CPU is
-allocated only during requests. Process-local locks are not a Cloud Run coordination mechanism.
+transaction. A whole refresh runs under a PostgreSQL session lock named for the demo (`Database.exclusive`), which
+every instance on the database takes: during a rollout with two instances the second waits, then reads the first's
+finished seed for the same revision and keeps it, edits made in it included. The lock ends with its connection, so
+an instance that dies mid-seed frees it, and the next start resumes the marked seed. Moving refresh and drain to
+the durable job interface remains open (#821); several instances do not need it. Scheduled requests must
+replace the renewal timer when CPU is allocated only during requests.
 
 This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
 remain useful to enforced transfer removal and cleanup. The PostgreSQL baseline includes only local operational demo state,
