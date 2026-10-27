@@ -73,44 +73,83 @@ const usePolicy = async (preset: string, unlinked?: "ask" | "track" | "create") 
 	return await decide(await open("adopt"), { is: "accept" }, h.owner, { reason: "switch for the test" });
 };
 
+async function protectedReview() {
+	await h.call("propose", {
+		edits: [
+			{
+				op: "policy",
+				base: (await h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" })).version,
+				clauses: PRESETS.loose.clauses.flatMap((clause) =>
+					clause.id === "adopt-any"
+						? [
+								{
+									id: "critical-review",
+									kind: "adopt",
+									when: ["author:agent", "tag:critical"],
+									ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+									blocks: "nothing",
+								},
+								clause,
+							]
+						: [
+								{
+									...clause,
+									ask: clause.id === "adopt-conflict" ? { ...clause.ask, agents: "answer" } : clause.ask,
+								},
+							],
+				),
+			},
+		],
+	});
+	await decide(await open("adopt"), { is: "accept" });
+}
+
 describe("who may change the suite and the policy", () => {
-	for (const chosen of ["Merged", "Theirs"]) {
-		test(`a combined conflict keeps tag and link deltas when choosing ${chosen}`, async () => {
-			await h.call("propose", {
-				edits: [{ op: "create", body: { title: "Base" }, tags: ["old"], covers: ["REQ-100"] }],
+	for (const chosen of ["Merged", "Theirs"])
+		for (const remote of ["addition", "removal", "draft removal"]) {
+			test(`a combined conflict keeps tag and link deltas when choosing ${chosen} with remote ${remote}`, async () => {
+				await h.call("propose", {
+					edits: [
+						{ op: "create", body: { title: "Base" }, tags: ["old"], covers: remote === "addition" ? [] : ["REQ-100"] },
+					],
+				});
+				await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+				const pending = await h.call<ProposeReply>("propose", {
+					edits: [
+						{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+						{ op: "place", cases: ["C-1"], tags: { add: ["mine"], remove: remote === "addition" ? [] : ["old"] } },
+						...(remote === "draft removal"
+							? [{ op: "cover", case: "C-1", requirement: "REQ-100", on: false } satisfies Edit]
+							: []),
+						{ op: "cover", case: "C-1", requirement: "REQ-101", on: true },
+					],
+				});
+				expect(pending.status).toBe("conflict");
+				const question = await open("adopt");
+				await h.call("propose", {
+					edits: [
+						{ op: "edit", case: "C-1", base: 2, body: { pre: "Independent later work" } },
+						{ op: "place", cases: ["C-1"], tags: remote === "addition" ? { set: ["theirs"] } : { add: ["theirs"] } },
+						{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
+						...(remote === "removal"
+							? [{ op: "cover", case: "C-1", requirement: "REQ-100", on: false } satisfies Edit]
+							: []),
+					],
+				});
+				const merged = await decide(question, { is: "merge", body: emptyBody(chosen) });
+				expect(merged.status).toBe("decided");
+				expect(await getCase()).toMatchObject({
+					title: chosen,
+					pre: "Independent later work",
+					version: chosen === "Merged" ? 4 : 3,
+				});
+				expect([...(await getCase()).tags].sort()).toEqual(["mine", "theirs"]);
+				expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual([
+					"REQ-101",
+					"REQ-102",
+				]);
 			});
-			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
-			const pending = await h.call<ProposeReply>("propose", {
-				edits: [
-					{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
-					{ op: "place", cases: ["C-1"], tags: { add: ["mine"], remove: ["old"] } },
-					{ op: "cover", case: "C-1", requirement: "REQ-100", on: false },
-					{ op: "cover", case: "C-1", requirement: "REQ-101", on: true },
-				],
-			});
-			expect(pending.status).toBe("conflict");
-			const question = await open("adopt");
-			await h.call("propose", {
-				edits: [
-					{ op: "edit", case: "C-1", base: 2, body: { pre: "Independent later work" } },
-					{ op: "place", cases: ["C-1"], tags: { add: ["theirs"] } },
-					{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
-				],
-			});
-			const merged = await decide(question, { is: "merge", body: emptyBody(chosen) });
-			expect(merged.status).toBe("decided");
-			expect(await getCase()).toMatchObject({
-				title: chosen,
-				pre: "Independent later work",
-				version: chosen === "Merged" ? 4 : 3,
-			});
-			expect([...(await getCase()).tags].sort()).toEqual(["mine", "theirs"]);
-			expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual([
-				"REQ-101",
-				"REQ-102",
-			]);
-		});
-	}
+		}
 
 	test("inline merge additions override same-item removals without losing other or concurrent deltas", async () => {
 		await h.call("propose", {
@@ -361,38 +400,43 @@ describe("who may change the suite and the policy", () => {
 		["creation", { op: "create", body: { title: "Extra" } }],
 		["restore", { op: "restore", case: "C-1", to: 1 }],
 	];
-	for (const form of ["raw", "parsed"] as const) {
-		test(`a ${form} inline merge answer classifies its body and links under protected review`, async () => {
+	for (const answer of ["accept", "reject"] as const)
+		test(`a protected body and its inline tag wait together before ${answer}`, async () => {
+			await seed();
+			await protectedReview();
+			const writer = await h.actor("case-writer", "agent", ["read", "produce", "answer"]);
+			const parsed = parseBodyInline(emptyBody("Protected body #critical"));
+			expect(
+				await h.call<ProposeReply>(
+					"propose",
+					{
+						edits: [
+							{ op: "edit", case: "C-1", base: 1, body: parsed.body },
+							{ op: "place", cases: ["C-1"], tags: { add: parsed.tags } },
+						],
+					},
+					writer,
+				),
+			).toMatchObject({ status: "open" });
+			expect(await getCase()).toMatchObject({ version: 1, title: "Case 1", tags: [] });
+			const waiting = (await h.call<InboxReply>("inbox", { kind: "adopt", on: "C-1" })).items;
+			expect(waiting).toHaveLength(1);
+			await decide(first(waiting), { is: answer });
+			expect(await getCase()).toMatchObject({
+				title: answer === "accept" ? "Protected body" : "Case 1",
+				tags: answer === "accept" ? ["critical"] : [],
+			});
+		});
+
+	for (const [form, answer] of [
+		["raw", "accept"],
+		["parsed", "accept"],
+		["parsed", "reject"],
+	] as const) {
+		test(`a ${form} inline merge answer classifies its body and links under protected review before ${answer}`, async () => {
 			await h.call("propose", { edits: [{ op: "create", body: { title: "Base" } }] });
 			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
-			await h.call("propose", {
-				edits: [
-					{
-						op: "policy",
-						base: (await h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" })).version,
-						clauses: PRESETS.loose.clauses.flatMap((clause) =>
-							clause.id === "adopt-any"
-								? [
-										{
-											id: "critical-review",
-											kind: "adopt",
-											when: ["author:agent", "tag:critical"],
-											ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
-											blocks: "nothing",
-										},
-										clause,
-									]
-								: [
-										{
-											...clause,
-											ask: clause.id === "adopt-conflict" ? { ...clause.ask, agents: "answer" } : clause.ask,
-										},
-									],
-						),
-					},
-				],
-			});
-			await decide(await open("adopt"), { is: "accept" });
+			await protectedReview();
 			const writer = await h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
 			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }, writer);
 			const merged = await decide(
@@ -413,9 +457,17 @@ describe("who may change the suite and the policy", () => {
 			expect(merged).toMatchObject({ status: "decided", effects: { status: "open" } });
 			expect(await getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
 			expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual([]);
-			await decide(await open("adopt"), { is: "accept" });
-			expect(await getCase()).toMatchObject({ title: "Resolved", tags: ["critical"] });
-			expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual(["REQ-101"]);
+			const waiting = await open("adopt");
+			expect(waiting.evidence).toMatchObject({ author: "merge-agent" });
+			expect((await h.call<InboxReply>("inbox", { kind: "adopt", on: "C-1" })).items).toHaveLength(1);
+			await decide(waiting, { is: answer });
+			expect(await getCase()).toMatchObject({
+				title: answer === "accept" ? "Resolved" : "Theirs",
+				tags: answer === "accept" ? ["critical"] : [],
+			});
+			expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual(
+				answer === "accept" ? ["REQ-101"] : [],
+			);
 		});
 	}
 

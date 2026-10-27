@@ -2,6 +2,7 @@
 // browser tests in `test/e2e/draft-ownership.test.ts` run the routes, and every route there is also stopped by
 // the screen's own check before it writes. These pin the rule in `src/web/lib/drafts.ts` itself (issue #79).
 import { beforeEach, expect, spyOn, test } from "bun:test";
+import { budget } from "../scripts/budget.ts";
 import { emptyBody } from "../src/core/model.ts";
 import { dropNameKeyedData, setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts";
 import {
@@ -387,9 +388,29 @@ test("the first storage turn confirms ownership and later keys do not write copi
 		expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(1);
 	});
 	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
-	const next = { ...mine, body: { ...body, title: "Later accepted text" } };
-	expect(writeCopiedDraft({ project, draft: next })).toBe(true);
-	expect(stored()?.body.title).toBe("Later accepted text");
+	for (let index = 0; index < 100; index++) kept.set(`unrelated:${index}`, "other data");
+	const get = spyOn(localStorage, "getItem");
+	const set = spyOn(localStorage, "setItem");
+	const key = spyOn(localStorage, "key");
+	try {
+		for (let index = 0; index < 10; index++)
+			expect(
+				writeCopiedDraft({ project, draft: { ...mine, body: { ...body, title: `Later accepted text ${index}` } } }),
+			).toBe(true);
+		budget(
+			"draft copy reads for 10 accepted keys",
+			get.mock.calls.filter(([key]) => key.includes(":draft-copy:")).length,
+			0,
+			"reads",
+		);
+		expect(set.mock.calls.filter(([key]) => key.includes(":draft-copy:"))).toEqual([]);
+		budget("draft key enumerations for 10 accepted keys", key.mock.calls.length, 0, "enumerations");
+	} finally {
+		get.mockRestore();
+		set.mockRestore();
+		key.mockRestore();
+	}
+	expect(stored()?.body.title).toBe("Later accepted text 9");
 	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
 	another({ body: { ...body, title: "Ordinary takeover and later edit" } });
 	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);

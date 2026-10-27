@@ -10,8 +10,17 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
 			const commit = "abc1230000000000000000000000000000000001";
+			const sent = ciReport({ commit, branch: "coupon", pr: 12, n: 3, fail: { 0: "expected $90, got $100" } });
 			await server.api("report", {
-				...ciReport({ commit, branch: "coupon", pr: 12, n: 3, fail: { 0: "expected $90, got $100" } }),
+				...sent,
+				results: sent.results.map((result, index) =>
+					index === 1
+						? {
+								...result,
+								tries: [{ outcome: "fail", failure: { message: "locator.click: Timeout 5000ms exceeded." } }],
+							}
+						: result,
+				),
 				buildUrl: "javascript:alert(1)",
 			});
 			view = await openPage(server, { path: "/p/scratch/changes/pr%3A12" });
@@ -25,19 +34,26 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			// A build address that is not a web address is not offered as a link.
 			expect(await list.getByRole("link", { name: "build" }).count()).toBe(0);
 
+			await page.getByRole("note").getByText("1 test both passed and failed on this commit, so it is flaky.").waitFor();
+			const retried = list.getByRole("listitem").filter({ hasText: "passed and failed on this commit" });
+			await expect(retried.locator(".result-flaky").textContent()).resolves.toBe("flaky");
+
 			// The tally above chooses what the list shows.
 			await page.locator(".change-tally").getByRole("button", { name: "2 passed" }).click();
 			await page.getByRole("button", { name: "2 passed", pressed: true }).waitFor();
 			await page.waitForFunction(() => document.querySelectorAll(".change-result").length === 2);
-			await page.getByLabel("Filter results by test name or file").fill("test 2");
+			await page.getByLabel("Filter results by test name or file").fill("test 1");
 			await page.waitForFunction(() => document.querySelectorAll(".change-result").length === 1);
 
-			await list.getByRole("link", { name: "test 2" }).click();
+			await list.getByRole("link", { name: "test 1" }).click();
 			await page.waitForURL(/\/p\/scratch\/tests\/\d+$/);
-			await page.locator("#detail .test-title").getByText("test 2", { exact: true }).waitFor();
+			await page.locator("#detail .test-title").getByText("test 1", { exact: true }).waitFor();
 			const latest = page.getByRole("list", { name: "Latest results" });
 			await latest.getByText(commit.slice(0, 12)).waitFor();
 			await latest.getByRole("link", { name: "pr:12" }).waitFor();
+			await latest.getByText("the runner's tries: fail, pass", { exact: false }).waitFor();
+			await expect(latest.locator(".result-outcome").textContent()).resolves.toBe("flaky");
+			await latest.getByText("An earlier try: locator.click: Timeout 5000ms exceeded.").waitFor();
 			await page.getByText("None: the test is tracked without a case.").waitFor();
 
 			// The Tests screen lists every test, and narrows to those with no case.
@@ -99,49 +115,6 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			// The failure on the next commit has no retry yet: it reads as what it is.
 			const open = latest.getByRole("listitem").filter({ hasText: next.slice(0, 12) });
 			await expect(open.locator(".result-outcome").textContent()).resolves.toBe("fail");
-		} finally {
-			await view?.close();
-			await server.stop();
-		}
-	},
-	60_000,
-);
-
-// A runner that retried a test inside one run reports the tries with the result (decision 0129): the change shows the
-// test flaky, and its page lists what the runner saw.
-(browserAvailable ? test : test.skip)(
-	"a test the runner retried reads as flaky on the change and lists its tries on its page",
-	async () => {
-		const server = await startServer({ preset: "loose" });
-		let view: Awaited<ReturnType<typeof openPage>> | null = null;
-		try {
-			const commit = "a1b2000000000000000000000000000000000001";
-			const sent = ciReport({ commit, branch: "cart", pr: 21, n: 2 });
-			await server.api("report", {
-				...sent,
-				results: sent.results.map((result, index) =>
-					index === 0
-						? {
-								...result,
-								tries: [{ outcome: "fail", failure: { message: "locator.click: Timeout 5000ms exceeded." } }],
-							}
-						: result,
-				),
-			});
-			view = await openPage(server, { path: "/p/scratch/changes/pr%3A21" });
-			const page = view.page;
-			await page.getByRole("note").getByText("1 test both passed and failed on this commit, so it is flaky.").waitFor();
-			const row = page
-				.getByRole("list", { name: "Results the gate counted" })
-				.getByRole("listitem")
-				.filter({ hasText: "passed and failed on this commit" });
-			await expect(row.locator(".result-flaky").textContent()).resolves.toBe("flaky");
-
-			await row.getByRole("link", { name: "test 0" }).click();
-			const latest = page.getByRole("list", { name: "Latest results" }).getByRole("listitem").first();
-			await latest.getByText("the runner's tries: fail, pass", { exact: false }).waitFor();
-			await expect(latest.locator(".result-outcome").textContent()).resolves.toBe("flaky");
-			await latest.getByText("An earlier try: locator.click: Timeout 5000ms exceeded.").waitFor();
 		} finally {
 			await view?.close();
 			await server.stop();
