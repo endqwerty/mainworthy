@@ -512,11 +512,17 @@ const Q = {
 		`UPDATE tests SET case_id = asked.case_id, linked_by = $by
 		 FROM unnest($ids::bigint[], $cases::bigint[]) AS asked(id, case_id) WHERE tests.id = asked.id`,
 	),
-	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
-		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
+	unlinkedInFile: sql<{ project: number; file: string; after: number }, TestRow>(
+		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT 500",
 	),
-	unlinkedWithoutFile: sql<{ project: number; file: string }, TestRow>(
-		"SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
+	unlinkedWithoutFile: sql<{ project: number; file: string; after: number }, TestRow>(
+		"SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT 500",
+	),
+	unlinkedIdsInFile: sql<{ project: number; file: string }, { id: number }>(
+		"SELECT id FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id",
+	),
+	unlinkedIdsWithoutFile: sql<{ project: number; file: string }, { id: number }>(
+		"SELECT id FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' ORDER BY id",
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
@@ -2022,11 +2028,17 @@ export const testsOfCase = async (db: ReadDb, project: number, caseId: number): 
 /** What the question about tests that name no file calls their file. */
 export const NO_FILE = "(no file)";
 /**
- * The tests with no case in a file. For `NO_FILE` they are those that came with no file and no class name to take
- * one from, and with them the tests of a file that is really called that: the two share one question.
+ * The tests with no case in a file, a page of up to 500 in id order, after the test with id `after`. For `NO_FILE`
+ * they are those that came with no file and no class name to take one from, and with them the tests of a file that
+ * is really called that: the two share one question.
  */
-export const unlinkedInFile = async (db: ReadDb, project: number, file: string): Promise<TestRow[]> =>
-	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file });
+export const unlinkedInFile = async (db: ReadDb, project: number, file: string, after = 0): Promise<TestRow[]> =>
+	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file, after });
+/** The ids of every test `unlinkedInFile` pages through, in the same order. */
+export const unlinkedIdsInFile = async (db: ReadDb, project: number, file: string): Promise<number[]> =>
+	(await db.all(file === NO_FILE ? Q.unlinkedIdsWithoutFile : Q.unlinkedIdsInFile, { project, file })).map(
+		(row) => row.id,
+	);
 export const unlinkedCount = async (db: ReadDb, project: number): Promise<number> =>
 	(await db.get(Q.unlinkedCount, { project }))?.n ?? 0;
 export const resultById = async (db: ReadDb, id: number): Promise<ResultRow | null> =>

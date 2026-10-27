@@ -58,6 +58,7 @@ import {
 	setChangeEnded,
 	type TargetRow,
 	testRef,
+	unlinkedIdsInFile,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
@@ -403,18 +404,20 @@ async function brief(ctx: Ctx, raised: Raised, tests: number): Promise<QuestionB
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
 async function* raiseMapSteps(ctx: Ctx, file: string, producer: ActorKind): AsyncGenerator<undefined, Raised, void> {
 	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
+	const ids = await unlinkedIdsInFile(ctx.db, ctx.project.id, file);
+	const count = ids.length;
 	return yield* raiseSteps(ctx, {
 		kind: "map",
 		key: `file:${file}`,
 		subject: { file },
-		title: `${tests.length || "Some"} test${tests.length === 1 ? "" : "s"} in ${file} ${tests.length === 1 ? "has" : "have"} no case`,
+		title: `${count || "Some"} test${count === 1 ? "" : "s"} in ${file} ${count === 1 ? "has" : "have"} no case`,
 		producer,
 		evidence: {
 			file,
 			tests: tests.slice(0, 50).map((test) => ({ id: test.id, t: testRef(test), name: test.name })),
-			count: tests.length,
+			count,
 		},
-		material: { file, tests: tests.map((test) => test.id) },
+		material: { file, tests: ids },
 		facts: [],
 		refs: tests.slice(0, 20).map(testRef),
 		runs: [],
