@@ -346,10 +346,10 @@ function ProjectRunCockpit({
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const { body: currentBody } = usePinnedCase(current);
-	const admittedMethod = !!(
-		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
-		(!currentBody || currentBody.methods.includes(method))
+	const runAdmitsMethod = !!run?.require.some(
+		(obligation) => obligation.kind === "exercise" && obligation.methods.includes(method),
 	);
+	const admittedMethod = runAdmitsMethod && (!currentBody || currentBody.methods.includes(method));
 	const canRecord = !!(
 		current &&
 		canReport &&
@@ -357,7 +357,7 @@ function ProjectRunCockpit({
 	);
 	const hasAvailable = slots.some(available);
 	// j and k pass over evidence left to its producer only while this person has a slot of their own to report.
-	const skipsExternal = canReport && isOpen && hasAvailable;
+	const skipsExternal = canReport && isOpen && runAdmitsMethod && hasAvailable;
 	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
