@@ -225,6 +225,8 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Runner CPUs and memory (timing experiment)
+        run: nproc && free -m
       - name: Start PostgreSQL for this test phase
         env:
           TEST_PHASE: ${{ matrix.phase }}

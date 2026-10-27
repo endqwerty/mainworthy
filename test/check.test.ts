@@ -716,7 +716,7 @@ test("the workers fit the machine: the performance phase is alone on a small one
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
 });
 
-test("CI functional runners leave a CPU for PostgreSQL", () => {
+test("CI functional runners run two workers beside PostgreSQL", () => {
 	for (const entries of [matrix("all"), matrix(["test/docs.test.ts", "test/policy-latency.test.ts"])]) {
 		for (const entry of entries) {
 			if (entry.name === "performance") {
@@ -724,9 +724,9 @@ test("CI functional runners leave a CPU for PostgreSQL", () => {
 				continue;
 			}
 			const options = parseCheckArgs(["test", ...entry.phase.split(" ")]);
-			expect(options.workers).toBe(1);
+			expect(options.workers).toBe(2);
 			expect(testArgs("parallel", { timings: "t.json", workers: options.workers, shard: options.shard })).toContain(
-				"--parallel=1",
+				"--parallel=2",
 			);
 		}
 	}
@@ -739,7 +739,7 @@ test("the workflow runs the shards the scope names and its gate reads every one 
 	expect(matrix("all")).toEqual([
 		...shards.map((name, i) => ({
 			name,
-			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS}`,
+			phase: `--only=parallel --workers=2 --shard=${i + 1}/${CI_SHARDS}`,
 			files: "",
 		})),
 		{ name: "performance", phase: "--only=performance", files: "" },
