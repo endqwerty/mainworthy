@@ -1,8 +1,8 @@
 import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
 import { CaseKind, type FieldDefinitions } from "../../core/model.ts";
-import { parseBodyInline, parseOutline, splitExpected } from "../../core/outline.ts";
-import { addDraftTags, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
+import { parseOutline, splitExpected } from "../../core/outline.ts";
+import { addDraftTags, cleanTitle, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
 import { focusInto } from "../lib/focus.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
@@ -42,14 +42,6 @@ function freshStep(draft: Draft) {
 		),
 		action: "",
 		expected: null,
-	};
-}
-export function cleanTitle(draft: Draft): Draft {
-	const parsed = parseBodyInline(draft.body);
-	return {
-		...addDraftTags(draft, parsed.tags),
-		body: parsed.body,
-		covers: [...new Set([...draft.covers, ...parsed.covers])],
 	};
 }
 export function firstStep({ draft, change }: { draft: Draft; change: DraftChange }): void {
