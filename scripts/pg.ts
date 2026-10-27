@@ -291,6 +291,22 @@ const CLUSTER_SETTINGS = [
 	"full_page_writes = off",
 	"",
 ].join("\n");
+// `pg_ctl reload` only signals the server, so a DROP DATABASE sent at once could still sync. Wait until it reads
+// the new settings.
+async function reloaded(adminUrl: string): Promise<void> {
+	const sql = new Bun.SQL(adminUrl, { max: 1 });
+	try {
+		const deadline = Date.now() + 10_000;
+		for (;;) {
+			const [row] = await sql`SELECT current_setting('fsync') AS fsync`;
+			if (row?.fsync === "off") return;
+			if (Date.now() > deadline) throw new Error("checkout PostgreSQL did not take its reloaded settings in 10 s");
+			await Bun.sleep(50);
+		}
+	} finally {
+		await sql.close();
+	}
+}
 export async function cluster(): Promise<Cluster> {
 	if (process.env.MAINWORTHY_TEST_PG)
 		return { adminUrl: process.env.MAINWORTHY_TEST_PG, directory: null, owned: false, startMs: 0 };
@@ -305,6 +321,7 @@ export async function cluster(): Promise<Cluster> {
 			if (readFileSync(settings, "utf8") !== CLUSTER_SETTINGS) {
 				writeFileSync(settings, CLUSTER_SETTINGS);
 				await command([join(state.bin, "pg_ctl"), "-D", join(state.directory, "data"), "reload"]);
+				await reloaded(describe(state).adminUrl);
 			}
 			return describe(state);
 		}
