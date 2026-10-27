@@ -171,6 +171,8 @@ export type Call = {
 	 * was given. It is part of what a command id names: the same request at another time is another request.
 	 */
 	at?: number;
+	/** Stops a write, also one waiting for a lock; the write rolls back and `invoke` throws the signal's reason. */
+	signal?: AbortSignal;
 };
 
 /**
@@ -545,8 +547,12 @@ export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, cal
 	if (misplaced) return misplaced;
 	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
 	try {
-		return await app.database.write(async (db) => await execute(app, db, ops, call));
+		return await app.database.write(
+			async (db) => await execute(app, db, ops, call),
+			call.signal ? { signal: call.signal } : {},
+		);
 	} catch (error) {
+		if (call.signal?.aborted) throw call.signal.reason;
 		return failure(call.op, error);
 	}
 }
