@@ -195,7 +195,7 @@ prints the warning immediately. Keep correctness assertions separate from baseli
 local worker order read it. A pull request does not refresh it: refreshing meant waiting for a CI run and pushing
 again (#1010). A file with no weight gets the upper median of the known weights until the next refresh. A scheduled
 T3 Code task refreshes it every Monday from the newest full CI run on `main`, and opens a pull request only when a
-weight moved by more than a quarter or a file was added or removed. Refresh it by hand when a shard runs much longer
+weight moved by more than a quarter or a file was added. Refresh it by hand when a shard runs much longer
 than the others.
 
 To take the weights from a passing CI run, use the GitHub CLI with access to the repository:
