@@ -106,7 +106,9 @@ export function holdsUnfinishedStep(body: Draft["body"]): boolean {
  * issue #86, B1). So the recorded step stands. An expected result the draft's step holds and the recorded one
  * does not is kept as a step of its own, under a new id from `newId`; a step with nothing of its own goes. A
  * step emptied after `sent` went out is in `sent`: that is the person's removal of it, and is left to the merge.
- * Text `recorded` holds as `sent` trimmed is taken as `sent` had it (`asTyped`).
+ * Spacing a save takes out is not merged as anyone's edit (`asTyped`): the draft's spacing gives way to a version's
+ * other words in that field, and is kept as typed where the field ends as the draft has it (the independent check
+ * of the change for issue #927, F1).
  */
 export function carried({
 	sent,
@@ -130,22 +132,36 @@ export function carried({
 		taken.add(id);
 		return [{ ...step, id }];
 	});
-	return mergeBodies({ base: sent, mine: { ...live, steps }, theirs: asTyped({ typed: sent, stored: recorded }) })
-		.merged;
+	const typed = { ...live, steps };
+	const merged = mergeBodies({
+		base: sent,
+		mine: asTyped({ typed: sent, stored: typed }),
+		theirs: asTyped({ typed: sent, stored: recorded }),
+	}).merged;
+	return asTyped({ typed, stored: merged });
 }
 /**
- * `stored`, with each text that differs from `typed` only in its spaces and line breaks given back as typed. Saving
- * trims text, on the page (`cleanTitle`) and on the server (`cleanBody`). The editor keeps what was typed, or a
- * word typed after a trailing space or line break would join the last (issue #927). Text the save changed in
- * another way, such as a tag taken out of it, is as stored.
+ * Text as saving leaves it, but for what it takes out: the page trims each line and joins its spaces
+ * (`cleanTitle`, which also makes a title one line), and the server trims the whole (`cleanBody`).
+ */
+const saved = (text: string | null): string =>
+	(text ?? "")
+		.split(/\r\n|\n|\r/)
+		.map((line) => line.trim().replace(/[ \t]+/g, " "))
+		.join("\n")
+		.trim();
+/**
+ * `stored`, with each text that saving would make the same as `typed`'s given back as typed. The editor keeps what
+ * was typed, or a word typed after a trailing space or line break would join the last (issue #927). Text the save
+ * changed in another way, such as a tag taken out of it, or a line break where a space was, is as stored.
  */
 export function asTyped<T extends Draft["body"]>({ typed, stored }: { typed: Draft["body"]; stored: T }): T {
-	const spaced = (text: string | null): string => (text ?? "").replace(/\s+/g, " ").trim();
-	const kept = <V extends string | null>(text: V, as: V): V => (spaced(text) === spaced(as) ? as : text);
+	const kept = <V extends string | null>(text: V, as: V, line = (value: string) => value): V =>
+		saved(line(text ?? "")) === saved(line(as ?? "")) ? as : text;
 	const steps = new Map(typed.steps.map((step) => [step.id, step]));
 	return {
 		...stored,
-		title: kept(stored.title, typed.title),
+		title: kept(stored.title, typed.title, (title) => title.replace(/\s+/g, " ")),
 		pre: kept(stored.pre, typed.pre),
 		steps: stored.steps.map((step) => {
 			const own = steps.get(step.id);
