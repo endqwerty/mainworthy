@@ -2064,6 +2064,7 @@ index slots_next: CREATE INDEX slots_next ON public.slots USING btree (run, stat
 index slots_pkey: CREATE UNIQUE INDEX slots_pkey ON public.slots USING btree (id)
 index slots_rank: CREATE INDEX slots_rank ON public.slots USING btree (run, rank)
 index slots_run_case_id_obligation_key: CREATE UNIQUE INDEX slots_run_case_id_obligation_key ON public.slots USING btree (run, case_id, obligation)
+index slots_run_id: CREATE INDEX slots_run_id ON public.slots USING btree (run, id)
 index targets_commit: CREATE INDEX targets_commit ON public.targets USING btree (project, commit_sha)
 index targets_pkey: CREATE UNIQUE INDEX targets_pkey ON public.targets USING btree (id)
 index targets_project_what_env_key: CREATE UNIQUE INDEX targets_project_what_env_key ON public.targets USING btree (project, what, env)

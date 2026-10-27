@@ -531,6 +531,62 @@ test("a refresh that lost its lock while another revision replaced the demo has 
 	});
 }, 60_000);
 
+/** The people side of the instance, row by row: who exists, what each may do where, and every token. */
+const people = (app: App) =>
+	app.database.read(async (db) => {
+		const rows: Record<string, unknown[]> = {};
+		for (const table of ["actors", "grants", "tokens", "team_grants"])
+			rows[table] = await db.allDynamic(`SELECT row_to_json(t)::text AS row FROM ${table} t ORDER BY 1`);
+		return rows;
+	});
+
+test("a refresh that lost its lock while another revision replaced the demo changes none of its grants or tokens", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		// A first revision makes the demo's pipeline and reviewer, so the next seed sets their grants before its tokens.
+		app.config.commit = C;
+		await refreshDemo(instance, "demo", { cases: 1, unlinkedFiles: 0, days: 0 });
+		app.config.commit = A;
+		await withSecond(instance, async (second) => {
+			second.app.config.commit = B;
+			const paused = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			let reached = false;
+			// Revision A stops before its seed's first administrative write: the pipeline's grant on its project.
+			const late = refreshDemo(
+				instance,
+				"demo",
+				{ cases: 1, unlinkedFiles: 0, days: 0 },
+				{
+					step: async (step) => {
+						if (step !== "request admin grant.set" || reached) return;
+						reached = true;
+						paused.resolve();
+						await resume.promise;
+					},
+				},
+			);
+			try {
+				await Promise.race([paused.promise, late]);
+				expect(reached).toBe(true);
+				expect(await endRefreshLock(app, "demo")).toEqual([true]);
+				await refreshDemo(second, "demo", { cases: 2, unlinkedFiles: 0, days: 0 });
+				const before = await people(app);
+				resume.resolve();
+				const refused = await late.then(
+					() => "ready",
+					(error: unknown) => (error instanceof Error ? error.message : String(error)),
+				);
+				expect(await people(app)).toEqual(before);
+				expect(refused).toContain("was replaced since this seed was started for it");
+			} finally {
+				resume.resolve();
+				await late.catch(() => undefined);
+			}
+		});
+	});
+}, 60_000);
+
 test("behind a proxy secret, a refresh seeds the demo in this process and sends no request", async () => {
 	const settings = {
 		mode: "server" as const,

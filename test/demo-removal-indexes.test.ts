@@ -168,25 +168,18 @@ async function examined(db: WriteDb): Promise<number> {
 }
 
 /**
- * The most a drain's slice of a table owned through `results` examines, removing a demo whose `parents` results each
- * have an excuse. The slices of other tables are not counted: removing the results themselves, and the first look past
- * their removed index entries, are work in proportion to the demo's own rows, once.
+ * The most a drain's slice of one of `tables` examines, removing a demo that `fill` adds to the removal fixture. The
+ * slices of other tables are not counted: removing the parents themselves, and the first look past their removed index
+ * entries, are work in proportion to the demo's own rows, once.
  */
-async function largestSlice(parents: number): Promise<{ largest: number; slices: number }> {
+async function largestSlice(
+	fill: (db: WriteDb) => Promise<void>,
+	tables: readonly string[],
+): Promise<{ largest: number; slices: number }> {
 	await using db = await writerDatabase();
-	await removalFixture(db, parents, 10);
+	await removalFixture(db, 1, 10);
 	await db.transaction(async () => {
-		await db.exec(`
-			INSERT INTO questions (id, project, no, kind, subject, fingerprint, title, producer, evidence,
-				evidence_hash, basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
-				VALUES (901, 900, 1, 'failure', '{}', 'failure', 'Failure', 'ci', '{}', 'hash', '{}',
-				1, 1, '{}', '[]', 1, 'decided', 1, 1);
-			INSERT INTO decisions (id, project, question, kind, answer, signers, basis, holds, at, seq)
-				VALUES (901, 900, 901, 'failure', '{}', '[]', '{}', '{}', 1, 1);`);
-		await db.runDynamic(
-			"INSERT INTO result_excuses (result, decision, class) SELECT n, 901, 'excused' FROM generate_series(1, $1::bigint) n",
-			[parents],
-		);
+		await fill(db);
 		await db.exec("ANALYZE");
 	});
 	const plan = await removalPlan(db);
@@ -197,7 +190,7 @@ async function largestSlice(parents: number): Promise<{ largest: number; slices:
 			const before = await examined(db);
 			const slice = await removeProjectSlice(db, "removing", 32, plan);
 			done = slice.done;
-			if (slice.table !== "result_excuses" && slice.table !== "attachments") return;
+			if (!tables.includes(slice.table ?? "")) return;
 			slices++;
 			largest = Math.max(largest, (await examined(db)) - before);
 		});
@@ -206,11 +199,69 @@ async function largestSlice(parents: number): Promise<{ largest: number; slices:
 	return { largest, slices };
 }
 
+/** `parents` more results of the demo, each with an excuse. */
+const excusedResults = (parents: number) => async (db: WriteDb) => {
+	await db.exec(`
+		INSERT INTO questions (id, project, no, kind, subject, fingerprint, title, producer, evidence,
+			evidence_hash, basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
+			VALUES (901, 900, 1, 'failure', '{}', 'failure', 'Failure', 'ci', '{}', 'hash', '{}',
+			1, 1, '{}', '[]', 1, 'decided', 1, 1);
+		INSERT INTO decisions (id, project, question, kind, answer, signers, basis, holds, at, seq)
+			VALUES (901, 900, 901, 'failure', '{}', '[]', '{}', '{}', 1, 1);`);
+	await db.runDynamic(
+		`INSERT INTO results (id, project, test, seq, ord, batch, target, method, actor, basis, outcome, at)
+		 SELECT 100000 + n, 900, 900, 1, n, 900, 900, 'auto', 900, 'unresolved', 'fail', 1 FROM generate_series(1, $1::bigint) n`,
+		[parents],
+	);
+	await db.runDynamic(
+		"INSERT INTO result_excuses (result, decision, class) SELECT 100000 + n, 901, 'excused' FROM generate_series(1, $1::bigint) n",
+		[parents],
+	);
+};
+
+/**
+ * Four planned runs of the demo with `slots` slots between them, each slot leased, as `plan` and `work take` leave
+ * them: a lease is owned through its slot, and the slot through its run.
+ */
+const leasedSlots = (slots: number) => async (db: WriteDb) => {
+	await db.exec(`
+		INSERT INTO folders (id, project, name, rank, rev) VALUES (900, 900, 'Suite', 'a', 1);
+		INSERT INTO cases (id, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder,
+			rank, created_by, created_at, updated_by, updated_at, rev)
+			VALUES (900, 900, 1, 1, 'h', 'c', 'A case', '[]', 'no', 0, 900, 'a', 900, 1, 900, 1, 1);
+		INSERT INTO runs (id, project, no, name, origin, accepts, require, tally, verdict, created_by, created_at, rev)
+			SELECT 900 + n, 900, n, 'Run ' || n, 'planned', '{}', '[]', '{}', 'pending', 900, 1, 1 FROM generate_series(1, 4) n;`);
+	await db.runDynamic(
+		`INSERT INTO slots (id, run, case_id, version, claim, obligation, rank, rev)
+		 SELECT n, 901 + n % 4, 900, 1, 'c', 'o' || n, n, 1 FROM generate_series(1, $1::bigint) n`,
+		[slots],
+	);
+	await db.runDynamic(
+		"INSERT INTO slot_leases (slot, actor, since, until) SELECT n, 900, 1, 2 FROM generate_series(1, $1::bigint) n",
+		[slots],
+	);
+};
+
+// Every level of a longer chain is read in batches too: a lease is owned through its slot, and the slot through its
+// run. Batching only the runs gathered every slot of the batch's runs again on every slice.
+test("a slice of a table owned through two levels of parents examines a bounded number of rows however many there are", async () => {
+	const tables = ["slot_leases"];
+	const small = await largestSlice(leasedSlots(1_600), tables);
+	const large = await largestSlice(leasedSlots(16_000), tables);
+	console.log(
+		`largest slice of slot_leases: ${small.largest} rows and index entries for 1600 slots (${small.slices} slices), ${large.largest} for 16000 (${large.slices} slices)`,
+	);
+	expect(large.slices).toBeGreaterThan(small.slices * 5);
+	expect(large.largest).toBeLessThan(small.largest * 1.5);
+	expect(large.largest).toBeLessThan(2_000);
+}, 120_000);
+
 // A table owned through a parent (an excuse through its result) was read as `result = ANY(ARRAY(SELECT id FROM results
 // WHERE project = $1))`: every slice gathered all the demo's parents again, so the work grew with their square.
 test("a slice of a table owned through its parents examines a bounded number of rows however many parents there are", async () => {
-	const small = await largestSlice(400);
-	const large = await largestSlice(4_000);
+	const tables = ["result_excuses", "attachments"];
+	const small = await largestSlice(excusedResults(400), tables);
+	const large = await largestSlice(excusedResults(4_000), tables);
 	console.log(
 		`largest slice of a parent-owned table: ${small.largest} rows and index entries for 400 parents (${small.slices} slices), ${large.largest} for 4000 (${large.slices} slices)`,
 	);
@@ -219,26 +270,35 @@ test("a slice of a table owned through its parents examines a bounded number of 
 	expect(large.largest).toBeLessThan(2_000);
 }, 120_000);
 
-// The batch of ancestors a slice reads must come from an index in (project, id) order, so it stops at the batch's end:
-// otherwise it sorts every one of the project's ancestors, or walks the primary key past every other project's rows.
-test("every ancestor a slice reads in batches has an index in project and id order", async () => {
+// Each batch a slice reads comes from an index in the order it is read: the top ancestor's rows in (project, id) order,
+// and a lower parent's in (parent column, id) order, so the read stops at the batch's end. Otherwise it sorts every one
+// of the project's rows at that level, or walks a primary key past every other project's rows.
+test("every level of parents a slice reads in batches has an index in that order", async () => {
 	await using db = await writerDatabase();
 	const plan = await removalPlan(db);
-	const ancestors = [
-		...new Set(plan.tables.flatMap((table) => (table.owner?.by === "parents" ? [table.owner.ancestor] : []))),
-	].sort();
-	expect(ancestors).toContain("runs");
+	const levels = new Set<string>();
+	for (const table of plan.tables) {
+		if (table.owner?.by !== "parents") continue;
+		const { chain } = table.owner;
+		chain.forEach((link, at) => {
+			levels.add(`${link.table}:${chain[at + 1]?.column ?? "project"}`);
+		});
+	}
+	expect([...levels]).toEqual(expect.arrayContaining(["runs:project", "slots:run"]));
 	const unordered: string[] = [];
 	await db.transaction(async () => {
-		await db.exec("SET LOCAL enable_seqscan = off; SET LOCAL enable_bitmapscan = off");
-		for (const ancestor of ancestors) {
+		await db.exec(
+			"SET LOCAL enable_seqscan = off; SET LOCAL enable_bitmapscan = off; SET LOCAL enable_sort = off; SET LOCAL enable_incremental_sort = off",
+		);
+		for (const level of [...levels].sort()) {
+			const [table = "", column = ""] = level.split(":");
 			const lines = (
 				await db.allDynamic<{ "QUERY PLAN": string }>(
-					`EXPLAIN SELECT id FROM ${identifier(ancestor)} WHERE project = 1 AND id > 0 ORDER BY project, id LIMIT 256`,
+					`EXPLAIN SELECT id FROM ${identifier(table)} WHERE (${identifier(column)}, id) > (1, 0) AND ${identifier(column)} <= 1 ORDER BY ${identifier(column)}, id LIMIT 256`,
 				)
 			).map((row) => row["QUERY PLAN"]);
-			if (lines.some((line) => /Sort/.test(line)) || !lines.some((line) => /Index Cond: .*project = /.test(line)))
-				unordered.push(`${ancestor}: ${lines.join(" / ")}`);
+			if (lines.some((line) => /Sort/.test(line)) || !lines.some((line) => /Index Cond: .*= /.test(line)))
+				unordered.push(`${level}: ${lines.join(" / ")}`);
 		}
 	});
 	expect(unordered).toEqual([]);

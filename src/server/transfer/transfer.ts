@@ -787,7 +787,7 @@ type SliceReference = { child: SliceTable; columns: { from: string; to: string }
 type SliceOwner =
 	| { by: "id" }
 	| { by: "project" }
-	| { by: "parents"; chain: readonly { column: string; table: string }[]; ancestor: string }
+	| { by: "parents"; chain: readonly { column: string; table: string }[] }
 	| null;
 type SliceTable = {
 	name: string;
@@ -799,16 +799,17 @@ type SliceTable = {
 /**
  * What one drain carries from slice to slice: the tables in visiting order, read once (the schema does not change
  * while serving), the tables already found empty for the project being removed, and, for a table owned through its
- * parents, the last ancestor whose rows a slice found none of. A slice skips the empty tables, so it reads only the
- * table it deletes from, not every table the project once had; and it reads a parent-owned table one batch of
- * ancestors on from where the last slice stopped, not from the first ancestor again (#914). Before the project row
- * goes, one pass reads every table again from the start, so a row written meanwhile is still found.
+ * parents, the place in its walk of those parents (`Place`). A slice skips the empty tables, so it reads only the
+ * table it deletes from, not every table the project once had; and it reads a parent-owned table under one batch of
+ * parents on from where the last slice stopped, at every level of the chain, not from the first parent again (#914).
+ * Before the project row goes, one pass reads every table again from the start, so a row written meanwhile is still
+ * found.
  */
 export type RemovalPlan = {
 	readonly tables: readonly SliceTable[];
 	project: string | null;
 	readonly empty: Set<string>;
-	readonly after: Map<string, string>;
+	readonly after: Map<string, Place>;
 };
 export async function removalPlan(db: ReadDb): Promise<RemovalPlan> {
 	return { tables: await slicePlan(db), project: null, empty: new Set(), after: new Map() };
@@ -818,25 +819,27 @@ export async function removalPlan(db: ReadDb): Promise<RemovalPlan> {
  * Planner settings for a slice. Its statements are prepared, and a generic plan expects an average project's rows
  * behind `project = $1`: once the retired project's rows of a table were gone, `LIMIT 1` scanned every other
  * project's rows to find none, on every later slice (#914). A custom plan sees the retired project's own share, and
- * without sequential or bitmap scans, hash or merge joins each query walks that project's index entries, stops at its
- * LIMIT, and probes its dependants by index. A table without a usable index still gets its sequential scan;
+ * without sequential or bitmap scans, sorts, hash or merge joins each query walks that project's index entries, stops at
+ * its LIMIT, and probes its dependants by index. A table without a usable index still gets its sequential scan;
  * `test/demo-removal-indexes.test.ts` holds every table a slice reads to having one.
  */
 const SLICE_SETTINGS: readonly (readonly [string, string])[] = [
 	["plan_cache_mode", "force_custom_plan"],
 	["enable_seqscan", "off"],
 	["enable_bitmapscan", "off"],
+	["enable_sort", "off"],
+	["enable_incremental_sort", "off"],
 	["enable_hashjoin", "off"],
 	["enable_mergejoin", "off"],
 	["max_parallel_workers_per_gather", "0"],
 ];
 
 /**
- * How many ancestors a slice reads a parent-owned table under. Reading all of the project's ancestors into an array
- * on every slice made the work grow with the square of their number, and a large demo's slice could outlast the
+ * How many parents a slice reads a parent-owned table under. Reading all of the project's parents into an array on
+ * every slice made the work grow with the square of their number, and a large demo's slice could outlast the
  * transaction timeout while it held the project's locks (#914).
  */
-const ANCESTORS_PER_SLICE = 256;
+const PARENTS_PER_SLICE = 256;
 
 function sliceOwner(table: { name: string; columns: readonly string[] }): SliceOwner {
 	if (table.name === "projects") return { by: "id" };
@@ -846,7 +849,7 @@ function sliceOwner(table: { name: string; columns: readonly string[] }): SliceO
 		const parent = PROJECT_PARENT[name];
 		if (!parent) throw invalid(`removing a project has no ownership rule for table ${table.name}`);
 		chain.push(parent);
-		if (!PROJECT_PARENT[parent.table]) return { by: "parents", chain, ancestor: parent.table };
+		if (!PROJECT_PARENT[parent.table]) return { by: "parents", chain };
 		name = parent.table;
 	}
 }
@@ -866,18 +869,58 @@ function ownedRow(table: SliceTable, alias: string): string {
 	return check(0, alias);
 }
 
+type ParentsOwner = Extract<SliceOwner, { by: "parents" }>;
 /**
- * The rows of a parent-owned table under the ancestors in the array parameter `$n`, read down the chain by each
- * table's index on its parent column.
+ * Where a slice is in the walk of a parent-owned table's parents: one id for each level of its chain, the top
+ * ancestor's first and the table's own parent's last. "0" is before the first row of a level.
  */
-function underAncestors(table: SliceTable, owner: Extract<SliceOwner, { by: "parents" }>, n: number): string {
-	let ids = `ANY($${n}::bigint[])`;
-	for (let at = owner.chain.length - 1; at > 0; at--) {
-		const [parent, link] = [owner.chain[at - 1], owner.chain[at]];
-		if (!parent || !link) throw new Error(`${table.name}: a broken ownership chain`);
-		ids = `ANY(ARRAY(SELECT id FROM ${identifier(parent.table)} WHERE ${identifier(link.column)} = ${ids}))`;
+type Place = readonly string[];
+const startOf = (owner: ParentsOwner): Place => owner.chain.map(() => "0");
+
+/** Level `at` of a chain, counted from the top ancestor: its table, and its column naming the level above. */
+function levelOf(owner: ParentsOwner, at: number): { table: string; column: string } {
+	const depth = owner.chain.length;
+	const link = owner.chain[depth - 1 - at];
+	if (!link) throw new Error(`no level ${at} in an ownership chain of ${depth}`);
+	return { table: link.table, column: owner.chain[depth - at]?.column ?? "project" };
+}
+
+/**
+ * Up to `count` rows of level `at` after the one `place` names there, under the row it names at the level above (the
+ * project, at the top), read in the order of that level's index on (parent column, id). However many rows the levels
+ * above hold, a read examines at most `count` of them.
+ *
+ * The parent is bounded by a row comparison and `<=`, not by `=`: with `=` the planner knows it and may read the rows
+ * in id order off the primary key instead, filtering out every other parent's rows (other projects' included), which
+ * it prefers when the table's ids follow its storage order.
+ */
+async function following(
+	db: WriteDb,
+	owner: ParentsOwner,
+	at: number,
+	place: Place,
+	project: string,
+	count: number,
+): Promise<string[]> {
+	const { table, column } = levelOf(owner, at);
+	const parent = identifier(column);
+	const rows = await db.allDynamic<{ row_id: string }>(
+		`SELECT id::text AS row_id FROM ${identifier(table)} WHERE (${parent}, id) > ($1::bigint, $2::bigint) AND ${parent} <= $1::bigint ORDER BY ${parent}, id LIMIT ${count}`,
+		[at === 0 ? project : (place[at - 1] ?? "0"), place[at] ?? "0"],
+	);
+	return rows.map((row) => row.row_id);
+}
+
+/**
+ * The place after every parent under the current row of the level above: the next row at the nearest level above
+ * that has one, with the levels below it started again, or null once the top ancestor has none left.
+ */
+async function nextAbove(db: WriteDb, owner: ParentsOwner, place: Place, project: string): Promise<Place | null> {
+	for (let at = owner.chain.length - 2; at >= 0; at--) {
+		const [row] = await following(db, owner, at, place, project, 1);
+		if (row !== undefined) return [...place.slice(0, at), row, ...place.slice(at + 1).map(() => "0")];
 	}
-	return `${identifier(table.name)}.${identifier(owner.chain[0]?.column ?? "")} = ${ids}`;
+	return null;
 }
 const setLocal = (count: number): string =>
 	`SELECT ${Array.from({ length: count }, (_, i) => `set_config($${2 * i + 1}, $${2 * i + 2}, true)`).join(", ")}`;
@@ -943,7 +986,7 @@ function sliceIdentity(table: SliceTable, alias = "", first = 2): string {
  * Removes at most `limit` owned rows, including incoming FK dependants, in an enforced transaction.
  * A caller may supply its transaction to hold authority and project locks. Commit and yield between slices. No whole-instance audit is
  * needed; a drain passes one `removalPlan` to every slice so each reads only the table it is emptying, and a
- * parent-owned table under one batch of ancestors, from where the last slice stopped. A slice that read a batch and
+ * parent-owned table under one batch of its parents, from where the last slice stopped at each level. A slice that read a batch and
  * found nothing to remove returns with no rows; without a plan, a slice reads every batch. Leaf rows go
  * first, so cascades cannot turn a small slice into a large deletion. A bounded incoming
  * closure handles cycles; a larger cycle or a reference from retained data refuses the slice unchanged.
@@ -978,32 +1021,30 @@ export async function removeProjectSlice(
 
 /**
  * What a slice removes from `table` next: up to `limit` rows nothing references (`roots`), else one row to remove with
- * its dependants (`root`), else `none`. A parent-owned table is read under the next batch of its ancestors after
- * `after`, and `none` then names the last ancestor read, or null when no ancestor is left; any other table is read
- * whole, and its `none` names none.
+ * its dependants (`root`), else `none`. A parent-owned table is read under the next batch of its own parents after
+ * `place`, and `none` then names the place to read from next, or null when no parent is left at any level; any other
+ * table is read whole, and its `none` names none.
  */
 async function rowsToRemove(
 	db: WriteDb,
 	table: SliceTable,
 	project: string,
 	limit: number,
-	after: string,
+	place: Place | undefined,
 ): Promise<
-	{ kind: "roots"; roots: string[][] } | { kind: "root"; root: string } | { kind: "none"; last: string | null }
+	{ kind: "roots"; roots: string[][] } | { kind: "root"; root: string } | { kind: "none"; next: Place | null }
 > {
 	let params: SqlValue[] = [project];
 	let scope = ownedRow(table, identifier(table.name));
-	let last: string | null = null;
-	if (table.owner?.by === "parents") {
-		// In the order of the ancestor's index on (project, id), so the batch is read from the index and stops at its end.
-		const ancestors = await db.allDynamic<{ ancestor: string }>(
-			`SELECT id::text AS ancestor FROM ${identifier(table.owner.ancestor)} WHERE project = $1::bigint AND id > $2::bigint ORDER BY project, id LIMIT ${ANCESTORS_PER_SLICE}`,
-			[project, after],
-		);
-		last = ancestors.at(-1)?.ancestor ?? null;
-		if (last === null) return { kind: "none", last };
-		scope = underAncestors(table, table.owner, 1);
-		params = [arrayLiteral(ancestors.map((row) => row.ancestor))];
+	let next: Place | null = null;
+	const { owner } = table;
+	if (owner?.by === "parents") {
+		const at = place ?? startOf(owner);
+		const parents = await following(db, owner, owner.chain.length - 1, at, project, PARENTS_PER_SLICE);
+		if (parents.length === 0) return { kind: "none", next: await nextAbove(db, owner, at, project) };
+		next = [...at.slice(0, -1), parents.at(-1) ?? "0"];
+		scope = `${identifier(table.name)}.${identifier(owner.chain[0]?.column ?? "")} = ANY($1::bigint[])`;
+		params = [arrayLiteral(parents)];
 	}
 	const blockers = table.incoming.map(({ child, columns }) => {
 		const matches = columns
@@ -1027,7 +1068,7 @@ async function rowsToRemove(
 			params,
 		)
 	)[0];
-	return root ? { kind: "root", root: root.keys } : { kind: "none", last };
+	return root ? { kind: "root", root: root.keys } : { kind: "none", next };
 }
 
 async function slice(
@@ -1049,16 +1090,17 @@ async function slice(
 	let blocked: string | null = null;
 	for (const table of ordinary) {
 		if (skip && plan?.empty.has(table.name)) continue;
-		// A drain's slice reads one batch of a parent-owned table's ancestors and leaves the next to the next slice.
-		// Without a plan to keep its place, and in the pass before the project row goes, a slice reads them all.
+		// A drain's slice reads one batch of a parent-owned table's parents, or moves one row on at a level above, and
+		// leaves the rest to the next slice. Without a plan to keep its place, and in the pass before the project row
+		// goes, a slice reads them all.
 		const resume = skip ? plan : undefined;
-		let found = await rowsToRemove(db, table, project.id, limit, resume?.after.get(table.name) ?? "0");
-		while (found.kind === "none" && found.last !== null) {
+		let found = await rowsToRemove(db, table, project.id, limit, resume?.after.get(table.name));
+		while (found.kind === "none" && found.next !== null) {
 			if (resume) {
-				resume.after.set(table.name, found.last);
+				resume.after.set(table.name, found.next);
 				return { done: false, table: table.name, rows: 0 };
 			}
-			found = await rowsToRemove(db, table, project.id, limit, found.last);
+			found = await rowsToRemove(db, table, project.id, limit, found.next);
 		}
 		if (found.kind === "none") {
 			plan?.empty.add(table.name);

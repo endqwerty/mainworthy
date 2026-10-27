@@ -1243,11 +1243,13 @@ Projects, actors, teams, grants and tokens. There are no seats: an actor is free
 | `[9].do` | `"project.list"` | yes |  |
 | `[10].do` | `"project.demo"` | yes |  |
 | `[10].key` | `string` | yes | Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone. |
+| `[10].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[11].do` | `"token.create"` | yes |  |
 | `[11].actor` | `string` | yes |  |
 | `[11].kind` | `"human" \| "agent" \| "ci"` | yes |  |
 | `[11].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
 | `[11].project` | `string` | no | Limit the grant to one project. Absent: every project. |
+| `[11].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[11].label` | `string` | no |  |
 | `[11].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
 | `[12].do` | `"token.list"` | yes |  |
@@ -1257,11 +1259,13 @@ Projects, actors, teams, grants and tokens. There are no seats: an actor is free
 | `[15].do` | `"grant.set"` | yes |  |
 | `[15].actor` | `string` | yes |  |
 | `[15].project` | `string` | no | The project the grant is for. Absent: every project. |
+| `[15].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[15].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
 | `[15].roles` | `array<string>` | no | Named roles on this grant. Absent: keep its roles; []: clear them. |
 | `[16].do` | `"grant.remove"` | yes |  |
 | `[16].actor` | `string` | yes |  |
 | `[16].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |
+| `[16].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[17].do` | `"actor.forget"` | yes |  |
 | `[17].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
 | `[18].do` | `"policy.show"` | yes |  |
