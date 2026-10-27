@@ -266,6 +266,16 @@ describe("a draft carried onto a version the page has read", () => {
 		expect(
 			asTyped({ typed: lines, stored: { ...step("Open cart\nApply coupon"), pre: "Logged in \n  Cart ready" } }),
 		).toEqual(lines);
+		// Preconditions are trimmed only at their ends: a colleague's indentation inside them is an edit (F3).
+		const indented = { ...step("Open cart"), pre: "Logged in\n  Cart  ready" };
+		expect(
+			onto({ ...step("Open cart"), pre: "Logged in\nCart ready" }, indented, {
+				...step("Open cart"),
+				pre: "Logged in\nCart ready",
+			}),
+		).toEqual(indented);
+		// The same for a step: the page would make it one way, and a colleague made it another.
+		expect(onto(step("Open\ncart"), step("Open\n  cart"), step("Open\ncart"))).toEqual(step("Open\n  cart"));
 		// With nothing else changed, the spacing stays as typed.
 		expect(onto(step("Open cart "), { ...step("Open cart"), title: "Theirs" }, step("Open cart"))).toEqual({
 			...step("Open cart "),
