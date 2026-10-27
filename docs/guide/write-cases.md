@@ -209,8 +209,9 @@ An already-recorded restore leaves later edits alone.
 Leaving the case checks the old request once and reports its outcome with the case reference.
 The page then drops that request. Pressing <kbd>u</kbd> on another case starts a new restore there.
 The retry instruction clears as soon as you leave. The check reports that case's outcome even if you keep navigating.
-If something newer has set the status line by then, such as a tag or another restore, that status stays and the
-outcome follows it.
+While the check runs, the status line says the restore is being checked, and the outcome replaces that sentence.
+If anything has written the status line since, such as a tag or another restore (even of the same case), that status
+stays and the outcome appears on a line of its own below it, until the next such outcome or until you press Dismiss.
 If nothing was recorded when checked, the old request may still arrive, but the page does not retry it.
 A final refusal shows the server's message without promising a retry of the old request.
 If the project was replaced under the same key, the page discards the restore and asks you to reload.
@@ -233,8 +234,8 @@ The name stays read-only while that request is kept.
 Pressing <kbd>Escape</kbd> or leaving the parent folder checks the old request once and reports its outcome
 with the full folder path, then drops it and closes the field. The next folder creation is a fresh request.
 The retry instruction clears while the page checks the outcome. Navigating again does not hide that folder's outcome.
-If something newer has set the status line by then, such as a tag or another folder creation, that status stays and
-the outcome follows it.
+The outcome replaces the status line's sentence that the folder is being checked. If anything has written the status
+line since, that status stays and the outcome appears on the line below it, as for a restore.
 If nothing was recorded when checked, the old request may still arrive, but the page does not retry it.
 A final refusal leaves the name editable and shows the server's message without promising recovery of that request.
 If the project was replaced under the same key, the server refuses the old creation and the page asks you to reload.

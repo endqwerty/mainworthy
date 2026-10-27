@@ -148,7 +148,7 @@ function sentBody(draft: Draft): CaseBody {
 const focusOnce = (node: HTMLElement | null): void => focusInto(node);
 
 export function SuiteScreen() {
-	const { project, session, route, setStatus, openPalette } = useApp();
+	const { project, session, route, setStatus, settleStatus, openPalette } = useApp();
 	const projectIdentity = session.projects.find((entry) => entry.key === project)?.identity;
 	// Cleanup and recursive saves retain the route that owned this render.
 	const navigation = navigationToken();
@@ -431,13 +431,10 @@ export function SuiteScreen() {
 	const undo = useRef<PlacementUndo | null>(null);
 	const folderCreation = useRef<RetainedProposal<Extract<Edit, { op: "folder" }>> | null>(null);
 	const versionRestore = useRef<RetainedProposal<Extract<Edit, { op: "restore" }>> | null>(null);
-	// A settled outcome takes the place of the line its own lookup wrote. A newer status (a tag, another command,
-	// the next screen) keeps its place, and the outcome is added after it rather than lost.
 	const settleRetained = useCallback(
 		async (action: RetainedProposal, subject: string): Promise<void> => {
 			if (!sessionCurrent(owner)) return;
-			const pending = `${subject} is being checked. It will not be retried.`;
-			setStatus(pending);
+			const pending = setStatus(`${subject} is being checked. It will not be retried.`);
 			let message: string;
 			try {
 				const fate = await call("command", { cmd: action.input.cmd }, { project, owner });
@@ -462,12 +459,9 @@ export function SuiteScreen() {
 				const reason = errorMessage(error, "Could not check the outcome.");
 				message = `${subject}: ${reason}${/[.!?]$/.test(reason) ? "" : "."} Outcome unknown. It will not be retried.`;
 			}
-			if (sessionCurrent(owner))
-				setStatus((shown) =>
-					shown.includes(pending) ? shown.replace(pending, () => message) : shown ? `${shown} ${message}` : message,
-				);
+			if (sessionCurrent(owner)) settleStatus(pending, message);
 		},
-		[project, owner, setStatus],
+		[project, owner, setStatus, settleStatus],
 	);
 	const abandonFolder = useCallback((): void => {
 		const action = folderCreation.current;
