@@ -21,7 +21,7 @@ checkers** come from maintained libraries, behind one file each, and decide only
 | --- | --- |
 | Passwords | `Bun.password` (argon2id), as before |
 | TOTP | our RFC 6238 code, which is small and fully specified |
-| Passkeys | our verifier for now; whether to move to `@simplewebauthn/server` is #419 |
+| Passkeys | our verifier, compared answer by answer with `@simplewebauthn/server` in `test/webauthn-comparison.test.ts` (#419) |
 | OpenID Connect | `openid-client` (this decision, `src/server/identity/oidc.ts`) |
 | SAML 2.0 | a library chosen by the spike in #418 |
 

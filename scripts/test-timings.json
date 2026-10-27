@@ -193,6 +193,7 @@
 		"src/server/identity/webauthn.test.ts": 312,
 		"test/demo-removal-budget.test.ts": 301,
 		"src/core/hash.test.ts": 299,
+		"test/webauthn-comparison.test.ts": 290,
 		"src/cli/archive-stream.test.ts": 283,
 		"src/core/outline.test.ts": 275,
 		"src/core/signature.test.ts": 249,
