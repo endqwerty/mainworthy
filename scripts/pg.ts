@@ -279,6 +279,18 @@ export async function cleanupClusters(
 	}
 	return retained;
 }
+// Disposable, like CI's functional shards (scripts/ci-postgres.sh): DROP DATABASE forces a checkpoint, and with
+// fsync on it syncs every file the clones dirtied, seconds on a busy machine (#984). `bun run dev` shares the cluster,
+// so its data is as disposable as the tests'.
+const CLUSTER_SETTINGS = [
+	"listen_addresses = '127.0.0.1'",
+	"unix_socket_directories = ''",
+	"max_connections = 300",
+	"fsync = off",
+	"synchronous_commit = off",
+	"full_page_writes = off",
+	"",
+].join("\n");
 export async function cluster(): Promise<Cluster> {
 	if (process.env.MAINWORTHY_TEST_PG)
 		return { adminUrl: process.env.MAINWORTHY_TEST_PG, directory: null, owned: false, startMs: 0 };
@@ -288,6 +300,12 @@ export async function cluster(): Promise<Cluster> {
 		const device = statSync(checkout).dev;
 		if (state && running(state)) {
 			if (state.checkout !== checkout || state.device !== device) save(stateFile, { ...state, checkout, device });
+			// A cluster started before these settings changed takes them without a restart: all three reload.
+			const settings = join(state.directory, "data", "postgresql.auto.conf");
+			if (readFileSync(settings, "utf8") !== CLUSTER_SETTINGS) {
+				writeFileSync(settings, CLUSTER_SETTINGS);
+				await command([join(state.bin, "pg_ctl"), "-D", join(state.directory, "data"), "reload"]);
+			}
 			return describe(state);
 		}
 		const bin = binaries();
@@ -311,20 +329,7 @@ export async function cluster(): Promise<Cluster> {
 				"--locale=C",
 			]);
 		}
-		// Disposable, like CI's functional shards (scripts/ci-postgres.sh): DROP DATABASE forces a checkpoint, and
-		// with fsync on it syncs every file the clones dirtied, seconds on a busy machine (#984).
-		writeFileSync(
-			join(data, "postgresql.auto.conf"),
-			[
-				"listen_addresses = '127.0.0.1'",
-				"unix_socket_directories = ''",
-				"max_connections = 300",
-				"fsync = off",
-				"synchronous_commit = off",
-				"full_page_writes = off",
-				"",
-			].join("\n"),
-		);
+		writeFileSync(join(data, "postgresql.auto.conf"), CLUSTER_SETTINGS);
 		state.port = await freePort();
 		state.bin = bin;
 		state.checkout = checkout;
