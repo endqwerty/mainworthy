@@ -83,6 +83,7 @@
 		"test/oidc.test.ts": 5898,
 		"test/e2e/cockpit-work.test.ts": 5817,
 		"test/pg-cleanup.test.ts": 5705,
+		"test/pg-dev.test.ts": 20,
 		"test/e2e/merged-drafts.test.ts": 5528,
 		"test/tokens.test.ts": 5523,
 		"test/results.test.ts": 5479,

@@ -307,6 +307,18 @@ async function reloaded(adminUrl: string): Promise<void> {
 		await sql.close();
 	}
 }
+/**
+ * Why `bun run dev` may not serve from the checkout cluster, or null when it may. The cluster runs without durability
+ * (CLUSTER_SETTINGS), so a crash can undo an acknowledged sign-out or revoked token: server mode, or a host other
+ * people reach, needs a database of its own in MAINWORTHY_DATABASE_URL.
+ */
+export function devDatabaseRefusal(env: Record<string, string | undefined>): string | null {
+	if (env.MAINWORTHY_DATABASE_URL) return null;
+	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
+	const loopback = host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host);
+	if (env.MAINWORTHY_MODE !== "server" && loopback) return null;
+	return "bun run dev serves the checkout's disposable PostgreSQL only in local mode on loopback; for server mode or another host, set MAINWORTHY_DATABASE_URL to a durable database";
+}
 export async function cluster(): Promise<Cluster> {
 	if (process.env.MAINWORTHY_TEST_PG)
 		return { adminUrl: process.env.MAINWORTHY_TEST_PG, directory: null, owned: false, startMs: 0 };
@@ -412,6 +424,8 @@ if (import.meta.main) {
 	else if (action === "start" || action === "url")
 		console.log(action === "url" ? (await cluster()).adminUrl : JSON.stringify(await cluster()));
 	else if (action === "dev") {
+		const refused = devDatabaseRefusal(process.env);
+		if (refused) throw new Error(refused);
 		const url = process.env.MAINWORTHY_DATABASE_URL ?? (await cluster()).adminUrl;
 		const child = Bun.spawn([process.execPath, "--watch", "src/cli/main.ts", "serve"], {
 			cwd: checkout,
