@@ -135,8 +135,10 @@ of 231 files and 0.2% of the test time; browser tests were 39% of it and most of
   page receives replies in. A browser test checks the journey once; the conditions behind it go a layer down.
 
 Extend an existing test before adding a file. A pull request that adds a browser test says why on a line of its
-description starting `Browser tests:`; the `description` job (`bun scripts/work.ts pr-body`) asks for that line and
-names each test it found.
+description starting `Browser tests:`. The `description` job (`bun scripts/work.ts pr-body`) asks for that line when
+a browser test file declares more tests at the head than at the base, and names each file with both counts. Which
+files open a browser is listed in `scripts/browser-tests.ts`; `test/browser-tests.test.ts` holds the list to what each
+file opens.
 
 ## Keep tests independent
 

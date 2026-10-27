@@ -30,7 +30,7 @@ import {
 	stopServers,
 	within,
 } from "../scripts/work/processes.ts";
-import { addedBrowserTests, closing, type Facts, gather, problems } from "../scripts/work/pull-request.ts";
+import { closing, type Facts, gather, problems } from "../scripts/work/pull-request.ts";
 import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
@@ -448,42 +448,80 @@ test("added fragments name their own PR and pending is allowed only in a draft",
 });
 
 test("a pull request that adds browser tests says what only a browser shows (the cheapest layer, AGENTS.md)", () => {
-	const added = ['test/e2e/conflict.test.ts: "a lost reply shows the conflict card"'];
+	const added = [{ file: "test/e2e/conflict.test.ts", before: 12, after: 13 }];
 	const found = problems(facts({ addedBrowserTests: added }));
 	expect(found).toHaveLength(1);
 	expect(found[0]).toContain("adds 1 browser test");
-	expect(found[0]).toContain("test/e2e/conflict.test.ts");
+	expect(found[0]).toContain("test/e2e/conflict.test.ts: 12 → 13");
 	expect(found[0]).toContain("Browser tests:");
 	const body = "Closes #12\n\nBrowser tests: the card's focus after a reload, which no server test sees.\n";
 	expect(problems(facts({ body, addedBrowserTests: added }))).toEqual([]);
 	// The line counts only in prose, and only with a reason after it.
-	expect(
-		problems(facts({ body: "Closes #12\n\n```\nBrowser tests: x\n```\n", addedBrowserTests: added })),
-	).toHaveLength(1);
+	const fenced = "Closes #12\n\n```\nBrowser tests: x\n```\n";
+	expect(problems(facts({ body: fenced, addedBrowserTests: added }))).toHaveLength(1);
 	expect(problems(facts({ body: "Closes #12\n\nBrowser tests:\n", addedBrowserTests: added }))).toHaveLength(1);
 });
 
-test("added browser tests are read from the patch of a browser test file", () => {
-	const patch = [
-		"@@ -1,3 +1,9 @@",
-		' import { test } from "bun:test";',
-		'+test("a new journey", async () => {});',
-		'+	test.each([1, 2])("a row %d", async () => {});',
-		'-test("a removed one", async () => {});',
-		' test("an unchanged one", async () => {});',
-		'+// test("a comment") is not a test',
-	].join("\n");
-	expect(addedBrowserTests("test/e2e/journey.test.ts", patch, 3)).toEqual([
-		'test/e2e/journey.test.ts: "a new journey"',
-		'test/e2e/journey.test.ts: "a row %d"',
+// A fake GitHub for `gather`: one pull request, its files, and each file's text at the base and the head.
+const BASE = "b".repeat(40);
+const HEAD = "a".repeat(40);
+const github =
+	(files: object[], text: Record<string, string>) =>
+	async (args: string[]): Promise<string> => {
+		if (args[0] === "pr")
+			return JSON.stringify({
+				body: "",
+				baseRefName: "main",
+				milestone: null,
+				closingIssuesReferences: [],
+				isDraft: false,
+				headRefOid: HEAD,
+				baseRefOid: BASE,
+			});
+		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return String(files.length);
+		if (args[1]?.endsWith("/pulls/832/files")) return JSON.stringify([files]);
+		const at = /^repos\/endqwerty\/mainworthy\/contents\/(.+)\?ref=([a-f0-9]{40})$/.exec(args[1] ?? "");
+		if (at) {
+			const found = text[`${at[2] === HEAD ? "head" : "base"}:${decodeURIComponent(at[1] ?? "")}`];
+			if (found === undefined) throw new Error("gh: Not Found (HTTP 404)");
+			return found;
+		}
+		throw new Error(`unexpected GitHub read: ${args.join(" ")}`);
+	};
+const tests = (n: number, declare = 'test.skipIf(!browserAvailable)(\n\t"journey",\n\tasync () => {},\n);\n') =>
+	declare.repeat(n);
+
+test("gather counts the browser tests a pull request adds, file by file, at the base and the head", async () => {
+	const got = await gather(
+		832,
+		github(
+			[
+				{ status: "modified", filename: "test/e2e/drafts.test.ts" },
+				{ status: "added", filename: "test/e2e/new-journey.test.ts" },
+				{ status: "renamed", filename: "test/e2e/renamed.test.ts", previous_filename: "test/e2e/old-name.test.ts" },
+				{ status: "removed", filename: "test/e2e/gone.test.ts" },
+				{ status: "modified", filename: "test/e2e/ports.test.ts" },
+				{ status: "modified", filename: "test/e2e/fewer.test.ts" },
+				{ status: "modified", filename: "test/e2e/support.ts" },
+			],
+			{
+				"base:test/e2e/drafts.test.ts": tests(3),
+				"head:test/e2e/drafts.test.ts": tests(4),
+				"head:test/e2e/new-journey.test.ts": `const check = test.skipIf(!browserAvailable);\n${tests(2, 'check("a", () => {});\n')}`,
+				"base:test/e2e/old-name.test.ts": tests(2),
+				"head:test/e2e/renamed.test.ts": tests(2),
+				"base:test/e2e/ports.test.ts": tests(1, 'test("a port", () => {});\n'),
+				"head:test/e2e/ports.test.ts": tests(5, 'test("a port", () => {});\n'),
+				"base:test/e2e/fewer.test.ts": tests(4),
+				"head:test/e2e/fewer.test.ts": tests(1),
+			},
+		),
+	);
+	// A rename keeps its tests, a removal and fewer tests add none, and ports.test.ts opens no browser.
+	expect(got.addedBrowserTests).toEqual([
+		{ file: "test/e2e/drafts.test.ts", before: 3, after: 4 },
+		{ file: "test/e2e/new-journey.test.ts", before: 0, after: 2 },
 	]);
-	expect(addedBrowserTests("test/results.test.ts", patch, 3)).toEqual([]);
-	expect(addedBrowserTests("test/e2e/support.ts", patch, 3)).toEqual([]);
-	// GitHub leaves out the patch of a large file: lines were added, so it counts as adding browser tests.
-	expect(addedBrowserTests("test/e2e/journey.test.ts", undefined, 40)).toEqual([
-		"test/e2e/journey.test.ts: 40 added lines GitHub shows no patch for",
-	]);
-	expect(addedBrowserTests("test/e2e/journey.test.ts", undefined, 0)).toEqual([]);
 });
 
 test("PR facts read added fragments at the immutable PR head", async () => {
@@ -501,18 +539,10 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 				isDraft: true,
 				headRefOid: head,
 			});
-		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "3";
+		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "2";
 		if (args[1]?.endsWith("/pulls/832/files"))
 			return JSON.stringify([
-				[
-					{ status: "modified", filename: "src/example.ts" },
-					{
-						status: "modified",
-						filename: "test/e2e/journey.test.ts",
-						additions: 1,
-						patch: '@@ -1 +1,2 @@\n+test("a new journey", async () => {});',
-					},
-				],
+				[{ status: "modified", filename: "src/example.ts" }],
 				[{ status: "added", filename: ".changes/example-change.md" }],
 			]);
 		if (args[1] === `repos/endqwerty/mainworthy/contents/.changes/example-change.md?ref=${head}`) return source;
@@ -520,7 +550,6 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 	});
 	expect(got.pull).toEqual({ url: "https://github.com/endqwerty/mainworthy/pull/832", draft: true });
 	expect(got.addedFragments).toEqual([{ file: ".changes/example-change.md", text: source }]);
-	expect(got.addedBrowserTests).toEqual(['test/e2e/journey.test.ts: "a new journey"']);
 	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--paginate");
 	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--slurp");
 });
