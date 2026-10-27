@@ -623,7 +623,7 @@ test("a queued write returns Busy when acquiring a connection exceeds its bound"
 	}
 });
 
-test("closing stops an exclusive callback's write waiting for a lock, and returns once the callback has settled", async () => {
+test("closing returns once an exclusive callback has settled, and the callback's write waiting for a lock does not commit", async () => {
 	const closing = await Database.open({ url: fixture.url, writePool: 1 });
 	const entered = barrier();
 	const finish = barrier();
@@ -639,7 +639,14 @@ test("closing stops an exclusive callback's write waiting for a lock, and return
 		await entered.promise;
 		const work = closing
 			.exclusive("db test", (signal) =>
-				closing.write((db) => db.transaction(() => db.allDynamic("SELECT pg_advisory_xact_lock(4242)")), { signal }),
+				closing.write(
+					(db) =>
+						db.transaction(async () => {
+							await db.run(Q.insert, { id: 9_142, text: "written before the wait" });
+							await db.allDynamic("SELECT pg_advisory_xact_lock(4242)");
+						}),
+					{ signal },
+				),
 			)
 			.finally(() => order.push("callback settled"));
 		for (let waiting = 0; waiting === 0; ) {
@@ -655,10 +662,17 @@ test("closing stops an exclusive callback's write waiting for a lock, and return
 				),
 			);
 		}
-		// The lock is held until the end of the test: only the cancelled wait lets the callback, and `close`, finish.
-		await closing.close().then(() => order.push("closed"));
+		// Closing aborts the callback's signal, but the statement already waiting for the lock waits on, and so does
+		// `close`, until the lock is released. The write then stops before its commit.
+		const closed = closing.close().then(() => order.push("closed"));
+		await Bun.sleep(300);
+		expect(order).toEqual([]);
+		finish.release();
+		await holding;
+		await closed;
 		await expect(work).rejects.toThrow("database is closed");
 		expect(order).toEqual(["callback settled", "closed"]);
+		expect(await database.read((db) => db.get(Q.select, { id: 9_142 }))).toBeNull();
 	} finally {
 		finish.release();
 		await holding;
@@ -666,7 +680,7 @@ test("closing stops an exclusive callback's write waiting for a lock, and return
 	}
 });
 
-test("a write whose signal aborted does not commit, even when its callback caught the cancellation", async () => {
+test("a write whose signal aborted between statements does not commit, even when its callback caught the abort", async () => {
 	const controller = new AbortController();
 	const reason = new Error("stopped by the test");
 	const outcome = await database

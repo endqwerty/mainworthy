@@ -742,21 +742,22 @@ the swap's check is what keeps the demo. Moving refresh and drain to the durable
 (#821); several instances do not need it. Scheduled requests must replace the renewal timer when CPU is
 allocated only during requests.
 
-A stopping server does not wait for its demo work. On SIGTERM or SIGINT, `serve` aborts the refresh, the drain
-and the renewal of the demo's featured work: the wait for the refresh lock ends, a statement waiting for a
-project writer's lock is cancelled, an unfinished seed's HTTP requests are aborted, and the open transaction
-rolls back. An aborted transaction never commits, even when the code that ran in it caught the cancellation, and
-the stopped operation is not logged as a failure. A renewal that fails for any other reason logs `demo work
-renewal failed` with the reason. The seed token's revocation gets one more second, after which the token expires
-by itself within 15 minutes. With the drain or the renewal waiting for a writer, `serve` exits with code 0 in milliseconds. What the
+A stopping server waits for its demo work only briefly. On SIGTERM or SIGINT, `serve` aborts the refresh, the drain
+and the renewal of the demo's featured work: the wait for the refresh lock ends, an unfinished seed's HTTP
+requests are aborted, and each transaction stops at its next statement and rolls back. An aborted transaction
+never commits, even when the code that ran in it caught the abort, and the stopped operation is not logged as a
+failure. A renewal that fails for any other reason logs `demo work renewal failed` with the reason. The aborted
+refresh still revokes its seed token; if it cannot, the token expires by itself within 15 minutes. What the
 refresh or drain left unfinished resumes on the next start.
 
-Some work does not stop on the signal. A seed request the server is still handling, waiting for a writer's lock,
-keeps the server's own shutdown waiting for it. So `serve` gives the whole stop seven seconds, inside the ten Cloud
-Run allows before SIGKILL. At seven seconds it prints `mainworthy: stopping took longer than 7 s; exiting with
-<what> still running`, naming the step it was on (the demo refresh, demo work renewal, retired demo cleanup or
-the server's own shutdown), and exits with code 4. PostgreSQL rolls back the transactions still open when their
-connections close.
+A statement already sent is not cancelled: one waiting for another writer's lock, in the drain, the renewal, the
+token's revocation or a seed request the server is still handling, waits on. So `serve` gives the whole stop seven
+seconds, inside the ten Cloud Run allows before SIGKILL. At seven seconds it prints `mainworthy: stopping took
+longer than 7 s; exiting with <what> still running`, naming the step it was on (the demo refresh, demo work
+renewal, retired demo cleanup or the server's own shutdown), and exits with code 4. Write connections set
+PostgreSQL's `client_connection_check_interval` to one second, so a statement still waiting for a lock when the
+process exits notices the closed connection within about a second and rolls back its transaction, releasing the
+locks it held, rather than holding them until it gets its lock.
 
 This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
 remain useful to enforced transfer removal and cleanup. The PostgreSQL baseline includes only local operational demo state,
