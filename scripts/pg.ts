@@ -315,7 +315,8 @@ async function reloaded(adminUrl: string): Promise<void> {
 export function devDatabaseRefusal(env: Record<string, string | undefined>): string | null {
 	if (env.MAINWORTHY_DATABASE_URL) return null;
 	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
-	const loopback = host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host);
+	// The same rule as defaultConfig (src/server/kernel/app.ts); test/pg-dev.test.ts holds the two together.
+	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
 	if (env.MAINWORTHY_MODE !== "server" && loopback) return null;
 	return "bun run dev serves the checkout's disposable PostgreSQL only in local mode on loopback; for server mode or another host, set MAINWORTHY_DATABASE_URL to a durable database";
 }

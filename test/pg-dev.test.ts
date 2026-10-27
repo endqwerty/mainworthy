@@ -1,13 +1,17 @@
 import { expect, test } from "bun:test";
 import { devDatabaseRefusal } from "../scripts/pg.ts";
+import { defaultConfig } from "../src/server/kernel/app.ts";
 
-test("bun run dev keeps the disposable checkout cluster to loopback local mode", () => {
-	expect(devDatabaseRefusal({})).toBeNull();
-	expect(devDatabaseRefusal({ MAINWORTHY_HOST: "127.0.0.1" })).toBeNull();
-	expect(devDatabaseRefusal({ MAINWORTHY_HOST: "::1" })).toBeNull();
-	expect(devDatabaseRefusal({ MAINWORTHY_HOST: "localhost", MAINWORTHY_MODE: "local" })).toBeNull();
-	for (const env of [{ MAINWORTHY_MODE: "server" }, { MAINWORTHY_HOST: "0.0.0.0" }, { MAINWORTHY_HOST: "192.0.2.10" }])
-		expect(devDatabaseRefusal(env)).toContain("MAINWORTHY_DATABASE_URL");
+test("bun run dev serves the disposable checkout cluster exactly when the server would start in local mode", () => {
+	const hosts = [undefined, "127.0.0.1", "localhost", "::1", "[::1]", "127.0.0.2", "0:0:0:0:0:0:0:1", "", "0.0.0.0"];
+	const modes = [undefined, "local", "server", "other"];
+	for (const MAINWORTHY_HOST of hosts)
+		for (const MAINWORTHY_MODE of modes) {
+			const env = { MAINWORTHY_HOST, MAINWORTHY_MODE };
+			const local = defaultConfig(env).mode === "local";
+			expect({ env, refused: devDatabaseRefusal(env) !== null }).toEqual({ env, refused: !local });
+		}
+	expect(devDatabaseRefusal({ MAINWORTHY_MODE: "server" })).toContain("MAINWORTHY_DATABASE_URL");
 	expect(
 		devDatabaseRefusal({ MAINWORTHY_MODE: "server", MAINWORTHY_DATABASE_URL: "postgres://db.example/mw" }),
 	).toBeNull();
