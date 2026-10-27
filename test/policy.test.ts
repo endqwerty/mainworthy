@@ -2035,6 +2035,50 @@ describe("unlinked tests", () => {
 		]);
 	});
 
+	test("answering a decided file question again is refused when its tests with no case changed since", async () => {
+		await use("standard", "ask");
+		const file = "tests/checkout/coupon.spec.ts";
+		await h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "Coupon applies" } },
+				{ op: "create", body: { title: "Coupon expires" } },
+			],
+		});
+		await h.call("report", ciReport({ commit: "bbbb0051", n: 3, file }));
+		const link = async (pair: [string, string]) => {
+			const asked = first((await queue({ kind: "map", state: "open" })).items);
+			await h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "link", pairs: [pair] } });
+			return asked;
+		};
+		const firstLink = await link(["T-1", "C-1"]);
+		await link(["T-2", "C-2"]);
+		// Replacing the first answer as it was read would stand on T-1, T-2 and T-3, and could relink T-2.
+		const replaced = await h.call<{ status: string; needs: string }[]>("decide", {
+			q: firstLink.q,
+			onEvidence: firstLink.evidenceHash,
+			answer: { is: "track" },
+		});
+		expect(replaced[0]).toMatchObject({ status: "conflict" });
+		expect(replaced[0]?.needs).toContain("undo");
+		expect(await unlinkedTests()).toBe(1);
+		expect((await queue({ kind: "map", state: "open" })).items).toHaveLength(1);
+	});
+
+	test("answering a decided file question again works while its tests with no case are unchanged", async () => {
+		await use("standard", "track");
+		const file = "tests/checkout/coupon.spec.ts";
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Coupon applies" } }] });
+		await h.call("report", ciReport({ commit: "bbbb0052", n: 2, file }));
+		const tracked = first((await queue({ kind: "map", state: "decided" })).items);
+		const reply = await h.call<{ status: string }[]>("decide", {
+			q: tracked.q,
+			onEvidence: tracked.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		expect(reply[0]).toMatchObject({ status: "decided" });
+		expect(await unlinkedTests()).toBe(1);
+	});
+
 	test("a withdrawn answer keeps the rule away until the file changes, also when tests changed before it", async () => {
 		await use("standard", "track");
 		const file = "tests/checkout/coupon.spec.ts";
