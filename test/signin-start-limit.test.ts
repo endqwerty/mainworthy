@@ -88,7 +88,7 @@ test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protoco
 	// slots, so a burst that each /64 could take 300 of would fill them and refuse the next person.
 	expect(said(await w.post("/api/login/challenge", { native: true }, subscriber(0)))).toBe("200");
 	await padded(w, "passkey", 9_980);
-	await used(w, "2001:db8:0:0::1", 290);
+	await used(w, "2001:db8:0:0::1", 289);
 	const burst = await Promise.all(
 		Array.from({ length: 34 }, (_, net) => w.post("/api/login/challenge", { native: true }, subscriber(net))),
 	);
@@ -122,7 +122,7 @@ CROSS JOIN generate_series(1,299) n`,
 				),
 			),
 		);
-		await used(w, "2001:db8:0:0::1", 300);
+		await used(w, "2001:db8:0:0::1", 299);
 		const refused = await Promise.all(
 			[0, 1, 2, 3].map((net) => w.post("/api/login/challenge", { native: true }, subscriber(net))),
 		);
@@ -242,10 +242,8 @@ test.each(["passkey", "provider"])("one client's IPv6 /58 spread cannot evict a 
 
 test("a start block reports attempts without claiming that authentication failed", async () => {
 	const w = await world({ proxied: true });
-	// The App's own ceiling and the shared count as 300 begins this minute leave them.
-	const ceiling = localStarts(w.instance.app);
-	for (let count = 0; count < 300; count++) ceiling(sha256(startAddressKey(CLIENT) ?? ""), w.clock.now());
-	await used(w, CLIENT, 300);
+	await used(w, CLIENT, 299);
+	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("200");
 	const blocked = await w.post("/api/login/challenge", {}, client);
 	expect(blocked.body).toEqual({
 		ok: false,
@@ -253,6 +251,13 @@ test("a start block reports attempts without claiming that authentication failed
 	});
 	// The App's own ceiling refused it before the shared count, which would have stored 301, was touched.
 	expect(await stored(w, CLIENT)).toBe(300);
+});
+
+test("begins another instance admitted count against the same source here", async () => {
+	const w = await world({ proxied: true });
+	await usedElsewhere(w, CLIENT, 300);
+	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("429 limited, retry after 60");
+	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("200");
 });
 
 test("one source cannot exhaust another source's allowance, including unknown peers", async () => {
@@ -425,22 +430,34 @@ test.each(starts)(
 		expect(said(await w.post(start.path, start.body, client))).toBe("200");
 		// A new window starts from this one begin, so all 300 of it are left to give.
 		expect(await stored(w, CLIENT)).toBe(1);
-		await used(w, CLIENT, 299);
+		await used(w, CLIENT, 298);
 		expect(said(await w.post(start.path, start.body, client))).toBe("200");
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
 	},
 );
 
 /**
- * Sets the count of `address`'s start window, opening it now when it has none, as G1 fills the ceremonies
- * directly: what a test gives this way costs no requests, and real begins then cross the window's boundary.
+ * Adds `count` begins to `address`'s start window now, in both places a real begin is counted: the App's own
+ * ceiling and the shared count, each opening a new window as `takeStart` would. As G1 fills the ceremonies
+ * directly, what a test gives this way costs no requests, and real begins then cross the window's boundary.
  */
 async function used(w: World, address: string, count: number): Promise<void> {
+	const ceiling = localStarts(w.instance.app);
+	for (let n = 0; n < count; n++) ceiling(sha256(startAddressKey(address) ?? ""), w.clock.now());
+	await usedElsewhere(w, address, count);
+}
+
+/** Adds `count` begins to the shared count alone, as another instance admitting them would. */
+async function usedElsewhere(w: World, address: string, count: number): Promise<void> {
+	const key = sha256(startAddressKey(address) ?? "");
+	const now = w.clock.now();
 	await w.instance.app.database.write((db) =>
 		db.transaction(() =>
 			db.runDynamic(
-				"INSERT INTO identity_starts (key,since,count) VALUES ($1,$2,$3) ON CONFLICT(key) DO UPDATE SET count = excluded.count",
-				[sha256(startAddressKey(address) ?? ""), w.clock.now(), count],
+				`INSERT INTO identity_starts (key,since,count) VALUES ($1,$2,$3) ON CONFLICT(key) DO UPDATE SET
+ since = CASE WHEN $2 >= identity_starts.since AND $2 < identity_starts.since + 60000 THEN identity_starts.since ELSE $2 END,
+ count = CASE WHEN $2 >= identity_starts.since AND $2 < identity_starts.since + 60000 THEN identity_starts.count + $3 ELSE $3 END`,
+				[key, now, count],
 			),
 		),
 	);
