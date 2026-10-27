@@ -560,7 +560,7 @@ test("a browser phase builds once, including performance and shards, but named s
 	expect(needsBrowserFixture(["performance"])).toBe(true);
 	expect(needsBrowserFixture(["parallel"], "2/6")).toBe(true);
 	expect(needsBrowserFixture(["parallel"], undefined, ["test/e2e/phone.test.ts"])).toBe(true);
-	expect(needsBrowserFixture(["parallel"], undefined, ["test/check.test.ts"])).toBe(false);
+	expect(needsBrowserFixture(["parallel"], undefined, ["test/check.test.ts"])).toBe(true);
 });
 
 test("a broken browser fixture build fails the check before any test runs, even with an inherited executable", async () => {
@@ -572,6 +572,7 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			"budget.ts",
 			"check.ts",
 			"check-plan.ts",
+			"browser-tests.ts",
 			"chromium-diagnostics.ts",
 			"preflight.ts",
 			"pg.ts",
@@ -583,9 +584,9 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
-		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
+		writeFileSync(join(root, "test/e2e/phone.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
 		const child = Bun.spawn(
-			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/broken.test.ts"],
+			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/phone.test.ts"],
 			{ cwd: root, env: { ...process.env, MAINWORTHY_E2E_SERVER: "/do-not-reuse" }, stdout: "pipe", stderr: "pipe" },
 		);
 		const [out, err, exit] = await Promise.all([
@@ -682,8 +683,8 @@ test("every test file is in exactly one phase: the performance files, and everyt
 	expect(phaseFiles("parallel")).not.toContain("test/policy-latency.test.ts");
 	for (const file of PERFORMANCE)
 		expect(existsSync(file), `${file} is listed as performance and is not there`).toBe(true);
-	const performance = testArgs("performance", { timings: "t.json" });
-	const parallel = testArgs("parallel", { timings: "t.json" });
+	const performance = testArgs("performance", { timings: "t.json", browser: true });
+	const parallel = testArgs("parallel", { timings: "t.json", browser: true });
 	expect(performance.filter((arg) => arg.startsWith("./"))).toEqual(PERFORMANCE.map((file) => `./${file}`));
 	expect(performance).not.toContain("src");
 	expect(parallel.filter((arg) => arg.startsWith("--path-ignore-patterns="))).toEqual(
@@ -739,7 +740,7 @@ test("the workflow runs the shards the scope names and its gate reads every one 
 	expect(matrix("all")).toEqual([
 		...shards.map((name, i) => ({
 			name,
-			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS}`,
+			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS} --browser`,
 			files: "",
 		})),
 		{ name: "performance", phase: "--only=performance", files: "" },
@@ -1476,7 +1477,14 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 		"node:path",
 	]);
 	expect(loaded("scripts/work/run.ts")).toEqual([]);
-	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
+	expect(loaded("scripts/check-plan.ts").sort()).toEqual([
+		"./browser-tests.ts",
+		"bun",
+		"node:fs",
+		"node:os",
+		"node:path",
+	]);
+	expect(loaded("scripts/browser-tests.ts")).toEqual([]);
 	expect(loaded("scripts/chromium-diagnostics.ts").sort()).toEqual(["node:fs", "node:path"]);
 	expect(loaded("scripts/preflight.ts").sort()).toEqual(["./pg.ts", "node:fs", "node:path"]);
 	expect(loaded("test/preflight.ts").sort()).toEqual([

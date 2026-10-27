@@ -187,7 +187,7 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 		return [
 			...Array.from({ length: CI_SHARDS }, (_, i) => ({
 				name: `tests-${i + 1}`,
-				phase: `--only=parallel --workers=${CI_TEST_WORKERS} --shard=${i + 1}/${CI_SHARDS}`,
+				phase: `--only=parallel --workers=${CI_TEST_WORKERS} --shard=${i + 1}/${CI_SHARDS} --browser`,
 				files: "",
 			})),
 			{ name: "performance", phase: "--only=performance", files: "" },

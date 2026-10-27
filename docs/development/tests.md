@@ -1,9 +1,9 @@
 # The check and the tests
 
 `bun run check` is the gate on your machine. It runs the type-check, lint, async-port guard and functional
-tests, including browser tests.
-CI runs those tests in shards and elapsed-time budgets on a dedicated runner. This page explains what
-the check does, how the tests are arranged and what keeps them from interfering with each other.
+tests that do not open Chromium. Add `--browser` to include browser tests.
+The PR's CI run includes browser tests in shards and elapsed-time budgets on a dedicated runner.
+This page explains what the check does, how the tests are arranged and what keeps them from interfering with each other.
 
 Tests need PostgreSQL 18. The fixture starts one checkout cluster on demand and clones a database for each
 harness or server. Set `MAINWORTHY_TEST_PG` to use an existing PostgreSQL admin URL instead, as CI does.
@@ -67,10 +67,17 @@ restoring the matching device lets the same abandoned cluster be removed. Metada
 | Command | What it runs |
 | --- | --- |
 | `bun test <file>` | one file. `bunfig.toml` preloads `test/preflight.ts`, which checks Bun and the packages first. |
-| `bun run test` | functional tests, with output as it comes. No type-check and no lint. |
-| `bun run check` | the type-check, the lint, the async-port guard and functional tests, side by side |
+| `bun run test` | functional tests without Chromium, with output as it comes. Add `--browser` for browser tests. No type-check or lint. |
+| `bun run check` | the type-check, lint, async-port guard and functional tests without Chromium, side by side |
+| `bun run check --browser` | the same check, including browser tests |
 | `bun run performance` | elapsed-time budgets, one file at a time. Run this alone on an idle machine. |
 | `bun scripts/check.ts test --only=parallel <file>...` | the named files of one phase, as CI runs the files a change needs |
+
+Browser tests normally run once later, in the PR's CI run. For a change to what a browser shows, run the affected
+file locally with `bun test test/e2e/<file>.test.ts` or the explicit-file check command above. Explicit files run
+even when they need Chromium. Other local browser runs are opt-in with `--browser`.
+The owner said, on 2026-10-27: "I'm not sure about bun run check running browser tests, I'm leaning no and to run
+the browser tests once later in the phase. Reduce the amount of waiting every thread has."
 
 Several worktrees can run `bun run check` at once. Each run takes half the CPU threads that are free when it
 starts (by the load average), at least two and at most half of all threads, so a check alone keeps its speed.
@@ -83,20 +90,26 @@ runner of its own. The iPhone simulator lane is separate and still uses one simu
 The check runs these steps:
 
 1. `scripts/preflight.ts` checks Bun and the packages.
-2. If browser tests will run, the check compiles `test/e2e/serve.ts` once.
+2. The plan uses `opensBrowser` from `scripts/browser-tests.ts` to exclude Chromium files unless `--browser`
+   or explicit files select them.
+   If browser tests will run, the check compiles `test/e2e/serve.ts` once. Otherwise it skips the fixture build
+   and shared Chromium startup.
 3. The type-check, the lint, `bun scripts/async-port.ts --check` and the tests start side by side.
 4. Functional test files run in parallel workers.
-5. The check prints a summary.
+5. The check prints a summary, including a notice when browser tests did not run and how to include them.
 
 - The functional phase runs test files in workers: half the free CPU threads, at least two (one on a two-thread
   machine) and at most half of all threads (`parallelWorkers` in `scripts/check-plan.ts`). Each file gets its own globals and modules. `scripts/test-timings.json` gives each file a
   weight, so the slowest files start first.
+- `opensBrowser` classifies Chromium files, including `test/check.test.ts`. Server and process tests
+  `test/e2e/ports.test.ts` and `test/e2e/lifetime.test.ts` stay in the default check. `test/browser-tests.test.ts`
+  checks the classification against what each file opens. `test/check-plan.test.ts` holds CI's full shards to `--browser`.
 - `bun run performance` selects the separate `PERFORMANCE` files in `scripts/check-plan.ts`.
   It runs with one worker and preserves the product thresholds. It is outside the default check.
 - When a selected phase includes browser tests, the check compiles `test/e2e/serve.ts` once into a private
   temporary directory and passes it to the tests as `MAINWORTHY_E2E_SERVER`. Each browser test still starts its
   own server process with its own data directory, port and token.
-- The check starts one headless Chromium per worker slot and passes the endpoints in
+- For a phase with browser files, the check starts one headless Chromium per worker slot and passes the endpoints in
   `MAINWORTHY_E2E_BROWSER_ENDPOINTS`. Each test still gets a fresh browser context, with its own cookies and
   storage. The few tests that need their own browser launch one.
 
@@ -204,7 +217,8 @@ budgets. The weights are scheduling estimates. They do not predict local elapsed
 
 | Flag | Effect |
 | --- | --- |
-| `--only=parallel`, `--only=performance` | runs one phase |
+| `--browser` | includes Chromium files in an unnamed functional run; `bun run check` accepts it too |
+| `--only=parallel`, `--only=performance` | runs one phase; explicit performance runs include their browser files |
 | `--shard=<i>/<n>` | runs share `i` of `n` of the parallel phase |
 | `--workers=<n>` | caps functional workers for this run. Performance always uses one. |
 | `--junit=<path>` | writes a JUnit report |
