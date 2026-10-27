@@ -456,6 +456,15 @@ export async function keyCount(page: Page): Promise<number> {
 		return typeof value === "number" ? value : 0;
 	});
 }
+/**
+ * Returns once the suite has the project's folders: the sidebar lists the one named. The suite reads them apart
+ * from its cases, so a case can show first. Until they arrive, `]` and `Alt+[` have no folder to step to and the
+ * move palette offers none, and a key pressed then does nothing (issue #994). The sidebar and the suite share one
+ * read of the folders, so the sidebar listing them means the suite has them too.
+ */
+export async function foldersShown(page: Page, name: string): Promise<void> {
+	await page.locator("#tree .fo .fn").getByText(name, { exact: true }).waitFor();
+}
 /** Pastes with the key of the machine the browser runs on: Control+V pastes nothing on macOS (issue #103). */
 export async function paste(page: Page, text: string): Promise<void> {
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
