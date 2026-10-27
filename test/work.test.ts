@@ -30,7 +30,7 @@ import {
 	stopServers,
 	within,
 } from "../scripts/work/processes.ts";
-import { closing, type Facts, gather, problems } from "../scripts/work/pull-request.ts";
+import { addedBrowserTests, closing, type Facts, gather, problems } from "../scripts/work/pull-request.ts";
 import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
@@ -385,6 +385,7 @@ test("`board check` names the id that no longer fits the board", () => {
 const facts = (over: Partial<Facts> = {}): Facts => ({
 	pull: { url: "https://github.com/endqwerty/mainworthy/pull/832", draft: false },
 	addedFragments: [],
+	addedBrowserTests: [],
 	body: "## Why\n\nCloses #12\n",
 	base: "main",
 	milestone: "M3",
@@ -446,6 +447,45 @@ test("added fragments name their own PR and pending is allowed only in a draft",
 	).not.toEqual([]);
 });
 
+test("a pull request that adds browser tests says what only a browser shows (the cheapest layer, AGENTS.md)", () => {
+	const added = ['test/e2e/conflict.test.ts: "a lost reply shows the conflict card"'];
+	const found = problems(facts({ addedBrowserTests: added }));
+	expect(found).toHaveLength(1);
+	expect(found[0]).toContain("adds 1 browser test");
+	expect(found[0]).toContain("test/e2e/conflict.test.ts");
+	expect(found[0]).toContain("Browser tests:");
+	const body = "Closes #12\n\nBrowser tests: the card's focus after a reload, which no server test sees.\n";
+	expect(problems(facts({ body, addedBrowserTests: added }))).toEqual([]);
+	// The line counts only in prose, and only with a reason after it.
+	expect(
+		problems(facts({ body: "Closes #12\n\n```\nBrowser tests: x\n```\n", addedBrowserTests: added })),
+	).toHaveLength(1);
+	expect(problems(facts({ body: "Closes #12\n\nBrowser tests:\n", addedBrowserTests: added }))).toHaveLength(1);
+});
+
+test("added browser tests are read from the patch of a browser test file", () => {
+	const patch = [
+		"@@ -1,3 +1,9 @@",
+		' import { test } from "bun:test";',
+		'+test("a new journey", async () => {});',
+		'+	test.each([1, 2])("a row %d", async () => {});',
+		'-test("a removed one", async () => {});',
+		' test("an unchanged one", async () => {});',
+		'+// test("a comment") is not a test',
+	].join("\n");
+	expect(addedBrowserTests("test/e2e/journey.test.ts", patch, 3)).toEqual([
+		'test/e2e/journey.test.ts: "a new journey"',
+		'test/e2e/journey.test.ts: "a row %d"',
+	]);
+	expect(addedBrowserTests("test/results.test.ts", patch, 3)).toEqual([]);
+	expect(addedBrowserTests("test/e2e/support.ts", patch, 3)).toEqual([]);
+	// GitHub leaves out the patch of a large file: lines were added, so it counts as adding browser tests.
+	expect(addedBrowserTests("test/e2e/journey.test.ts", undefined, 40)).toEqual([
+		"test/e2e/journey.test.ts: 40 added lines GitHub shows no patch for",
+	]);
+	expect(addedBrowserTests("test/e2e/journey.test.ts", undefined, 0)).toEqual([]);
+});
+
 test("PR facts read added fragments at the immutable PR head", async () => {
 	const head = "a".repeat(40);
 	const calls: string[][] = [];
@@ -461,10 +501,18 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 				isDraft: true,
 				headRefOid: head,
 			});
-		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "2";
+		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "3";
 		if (args[1]?.endsWith("/pulls/832/files"))
 			return JSON.stringify([
-				[{ status: "modified", filename: "src/example.ts" }],
+				[
+					{ status: "modified", filename: "src/example.ts" },
+					{
+						status: "modified",
+						filename: "test/e2e/journey.test.ts",
+						additions: 1,
+						patch: '@@ -1 +1,2 @@\n+test("a new journey", async () => {});',
+					},
+				],
 				[{ status: "added", filename: ".changes/example-change.md" }],
 			]);
 		if (args[1] === `repos/endqwerty/mainworthy/contents/.changes/example-change.md?ref=${head}`) return source;
@@ -472,6 +520,7 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 	});
 	expect(got.pull).toEqual({ url: "https://github.com/endqwerty/mainworthy/pull/832", draft: true });
 	expect(got.addedFragments).toEqual([{ file: ".changes/example-change.md", text: source }]);
+	expect(got.addedBrowserTests).toEqual(['test/e2e/journey.test.ts: "a new journey"']);
 	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--paginate");
 	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--slurp");
 });

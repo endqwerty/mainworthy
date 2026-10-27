@@ -39,6 +39,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
 | **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). After adding or splitting tests, refresh `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
 | **Guard only what is critical.** Before adding a check, test or audit fix, name what reaches the state; if nothing does yet, say so, add nothing (the owner, 2026-10-25: "Only guard if it's absolutely critical to do so") | the audit brief (`test/security-audit.test.ts`); review judgment |
+| **A reachable finding becomes a test at the cheapest layer that reaches it**, extending an existing one before adding a file (the owner, 2026-10-27: "4 is critical"; docs/development/tests.md) | `pr-body` asks why of each added browser test (`scripts/browser-tests.ts`); the layer is review judgment |
 | **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Timing and database process cleanup tests run alone with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
 | **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` holds the failure question's sentence to the server; other screen copy is review judgment |
@@ -60,7 +61,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
   After cutover, check that `https://mainworthy.com/health` names the commit after every landing.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
-  rewrite. A reachable finding becomes a test. The goal: landing costs minutes.
+  rewrite. The goal: landing costs minutes.
 - `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
   rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
 
