@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, fetched, foldersShown, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const titleOf = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
@@ -480,6 +480,7 @@ check(
 			await page.keyboard.type("Unsaved capture");
 			await page.keyboard.press("Escape");
 			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Offline"));
+			await foldersShown(page, "Checkout");
 			await page.keyboard.press("j");
 			await page.keyboard.press("]");
 			await page.waitForURL("**/suite?folder=Checkout");
