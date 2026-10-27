@@ -275,10 +275,14 @@ export function brief({ pull, source, head, base, tree, diff, changed, context }
 		"- file paths, the CLI and MCP surfaces, .github/workflows/, dependencies (bun.lock), and anything a public",
 		"  repository must not hold (credentials, private addresses, machine names, the owner's name).",
 		"",
+		"An issue names what reaches it in this head: the request or other input, the caller, the stored or imported",
+		"data or the race that gets there. A state this head's code and configuration cannot reach is not an issue, nor",
+		"is one that only a later change could create (new code, a changed setting): that change gets its own audit.",
+		"",
 		...(context === null ? [] : ["Earlier rounds and their answers:", context.trim(), ""]),
-		"For each issue give the file and line, a concrete case that goes wrong, the severity (high, medium, low) and",
-		'a fix. For each earlier issue, say "addressed" or "not addressed" and why. If there is nothing new, say',
-		'"No new issues". Name the head you read.',
+		"For each issue give the file and line, what reaches it, a concrete case that goes wrong, the severity (high,",
+		'medium, low) and a fix. For each earlier issue, say "addressed" or "not addressed" and why. If there is nothing',
+		'new, say "No new issues". Name the head you read.',
 	].join("\n");
 }
 

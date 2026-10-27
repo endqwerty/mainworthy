@@ -275,6 +275,12 @@ test("the brief names the head, the base, what to read and what to look at", () 
 	expect(text).not.toContain("edits the audit itself");
 });
 
+test("the brief asks each issue for what reaches it in this head", () => {
+	const text = briefFor(["a.ts"]);
+	expect(text).toContain("what reaches it in this head");
+	expect(text).toContain("only a later change could create");
+});
+
 test("a change to the audit's own files is called out first", () => {
 	for (const file of AUDIT_FILES) expect(briefFor([file])).toContain(`edits the audit itself: ${file}`);
 });
