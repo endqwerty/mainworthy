@@ -424,12 +424,16 @@ test("a retired demo another instance removed first does not stop the new revisi
 	});
 }, 60_000);
 
-/** Ends the session that holds the refresh lock, as a lost connection or a restarted database server would. */
+/**
+ * Ends the session that holds the refresh lock, as a lost connection or a restarted database server would. Only this
+ * test's database: other demo test files beside it hold a lock under the same key in theirs.
+ */
 async function endRefreshLock(app: App, project: string): Promise<boolean[]> {
 	const rows = await app.database.read((db) =>
 		db.allDynamic<{ ended: boolean }>(
 			`SELECT pg_terminate_backend(pid) AS ended FROM pg_locks, hashtextextended($1::text, 914) AS k(key)
 			 WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
 			   AND classid::bigint = (key >> 32) & 4294967295 AND objid::bigint = key & 4294967295`,
 			[`demo refresh ${project}`],
 		),
