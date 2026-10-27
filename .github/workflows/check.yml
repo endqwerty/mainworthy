@@ -183,7 +183,7 @@ jobs:
       - name: The package's tests, against a Mainworthy started from this commit
         run: bun scripts/ios.ts test
       - name: With no Mainworthy to reach, live suites skip and the other package tests pass
-        run: swift test --package-path ios/Kit --scratch-path "$HOME/.cache/mainworthy-ios/offline"
+        run: swift test --package-path ios/Kit --scratch-path "$HOME/.cache/mainworthy-ios/kit"
       - run: brew install xcodegen
       - name: The app builds for a simulator
         run: bun scripts/ios.ts build
