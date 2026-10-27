@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { applyMergeChoice } from "../src/core/merge3.ts";
 import type { CaseBody, ConflictAddress } from "../src/core/model.ts";
+import { cleanBody } from "../src/server/suite/suite.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
 import {
 	allRecorded,
@@ -562,4 +563,33 @@ test("inline re-additions cancel original removals while preserving other origin
 		tagChanges: { add: ["mine", "old", "new"], remove: ["remove"] },
 		covers: { add: ["REQ-3", "REQ-1", "REQ-4"], remove: ["REQ-2"] },
 	});
+});
+
+test("merge-card inline metadata is parsed across every whitespace boundary", () => {
+	for (const space of [" ", "\u00a0", "\u3000"]) {
+		const card = conflict({
+			...sent,
+			title: `Resolved${space}#critical${space}@REQ-101`,
+			steps: [
+				{
+					id: "s1",
+					action: `${space}#smoke${space}#critical Apply the coupon${space}@REQ-101`,
+					expected: `${space}#expected Total is correct\n${space}#critical${space}@REQ-102`,
+				},
+			],
+		});
+		const held = draft(card);
+		const before = structuredClone({ card, held });
+		const parsed = parsedMergeCard({ draft: held, conflict: card });
+		expect(parsed.conflict.merged.title).toBe("Resolved");
+		expect(parsed.conflict.merged.steps).toEqual([
+			{ id: "s1", action: "Apply the coupon", expected: "Total is correct\n" },
+		]);
+		expect(cleanBody(parsed.conflict.merged, parsed.conflict.merged).steps).toEqual([
+			{ id: "s1", action: "Apply the coupon", expected: "Total is correct" },
+		]);
+		expect(parsed.draft.tagChanges).toEqual({ add: ["critical", "smoke", "expected"], remove: [] });
+		expect(parsed.draft.covers).toEqual(["REQ-101", "REQ-102"]);
+		expect({ card, held }).toEqual(before);
+	}
 });

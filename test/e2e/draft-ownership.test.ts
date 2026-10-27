@@ -2,7 +2,6 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
-import { budget } from "../../scripts/budget.ts";
 import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -46,6 +45,21 @@ async function windows() {
 			await server.stop();
 		},
 	};
+}
+
+function checkWindows(name: string, journey: (opened: Awaited<ReturnType<typeof windows>>) => Promise<void>) {
+	check(
+		name,
+		async () => {
+			const opened = await windows();
+			try {
+				await journey(opened);
+			} finally {
+				await opened.close();
+			}
+		},
+		30_000,
+	);
 }
 
 for (const locks of ["available", "unavailable", "query fails"])
@@ -216,48 +230,41 @@ check(
 	30_000,
 );
 
-check(
+checkWindows(
 	"R8 ownership: opening, refusing a key, taking over and leaving the former owner",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await step(a).fill("Apply the coupon typed in A");
-			await b.keyboard.press("e");
-			expect(await readOnly(b)).toBe(true);
-			await step(b).click();
-			await b.keyboard.type(" REFUSED");
-			await refused(b);
-			expect(await step(b).inputValue()).toBe("Apply the coupon typed in A");
-			const first = await stored(a);
-			await takeover(b);
-			await eventually(() => readOnly(a), Boolean);
-			await refused(a);
-			expect(await step(b).inputValue()).toBe("Apply the coupon typed in A");
-			expect((await stored(b)).owner).not.toBe(first.owner);
-			expect((await stored(b)).cmd).not.toBe(first.cmd);
-			let sent = 0;
-			await a.route("**/propose", async (route) => {
-				sent++;
-				await route.continue();
-			});
-			await a.keyboard.press("Escape");
-			expect(sent).toBe(0);
-			await step(b).fill("Apply the coupon typed in A and B");
-			await b.keyboard.press("Escape");
-			const saved = await eventually(
-				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.version === 2,
-			);
-			expect(JSON.stringify(saved)).toContain("typed in A and B");
-			expect(JSON.stringify(saved)).not.toContain("REFUSED");
-		} finally {
-			await w.close();
-		}
+	async ({ a, b, server }) => {
+		await a.keyboard.press("e");
+		await title(a).fill("Coupon case mine");
+		await step(a).fill("Apply the coupon typed in A");
+		await b.keyboard.press("e");
+		expect(await readOnly(b)).toBe(true);
+		await step(b).click();
+		await b.keyboard.type(" REFUSED");
+		await refused(b);
+		expect(await step(b).inputValue()).toBe("Apply the coupon typed in A");
+		const first = await stored(a);
+		await takeover(b);
+		await eventually(() => readOnly(a), Boolean);
+		await refused(a);
+		expect(await step(b).inputValue()).toBe("Apply the coupon typed in A");
+		expect((await stored(b)).owner).not.toBe(first.owner);
+		expect((await stored(b)).cmd).not.toBe(first.cmd);
+		let sent = 0;
+		await a.route("**/propose", async (route) => {
+			sent++;
+			await route.continue();
+		});
+		await a.keyboard.press("Escape");
+		expect(sent).toBe(0);
+		await step(b).fill("Apply the coupon typed in A and B");
+		await b.keyboard.press("Escape");
+		const saved = await eventually(
+			() => server.api("get", { refs: ["C-1"] }),
+			(rows) => rows[0]?.version === 2,
+		);
+		expect(JSON.stringify(saved)).toContain("typed in A and B");
+		expect(JSON.stringify(saved)).not.toContain("REFUSED");
 	},
-	30000,
 );
 
 for (const order of ["B types before A leaves", "A leaves before B types"])
@@ -313,200 +320,87 @@ for (const order of ["B types before A leaves", "A leaves before B types"])
 		30000,
 	);
 
-check(
+checkWindows(
 	"R8 simultaneous keys and sequential takeovers keep one owner and every accepted character",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await b.keyboard.press("e");
-			await Promise.all([title(a).press("End"), title(b).press("End")]);
-			await Promise.all([a.keyboard.type(" A"), b.keyboard.type(" B")]);
-			await refused(b);
-			expect((await stored(a)).body.title).toBe("Coupon case mine A");
-			await takeover(b);
-			await eventually(() => readOnly(a), Boolean);
-			await title(b).press("End");
-			await b.keyboard.type(" B");
-			await takeover(a);
-			await eventually(() => readOnly(b), Boolean);
-			expect((await stored(a)).owner).toBe(
-				z.string().parse(await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))),
-			);
-			expect(await title(a).inputValue()).toBe("Coupon case mine A B");
-			expect(await title(b).inputValue()).toBe("Coupon case mine A B");
-		} finally {
-			await w.close();
+	async ({ a, b, server }) => {
+		await a.keyboard.press("e");
+		await title(a).fill("Coupon case mine");
+		await b.keyboard.press("e");
+		await Promise.all([title(a).press("End"), title(b).press("End")]);
+		await Promise.all([a.keyboard.type(" A"), b.keyboard.type(" B")]);
+		await refused(b);
+		expect((await stored(a)).body.title).toBe("Coupon case mine A");
+		await takeover(b);
+		await eventually(() => readOnly(a), Boolean);
+		await title(b).press("End");
+		await b.keyboard.type(" B");
+		await takeover(a);
+		await eventually(() => readOnly(b), Boolean);
+		expect((await stored(a)).owner).toBe(
+			z.string().parse(await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))),
+		);
+		expect(await title(a).inputValue()).toBe("Coupon case mine A B");
+		expect(await title(b).inputValue()).toBe("Coupon case mine A B");
+		for (const page of [a, b]) expect(await page.locator(".preserved-draft").count()).toBe(0);
+		await a.keyboard.press("Escape");
+		await eventually(
+			() => server.api("get", { refs: ["C-1"] }),
+			(rows) => rows[0]?.version === 2,
+		);
+		for (const page of [a, b]) {
+			await page.locator("#detail .ctitle").filter({ hasText: "Coupon case mine A B" }).waitFor();
+			await page.reload();
+			await page.locator("#detail .ctitle").filter({ hasText: "Coupon case mine A B" }).waitFor();
+			expect(await page.locator(".preserved-draft").count()).toBe(0);
 		}
+		expect(await a.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft-copy:")).length)).toBe(
+			0,
+		);
 	},
-	30000,
 );
 
-check(
-	"ordinary takeovers and later edits leave no preserved copies",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case ordinary A");
-			await b.keyboard.press("e");
-			await takeover(b);
-			await eventually(() => readOnly(a), Boolean);
-			await title(b).fill("Coupon case ordinary A and B");
-			await takeover(a);
-			await eventually(() => readOnly(b), Boolean);
-			await title(a).fill("Coupon case ordinary A and B and A again");
-			for (const page of [a, b]) expect(await page.locator(".preserved-draft").count()).toBe(0);
-			await a.keyboard.press("Escape");
-			await eventually(
-				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.version === 2,
-			);
-			for (const page of [a, b]) {
-				await page.reload();
-				await page.locator("#detail .ctitle").filter({ hasText: "Coupon case ordinary A and B and A again" }).waitFor();
-				expect(await page.locator(".preserved-draft").count()).toBe(0);
-			}
-			expect(
-				await a.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft-copy:")).length),
-			).toBe(0);
-		} finally {
-			await w.close();
-		}
-	},
-	30000,
-);
+checkWindows("R8 a closed owner's mid-sentence draft is claimed on opening the editor", async ({ a, b }) => {
+	await a.route("**/propose", (route) => route.abort("failed"));
+	await a.keyboard.press("e");
+	await title(a).fill("Coupon case mid-sent");
+	await a.close();
+	await b.keyboard.press("e");
+	expect(await readOnly(b)).toBe(false);
+	expect(await title(b).inputValue()).toBe("Coupon case mid-sent");
+	await title(b).press("End");
+	await b.keyboard.type("ence");
+	expect((await stored(b)).body.title).toBe("Coupon case mid-sentence");
+});
 
-check(
-	"confirmed ownership adds no copy reads or writes per keystroke",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b } = w;
-			await b.close();
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case warm");
-			await a.waitForFunction(() => {
-				const owner = sessionStorage.getItem("mainworthy:draft-window");
-				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
-				return (
-					key &&
-					JSON.parse(localStorage.getItem(key) ?? "null")?.owner === owner &&
-					!Object.keys(localStorage).some((key) => key.includes(":draft-copy:"))
-				);
-			});
-			await title(a).press("End");
-			await a.evaluate(() => {
-				for (let index = 0; index < 100; index++) localStorage.setItem(`unrelated:${index}`, "other data");
-				const counts = { reads: 0, writes: 0, keys: 0, copyReads: 0, copyWrites: 0 };
-				const get = Storage.prototype.getItem;
-				const set = Storage.prototype.setItem;
-				const keyAt = Storage.prototype.key;
-				Storage.prototype.getItem = function (key) {
-					if (this === localStorage) {
-						counts.reads++;
-						if (key.includes(":draft-copy:")) counts.copyReads++;
-					}
-					return get.call(this, key);
-				};
-				Storage.prototype.setItem = function (key, value) {
-					if (this === localStorage) {
-						counts.writes++;
-						if (key.includes(":draft-copy:")) counts.copyWrites++;
-					}
-					set.call(this, key, value);
-				};
-				Storage.prototype.key = function (index) {
-					if (this === localStorage) counts.keys++;
-					return keyAt.call(this, index);
-				};
-				Object.assign(window, { draftStorageCounts: counts });
-			});
-			await a.keyboard.type("0123456789", { delay: 10 });
-			expect(await title(a).inputValue()).toBe("Coupon case warm0123456789");
-			const counts = z
-				.object({
-					reads: z.number(),
-					writes: z.number(),
-					keys: z.number(),
-					copyReads: z.number(),
-					copyWrites: z.number(),
-				})
-				.parse(await a.evaluate(() => Reflect.get(window, "draftStorageCounts")));
-			console.log(`Draft storage operations for 10 accepted keys: ${JSON.stringify(counts)}`);
-			expect((await stored(a)).body.title).toBe("Coupon case warm0123456789");
-			expect(counts.copyWrites).toBe(0);
-			budget("draft copy reads for 10 accepted keys", counts.copyReads, 0, "reads");
-			budget("draft key enumerations for 10 accepted keys", counts.keys, 0, "enumerations");
-		} finally {
-			await w.close();
-		}
-	},
-	30000,
-);
-
-check(
-	"R8 a closed owner's mid-sentence draft is claimed on opening the editor",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b } = w;
-			await a.route("**/propose", (route) => route.abort("failed"));
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mid-sent");
-			await a.close();
-			await b.keyboard.press("e");
-			expect(await readOnly(b)).toBe(false);
-			expect(await title(b).inputValue()).toBe("Coupon case mid-sent");
-			await title(b).press("End");
-			await b.keyboard.type("ence");
-			expect((await stored(b)).body.title).toBe("Coupon case mid-sentence");
-		} finally {
-			await w.close();
-		}
-	},
-	30000,
-);
-
-check(
+checkWindows(
 	"R8 conflict card follows the owner and refuses keys and resolution until takeover",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await server.api("propose", {
-				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
-			});
-			await a.keyboard.press("Escape");
-			await card(a).waitFor();
-			await b.keyboard.press("e");
-			await card(b).waitFor();
-			const merged = (page: Page) => page.getByRole("textbox", { name: "Merged title", exact: true });
-			expect(await merged(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
-			await merged(b).click();
-			await b.keyboard.type(" REFUSED");
-			await refused(b);
-			expect(await b.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled()).toBe(true);
-			await takeover(b);
-			await eventually(() => a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled(), Boolean);
-			await merged(b).fill("Merged by the new owner");
-			await eventually(
-				() => merged(a).inputValue(),
-				(value) => value === "Merged by the new owner",
-			);
-			await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
-			await card(a).waitFor({ state: "detached" });
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merged by the new owner");
-		} finally {
-			await w.close();
-		}
+	async ({ a, b, server }) => {
+		await a.keyboard.press("e");
+		await title(a).fill("Coupon case mine");
+		await server.api("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
+		});
+		await a.keyboard.press("Escape");
+		await card(a).waitFor();
+		await b.keyboard.press("e");
+		await card(b).waitFor();
+		const merged = (page: Page) => page.getByRole("textbox", { name: "Merged title", exact: true });
+		expect(await merged(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+		await merged(b).click();
+		await b.keyboard.type(" REFUSED");
+		await refused(b);
+		expect(await b.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled()).toBe(true);
+		await takeover(b);
+		await eventually(() => a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled(), Boolean);
+		await merged(b).fill("Merged by the new owner");
+		await eventually(
+			() => merged(a).inputValue(),
+			(value) => value === "Merged by the new owner",
+		);
+		await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+		await card(a).waitFor({ state: "detached" });
+		expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merged by the new owner");
 	},
-	30000,
 );
 
 // The reviews of the change for issue #79 (F1 to F3). A window that comes to a case takes no draft by itself: an
@@ -571,70 +465,53 @@ check(
 
 // Review round 9, R9-3. A window that only shows the case has no card on its screen. Taking the draft over there
 // opens it, so the conflict the window now owns is where its status line says to resolve it.
-check(
+checkWindows(
 	"R9-3 taking over from a window that only shows the case puts the conflict card on its screen",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await server.api("propose", {
-				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
-			});
-			await a.keyboard.press("Escape");
-			await card(a).waitFor();
-			expect(await card(b).count()).toBe(0);
-			await takeover(b);
-			const merged = b.getByRole("textbox", { name: "Merged title", exact: true });
-			await merged.fill("Merged by the new owner");
-			await eventually(() => a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled(), Boolean);
-			await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
-			await card(b).waitFor({ state: "detached" });
-			await card(a).waitFor({ state: "detached" });
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merged by the new owner");
-		} finally {
-			await w.close();
-		}
+	async ({ a, b, server }) => {
+		await a.keyboard.press("e");
+		await title(a).fill("Coupon case mine");
+		await server.api("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
+		});
+		await a.keyboard.press("Escape");
+		await card(a).waitFor();
+		expect(await card(b).count()).toBe(0);
+		await takeover(b);
+		const merged = b.getByRole("textbox", { name: "Merged title", exact: true });
+		await merged.fill("Merged by the new owner");
+		await eventually(() => a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled(), Boolean);
+		await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+		await card(b).waitFor({ state: "detached" });
+		await card(a).waitFor({ state: "detached" });
+		expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merged by the new owner");
 	},
-	30000,
 );
 
-check(
-	"R8 a stored takeover before its event guards input and seal at execution time",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case kept");
-			const bOwner = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
-			await title(a).click();
-			await a.evaluate((owner) => {
-				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
-				if (!key) throw Error("Missing draft");
-				const draft = JSON.parse(localStorage.getItem(key) ?? "{}");
-				draft.owner = owner;
-				localStorage.setItem(key, JSON.stringify(draft));
-			}, bOwner);
-			await a.keyboard.insertText(" REFUSED BEFORE EVENT");
-			await refused(a);
-			expect(await title(a).inputValue()).toBe("Coupon case kept");
-			expect((await stored(a)).body.title).toBe("Coupon case kept");
-			let sent = 0;
-			await a.route("**/propose", async (route) => {
-				sent++;
-				await route.continue();
-			});
-			await a.keyboard.press("Escape");
-			expect(sent).toBe(0);
-			expect(await readOnly(a)).toBe(true);
-		} finally {
-			await w.close();
-		}
-	},
-	30000,
-);
+checkWindows("R8 a stored takeover before its event guards input and seal at execution time", async ({ a, b }) => {
+	await a.keyboard.press("e");
+	await title(a).fill("Coupon case kept");
+	const bOwner = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
+	await title(a).click();
+	await a.evaluate((owner) => {
+		const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+		if (!key) throw Error("Missing draft");
+		const draft = JSON.parse(localStorage.getItem(key) ?? "{}");
+		draft.owner = owner;
+		localStorage.setItem(key, JSON.stringify(draft));
+	}, bOwner);
+	await a.keyboard.insertText(" REFUSED BEFORE EVENT");
+	await refused(a);
+	expect(await title(a).inputValue()).toBe("Coupon case kept");
+	expect((await stored(a)).body.title).toBe("Coupon case kept");
+	let sent = 0;
+	await a.route("**/propose", async (route) => {
+		sent++;
+		await route.continue();
+	});
+	await a.keyboard.press("Escape");
+	expect(sent).toBe(0);
+	expect(await readOnly(a)).toBe(true);
+});
 
 check(
 	"R8 a late conflict reply cannot write over a draft taken over during the request",
@@ -692,51 +569,43 @@ check(
 	30000,
 );
 
-check(
+checkWindows(
 	"R8 both clean editors racing their first key preserve the winning draft and visibly refuse the other",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b } = w;
-			await a.keyboard.press("e");
-			await b.keyboard.press("e");
-			expect(await readOnly(a)).toBe(false);
-			expect(await readOnly(b)).toBe(false);
-			await Promise.all([title(a).press("End"), title(b).press("End")]);
-			await Promise.all([a.keyboard.type("A"), b.keyboard.type("B")]);
-			// Each window writes the draft when it has not yet seen the other's write, so both can write more than
-			// once before the storage events arrive, and the last write wins. Who won is known only when every
-			// event has landed: the window that does not own the stored draft shows the refusal and is read-only.
-			const aId = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
-			const settle = async () => {
-				const draft = await stored(a);
-				const winner = draft.owner === aId ? a : b;
-				const other = winner === a ? b : a;
-				const refusing =
-					(await other.locator("#bar").filter({ hasText: "being edited in another window" }).count()) > 0;
-				return { draft, winner, other, done: refusing && (await readOnly(other)) && !(await readOnly(winner)) };
-			};
-			const { draft, winner, other } = await eventually(settle, (state) => state.done);
-			await refused(other);
-			expect(await readOnly(winner)).toBe(false);
-			expect(await readOnly(other)).toBe(true);
-			expect(draft.body.title).toBe(`Coupon case${winner === a ? "A" : "B"}`);
-			expect(await title(other).inputValue()).toBe(draft.body.title);
-			await title(winner).press("End");
-			await winner.keyboard.type(" keeps editing");
-			const continued = `${draft.body.title} keeps editing`;
-			await eventually(
-				() => title(other).inputValue(),
-				(value) => value === continued,
-			);
-			expect(await stored(a)).toMatchObject({ owner: draft.owner, body: { title: continued } });
-			expect(await readOnly(winner)).toBe(false);
-			expect(await readOnly(other)).toBe(true);
-		} finally {
-			await w.close();
-		}
+	async ({ a, b }) => {
+		await a.keyboard.press("e");
+		await b.keyboard.press("e");
+		expect(await readOnly(a)).toBe(false);
+		expect(await readOnly(b)).toBe(false);
+		await Promise.all([title(a).press("End"), title(b).press("End")]);
+		await Promise.all([a.keyboard.type("A"), b.keyboard.type("B")]);
+		// Each window writes the draft when it has not yet seen the other's write, so both can write more than
+		// once before the storage events arrive, and the last write wins. Who won is known only when every
+		// event has landed: the window that does not own the stored draft shows the refusal and is read-only.
+		const aId = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
+		const settle = async () => {
+			const draft = await stored(a);
+			const winner = draft.owner === aId ? a : b;
+			const other = winner === a ? b : a;
+			const refusing = (await other.locator("#bar").filter({ hasText: "being edited in another window" }).count()) > 0;
+			return { draft, winner, other, done: refusing && (await readOnly(other)) && !(await readOnly(winner)) };
+		};
+		const { draft, winner, other } = await eventually(settle, (state) => state.done);
+		await refused(other);
+		expect(await readOnly(winner)).toBe(false);
+		expect(await readOnly(other)).toBe(true);
+		expect(draft.body.title).toBe(`Coupon case${winner === a ? "A" : "B"}`);
+		expect(await title(other).inputValue()).toBe(draft.body.title);
+		await title(winner).press("End");
+		await winner.keyboard.type(" keeps editing");
+		const continued = `${draft.body.title} keeps editing`;
+		await eventually(
+			() => title(other).inputValue(),
+			(value) => value === continued,
+		);
+		expect(await stored(a)).toMatchObject({ owner: draft.owner, body: { title: continued } });
+		expect(await readOnly(winner)).toBe(false);
+		expect(await readOnly(other)).toBe(true);
 	},
-	30000,
 );
 
 for (const beforeEvent of [false, true])
@@ -817,86 +686,69 @@ for (const beforeEvent of [false, true])
 		30000,
 	);
 
-check(
+checkWindows(
 	"R8 a takeover stored before its event guards a conflict-card change and merge",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await server.api("propose", {
-				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
-			});
-			await a.keyboard.press("Escape");
-			await card(a).waitFor();
-			const merged = a.getByRole("textbox", { name: "Merged title", exact: true });
-			await merged.fill("Owner's merged choice");
-			const bId = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
-			await merged.click();
-			await a.evaluate((owner) => {
-				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
-				if (!key) throw Error("Missing draft");
-				const draft = JSON.parse(localStorage.getItem(key) ?? "{}");
-				draft.owner = owner;
-				localStorage.setItem(key, JSON.stringify(draft));
-			}, bId);
-			await a.keyboard.insertText(" REFUSED BEFORE EVENT");
-			await refused(a);
-			expect(await merged.inputValue()).toBe("Owner's merged choice");
-			expect(await a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled()).toBe(true);
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
-		} finally {
-			await w.close();
-		}
+	async ({ a, b, server }) => {
+		await a.keyboard.press("e");
+		await title(a).fill("Coupon case mine");
+		await server.api("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
+		});
+		await a.keyboard.press("Escape");
+		await card(a).waitFor();
+		const merged = a.getByRole("textbox", { name: "Merged title", exact: true });
+		await merged.fill("Owner's merged choice");
+		const bId = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
+		await merged.click();
+		await a.evaluate((owner) => {
+			const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+			if (!key) throw Error("Missing draft");
+			const draft = JSON.parse(localStorage.getItem(key) ?? "{}");
+			draft.owner = owner;
+			localStorage.setItem(key, JSON.stringify(draft));
+		}, bId);
+		await a.keyboard.insertText(" REFUSED BEFORE EVENT");
+		await refused(a);
+		expect(await merged.inputValue()).toBe("Owner's merged choice");
+		expect(await a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled()).toBe(true);
+		expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 	},
-	30000,
 );
 
-check(
-	"R8 an empty merged step remains owned until a deliberate takeover",
-	async () => {
-		const w = await windows();
-		try {
-			const { a, b, server } = w;
-			await a.keyboard.press("e");
-			await title(a).fill("Coupon case mine");
-			await step(a).fill("Apply coupon mine");
-			const steps = z
-				.array(z.object({ id: z.string(), action: z.string(), expected: z.string().nullable() }))
-				.parse((await server.api("get", { refs: ["C-1"] }))[0]?.steps);
-			await server.api("propose", {
-				edits: [
-					{
-						op: "edit",
-						case: "C-1",
-						base: 1,
-						body: {
-							title: "Coupon case theirs",
-							steps: steps.map((step, index) => (index === 1 ? { ...step, action: "Apply coupon theirs" } : step)),
-						},
-					},
-				],
-			});
-			await a.keyboard.press("Escape");
-			await card(a).waitFor();
-			await b.keyboard.press("e");
-			await card(b).waitFor();
-			const mergedStep = (page: Page) => card(page).locator('textarea[aria-label^="Merged Step ^"]').last();
-			await mergedStep(a).fill("");
-			await takeover(b);
-			expect(await mergedStep(b).inputValue()).toBe("");
-			await mergedStep(b).fill("Typed after emptying the step");
-			await eventually(() => readOnly(a), Boolean);
-			await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
-			await card(b).waitFor({ state: "detached" });
-			expect(JSON.stringify(await server.api("get", { refs: ["C-1"] }))).toContain("Typed after emptying the step");
-		} finally {
-			await w.close();
-		}
-	},
-	30000,
-);
+checkWindows("R8 an empty merged step remains owned until a deliberate takeover", async ({ a, b, server }) => {
+	await a.keyboard.press("e");
+	await title(a).fill("Coupon case mine");
+	await step(a).fill("Apply coupon mine");
+	const steps = z
+		.array(z.object({ id: z.string(), action: z.string(), expected: z.string().nullable() }))
+		.parse((await server.api("get", { refs: ["C-1"] }))[0]?.steps);
+	await server.api("propose", {
+		edits: [
+			{
+				op: "edit",
+				case: "C-1",
+				base: 1,
+				body: {
+					title: "Coupon case theirs",
+					steps: steps.map((step, index) => (index === 1 ? { ...step, action: "Apply coupon theirs" } : step)),
+				},
+			},
+		],
+	});
+	await a.keyboard.press("Escape");
+	await card(a).waitFor();
+	await b.keyboard.press("e");
+	await card(b).waitFor();
+	const mergedStep = (page: Page) => card(page).locator('textarea[aria-label^="Merged Step ^"]').last();
+	await mergedStep(a).fill("");
+	await takeover(b);
+	expect(await mergedStep(b).inputValue()).toBe("");
+	await mergedStep(b).fill("Typed after emptying the step");
+	await eventually(() => readOnly(a), Boolean);
+	await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+	await card(b).waitFor({ state: "detached" });
+	expect(JSON.stringify(await server.api("get", { refs: ["C-1"] }))).toContain("Typed after emptying the step");
+});
 
 for (const fate of ["recorded", "in flight", "lost reconciliation reply"]) {
 	check(
