@@ -189,7 +189,7 @@ A pipeline reports tests that no case names. What happens to them is one choice 
 | Choice | What happens |
 | --- | --- |
 | Track without a case (`track`) | The tests are kept without cases and nobody is asked. They still gate the build. `loose` and `standard` start here. |
-| Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The folder comes from meaningful directories of the test's file, or its file name when none remain. For example, `test/e2e/docs.test.ts` becomes `e2e/docs`. Nobody is asked, unless one file holds more than 100,000 tests with no case: the rule makes none for it and its question stays open. |
+| Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The folder comes from meaningful directories of the test's file, or its file name when none remain. For example, `test/e2e/docs.test.ts` becomes `e2e/docs`. Nobody is asked. One report, or one change of this setting, makes at most 100,000 cases: a file that does not fit keeps its question open until the next report, and a file with more than 100,000 tests with no case waits for you to link some of them. |
 | Ask in the queue (`ask`) | Each file with such tests is one question in the queue. It blocks nothing. `strict` starts here. |
 
 New cases always use the [computed folder](./report-results.md#link-tests-to-cases),

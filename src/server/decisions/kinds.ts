@@ -306,7 +306,7 @@ async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 	return question?.state === "decided" && question.decision === decisionId;
 }
 
-/** The most cases one `create` answer makes: as many tests as one report may carry. */
+/** The most cases `create` answers make in one command: as many tests as one report may carry. */
 export const CREATE_MAX = 100_000;
 
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
@@ -366,13 +366,19 @@ const mapHandler: Handler<"map"> = {
 				// tests stay unlinked and this question is asked again when the proposal lands.
 				let tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
 				if (tests.length === 0) return { linked: [] };
-				// One answer is one transaction, which the database ends after two minutes. A report's worth of
-				// tests fits well inside it; a file that gathered more is answered in parts, by linking or
-				// tracking some of its tests first. Refused, the question stays open.
+				// A command is one transaction, which the database ends after two minutes. A report's worth of
+				// cases fits well inside it, made for one file or several (a policy change answers every file's
+				// question at once). A file that gathered more is answered in parts, by linking some of its tests
+				// first; one that does not fit beside the files before it waits for the next command. Refused, the
+				// question stays open.
 				const { count } = await unlinkedSetInFile(ctx.db, ctx.project.id, file);
 				if (count > CREATE_MAX)
 					throw invalid(
 						`${file} has ${count} tests with no case, and one answer creates at most ${CREATE_MAX}: link some of them to cases first, then create the rest`,
+					);
+				if (ctx.mapped.created + count > CREATE_MAX)
+					throw invalid(
+						`this command has already made ${ctx.mapped.created} cases for tests with no case, and one command makes at most ${CREATE_MAX}: answer ${file} again`,
 					);
 				// Creating and linking in one answer works only where the policy adopts this actor's new cases at
 				// once. Where a person must adopt them first, nothing is created here: saying so is better than
@@ -431,6 +437,7 @@ const mapHandler: Handler<"map"> = {
 					const last = tests.at(-1);
 					tests = last ? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id) : [];
 				}
+				ctx.mapped.created += created.length;
 				if (created.length === 0) return { linked: [] };
 				return { linked, created };
 			}
