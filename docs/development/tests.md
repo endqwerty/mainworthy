@@ -10,7 +10,9 @@ harness or server. Set `MAINWORTHY_TEST_PG` to use an existing PostgreSQL admin 
 The checkout cluster is disposable and runs with `fsync`, `synchronous_commit` and `full_page_writes` off, like
 CI's functional shards: every dropped database forces a checkpoint, and with `fsync` on that took seconds on a
 busy machine (#984). CI's performance job alone measures on durable PostgreSQL. `bun run dev` uses the same
-cluster, so its data is disposable too: a crash of the machine can lose or corrupt it. A cluster already running
+cluster, so its data is disposable too: a crash of the machine can lose or corrupt it, an acknowledged sign-out or
+revoked token included. It therefore serves from the cluster only in local mode on loopback; server mode or another
+host needs `MAINWORTHY_DATABASE_URL`. A cluster already running
 when these settings changed takes them the next time a command attaches to it.
 Install PostgreSQL binaries or set `MAINWORTHY_PG_BIN`; no in-memory SQLite fallback remains.
 
