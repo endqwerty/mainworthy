@@ -53,8 +53,9 @@ export function codeOnly(source: string): string {
 			while (i < source.length && source[i] !== "`" && !(source[i] === "$" && source[i + 1] === "{"))
 				i += source[i] === "\\" ? 2 : 1;
 			if (source[i] === "$") {
+				// `${` starts an expression, where a `/` begins a regular expression.
 				braces.push(0);
-				out += " ";
+				out += "{";
 				i += 2;
 			} else i++;
 		} else if (c === "/" && BEFORE_REGEX.test(out)) {
