@@ -47,6 +47,13 @@ on:
 permissions:
   contents: read
 
+# A newer commit on a pull request cancels the run still testing its older one: only the head's run is read. A push to
+# `main` is a group of its own and is never cancelled, because the deploy waits on its gate. A re-run (rerun.yml, or a
+# person's) cancels nothing and waits for the newer run instead.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('check-pr-{0}', github.event.pull_request.number) || format('check-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
+
 jobs:
   scope:
     runs-on: ubuntu-latest
