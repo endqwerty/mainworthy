@@ -1,9 +1,10 @@
 # The security audit before a merge
 
-Every merge into `main` passes a Daybreak security audit first (the owner, 2026-10-21). It is the last step before
-the merge: after the independent verdict and a green `gate`, on the revision that will land. The rule is this
-repository's; other repositories have their own security posture and their own rules. Nothing runs it for you: it is
-a judgment call that the owner reviews.
+Every merge into `main` passes a Daybreak security audit first (the owner, 2026-10-21). Its first round runs beside the
+first independent review, on the same head, so one fix answers both (the owner, 2026-10-27: "yes let it run earlier").
+The round that clears the merge is on the revision that will land, after the independent verdict and a green `gate`. The
+rule is this repository's; other repositories have their own security posture and their own rules. Nothing runs it for
+you: it is a judgment call that the owner reviews.
 
 ## Running it
 
@@ -93,18 +94,20 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   evidence (the code path, a test, a probe). One that names nothing reaching it in the head is answered by saying
   what rules it out (the type, the owning module, a value no configuration can set), and needs no fix or test. Count every writer: an
   imported archive or data an older version stored reaches what the normal writers never write.
-- Then audit the new head, giving Daybreak its earlier issues and their answers. The pull request is ready to merge
-  only when a round on the current head and base leaves no issue unaddressed.
+- Then audit the new head once the verifier has passed it, giving Daybreak its earlier issues and their answers. The
+  pull request is ready to merge only when a round on the current head and base leaves no issue unaddressed.
 - A new head or a new base needs another round: a rebase, a fix from review, or another pull request landing on
   `main` first. GitHub's rebase merge lands the head on `main` as it is then, which may not be the base the audit
   read.
 
 ## Where it sits in delivery
 
-- **Review-first** (`AGENTS.md`, Delivery): run the audit after the verdict and a green `gate`, as the last step
-  before you hand the pull request over, and record it in the description: the model and effort, the head and the
-  base it read, the commit the script came from, each issue and what answered it. The owner then knows which revision
-  on which `main` was audited, and by which copy of the audit.
+- **Review-first** (`AGENTS.md`, Delivery): open the pull request first, since the audit reads only an open one. Start
+  the first round with the first independent review, on the same head, and fix what both find in one change. Audit again
+  only on a head the verifier has passed, after a green `gate`, as the last step before you hand the pull request over.
+  Record every round in the description: the model and effort, the head and the base it read, the commit the script came
+  from, each issue and what answered it. The owner then knows which revision on which `main` was audited, and by which
+  copy of the audit.
 - **When the owner says to merge** (`ship`, [landing-a-stack.md](landing-a-stack.md)): just before the merge, check
   that each head and base is still the audited pair; if one is not, audit it again first. In a stack, every layer is
   audited.
