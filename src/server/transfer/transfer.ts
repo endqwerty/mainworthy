@@ -795,6 +795,12 @@ type SliceTable = {
 	owner: SliceOwner;
 	incoming: SliceReference[];
 	parents: string[];
+	/**
+	 * The nullable columns by which a row of a project-owned table refers to another row of the same table (a
+	 * folder's parent, the result a result corrects). A drain sets them to null before it deletes from the table.
+	 */
+	selfReferences: string[];
+	walk: Walk | null;
 };
 /**
  * What one drain carries from slice to slice: the tables in visiting order, read once (the schema does not change
@@ -802,17 +808,19 @@ type SliceTable = {
  * parents, the place in its walk of those parents (`Place`). A slice skips the empty tables, so it reads only the
  * table it deletes from, not every table the project once had; and it reads a parent-owned table under one batch of
  * parents on from where the last slice stopped, at every level of the chain, not from the first parent again (#914).
- * Before the project row goes, one pass reads every table again from the start, so a row written meanwhile is still
- * found.
+ * For a table that refers to itself, `unlinked` says how far the drain has set those references to null: the id it
+ * has reached, or `true` once it has passed the last row. Before the project row goes, one pass reads every table
+ * again from the start, so a row written meanwhile is still found.
  */
 export type RemovalPlan = {
 	readonly tables: readonly SliceTable[];
 	project: string | null;
 	readonly empty: Set<string>;
 	readonly after: Map<string, Place>;
+	readonly unlinked: Map<string, string | true>;
 };
 export async function removalPlan(db: ReadDb): Promise<RemovalPlan> {
-	return { tables: await slicePlan(db), project: null, empty: new Set(), after: new Map() };
+	return { tables: await slicePlan(db), project: null, empty: new Set(), after: new Map(), unlinked: new Map() };
 }
 
 /**
@@ -869,21 +877,31 @@ function ownedRow(table: SliceTable, alias: string): string {
 	return check(0, alias);
 }
 
-type ParentsOwner = Extract<SliceOwner, { by: "parents" }>;
 /**
- * Where a slice is in the walk of a parent-owned table's parents: one id for each level of its chain, the top
- * ancestor's first and the table's own parent's last. "0" is before the first row of a level.
+ * How a slice reads a table in batches, from where the last slice stopped: down `levels`, the top one read by
+ * (project, id) and each lower one by (its column naming the level above, id), and then the table's rows whose `key`
+ * names a row of the lowest level. A parent-owned table walks its parents (a lease: runs, then slots, by `slot`). A
+ * project's table that refers to itself walks its own rows (folders, by `id`), so a slice reads one batch of them, not
+ * the whole table from its first row.
  */
-type Place = readonly string[];
-const startOf = (owner: ParentsOwner): Place => owner.chain.map(() => "0");
+type Walk = { readonly levels: readonly { table: string; column: string }[]; readonly key: string };
 
-/** Level `at` of a chain, counted from the top ancestor: its table, and its column naming the level above. */
-function levelOf(owner: ParentsOwner, at: number): { table: string; column: string } {
-	const depth = owner.chain.length;
-	const link = owner.chain[depth - 1 - at];
-	if (!link) throw new Error(`no level ${at} in an ownership chain of ${depth}`);
-	return { table: link.table, column: owner.chain[depth - at]?.column ?? "project" };
+function walkOf(name: string, owner: SliceOwner, selfReferences: readonly string[]): Walk | null {
+	if (owner?.by === "parents")
+		return {
+			levels: owner.chain
+				.map((link, at) => ({ table: link.table, column: owner.chain[at + 1]?.column ?? "project" }))
+				.reverse(),
+			key: owner.chain[0]?.column ?? "",
+		};
+	if (owner?.by === "project" && selfReferences.length > 0)
+		return { levels: [{ table: name, column: "project" }], key: "id" };
+	return null;
 }
+
+/** Where a slice is in a walk: one id for each level, the top one's first. "0" is before the first row of a level. */
+type Place = readonly string[];
+const startOf = (walk: Walk): Place => walk.levels.map(() => "0");
 
 /**
  * Up to `count` rows of level `at` after the one `place` names there, under the row it names at the level above (the
@@ -896,28 +914,29 @@ function levelOf(owner: ParentsOwner, at: number): { table: string; column: stri
  */
 async function following(
 	db: WriteDb,
-	owner: ParentsOwner,
+	walk: Walk,
 	at: number,
 	place: Place,
 	project: string,
 	count: number,
 ): Promise<string[]> {
-	const { table, column } = levelOf(owner, at);
-	const parent = identifier(column);
+	const level = walk.levels[at];
+	if (!level) throw new Error(`no level ${at} in a walk of ${walk.levels.length}`);
+	const parent = identifier(level.column);
 	const rows = await db.allDynamic<{ row_id: string }>(
-		`SELECT id::text AS row_id FROM ${identifier(table)} WHERE (${parent}, id) > ($1::bigint, $2::bigint) AND ${parent} <= $1::bigint ORDER BY ${parent}, id LIMIT ${count}`,
+		`SELECT id::text AS row_id FROM ${identifier(level.table)} WHERE (${parent}, id) > ($1::bigint, $2::bigint) AND ${parent} <= $1::bigint ORDER BY ${parent}, id LIMIT ${count}`,
 		[at === 0 ? project : (place[at - 1] ?? "0"), place[at] ?? "0"],
 	);
 	return rows.map((row) => row.row_id);
 }
 
 /**
- * The place after every parent under the current row of the level above: the next row at the nearest level above
- * that has one, with the levels below it started again, or null once the top ancestor has none left.
+ * The place after every row under the current row of the level above: the next row at the nearest level above that
+ * has one, with the levels below it started again, or null once the top level has none left.
  */
-async function nextAbove(db: WriteDb, owner: ParentsOwner, place: Place, project: string): Promise<Place | null> {
-	for (let at = owner.chain.length - 2; at >= 0; at--) {
-		const [row] = await following(db, owner, at, place, project, 1);
+async function nextAbove(db: WriteDb, walk: Walk, place: Place, project: string): Promise<Place | null> {
+	for (let at = walk.levels.length - 2; at >= 0; at--) {
+		const [row] = await following(db, walk, at, place, project, 1);
 		if (row !== undefined) return [...place.slice(0, at), row, ...place.slice(at + 1).map(() => "0")];
 	}
 	return null;
@@ -929,14 +948,27 @@ async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
 	const catalog = await db.catalog();
 	const tables = new Map<string, SliceTable>();
 	for (const table of catalog) {
+		const owner = INSTANCE_TABLES.includes(table.name)
+			? null
+			: sliceOwner({ name: table.name, columns: table.columns.map((column) => column.name) });
+		const selfReferences =
+			owner?.by === "project" && table.columns.some((column) => column.name === "id")
+				? table.foreignKeys.flatMap((reference) => {
+						const [column, ...more] = reference.columns;
+						const nullable = table.columns.find((each) => each.name === column)?.nullable === true;
+						return reference.parent === table.name && column !== undefined && more.length === 0 && nullable
+							? [column]
+							: [];
+					})
+				: [];
 		tables.set(table.name, {
 			name: table.name,
 			keys: [...table.primary],
-			owner: INSTANCE_TABLES.includes(table.name)
-				? null
-				: sliceOwner({ name: table.name, columns: table.columns.map((column) => column.name) }),
+			owner,
 			incoming: [],
 			parents: table.foreignKeys.map((reference) => reference.parent),
+			selfReferences,
+			walk: walkOf(table.name, owner, selfReferences),
 		});
 	}
 	for (const table of catalog) {
@@ -1023,7 +1055,9 @@ export async function removeProjectSlice(
  * What a slice removes from `table` next: up to `limit` rows nothing references (`roots`), else one row to remove with
  * its dependants (`root`), else `none`. A parent-owned table is read under the next batch of its own parents after
  * `place`, and `none` then names the place to read from next, or null when no parent is left at any level; any other
- * table is read whole, and its `none` names none.
+ * table is read whole, and its `none` names none. Rows found under a batch come with `from`, the place just before the
+ * batch's first parent: every parent before it is done with, so the next slice need not read past it again, which
+ * matters when the walk reads the table's own rows, as their removed index entries stay behind it.
  */
 async function rowsToRemove(
 	db: WriteDb,
@@ -1032,18 +1066,22 @@ async function rowsToRemove(
 	limit: number,
 	place: Place | undefined,
 ): Promise<
-	{ kind: "roots"; roots: string[][] } | { kind: "root"; root: string } | { kind: "none"; next: Place | null }
+	| { kind: "roots"; roots: string[][]; from: Place | null }
+	| { kind: "root"; root: string; from: Place | null }
+	| { kind: "none"; next: Place | null }
 > {
 	let params: SqlValue[] = [project];
 	let scope = ownedRow(table, identifier(table.name));
 	let next: Place | null = null;
-	const { owner } = table;
-	if (owner?.by === "parents") {
-		const at = place ?? startOf(owner);
-		const parents = await following(db, owner, owner.chain.length - 1, at, project, PARENTS_PER_SLICE);
-		if (parents.length === 0) return { kind: "none", next: await nextAbove(db, owner, at, project) };
+	let from: Place | null = null;
+	const { walk } = table;
+	if (walk) {
+		const at = place ?? startOf(walk);
+		const parents = await following(db, walk, walk.levels.length - 1, at, project, PARENTS_PER_SLICE);
+		if (parents.length === 0) return { kind: "none", next: await nextAbove(db, walk, at, project) };
 		next = [...at.slice(0, -1), parents.at(-1) ?? "0"];
-		scope = `${identifier(table.name)}.${identifier(owner.chain[0]?.column ?? "")} = ANY($1::bigint[])`;
+		from = [...at.slice(0, -1), String(BigInt(parents[0] ?? "1") - 1n)];
+		scope = `${identifier(table.name)}.${identifier(walk.key)} = ANY($1::bigint[])`;
 		params = [arrayLiteral(parents)];
 	}
 	const blockers = table.incoming.map(({ child, columns }) => {
@@ -1061,14 +1099,54 @@ async function rowsToRemove(
 		params,
 	);
 	if (roots.length > 0)
-		return { kind: "roots", roots: roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys))) };
+		return { kind: "roots", roots: roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys))), from };
 	const root = (
 		await db.allDynamic<{ keys: string }>(
 			`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${scope} LIMIT 1`,
 			params,
 		)
 	)[0];
-	return root ? { kind: "root", root: root.keys } : { kind: "none", next };
+	return root ? { kind: "root", root: root.keys, from } : { kind: "none", next };
+}
+
+/**
+ * Sets to null, for one batch of the project's rows of `table` in (project, id) order, the columns by which a row
+ * refers to another row of the table, and says whether the table has none left to set. A row that another row of its
+ * own table refers to is deleted only after that one, so in a chain (a folder in a folder in a folder) only the leaf
+ * was free to go: a slice read the whole chain to find it, and the next slice read it again, less one row (#914).
+ * With the references gone first, every row is free, and each row is read once to clear them. Only the rows of a
+ * project being removed are changed, and nothing else reads them by those columns. Without `resume` (no plan, or the
+ * pass before the project row goes) every batch is cleared at once.
+ */
+async function unlinkSelf(
+	db: WriteDb,
+	table: SliceTable,
+	project: string,
+	plan: RemovalPlan | undefined,
+	resume: RemovalPlan | undefined,
+): Promise<boolean> {
+	const { walk } = table;
+	if (table.selfReferences.length === 0 || !walk) return true;
+	const reached = plan?.unlinked.get(table.name);
+	if (reached === true) return true;
+	const set = table.selfReferences.map((column) => `${identifier(column)} = NULL`).join(", ");
+	const held = table.selfReferences.map((column) => `${identifier(column)} IS NOT NULL`).join(" OR ");
+	for (let after = reached ?? "0"; ; ) {
+		const rows = await following(db, walk, 0, [after], project, PARENTS_PER_SLICE);
+		const last = rows.at(-1);
+		if (last === undefined) {
+			plan?.unlinked.set(table.name, true);
+			return true;
+		}
+		await db.runDynamic(`UPDATE ${identifier(table.name)} SET ${set} WHERE id = ANY($1::bigint[]) AND (${held})`, [
+			arrayLiteral(rows),
+		]);
+		after = last;
+		if (resume) {
+			resume.unlinked.set(table.name, after);
+			return false;
+		}
+	}
 }
 
 async function slice(
@@ -1084,6 +1162,7 @@ async function slice(
 		plan.project = `${key}:${project.id}`;
 		plan.empty.clear();
 		plan.after.clear();
+		plan.unlinked.clear();
 	}
 	const tables = plan?.tables ?? (await slicePlan(db));
 	const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
@@ -1094,6 +1173,7 @@ async function slice(
 		// leaves the rest to the next slice. Without a plan to keep its place, and in the pass before the project row
 		// goes, a slice reads them all.
 		const resume = skip ? plan : undefined;
+		if (!(await unlinkSelf(db, table, project.id, plan, resume))) return { done: false, table: table.name, rows: 0 };
 		let found = await rowsToRemove(db, table, project.id, limit, resume?.after.get(table.name));
 		while (found.kind === "none" && found.next !== null) {
 			if (resume) {
@@ -1107,6 +1187,7 @@ async function slice(
 			plan?.after.delete(table.name);
 			continue;
 		}
+		if (resume && found.from) resume.after.set(table.name, found.from);
 		if (found.kind === "roots") {
 			const identity = `(${table.keys.map(identifier).join(",")})`;
 			const placeholders = found.roots
@@ -1160,6 +1241,7 @@ async function slice(
 	if (skip && plan?.empty.size) {
 		plan.empty.clear();
 		plan.after.clear();
+		plan.unlinked.clear();
 		return slice(db, key, limit, plan, false);
 	}
 	if (blocked)
