@@ -15,7 +15,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and functional tests; prerequisites: `scripts/preflight.ts` |
+| `bun run check` | type-check, lint and the tests that open no browser (`--browser` adds them); prerequisites: `scripts/preflight.ts` |
 | `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357`, on the checkout's PostgreSQL cluster if no URL is set |
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
@@ -37,7 +37,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **Licences are read from the build** (decision 0025). After changing a dependency run `bun scripts/licences.ts` and commit the result. A licence the script does not name is the owner's call, asked in the pull request | `test/licences.test.ts` |
 | **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0100). Put no write time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
-| **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). After adding or splitting tests, refresh `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
+| **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). A weekly task, not a pull request, refreshes `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
 | **Guard only what is critical.** Before adding a check, test or audit fix, name what reaches the state; if nothing does yet, say so, add nothing (the owner, 2026-10-25: "Only guard if it's absolutely critical to do so") | the audit brief (`test/security-audit.test.ts`); review judgment |
 | **A reachable finding becomes a test at the cheapest layer that reaches it**, extending an existing one before adding a file (the owner, 2026-10-27: "4 is critical"; docs/development/tests.md) | `pr-body` asks why of each added browser test (`scripts/browser-tests.ts`); the layer is review judgment |
 | **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Timing and database process cleanup tests run alone with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
@@ -62,6 +62,9 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
   rewrite. The goal: landing costs minutes.
+- Browser tests run once, in the pull request's CI, not in `bun run check` (the owner, 2026-10-27: "I'm leaning no and
+  to run the browser tests once later in the phase"). Run a browser file locally only when a change is to what a
+  browser shows.
 - `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
   rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
 

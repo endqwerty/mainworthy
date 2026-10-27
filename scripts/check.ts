@@ -2,7 +2,8 @@
 // Performance tests run only when explicitly selected on an idle machine. Prints the wall time of each part and warns
 // about slow runs (`scripts/check-plan.ts`); elapsed time alone does not fail the check.
 //
-//   bun scripts/check.ts                      everything (`bun run check`)
+//   bun scripts/check.ts                      functional tests without Chromium (`bun run check`)
+//   bun scripts/check.ts --browser            include Chromium tests
 //   bun scripts/check.ts test                 the tests only, output as it comes (`bun run test`)
 //   bun scripts/check.ts test --shard=2/6     one share of the parallel phase
 //   bun scripts/check.ts test --only=performance    one phase: parallel or performance
@@ -66,7 +67,7 @@ import { ownedChildren, registerOwnedChild } from "./work/processes.ts";
 
 requireReady("check");
 
-const { testsOnly, junit, shard, chosen, record, workers, phases, flags } = (() => {
+const { testsOnly, junit, shard, chosen, record, workers, phases, flags, browser } = (() => {
 	try {
 		return parseCheckArgs(process.argv.slice(2));
 	} catch (error) {
@@ -230,6 +231,7 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 		const args = testArgs(phase, {
 			shard,
 			files: chosen,
+			browser,
 			workers: phaseWorkers,
 			junit: report,
 			timings,
@@ -241,10 +243,11 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 			const browserClosures: Promise<void>[] = [];
 			const diagnosticDirectory = join(scratch, `${phase}-chromium`);
 			mkdirSync(diagnosticDirectory);
-			const chromium = findChromium();
-			const selected = phaseFiles(phase, shard, chosen);
+			const browserPhase = needsBrowserFixture([phase], shard, chosen, browser);
+			const chromium = browserPhase ? findChromium() : null;
+			const selected = phaseFiles(phase, shard, chosen, browser);
 			const slots = phaseWorkers ?? 1;
-			if (fixture && chromium.path && !process.env.MAINWORTHY_E2E_CPU_THROTTLE) {
+			if (browserPhase && fixture && chromium?.path && !process.env.MAINWORTHY_E2E_CPU_THROTTLE) {
 				const { chromium: launcher } = await import("playwright-core");
 				for (let slot = 1; slot <= Math.min(slots, selected?.length ?? slots); slot++) {
 					const browser = await launcher.launchServer({
@@ -323,7 +326,7 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 	return parts;
 }
 
-const fixture = needsBrowserFixture(phases, shard, chosen) ? join(scratch, "browser-fixture") : undefined;
+const fixture = needsBrowserFixture(phases, shard, chosen, browser) ? join(scratch, "browser-fixture") : undefined;
 if (fixture) {
 	const build = await run("browser fixture", [process.execPath, ...fixtureBuildArgs(fixture)], false, {
 		NODE_ENV: "production",
@@ -368,13 +371,19 @@ if (record) {
 
 console.log("");
 // A machine with no browser passes with every browser test skipped: say so where it is read.
-const chromium = findChromium();
-if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
+if (!needsBrowserFixture(phases, shard, chosen, browser))
+	console.log(
+		"NOTE: browser tests did not run. PR CI runs them; include them locally with `bun run check --browser`.\n",
+	);
+else {
+	const chromium = findChromium();
+	if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
+}
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
 const slow = slowest(
 	measured,
 	5,
-	phases.flatMap((phase) => phaseFiles(phase, shard, chosen) ?? []),
+	phases.flatMap((phase) => phaseFiles(phase, shard, chosen, browser) ?? []),
 ).filter((entry) => existsSync(entry.file));
 if (everyFile && slow.length > 0)
 	console.log(`slowest files: ${slow.map((entry) => `${entry.file} ${entry.seconds.toFixed(0)} s`).join(", ")}`);
@@ -397,7 +406,7 @@ if (failedPhases.length > 0) {
 		phaseReport(
 			part.name,
 			existsSync(part.report) ? parseJUnit(readFileSync(part.report, "utf8")).results : null,
-			phaseFiles(part.phase, shard, chosen),
+			phaseFiles(part.phase, shard, chosen, browser),
 		),
 	);
 	console.log(`\n${failureLines(reports).join("\n")}`);

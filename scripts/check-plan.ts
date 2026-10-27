@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { Glob } from "bun";
 import type { LaunchOptions } from "playwright-core";
 import type { ResultIn } from "../src/core/ops.ts";
+import { opensBrowser } from "./browser-tests.ts";
 
 /** Static checks shared by the local runner and the CI static job. */
 export const STATIC_CHECKS = [
@@ -116,11 +117,15 @@ export function sharedBrowserEndpoint(
 }
 
 /** Build once for any phase that may run a browser test. Bun chooses a shard's files. */
-export function needsBrowserFixture(phases: readonly Phase[], shard?: string, files?: readonly string[]): boolean {
-	return phases.some((phase) => {
-		const selected = phaseFiles(phase, shard, files);
-		return selected === null || selected.some((file) => file.startsWith("test/e2e/"));
-	});
+export function needsBrowserFixture(
+	phases: readonly Phase[],
+	shard?: string,
+	files?: readonly string[],
+	browser = true,
+): boolean {
+	return phases.some((phase) =>
+		(phaseFiles(phase, shard, files, browser) ?? phaseFiles(phase, undefined, files, browser) ?? []).some(opensBrowser),
+	);
 }
 
 /** Production's compile flags with the test fixture. */
@@ -145,6 +150,8 @@ export function fixtureBuildArgs(outfile: string, root = process.cwd()): string[
 }
 
 export type TestOptions = {
+	/** Include Chromium files in an unnamed run. Explicit files always run. */
+	browser?: boolean | undefined;
 	/** `i/n`: the parallel phase runs only that share of its files. */
 	shard?: string | undefined;
 	/** Only these of the phase's files (`scripts/ci-scope.ts` chooses them for a change). */
@@ -174,9 +181,11 @@ export function testArgs(phase: Phase, options: TestOptions): string[] {
 		...(options.files
 			? (phaseFiles(phase, undefined, options.files) ?? []).map((file) => `./${file}`)
 			: phase === "performance"
-				? PERFORMANCE.map((file) => `./${file}`)
+				? (phaseFiles(phase, undefined, undefined, options.browser ?? false) ?? []).map((file) => `./${file}`)
 				: [
-						...PERFORMANCE.map((file) => `--path-ignore-patterns=${file}`),
+						...[...PERFORMANCE, ...(options.browser ? [] : (phaseFiles("parallel") ?? []).filter(opensBrowser))].map(
+							(file) => `--path-ignore-patterns=${file}`,
+						),
 						...(options.shard ? [`--shard=${options.shard}`] : []),
 						"src",
 						"test",
@@ -300,12 +309,17 @@ export function failedTests(results: readonly ResultIn[]): FailedTest[] {
 }
 
 /** The test files of a phase, of `only` when given, or null for a shard, whose share of them Bun chooses. */
-export function phaseFiles(phase: Phase, shard?: string | undefined, only?: readonly string[]): string[] | null {
+export function phaseFiles(
+	phase: Phase,
+	shard?: string | undefined,
+	only?: readonly string[],
+	browser = true,
+): string[] | null {
 	if (only) return [...only].filter((file) => PERFORMANCE.includes(file) === (phase === "performance")).sort();
-	if (phase === "performance") return PERFORMANCE;
+	if (phase === "performance") return PERFORMANCE.filter((file) => browser || !opensBrowser(file));
 	if (shard) return null;
 	const files = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")];
-	return files.filter((file) => !PERFORMANCE.includes(file)).sort();
+	return files.filter((file) => !PERFORMANCE.includes(file) && (browser || !opensBrowser(file))).sort();
 }
 
 /** What a test phase that did not exit 0 left behind. */
@@ -374,8 +388,8 @@ export function parseCheckArgs(argv: string[]) {
 			files.push(arg.replace(/^\.\//, ""));
 			continue;
 		}
-		const match = /^--(shard|only|junit|workers)=(.+)$/.exec(arg) ?? /^--(update-timings)()$/.exec(arg);
-		if (!match?.[1] || (!testsOnly && !["update-timings", "workers"].includes(match[1]))) {
+		const match = /^--(shard|only|junit|workers)=(.+)$/.exec(arg) ?? /^--(update-timings|browser)()$/.exec(arg);
+		if (!match?.[1] || (!testsOnly && !["update-timings", "workers", "browser"].includes(match[1]))) {
 			throw new Error(
 				`check: unknown argument ${arg}. One file is \`bun test <file>\`; scripts/check.ts lists the rest.`,
 			);
@@ -417,5 +431,6 @@ export function parseCheckArgs(argv: string[]) {
 	if (only === "performance" && workers !== undefined && workers !== 1)
 		throw new Error("check: performance runs with one worker");
 	const phases: Phase[] = only ? [only] : record && shard === undefined ? ["parallel", "performance"] : ["parallel"];
-	return { testsOnly, junit, shard, chosen, record, workers, phases, flags };
+	const browser = flags.has("browser") || record || only === "performance";
+	return { testsOnly, junit, shard, chosen, record, workers, phases, flags, browser };
 }
