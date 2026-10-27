@@ -99,13 +99,12 @@ one, take the verifier from `--profile balanced` and say so in the pull request;
 
 ## Delivery
 
-**Review-first: the owner merges; you do not.** On the T3 branch, follow the `build` skill: get the independent
-verification `verify` asks for, open a non-draft pull request with a standalone description naming its issue (above),
-link it to the thread, run the Daybreak audit every merge needs (`docs/security-audit.md`) and stop. Do not merge, arm
-auto-merge, close it or push to `main`, even when checks are green. Only the owner saying, in the current thread, to
-merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the branch). A stack lands in
-one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build` and `babysit` nothing
-merges.
+**Review-first: the owner merges; you do not.** On the T3 branch, follow the `build` skill: open a non-draft pull
+request with a standalone description naming its issue (above), link it to the thread, get `verify`'s independent
+verdict and the Daybreak audit every merge needs (`docs/security-audit.md`), its first round beside the first review,
+and stop. Do not merge, arm auto-merge, close it or push to `main`, even when checks are green. Only the owner saying,
+in the current thread, to merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the
+branch). A stack lands in one step when the owner's word covers it: `docs/landing-a-stack.md`.
 
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
 the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
