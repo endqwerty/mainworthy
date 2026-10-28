@@ -366,8 +366,8 @@ const Q = {
 		"SELECT * FROM slots WHERE run = $run AND rank > $after ORDER BY rank LIMIT $limit",
 	),
 	slotById: sql<{ id: number }, SlotRow>("SELECT * FROM slots WHERE id = $id"),
-	slotGroups: sql<{ run: number }, { state: SlotState; n: number }>(
-		"SELECT state, count(*) AS n FROM slots WHERE run = $run AND state NOT IN ('failing', 'disputed') GROUP BY state",
+	slotGroups: sql<{ run: number }, { state: SlotState; obligation: string; n: number }>(
+		"SELECT state, obligation, count(*) AS n FROM slots WHERE run = $run AND state NOT IN ('failing', 'disputed') GROUP BY state, obligation",
 	),
 	failingSlots: sql<{ run: number }, { id: number; state: SlotState; causes: string; obligation: string }>(
 		"SELECT id, state, causes, obligation FROM slots WHERE run = $run AND state IN ('failing', 'disputed')",
@@ -1200,7 +1200,7 @@ async function refreshSlot(
 		seen.add(`${fill.signature}:${fill.target}`);
 		causes.push([fill.signature, fill.target]);
 	}
-	const state = slotState(agg, obligation?.minActors ?? 1);
+	const state = obligation ? slotState(agg, obligation.minActors) : "missing";
 	await ctx.db.run(Q.updateSlot, {
 		id: slot.id,
 		agg: JSON.stringify(agg),
@@ -1676,8 +1676,11 @@ async function count(
 				failing.add(causeKey(row.signature, counted.scope));
 		}
 	} else {
+		const obligations = obligationsOf(run);
 		for (const row of await db.all(Q.slotGroups, { run: run.id })) {
-			if (row.state === "satisfied" || row.state === "waived") tally.pass += row.n;
+			const obligation = obligations.find((o) => o.id === row.obligation);
+			if (obligation?.kind !== "exercise") tally.missing += row.n;
+			else if (row.state === "satisfied" || row.state === "waived") tally.pass += row.n;
 			else if (row.state === "missing") tally.missing += row.n;
 			else if (row.state === "skipped") {
 				tally.skipped += row.n;
@@ -1691,6 +1694,11 @@ async function count(
 			slots.map((slot) => slot.id),
 		);
 		for (const slot of slots) {
+			const obligation = obligations.find((o) => o.id === slot.obligation);
+			if (obligation?.kind !== "exercise") {
+				tally.missing += 1;
+				continue;
+			}
 			const disputed = slot.state === "disputed";
 			const fills = bySlot.get(slot.id) ?? [];
 			const { agg, failing: failingResults } = aggregateFills(fills);
@@ -1720,14 +1728,12 @@ async function count(
 				if (disputed) tally.disputed += 1;
 				else tally.unexplained += 1;
 			} else if (disputed && quarantinedCauses === 0) {
-				const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
-				const minActors = obligation?.kind === "exercise" ? obligation.minActors : 1;
 				const passed = new Set(
 					Object.values(agg)
 						.filter((entry) => entry.outcome === "pass")
 						.map((entry) => entry.actor),
 				);
-				if (passed.size >= minActors) tally.pass += 1;
+				if (passed.size >= obligation.minActors) tally.pass += 1;
 				else tally.missing += 1;
 			} else tally.excused += 1;
 		}

@@ -19,6 +19,7 @@ import {
 	mustRun,
 	plannedCounting,
 	type RunTestWrite,
+	retally,
 	runsFor,
 	upsertRunTests,
 } from "../src/server/runs/runs.ts";
@@ -104,6 +105,109 @@ for (const preset of ["loose", "standard"] as const) {
 			});
 		});
 	}
+}
+
+for (const invalidObligation of ["missing", "jobs"] as const) {
+	test(`invalid ${invalidObligation} obligation never passes tally or refresh`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Buy > Works" }] });
+		const producer = await h.actor("tester", "human", ["read", "produce", "record"]);
+		const second = await h.actor("second", "human", ["read", "produce"]);
+		const planned = await h.call<PlanReply>("plan", {
+			name: "Two independent passes",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "abc12345" },
+			require: [{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 2, basis: "exact" }],
+		});
+		const target = { commit: "abc12345", branch: "main" };
+		const failed = await h.call<ReportReceipt>(
+			"report",
+			{
+				target,
+				results: [
+					{
+						test: { key: "checkout" },
+						annotation: { case: "C-1", version: 1 },
+						outcome: "fail",
+						failure: { message: "Network offline" },
+					},
+				],
+			},
+			producer,
+		);
+		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, producer);
+		const settle = async () => {
+			const questions = (await h.call<InboxReply>("inbox", { kind: "failure" })).items;
+			for (const q of questions) {
+				const replies = await h.call<DecideReply[]>("decide", {
+					q: q.q,
+					onEvidence: q.evidenceHash,
+					answer: { is: "infra" },
+				});
+				expect(replies[0]?.status).toBe("decided");
+			}
+		};
+		// Imported archives can contain a slot whose obligation is absent or names a jobs requirement.
+		await h.app.database.write((db) =>
+			db.transaction(async () => {
+				await db.run(sql<{ require: string }>("UPDATE runs SET require = $require WHERE origin = 'planned'"), {
+					require: JSON.stringify([
+						{ id: "other", kind: "exercise", methods: ["human", "auto"], minActors: 2, basis: "exact" },
+						...(invalidObligation === "jobs" ? [{ id: "exercise", kind: "jobs", jobs: [] }] : []),
+					]),
+				});
+			}),
+		);
+		await settle();
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { pass: 0, missing: 1, disputed: 0 },
+		});
+		await h.call(
+			"report",
+			{
+				target,
+				results: [
+					{
+						test: { key: "checkout" },
+						annotation: { case: "C-1", version: 1 },
+						outcome: "pass",
+						corrects: failed.results[0],
+					},
+				],
+			},
+			producer,
+		);
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { pass: 0, missing: 1 },
+		});
+		expect(first(await slots(planned.run)).state).toBe("missing");
+		// Cached states from an archive must not bypass obligation checking during a retally.
+		for (const state of ["satisfied", "waived", "failing"]) {
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					await db.run(sql<{ state: string }>("UPDATE slots SET state = $state"), { state });
+					const project = await findProject(db, "scratch");
+					if (!project) throw new Error("no project");
+					const ctx = makeCtx(h.app, db, project, h.owner, true);
+					await retally(ctx, (await mustRun(db, project.id, planned.run)).id, []);
+					await stampSeq(ctx);
+				}),
+			);
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "pending",
+				tally: { pass: 0, missing: 1 },
+			});
+		}
+
+		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
+		await settle();
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { pass: 0, missing: 1, disputed: 0 },
+		});
+	});
 }
 
 test("counting sibling failures reads their standing in batches", async () => {

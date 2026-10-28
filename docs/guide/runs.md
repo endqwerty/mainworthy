@@ -106,6 +106,9 @@ pass contributes once, even if they pass by several methods. Excusing a failed m
 does not turn it into a pass; a separate passing method from that actor can contribute. A two-actor run with only one passing actor stays pending until
 another actor supplies a counted pass.
 
+A slot whose obligation is missing from the run or is not an exercise obligation
+counts as missing when the run is tallied, even if its stored state says it passed.
+
 A person's result counts when the pinned case admits people.
 An automated test counts when its link or annotation identifies the case and the
 result meets the run's version rule.
