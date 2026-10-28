@@ -58,7 +58,11 @@ Every disputed slot requires local standing for every effective failing fill.
 A global inherited excuse or broad cause answer cannot substitute for it, however recent.
 An unanswered cause keeps the slot disputed even if another cause has been attributed.
 After every cause has a local settlement, the existing classification rule applies: any attributed cause fails the run,
-otherwise the disputed slot counts as passed. This preserves the existing treatment of exercise requirements and `minActors`.
+otherwise a non-quarantined disputed slot counts as passed only when at least `minActors` distinct actors
+have a counted pass. Count the passing producer entries in the existing effective aggregation, deduplicated by actor.
+An excused failing producer supplies no pass; a separate passing method from that actor still contributes once.
+If too few actors passed, count the slot as missing. Excusing failures does not reveal superseded results or
+turn a failing producer's other tests into passing evidence. Quarantined disputes retain their existing excused tally.
 Settlement does not waive missing slots or required jobs.
 
 A changed effective result from a person or pipeline renews the slot's settlement.

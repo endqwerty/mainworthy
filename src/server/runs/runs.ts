@@ -369,8 +369,8 @@ const Q = {
 	slotGroups: sql<{ run: number }, { state: SlotState; n: number }>(
 		"SELECT state, count(*) AS n FROM slots WHERE run = $run AND state NOT IN ('failing', 'disputed') GROUP BY state",
 	),
-	failingSlots: sql<{ run: number }, { id: number; state: SlotState; causes: string }>(
-		"SELECT id, state, causes FROM slots WHERE run = $run AND state IN ('failing', 'disputed')",
+	failingSlots: sql<{ run: number }, { id: number; state: SlotState; causes: string; obligation: string }>(
+		"SELECT id, state, causes, obligation FROM slots WHERE run = $run AND state IN ('failing', 'disputed')",
 	),
 	slotCount: sql<{ run: number }, { n: number }>("SELECT count(*) AS n FROM slots WHERE run = $run"),
 	pinned: sql<{ run: number }, { case_id: number; version: number }>(
@@ -1693,7 +1693,8 @@ async function count(
 		for (const slot of slots) {
 			const disputed = slot.state === "disputed";
 			const fills = bySlot.get(slot.id) ?? [];
-			const failingIds = new Set(aggregateFills(fills).failing);
+			const { agg, failing: failingResults } = aggregateFills(fills);
+			const failingIds = new Set(failingResults);
 			const causes = fills.filter((fill) => failingIds.has(fill.id));
 			const excuses = await mapAsync(
 				causes,
@@ -1718,8 +1719,17 @@ async function count(
 			else if (open.length > 0 || causes.length === 0) {
 				if (disputed) tally.disputed += 1;
 				else tally.unexplained += 1;
-			} else if (disputed && quarantinedCauses === 0) tally.pass += 1;
-			else tally.excused += 1;
+			} else if (disputed && quarantinedCauses === 0) {
+				const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+				const minActors = obligation?.kind === "exercise" ? obligation.minActors : 1;
+				const passed = new Set(
+					Object.values(agg)
+						.filter((entry) => entry.outcome === "pass")
+						.map((entry) => entry.actor),
+				);
+				if (passed.size >= minActors) tally.pass += 1;
+				else tally.missing += 1;
+			} else tally.excused += 1;
 		}
 	}
 

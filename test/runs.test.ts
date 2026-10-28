@@ -29,6 +29,83 @@ import { ciReport, type Harness, harness } from "./helpers.ts";
 let h: Harness;
 afterEach(async () => await h?.close());
 
+for (const preset of ["loose", "standard"] as const) {
+	for (const correctFailure of [false, true]) {
+		test(`${preset}: excused disputes need distinct passing actors, correction=${correctFailure}`, async () => {
+			h = await harness({ preset });
+			await h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Buy > Works" }] });
+			const producer = await h.actor("tester", "human", ["read", "produce", "record"]);
+			const second = await h.actor("second", "human", ["read", "produce"]);
+			const planned = await h.call<PlanReply>("plan", {
+				name: "Two independent passes",
+				select: { cases: ["C-1"] },
+				accepts: { commit: "abc12345" },
+				require: [{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 2, basis: "exact" }],
+			});
+			const target = { commit: "abc12345", branch: "main" };
+			const failed = await h.call<ReportReceipt>(
+				"report",
+				{
+					target,
+					results: [
+						{
+							test: { key: "checkout" },
+							annotation: { case: "C-1", version: 1 },
+							outcome: "fail",
+							failure: { message: "Network offline" },
+						},
+					],
+				},
+				producer,
+			);
+			await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, producer);
+			const settle = async () => {
+				const questions = (await h.call<InboxReply>("inbox", { kind: "failure" })).items;
+				for (const q of questions) {
+					const replies = await h.call<DecideReply[]>("decide", {
+						q: q.q,
+						onEvidence: q.evidenceHash,
+						answer: { is: "infra" },
+					});
+					expect(replies[0]?.status).toBe("decided");
+				}
+			};
+			await settle();
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "pending",
+				tally: { pass: 0, missing: 1, disputed: 0 },
+			});
+			if (correctFailure) {
+				await h.call(
+					"report",
+					{
+						target,
+						results: [
+							{
+								test: { key: "checkout" },
+								annotation: { case: "C-1", version: 1 },
+								outcome: "pass",
+								corrects: failed.results[0],
+							},
+						],
+					},
+					producer,
+				);
+				expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+					verdict: "pending",
+					tally: { pass: 0, missing: 1 },
+				});
+			}
+			await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
+			await settle();
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "passed",
+				tally: { pass: 1, missing: 0, disputed: 0 },
+			});
+		});
+	}
+}
+
 test("counting sibling failures reads their standing in batches", async () => {
 	h = await harness();
 	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
