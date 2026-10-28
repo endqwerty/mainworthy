@@ -247,6 +247,8 @@ export async function advanceClock(server: Server, ms: number): Promise<void> {
 		body: JSON.stringify({ advanceMs: ms }),
 	});
 	if (!moved.ok) throw new Error(`The e2e server's clock did not move: ${moved.status}`);
+	const { result } = (await moved.json()) as { result: { ahead: number } };
+	server.idp?.ahead(result.ahead);
 }
 /** The subject a person of this name has at the test's provider, as in `test/people-support.ts`. */
 export const subjectOf = (name: string): string => `sub-${name}`;

@@ -44,6 +44,8 @@ export type Provider = {
 	asked: URLSearchParams[];
 	/** How many codes the token endpoint has exchanged. */
 	exchanged: () => number;
+	/** How far the server's clock runs ahead of this process's, so that "now" at the provider is the server's now. */
+	ahead: (ms: number) => void;
 	stop: () => void;
 };
 
@@ -58,6 +60,7 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 	const jwk: JWK = { ...(await exportJWK(publicKey)), kid: "k1", alg: "ES256", use: "sig" };
 	let who: Next | null = null;
 	let exchanged = 0;
+	let aheadMs = 0;
 	const asked: URLSearchParams[] = [];
 	const codes = new Map<string, { next: Next; nonce: string; challenge: string; redirect: string }>();
 	const server: ReturnType<typeof Bun.serve> = Bun.serve({
@@ -93,7 +96,7 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 					const code = randomBytes(16).toString("base64url");
 					const fresh =
 						next.authTime === undefined && url.searchParams.get("max_age") === "0"
-							? { ...next, authTime: Math.floor(Date.now() / 1000) }
+							? { ...next, authTime: Math.floor((Date.now() + aheadMs) / 1000) }
 							: next;
 					codes.set(code, {
 						next: fresh,
@@ -161,6 +164,9 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 			who = next;
 		},
 		asked,
+		ahead: (ms) => {
+			aheadMs = ms;
+		},
 		exchanged: () => exchanged,
 		stop: () => void server.stop(true),
 	};
