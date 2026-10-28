@@ -162,6 +162,13 @@ export function CasePane({
 	}
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
 	const pendingQuestion = timelineData?.questions.find((q) => q.q === pendingAnswer?.question.q);
+	// Several failures can show a Create issue button; the key acts on the newest open one, so the keys list it once.
+	const issueKeyQuestion = timelineData?.questions
+		.filter((q) => q.kind === "failure" && q.state === "open")
+		.reduce<string | undefined>(
+			(newest, q) => (newest && Number(newest.slice(2)) > Number(q.q.slice(2)) ? newest : q.q),
+			undefined,
+		);
 	if (pendingAnswer && pendingQuestion && pendingQuestion.state !== "open") setPendingAnswer(null);
 	async function answerProposal(answer: "accept" | "reject", question = proposals[0], reason?: string): Promise<void> {
 		if (!question) return;
@@ -519,7 +526,7 @@ export function CasePane({
 												</p>
 											)}
 										</a>
-										<TrackerCreate question={q} active={() => true} />
+										<TrackerCreate question={q} active={() => true} keyed={q.q === issueKeyQuestion} />
 									</div>
 								);
 							})}

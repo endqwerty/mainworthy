@@ -171,6 +171,7 @@ test.skipIf(!browserAvailable)(
 				["/p/scratch/settings", "Next setting"],
 			] satisfies [string, string][];
 			let listed = 0;
+			const repeated = new Set<string>();
 			for (const [path, binding] of screens) {
 				await page.goto(`${server.url}${path}`);
 				await page.locator("#list").waitFor();
@@ -181,10 +182,14 @@ test.skipIf(!browserAvailable)(
 				await page.keyboard.press("?");
 				const rows = page.getByRole("region", { name: "Keyboard shortcuts" }).locator(".hk");
 				await rows.filter({ hasText: binding }).first().waitFor();
+				const seen = new Set<string>();
 				for (const row of await rows.all()) {
 					const label = (await row.locator("span").first().innerText()).trim().toLowerCase();
 					const key = (await row.locator("kbd").innerText()).trim().toLowerCase();
 					listed++;
+					// A key that several things on one screen register is listed once, or the list cannot say which acts.
+					if (seen.has(`${key} ${label}`)) repeated.add(`${path}: ${key} "${label}"`);
+					seen.add(`${key} ${label}`);
 					const found = documented.some(
 						(entry) => (entry.does.startsWith(label) || label.startsWith(entry.does)) && entry.keys.has(lastKey(key)),
 					);
@@ -194,6 +199,7 @@ test.skipIf(!browserAvailable)(
 			}
 			expect(listed).toBeGreaterThan(80);
 			expect([...missing], "add these to docs/guide/keyboard.md").toEqual([]);
+			expect([...repeated], "each key a screen lists once").toEqual([]);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();

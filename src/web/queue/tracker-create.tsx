@@ -9,7 +9,16 @@ import { useBindings } from "../lib/keys.ts";
 import { useApp } from "../ui/context.tsx";
 import { FailureEvidence } from "./evidence.tsx";
 
-export function TrackerCreate({ question, active }: { question: QuestionItem; active: () => boolean }) {
+/** `keyed` false leaves the key to another card on the screen: its button still works. */
+export function TrackerCreate({
+	question,
+	active,
+	keyed = true,
+}: {
+	question: QuestionItem;
+	active: () => boolean;
+	keyed?: boolean;
+}) {
 	const { project, session } = useApp();
 	const destination = session.projects.find((row) => row.key === project)?.tracker;
 	const sample = FailureEvidence.safeParse(question.evidence).data?.sample;
@@ -41,17 +50,21 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 	const last = status.data ?? receipt;
 	const busy = sending || last?.state === "queued" || last?.state === "sending";
 	const label = destination?.startsWith("jira:") ? "Create tracker issue" : "Create GitHub issue";
-	useBindings([
-		{
-			key: "alt+g",
-			label,
-			handler: () => {
-				void preview.refetch();
-				setReview(true);
-			},
-			applies: () => offered && active() && !busy && !last?.issue,
-		},
-	]);
+	useBindings(
+		keyed
+			? [
+					{
+						key: "alt+g",
+						label,
+						handler: () => {
+							void preview.refetch();
+							setReview(true);
+						},
+						applies: () => offered && active() && !busy && !last?.issue,
+					},
+				]
+			: [],
+	);
 	async function send() {
 		if (!sample || busy || !preview.data || preview.isFetching || preview.error) return;
 		setSending(true);
