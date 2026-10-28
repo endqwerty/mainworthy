@@ -4,6 +4,8 @@
 - Status: accepted
 - Issue: https://github.com/endqwerty/mainworthy/issues/948
 
+Frozen 2026-10-27 before any of it was built: [freeze what the customer does not need](2026-10-27-freeze-what-the-customer-does-not-need.md).
+
 The owner's direction on 2026-10-25 was "projects need to live under teams and teams need owner/admin, users, and viewers."
 The owner accepted the model and conversion rules with "1" on 2026-10-26 in
 [the acceptance comment](https://github.com/endqwerty/mainworthy/issues/948#issuecomment-6408691804).

@@ -31,7 +31,9 @@ The owner's three biggest decisions, each open:
    that the data model alone is no moat.
 3. **What to stop.** The native iPhone app, passkeys and SSO, teams (M8) and the loose-to-regulated policy spectrum
    all serve customers no one has yet. Freezing some of them until a user asks is the cheapest way to get back on
-   track. Which ones is the owner's call; section 6 says what each costs.
+   track. Answered 2026-10-27: all four
+   ([decision](decisions/2026-10-27-freeze-what-the-customer-does-not-need.md)); people sign in through an
+   identity provider only ([decision](decisions/2026-10-27-people-sign-in-through-an-identity-provider.md)).
 
 ## 1. The track: what the plan said on 2026-10-10
 

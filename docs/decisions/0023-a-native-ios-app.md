@@ -1,7 +1,7 @@
 # 0023: A native iOS app, as one more client of the operations
 
 - Date: 2026-10-13
-- Status: proposed (built in the pull request that adds this file; the owner reviews)
+- Status: proposed (built in the pull request that adds this file; the owner reviews). Frozen 2026-10-27: the app left `main` for the tag `ios-app-2026-10-27` ([freeze](2026-10-27-freeze-what-the-customer-does-not-need.md))
 
 Decision 0018 gave a phone its own layout in the web app and turned a native app down: "Two more clients to
 build, release and keep in step with a product that changes every day and has one user." On 2026-10-13 the owner
