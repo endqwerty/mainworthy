@@ -39,7 +39,7 @@ type Base<I, O> = {
 	output: z.ZodType<O>;
 	/** Caller-visible projection, applied to fresh and replayed replies after the full result is stored. */
 	present?: (actor: Actor, result: O) => O;
-	/** What the caller must hold. A list means any one of them; `test/architecture.test.ts` names the operations that give one. */
+	/** What the caller must hold. A list means any one of them, `{ all: [...] }` requires every one; `test/architecture.test.ts` names the operations that give one. */
 	needs: Need;
 	/**
 	 * When set, the operation is one of the agent tools, and this is its description, written for a model: what
@@ -147,7 +147,7 @@ const digest = (input: unknown): string => createHash("sha256").update(JSON.stri
 /** Stored in place of a reply that held a secret. */
 const WITHHELD = "(reply not kept: it held a secret)";
 
-const needed = (need: Need): string => needs(need).join(" or ");
+const needed = (need: Need): string => needs(need).join(typeof need === "object" && "all" in need ? " and " : " or ");
 
 const fail = (code: ErrorCode, message: string, details?: Record<string, unknown>): Reply => ({
 	ok: false,

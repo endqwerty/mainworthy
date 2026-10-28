@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
-import { needs } from "../src/core/kinds.ts";
+import { mayRun } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { Database, declaredSql } from "../src/server/kernel/db.ts";
 import {
@@ -584,9 +584,9 @@ describe("the registry", () => {
 		// `attach` appends only to the producer's own evidence (decision 0065). `gate` is
 		// also the one operation that accepts either of two capabilities.
 		const accepts = (capability: "record" | "read") =>
-			OP_LIST.filter((op) => needs(op.needs).includes(capability)).map((op) => op.name);
+			OP_LIST.filter((op) => mayRun({ kind: "ci", can: [capability] }, op.needs)).map((op) => op.name);
 		expect(accepts("record")).toEqual(["attach", "report", "change", "announce", "work", "gate"]);
-		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
+		expect(OP_LIST.filter((op) => Array.isArray(op.needs)).map((op) => op.name)).toEqual(["gate"]);
 		// What a pipeline may be let do besides: the reads, and nothing that writes.
 		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);
 	});
