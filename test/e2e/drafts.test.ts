@@ -823,3 +823,66 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"taking back a draft recovers the other tab's command instead of an older cached success",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Original case" } }] });
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = browser.page;
+			await a.getByRole("button", { name: "Original case", exact: true }).waitFor();
+			await a.route("**/api/p/scratch/get", async (route) => {
+				const asked = z.object({ version: z.number().optional() }).parse(route.request().postDataJSON());
+				if (asked.version !== undefined)
+					await route.fulfill({
+						status: 500,
+						json: { ok: false, error: { code: "internal", message: "Read unavailable" } },
+					});
+				else await route.continue();
+			});
+			await a.keyboard.press("e");
+			await a.getByRole("textbox", { name: "Case title", exact: true }).fill("First tab edit");
+			await a.keyboard.press("Control+Enter");
+			await a.locator("#stat").filter({ hasText: "kept on this device" }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+
+			const b = await browser.context.newPage();
+			b.on("pageerror", (error) => browser.errors.push(error.message));
+			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.locator("#list").waitFor();
+			await b.keyboard.press("e");
+			await b.getByRole("button", { name: "Take over here", exact: true }).click();
+			await b.keyboard.press("Control+Enter");
+			await b.locator("#stat").filter({ hasText: "Version 2" }).waitFor();
+			let secondCommand = "";
+			await b.route("**/api/p/scratch/propose", async (route) => {
+				secondCommand = z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd;
+				await route.abort();
+			});
+			await b.getByRole("textbox", { name: "Case title", exact: true }).fill("Second tab edit");
+			await b.keyboard.press("Control+Enter");
+			await b.locator("#stat").filter({ hasText: "kept on this device" }).waitFor();
+			expect(secondCommand).not.toBe("");
+
+			await a.unroute("**/api/p/scratch/get");
+			const recovered: string[] = [];
+			await a.route("**/api/p/scratch/command", async (route) => {
+				recovered.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				await route.continue();
+			});
+			await a.keyboard.press("e");
+			await a.getByRole("button", { name: "Take over here", exact: true }).click();
+			await a.keyboard.press("Control+Enter");
+			await a.locator("#stat").filter({ hasText: "Version 3" }).waitFor();
+			expect(recovered).toContain(secondCommand);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ version: 3, title: "Second tab edit" });
+			expect(browser.errors.filter((error) => !error.includes("status of 500"))).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
