@@ -604,6 +604,15 @@ const Q = {
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE project = $project AND test = $test ORDER BY seq DESC, ord DESC LIMIT $limit",
 	),
+	// Each test's newest result that counted for this case. A later result of the test that counted for no case
+	// (declined, or for another case) does not hide it.
+	lastOfTestsForCase: sql<{ project: number; case: number; tests: readonly number[] }, ResultRow>(`
+		SELECT r.* FROM unnest($tests::bigint[]) asked(id)
+		JOIN LATERAL (
+			SELECT * FROM results WHERE project = $project AND test = asked.id AND basis_case = $case
+			ORDER BY seq DESC, ord DESC LIMIT 1
+		) r ON true
+	`),
 	lastOfCaseByMethod: sql<{ id: number; method: string; limit: number }, ResultRow>(
 		`SELECT * FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT $limit`,
@@ -2102,6 +2111,16 @@ export const lastResultsOfTest = async (
 	test: number,
 	limit: number,
 ): Promise<ResultRow[]> => await db.all(Q.lastOfTest, { project, test, limit });
+/** The newest result of each test that counted for `caseId`, by test, in one statement. */
+export async function lastResultsOfTestsForCase(
+	db: ReadDb,
+	project: number,
+	caseId: number,
+	tests: readonly number[],
+): Promise<Map<number, ResultRow>> {
+	if (tests.length === 0) return new Map();
+	return new Map((await db.all(Q.lastOfTestsForCase, { project, case: caseId, tests })).map((row) => [row.test, row]));
+}
 /**
  * The newest results recorded for a case, from every producer. Read as three short index ranges (one per method)
  * and merged, so a case with ten thousand pipeline results costs the same as one with ten.

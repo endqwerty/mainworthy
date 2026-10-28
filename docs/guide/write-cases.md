@@ -188,8 +188,8 @@ it does not by itself supply evidence. Unlinking removes the test from this list
 and timeline entries. There is no age cutoff for these results.
 
 The `get` reply's `tests` list carries each linked test's `t`, `name`, `file`, and nullable `last` result.
-A `last` result carries `id`, `outcome`, `version`, `at`, and `current`. It is null when the test's latest result
-does not name this case. `current` compares the recorded version with the case's head, independently of outcome.
+A `last` result carries `id`, `outcome`, `version`, `at`, and `current`. It is the test's newest result that counted
+for this case, and null when it has none: a later result recorded for no case, or for another, does not replace it. `current` compares the recorded version with the case's head, independently of outcome.
 
 The Proof section shows each method's latest result, with its original version, author, basis, and any model or test name.
 It keeps those details even when the result is older than the timeline's displayed entries.
