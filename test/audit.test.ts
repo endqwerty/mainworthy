@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { seed } from "../src/cli/seed.ts";
+import { withInstance } from "../src/cli/test-support.ts";
 import { type AuditRecord, auditChecksum, verifyAudit } from "../src/core/audit.ts";
 import { canonicalJson } from "../src/core/hash.ts";
 import type { PolicySettings } from "../src/core/kinds.ts";
@@ -121,13 +123,42 @@ test("audit resolves signer policies and counts each signing reference before th
 			}),
 		),
 	).toThrow(/record decision:1: .*policy/);
-	expect(() =>
+	expect(
 		verifyAudit(
 			rehash(signingPolicy(999999), (rows) => {
 				if (rows[0]) rows[0].from = 1;
 			}),
+		).beforeRangeReferences,
+	).toBe(1);
+	expect(() =>
+		verifyAudit(
+			rehash(signingPolicy(0), (rows) => {
+				if (rows[0]) rows[0].from = 1;
+			}),
 		),
 	).toThrow(/record decision:1: .*policy/);
+});
+
+test("seeded demo partial audit exports verify when policy versions and timestamps differ", async () => {
+	await withInstance(async ({ client }) => {
+		await seed(client, { project: "demo", cases: 30, days: 3 });
+		const demo = client.with({ project: "demo" });
+		const full = AuditReply.parse(await demo.call("audit", {})).ndjson;
+		expect(verifyAudit(full).beforeRangeReferences).toBe(0);
+		const policies = entries(full).filter((row) => row.type === "policy");
+		const initial = policies.find((row) => row.version === 1);
+		const latest = policies.find((row) => row.version === 3);
+		if (!initial || !latest) throw new Error("missing seeded policies");
+		expect(initial.at).toBeGreaterThan(latest.at);
+		for (const from of [latest.at + 1, latest.at + 60_000]) {
+			for (const input of [{ from }, { from, to: initial.at + 1 }]) {
+				const partial = AuditReply.parse(await demo.call("audit", input)).ndjson;
+				expect(entries(partial).some((row) => row.type === "policy" && row.version === 1)).toBe(true);
+				expect(entries(partial).some((row) => row.type === "policy" && row.version === 3)).toBe(false);
+				expect(verifyAudit(partial).beforeRangeReferences).toBeGreaterThan(0);
+			}
+		}
+	});
 });
 
 test("audit refuses reordered context and event records even after rehashing", async () => {

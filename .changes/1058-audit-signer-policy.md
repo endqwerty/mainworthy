@@ -6,4 +6,4 @@ issue: https://github.com/endqwerty/mainworthy/issues/1058
 pr: https://github.com/endqwerty/mainworthy/pull/1061
 ---
 
-Audit verification now refuses full-history files whose decision signers name a missing policy version and identifies the decision in the error. Partial histories count omitted older signing policies among references before the range, once per signer. Included signing policies must not follow their decision in the project sequence.
+Audit verification now refuses full-history files whose decision signers name a missing policy version and identifies the decision in the error. Partial histories count omitted positive signing policies among references before the range, once per signer. Included signing policies must not follow their decision in the project sequence. Partial audit exports also verify demo history whose policy versions and timestamps have different orders.
