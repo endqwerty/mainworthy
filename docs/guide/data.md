@@ -460,7 +460,7 @@ A migration changes the archive version if it adds or removes exported tables, r
 
 An archive with a newer version is refused with a message to upgrade. An archive with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
 
-This build uses archive format 1 and schema 45. Import validates the table and column shapes and the evidence
+This build uses archive format 1 and schema 46. Import validates the table and column shapes and the evidence
 before committing. It does not open or convert a SQLite database file. Preserve the original database and a
 matching executable for archives whose older schema this build refuses.
 
