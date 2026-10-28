@@ -1,12 +1,12 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Mainworthy: the result is Mainworthy's gate, and a report that is missing or says less than happened is not a pass.
-import { afterAll, expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { budget, FAIL_MULTIPLE } from "../scripts/budget.ts";
+import { budget } from "../scripts/budget.ts";
 import { runCiGate } from "../scripts/ci-gate.ts";
 import { chooseInstance, contractDifferences, deploymentFetch, type Probe, startOwn } from "../scripts/ci-instance.ts";
 import { beginDatabaseRun, drainRecordedDatabases } from "../scripts/work/test-databases.ts";
@@ -16,16 +16,17 @@ import { inThisProcess, type Running, withInstance } from "../src/cli/test-suppo
 import { API_VERSION } from "../src/core/version.ts";
 import { sql } from "../src/server/kernel/db.ts";
 import { openApi } from "../src/surfaces/http.ts";
+import { onDatabaseCleanup } from "./db.ts";
 
 // Gate subprocesses release databases to this file, outside each behavioral test's deadline.
 const ownDatabases = beginDatabaseRun(process.cwd());
 const cleanupBaselineMs = 20_000;
-afterAll(async () => {
+onDatabaseCleanup(async () => {
 	const began = performance.now();
 	await drainRecordedDatabases(ownDatabases.directory);
 	await rm(ownDatabases.directory, { recursive: true, force: true });
 	budget("ci-gate database cleanup", performance.now() - began, cleanupBaselineMs, "ms");
-}, FAIL_MULTIPLE * cleanupBaselineMs);
+});
 
 /** A file whose tests did not run at all, as on a runner with no browser. */
 const SKIPPED = Symbol("every test skipped");
