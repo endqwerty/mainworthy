@@ -716,7 +716,7 @@ export const decideOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision.",
+	mcp: "onEvidence=evidenceHash. decided, pending=more approvals needed, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision.",
 	steps: decideSteps,
 });
 

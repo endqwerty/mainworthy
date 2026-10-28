@@ -5,6 +5,7 @@
 // - a detector suggests, a decision excuses: nothing in this file changes standing without a decision row;
 // - an answer names the evidence it saw, and an answer on changed evidence is a conflict, not a decision;
 // - a decision carries forward only while its hold stands, and is asked again with the old answer shown when not.
+
 import type { MergeReceipt } from "../../core/changes.ts";
 import type { SameCodeEvidence } from "../../core/flaky.ts";
 import { contentHash } from "../../core/hash.ts";
@@ -47,7 +48,7 @@ import {
 	testRef,
 } from "../evidence/evidence.ts";
 import { sameCodeEvidenceByTests } from "../evidence/flaky.ts";
-import { actorLabel, ruleActorId } from "../identity/identity.ts";
+import { actorById, actorLabel, ruleActorId } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
@@ -66,6 +67,7 @@ import {
 	type FailingGroup,
 	failsOnBase,
 	failsWith,
+	gateOf,
 	gateRun,
 	holdEndingRuns,
 	inheritanceAffected,
@@ -682,12 +684,26 @@ export async function* answerSteps(
 			});
 	}
 
+	if (question.kind === "signoff" && given.is === "approve" && (ask.approvals ?? 1) > 1) {
+		if (question.state === "decided")
+			return reply(question, "conflict", { needs: "withdraw the rejection before starting a fresh approval round" });
+		const run = await runById(ctx.db, json<{ run: number }>(question.subject).run);
+		if (!run || (await gateOf(ctx, run)).verdict !== "passed")
+			return reply(question, "conflict", { needs: "the run no longer passes; it cannot be approved" });
+	}
+
 	try {
 		if (standing === "counts" && question.kind === "failure" && question.subject.kind === "inherited")
 			return yield* replaceInheritedSteps(ctx, { ...question, subject: question.subject }, input);
 		await insertAnswer(ctx, {
 			question: question.id,
-			answer: given,
+			answer:
+				question.kind === "signoff" && (ask.approvals ?? 1) > 1
+					? {
+							...given,
+							approval: { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null },
+						}
+					: given,
 			reason: input.reason ?? null,
 			hash: question.evidence_hash,
 			counts: standing === "counts",
@@ -702,6 +718,16 @@ export async function* answerSteps(
 			policy: policy.version,
 			reason: input.reason ?? null,
 		};
+		let signers = [signer];
+		if (question.kind === "signoff" && given.is === "approve" && (ask.approvals ?? 1) > 1) {
+			signers = await approvalSigners(ctx, question, ask, clause.id, policy.version);
+			if (signers.length < (ask.approvals ?? 1)) {
+				ctx.touched.add(questionRef(question));
+				return reply(question, "pending", {
+					needs: `${signers.length} of ${ask.approvals} approvals recorded; ${describeAsk(ask)}`,
+				});
+			}
+		}
 		const settled = yield* ctx.db.savepointSteps(async function* () {
 			// The facts this answer is given under stay with the question while the answer is in force: an answer
 			// given to a dispute is still an answer to a dispute after it has set the disputed result aside, or
@@ -713,7 +739,7 @@ export async function* answerSteps(
 					: kept;
 				await setQuestionFacts(ctx, question, [...facts], parties);
 			}
-			return yield* settleSteps(ctx, question, [signer], given);
+			return yield* settleSteps(ctx, question, signers, given);
 		});
 		return reply(question, "decided", { decision: settled.decision.id, effects: settled.effects });
 	} catch (error) {
@@ -722,6 +748,36 @@ export async function* answerSteps(
 			return reply(question, error.code === "conflict" ? "conflict" : "invalid", { needs: error.message });
 		throw error;
 	}
+}
+
+async function approvalSigners(
+	ctx: Ctx<ReadDb>,
+	question: QuestionRow,
+	ask: Ask,
+	clause: string,
+	policy: number,
+): Promise<Signer[]> {
+	const after = (await decisionsOf(ctx.db, question.id)).at(-1)?.seq ?? 0;
+	const latest = new Map<number, Awaited<ReturnType<typeof answersOf>>[number]>();
+	for (const answer of await answersOf(ctx.db, question.id)) {
+		if (answer.seq > after && answer.on_evidence === question.evidence_hash) latest.set(answer.actor, answer);
+	}
+	const signers: Signer[] = [];
+	for (const answer of latest.values()) {
+		const stored = json<{ is: string; approval?: Signer }>(answer.answer);
+		if (
+			!answer.counts ||
+			stored.is !== "approve" ||
+			stored.approval?.clause !== clause ||
+			stored.approval.policy !== policy
+		)
+			continue;
+		const actor = await actorById(ctx.db, answer.actor, ctx.project.id);
+		if (actor.kind !== "human") continue;
+		const asActor = { ...ctx, actor };
+		if ((await standingFor(asActor, question, ask)) === "counts") signers.push(stored.approval);
+	}
+	return signers;
 }
 
 /** A person's counted answer withdraws the rule's result standing and answers the ordinary cause instead. */
@@ -2484,7 +2540,22 @@ async function itemOf(
 			? await decisionById(db, decision.supersedes)
 			: null;
 	const fixedIn = decision && supersedes ? await fixedInOf(db, row, decision) : null;
+	const approvals = new Map<number, Signer>();
+	const current = known?.policy ?? (await currentPolicy(db, row.project));
+	const after = row.kind === "signoff" ? ((await decisionsOf(db, row.id)).at(-1)?.seq ?? 0) : 0;
+	for (const answer of answers) {
+		const storedAnswer = json<{ is: string; approval?: Signer }>(answer.answer);
+		if (answer.on_evidence !== row.evidence_hash || answer.seq <= after) continue;
+		approvals.delete(answer.actor);
+		if (answer.counts && storedAnswer.is === "approve" && storedAnswer.approval?.policy === current.version)
+			approvals.set(answer.actor, storedAnswer.approval);
+	}
+
 	return {
+		approvals: await mapAsync([...approvals.values()], async (signer) => ({
+			...signer,
+			by: (await actorLabel(db, signer.by)).name,
+		})),
 		q: questionRef(row),
 		kind: row.kind,
 		title: row.title,
@@ -2548,6 +2619,7 @@ async function decisionItem(db: ReadDb, decision: DecisionRow) {
 	const signers = json<Signer[]>(decision.signers);
 	return {
 		id: decision.id,
+		signers: await mapAsync(signers, async (signer) => ({ ...signer, by: (await actorLabel(db, signer.by)).name })),
 		answer: json<Record<string, unknown>>(decision.answer),
 		by: await mapAsync(signers, async (signer) => (await actorLabel(db, signer.by)).name),
 		rule:
