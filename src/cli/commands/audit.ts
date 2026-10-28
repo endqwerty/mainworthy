@@ -51,7 +51,7 @@ export const auditCommand: AdapterCommand = {
 				if (args.has("json")) printJson(summary, args.bool("compact"));
 				else
 					line(
-						`verified ${summary.records} records for ${summary.project}; ${summary.unavailableDecisionEvidence} decisions lack a historical evidence hash; ${summary.beforeRangeReferences} references precede the range`,
+						`verified ${summary.records} records for ${summary.project}; ${summary.unavailableDecisionEvidence} decisions lack a historical evidence hash; ${summary.beforeRangeReferences} references precede the range; ${summary.omittedSigningPolicyReferences} signing policy references are omitted`,
 					);
 				return 0;
 			} catch (error) {
