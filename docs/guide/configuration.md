@@ -81,7 +81,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_HANDOFF_URL` | none | The address the server posts a hand-off to, for example a T3 Code webhook. It must be `https`, or `http` on `127.0.0.1` or `localhost`. Treat it as a secret when it carries a token, as a T3 Code webhook address does. It is never stored in the database or an archive. |
 | `MAINWORTHY_HANDOFF_SECRET` | none | At least 16 characters without whitespace. The server signs each post with it (HMAC-SHA256, hex, in `X-Mainworthy-Signature: sha256=<digest>`). Give the receiver the same secret. Keep it in the server's secret environment. |
 
-An invalid session duration also stops startup with a line that names the variable. Each entry in `MAINWORTHY_APPLE_APPS` must have a team id and bundle identifier.
+An invalid session duration also stops startup with a line that names the variable.
 
 For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, or `http://localhost` with its optional port. The server refuses IP addresses and plain `http` anywhere else because browsers do not make passkeys there. Paths and queries are refused because the server needs the instance's root address.
 
@@ -261,7 +261,6 @@ In server mode everything that reads or changes a project needs a token or a sig
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |
-| `/.well-known/apple-app-site-association` | The app identifiers set in `MAINWORTHY_APPLE_APPS`, when configured |
 
 `/api/login` opens a browser's session and sets its cookie. `/api/logout` ends the session and clears the cookie. `GET /api/login/methods` answers anyone and says whether the instance offers passkeys and mail. `/api/login/challenge` gives a browser what it needs to use a passkey. With a valid invitation code, the challenge route also says whose invitation it is and when it expires. Without a valid code, it reveals no invitation details.
 
@@ -290,8 +289,7 @@ Mainworthy signs people in through one OpenID Connect provider. It uses the auth
 
 1. At the provider, register a web application (a "confidential client"). Set its redirect address, also called the callback URL, to the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`. Allow the scopes `openid`, `email` and `profile`.
 2. Set `MAINWORTHY_OIDC_ISSUER` to the provider's issuer address. It is the address whose `/.well-known/openid-configuration` the provider publishes, exactly as that document's `issuer` writes it. Set `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to what the provider gave you, and `MAINWORTHY_OIDC_NAME` to the name the button shows.
-3. For iPhone provider sign-in, also register the instance's public address followed by `/api/login/oidc/native/callback`, for example `https://mainworthy.example/api/login/oidc/native/callback`. Keep the web callback registered too. The provider returns to the server over HTTPS, and the server hands the app a verifier-bound code.
-4. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
+3. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
 
 The four variables are set together or not at all. Startup stops when only some are set, when `MAINWORTHY_PUBLIC_URL` is missing, or when the issuer is not `https`. Plain `http` is accepted only on the loopback address, for a provider on the same machine.
 

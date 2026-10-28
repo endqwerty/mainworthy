@@ -118,7 +118,7 @@ Both the proposal and the admin's decision stay in the record. Definitions belon
 
 Field values remain strings in a case's `fields` map. A required value cannot be missing or blank. A nonblank choice value must match an allowed value exactly. An optional field can be absent or blank. Keys without definitions remain free text. Removing a definition leaves all its values in place.
 
-New cases and restores must meet the definitions when proposed and adopted. An edit may keep unchanged values from the current case, including missing required values and choices no longer allowed. Keeping unchanged values lets you edit an older case in the web or iPhone editor without filling newly required fields. Changed field values must meet the definitions, including after a merge or while a proposal waits for acceptance. A refusal leaves the case unchanged. Changing a definition never rewrites existing versions.
+New cases and restores must meet the definitions when proposed and adopted. An edit may keep unchanged values from the current case, including missing required values and choices no longer allowed. Keeping unchanged values lets you edit an older case in the web editor without filling newly required fields. Changed field values must meet the definitions, including after a merge or while a proposal waits for acceptance. A refusal leaves the case unchanged. Changing a definition never rewrites existing versions.
 
 Required fields cannot be combined with **Create a case for each test**. Automatic creation has no values for those fields. Choose **Ask in the queue** or **Track without a case** first. Optional definitions work with automatic creation.
 

@@ -27,7 +27,7 @@ design. Read it before you change identity, sessions, runs or policy.
 | `src/web/` | the React web UI. One directory per screen, with `lib/` and `ui/` shared. `SHELL.md` is the contract a screen follows. |
 | `skill/mainworthy/` | the skill that teaches an agent the case model. The server serves it as an archive. |
 | `test/` | tests that cross modules, the architecture rules, the budgets and, in `test/e2e/`, the browser tests. Pure unit tests sit beside their code in `src/`. |
-| `scripts/` | the check, the CI helpers, code generation, licences, diagrams, the iPhone tooling and `work.ts` |
+| `scripts/` | the check, the CI helpers, code generation, licences, diagrams and `work.ts` |
 | `bench/` | the benchmark and the load tools ([bench/README.md](../../bench/README.md)) |
 | `docs/` | the user guide, decisions, architecture, deploy and these pages |
 
