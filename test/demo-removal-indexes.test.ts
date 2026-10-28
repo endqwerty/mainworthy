@@ -134,9 +134,11 @@ test("every statement a removal slice issues reads by index, never by a scan of 
 	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
 });
 
-// A drain skips tables it has emptied. A row written to one meanwhile would stop the project's own deletion, or, in a
-// table no foreign key ties to the project (as `search_docs`), outlive it, if nothing read that table again.
-test("a drain that skips emptied tables still removes a row written to one before the project goes", async () => {
+// A drain reads each table once: a retired demo takes no writes (the registry refuses them), so a table the drain has
+// emptied stays empty and nothing reads it again (#914). A row that appears anyway, here by hand, stops the project's
+// own deletion through its foreign key, which rolls that slice back, and a new drain, which reads every table afresh,
+// removes it.
+test("a row written to a table after the drain emptied it stops the project's deletion until a new drain", async () => {
 	await using db = await writerDatabase();
 	await removalFixture(db, 8);
 	await db.transaction(() =>
@@ -147,9 +149,12 @@ test("a drain that skips emptied tables still removes a row written to one befor
 	const plan = await removalPlan(db);
 	while (!plan.empty.has("a_note")) expect((await removeProjectSlice(db, "removing", 4, plan)).done).toBe(false);
 	await db.transaction(() => db.exec("INSERT INTO a_note VALUES (2, 900)"));
-	let slices = 0;
-	while (!(await removeProjectSlice(db, "removing", 4, plan)).done) slices++;
-	expect(slices).toBeGreaterThan(0);
+	const drain = async (each: typeof plan) => {
+		while (!(await removeProjectSlice(db, "removing", 4, each)).done);
+	};
+	await expect(drain(plan)).rejects.toThrow(/foreign key/i);
+	expect(await db.allDynamic("SELECT id FROM a_note")).toEqual([{ id: 2 }]);
+	await drain(await removalPlan(db));
 	expect(await db.allDynamic("SELECT id FROM a_note")).toEqual([]);
 	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
 });
@@ -168,38 +173,43 @@ async function examined(db: WriteDb): Promise<number> {
 }
 
 /**
- * The most a drain's slice of one of `tables` examines, removing a demo that `fill` adds to the removal fixture. The
- * slices of other tables are not counted: removing the parents themselves, and the first look past their removed index
- * entries, are work in proportion to the demo's own rows, once.
+ * The most a drain's slice of one of `tables` (or of any table, `every`) examines, removing a demo that `fill` adds to
+ * the removal fixture. Autovacuum is off for every table, so what the drain removes stays behind in the indexes, as it
+ * does when maintenance lags.
  */
 async function largestSlice(
 	fill: (db: WriteDb) => Promise<void>,
-	tables: readonly string[],
-): Promise<{ largest: number; slices: number; total: number }> {
+	tables: readonly string[] | "every",
+	batch?: number,
+): Promise<{ largest: number; slices: number; total: number; last: number }> {
 	await using db = await writerDatabase();
 	await removalFixture(db, 1, 10);
 	await db.transaction(async () => {
+		for (const table of await db.catalog())
+			await db.exec(`ALTER TABLE ${identifier(table.name)} SET (autovacuum_enabled = false)`);
 		await fill(db);
 		await db.exec("ANALYZE");
 	});
-	const plan = await removalPlan(db);
+	const plan = await removalPlan(db, batch);
 	let largest = 0;
 	let total = 0;
+	let last = 0;
 	let slices = 0;
 	for (let done = false; !done; )
 		await db.transaction(async () => {
 			const before = await examined(db);
 			const slice = await removeProjectSlice(db, "removing", 32, plan);
 			done = slice.done;
-			if (!tables.includes(slice.table ?? "")) return;
+			if (tables !== "every" && !tables.includes(slice.table ?? "")) return;
 			slices++;
 			const read = (await examined(db)) - before;
 			largest = Math.max(largest, read);
 			total += read;
+			last = read;
 		});
 	expect(await db.allDynamic("SELECT key FROM projects")).toEqual([{ key: "retained" }]);
 	expect(await db.allDynamic("SELECT count(*) AS n FROM result_excuses")).toEqual([{ n: 10 }]);
-	return { largest, slices, total };
+	return { largest, slices, total, last };
 }
 
 /** `parents` more results of the demo, each with an excuse. */
@@ -291,6 +301,82 @@ test("every reference from a project's table to itself is one a drain clears bef
 		plan.tables.filter((table) => table.selfReferences.length > 0 && table.owner?.by !== "project").map((t) => t.name),
 	).toEqual([]);
 });
+
+// The last slice deleted the project after reading every table again from its first row, past the index entries of
+// everything the drain had removed: one transaction that grew with the whole demo, under the project's locks (#914).
+test("a whole removal reads no table again in its last slice, with what it removed left in the indexes", async () => {
+	// `size` rows each of results, excuses, folders (one chain), slots and leases, in groups of 10 that share a test,
+	// target, batch, decision, case and run: what grows is the demo, not how many rows refer to one row.
+	const demo = (size: number) => async (db: WriteDb) => {
+		const groups = [Math.ceil(size / 10)];
+		const each = (text: string, params: number[]) => db.runDynamic(text, params);
+		await folderChain(size)(db);
+		const g = "FROM generate_series(1, $1::bigint) g";
+		await each(
+			`INSERT INTO tests (id, project, no, kind, key, name, first_seq, last_seq) SELECT 2000 + g, 900, 100 + g, 'auto', 'k' || g, 'T', 1, 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO targets (id, project, what, line, first_seq) SELECT 2000 + g, 900, 'session:' || g, 'session', 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO batches (id, project, key, target, method, actor, state, counts, at, seq)
+			 SELECT 2000 + g, 900, 'b' || g, 2000 + g, 'auto', 900, 'processed', '{}', 1, 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO questions (id, project, no, kind, subject, fingerprint, title, producer, evidence, evidence_hash, basis,
+				seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
+			 SELECT 2000 + g, 900, 100 + g, 'failure', '{}', 'f' || g, 'Failure', 'ci', '{}', 'hash', '{}', 1, 1, '{}', '[]', 1,
+				'decided', 1, 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO decisions (id, project, question, kind, answer, signers, basis, holds, at, seq)
+			 SELECT 2000 + g, 900, 2000 + g, 'failure', '{}', '[]', '{}', '{}', 1, 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO cases (id, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank,
+				created_by, created_at, updated_by, updated_at, rev)
+			 SELECT 2000 + g, 900, 100 + g, 1, 'h', 'c', 'A case', '[]', 'no', 0, 1000 + g, 'a', 900, 1, 900, 1, 1 ${g}`,
+			groups,
+		);
+		await each(
+			`INSERT INTO runs (id, project, no, name, origin, accepts, require, tally, verdict, created_by, created_at, rev)
+			 SELECT 2000 + g, 900, g, 'Run', 'planned', '{}', '[]', '{}', 'pending', 900, 1, 1 ${g}`,
+			groups,
+		);
+		const n = "FROM generate_series(1, $1::bigint) n";
+		const group = "(2000 + (n - 1) / 10 + 1)";
+		await each(
+			`INSERT INTO results (id, project, test, seq, ord, batch, target, method, actor, basis, outcome, at)
+			 SELECT 100000 + n, 900, ${group}, 1, n, ${group}, ${group}, 'auto', 900, 'unresolved', 'fail', 1 ${n}`,
+			[size],
+		);
+		await each(`INSERT INTO result_excuses (result, decision, class) SELECT 100000 + n, ${group}, 'excused' ${n}`, [
+			size,
+		]);
+		await each(
+			`INSERT INTO slots (id, run, case_id, version, claim, obligation, rank, rev)
+			 SELECT n, ${group}, ${group}, 1, 'c', 'o' || n, n, 1 ${n}`,
+			[size],
+		);
+		await each(`INSERT INTO slot_leases (slot, actor, since, until) SELECT n, 900, 1, 2 ${n}`, [size]);
+	};
+	// Batches of 16 rows a level, so that both sizes fill whole batches at every level.
+	const small = await largestSlice(demo(400), "every", 16);
+	const large = await largestSlice(demo(4_000), "every", 16);
+	console.log(
+		`whole removal: largest slice ${small.largest}, last ${small.last} rows and index entries for 400 of each (${small.slices} slices); largest ${large.largest}, last ${large.last} for 4000 (${large.slices} slices)`,
+	);
+	expect(large.slices).toBeGreaterThan(small.slices * 5);
+	// Before, the last slice read 21,950 for 4000 of each, and was the largest. It still checks the foreign keys of
+	// every table that refers to the project, past the index entries the drain left in indexes it did not read by.
+	expect(large.last).toBeLessThan(2_000);
+	expect(large.largest).toBeLessThan(10_000);
+}, 300_000);
 
 test("a slice of a table owned through two levels of parents examines a bounded number of rows however many there are", async () => {
 	const tables = ["slot_leases"];

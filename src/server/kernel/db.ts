@@ -550,7 +550,7 @@ export type OpenOptions = {
 	acquireTimeoutMs?: number;
 	lockWaitMs?: number;
 };
-let migration: <T>(database: Database, fn: (db: WriteDb) => T | Promise<T>) => Promise<T>;
+let migration: <T>(database: Database, fn: (db: WriteDb, outside: Outside) => T | Promise<T>) => Promise<T>;
 export class Database {
 	private notifications: SQL | undefined;
 	/** Native LISTEN owns one dedicated connection, reconnecting independently of query leases. */
@@ -796,22 +796,36 @@ export class Database {
 		}
 	}
 
+	/**
+	 * Runs `fn` holding the session lock `key`. The lock is asked for again every `EXCLUSIVE_POLL_MS` rather than
+	 * waited for in one statement: a waiting statement holds a snapshot, and `CREATE INDEX CONCURRENTLY`, which a
+	 * migration runs while it holds the lock, waits for every older snapshot to end, so two starting instances would
+	 * wait for each other.
+	 */
 	private async locked<T>(
 		pool: SQL,
 		key: bigint,
-		fn: (db: WriteDb) => T | Promise<T>,
+		fn: (db: WriteDb, outside: Outside) => T | Promise<T>,
 		signal: AbortSignal,
 	): Promise<T> {
 		const lease = await this.lease(pool, signal);
 		const db = new Scope(lease, true);
 		let acquired = false;
 		try {
-			// Once sent, an uncertain acquisition must destroy the connection too.
-			lease.poisoned = true;
-			await query(lease, "SELECT pg_advisory_lock($1::bigint)", [key]);
+			for (;;) {
+				// Once sent, an uncertain acquisition must destroy the connection too.
+				lease.poisoned = true;
+				const [row] = await query<{ held: boolean }>(lease, "SELECT pg_try_advisory_lock($1::bigint) AS held", [key]);
+				lease.poisoned = false;
+				if (row?.held) break;
+				signal.throwIfAborted();
+				await new Promise<void>((resolve) => setTimeout(resolve, EXCLUSIVE_POLL_MS));
+			}
 			acquired = true;
-			lease.poisoned = false;
-			const result = await fn(db);
+			const result = await fn(db, async (text) => {
+				if (lease.tx) throw new Error("a statement outside a transaction was run inside one");
+				await query(lease, text, [], false, true);
+			});
 			if (lease.lost) throw lease.lost;
 			if (lease.tx) throw new Error("write callback returned with an open transaction");
 			return result;
@@ -847,7 +861,12 @@ export class Database {
 		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close(), this.jobs.close()]);
 	}
 }
-export async function migrationLock<T>(database: Database, fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
+/** Runs one statement on the migration's connection outside any transaction (`CREATE INDEX CONCURRENTLY`). */
+export type Outside = (text: string) => Promise<void>;
+export async function migrationLock<T>(
+	database: Database,
+	fn: (db: WriteDb, outside: Outside) => T | Promise<T>,
+): Promise<T> {
 	return migration(database, fn);
 }
 

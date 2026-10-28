@@ -809,8 +809,9 @@ type SliceTable = {
  * table it deletes from, not every table the project once had; and it reads a parent-owned table under one batch of
  * parents on from where the last slice stopped, at every level of the chain, not from the first parent again (#914).
  * For a table that refers to itself, `unlinked` says how far the drain has set those references to null: the id it
- * has reached, or `true` once it has passed the last row. Before the project row goes, one pass reads every table
- * again from the start, so a row written meanwhile is still found.
+ * has reached, or `true` once it has passed the last row. No table is read again before the project row goes: a
+ * retired demo takes no writes (the registry refuses them), so a table the drain emptied stays empty. A row that
+ * appears anyway makes the project row's foreign keys refuse its deletion, and the next drain's new plan finds it.
  */
 export type RemovalPlan = {
 	readonly tables: readonly SliceTable[];
@@ -818,9 +819,18 @@ export type RemovalPlan = {
 	readonly empty: Set<string>;
 	readonly after: Map<string, Place>;
 	readonly unlinked: Map<string, string | true>;
+	/** How many rows of a level a slice reads at once: `PARENTS_PER_SLICE`, or fewer for a test. */
+	readonly batch: number;
 };
-export async function removalPlan(db: ReadDb): Promise<RemovalPlan> {
-	return { tables: await slicePlan(db), project: null, empty: new Set(), after: new Map(), unlinked: new Map() };
+export async function removalPlan(db: ReadDb, batch = PARENTS_PER_SLICE): Promise<RemovalPlan> {
+	return {
+		tables: await slicePlan(db),
+		project: null,
+		empty: new Set(),
+		after: new Map(),
+		unlinked: new Map(),
+		batch,
+	};
 }
 
 /**
@@ -886,15 +896,28 @@ function ownedRow(table: SliceTable, alias: string): string {
  */
 type Walk = { readonly levels: readonly { table: string; column: string }[]; readonly key: string };
 
-function walkOf(name: string, owner: SliceOwner, selfReferences: readonly string[]): Walk | null {
-	if (owner?.by === "parents")
-		return {
-			levels: owner.chain
-				.map((link, at) => ({ table: link.table, column: owner.chain[at + 1]?.column ?? "project" }))
-				.reverse(),
-			key: owner.chain[0]?.column ?? "",
-		};
-	if (owner?.by === "project" && selfReferences.length > 0)
+/**
+ * The walk for a table, given which tables have an index in (column, id) order (`ordered`, as `table:column`). A table
+ * with one on the column naming its owner is walked down to its own rows, so a slice reads one batch of them after the
+ * rows already removed: under one parent (a run's thousands of slots) or one project, a batch of parents alone could
+ * hold any number of rows, and each slice would read past every one it had removed.
+ */
+function walkOf(
+	name: string,
+	owner: SliceOwner,
+	selfReferences: readonly string[],
+	ordered: ReadonlySet<string>,
+): Walk | null {
+	if (owner?.by === "parents") {
+		const levels = owner.chain
+			.map((link, at) => ({ table: link.table, column: owner.chain[at + 1]?.column ?? "project" }))
+			.reverse();
+		const key = owner.chain[0]?.column ?? "";
+		return ordered.has(`${name}:${key}`)
+			? { levels: [...levels, { table: name, column: key }], key: "id" }
+			: { levels, key };
+	}
+	if (owner?.by === "project" && (selfReferences.length > 0 || ordered.has(`${name}:project`)))
 		return { levels: [{ table: name, column: "project" }], key: "id" };
 	return null;
 }
@@ -946,6 +969,18 @@ const setLocal = (count: number): string =>
 
 async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
 	const catalog = await db.catalog();
+	// Valid, whole-table indexes whose first two columns are (some column, id).
+	const indexed = new Set(
+		(
+			await db.allDynamic<{ name: string; first: string }>(
+				`SELECT t.relname AS name, a.attname AS first FROM pg_index x
+				 JOIN pg_class t ON t.oid = x.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+				 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.indkey[0]
+				 JOIN pg_attribute b ON b.attrelid = t.oid AND b.attnum = x.indkey[1]
+				 WHERE n.nspname = 'public' AND x.indisvalid AND x.indpred IS NULL AND x.indnkeyatts >= 2 AND b.attname = 'id'`,
+			)
+		).map((row) => `${row.name}:${row.first}`),
+	);
 	const tables = new Map<string, SliceTable>();
 	for (const table of catalog) {
 		const owner = INSTANCE_TABLES.includes(table.name)
@@ -968,7 +1003,7 @@ async function slicePlan(db: ReadDb): Promise<SliceTable[]> {
 			incoming: [],
 			parents: table.foreignKeys.map((reference) => reference.parent),
 			selfReferences,
-			walk: walkOf(table.name, owner, selfReferences),
+			walk: walkOf(table.name, owner, selfReferences, indexed),
 		});
 	}
 	for (const table of catalog) {
@@ -1065,6 +1100,7 @@ async function rowsToRemove(
 	project: string,
 	limit: number,
 	place: Place | undefined,
+	batch: number,
 ): Promise<
 	| { kind: "roots"; roots: string[][]; from: Place | null }
 	| { kind: "root"; root: string; from: Place | null }
@@ -1077,7 +1113,7 @@ async function rowsToRemove(
 	const { walk } = table;
 	if (walk) {
 		const at = place ?? startOf(walk);
-		const parents = await following(db, walk, walk.levels.length - 1, at, project, PARENTS_PER_SLICE);
+		const parents = await following(db, walk, walk.levels.length - 1, at, project, batch);
 		if (parents.length === 0) return { kind: "none", next: await nextAbove(db, walk, at, project) };
 		next = [...at.slice(0, -1), parents.at(-1) ?? "0"];
 		from = [...at.slice(0, -1), String(BigInt(parents[0] ?? "1") - 1n)];
@@ -1132,7 +1168,7 @@ async function unlinkSelf(
 	const set = table.selfReferences.map((column) => `${identifier(column)} = NULL`).join(", ");
 	const held = table.selfReferences.map((column) => `${identifier(column)} IS NOT NULL`).join(" OR ");
 	for (let after = reached ?? "0"; ; ) {
-		const rows = await following(db, walk, 0, [after], project, PARENTS_PER_SLICE);
+		const rows = await following(db, walk, 0, [after], project, plan?.batch ?? PARENTS_PER_SLICE);
 		const last = rows.at(-1);
 		if (last === undefined) {
 			plan?.unlinked.set(table.name, true);
@@ -1154,7 +1190,6 @@ async function slice(
 	key: string,
 	limit: number,
 	plan: RemovalPlan | undefined,
-	skip = true,
 ): Promise<{ done: boolean; table: string | null; rows: number }> {
 	const project = (await db.allDynamic<{ id: string }>("SELECT id::text AS id FROM projects WHERE key=$1", [key]))[0];
 	if (!project) return { done: true, table: null, rows: 0 };
@@ -1165,22 +1200,22 @@ async function slice(
 		plan.unlinked.clear();
 	}
 	const tables = plan?.tables ?? (await slicePlan(db));
+	const batch = plan?.batch ?? PARENTS_PER_SLICE;
 	const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
 	let blocked: string | null = null;
 	for (const table of ordinary) {
-		if (skip && plan?.empty.has(table.name)) continue;
+		if (plan?.empty.has(table.name)) continue;
 		// A drain's slice reads one batch of a parent-owned table's parents, or moves one row on at a level above, and
-		// leaves the rest to the next slice. Without a plan to keep its place, and in the pass before the project row
-		// goes, a slice reads them all.
-		const resume = skip ? plan : undefined;
+		// leaves the rest to the next slice. Without a plan to keep its place, a slice reads them all.
+		const resume = plan;
 		if (!(await unlinkSelf(db, table, project.id, plan, resume))) return { done: false, table: table.name, rows: 0 };
-		let found = await rowsToRemove(db, table, project.id, limit, resume?.after.get(table.name));
+		let found = await rowsToRemove(db, table, project.id, limit, resume?.after.get(table.name), batch);
 		while (found.kind === "none" && found.next !== null) {
 			if (resume) {
 				resume.after.set(table.name, found.next);
 				return { done: false, table: table.name, rows: 0 };
 			}
-			found = await rowsToRemove(db, table, project.id, limit, found.next);
+			found = await rowsToRemove(db, table, project.id, limit, found.next, batch);
 		}
 		if (found.kind === "none") {
 			plan?.empty.add(table.name);
@@ -1238,30 +1273,11 @@ async function slice(
 			);
 		return { done: false, table: table.name, rows: pending.length };
 	}
-	if (skip && plan?.empty.size) {
-		plan.empty.clear();
-		plan.after.clear();
-		plan.unlinked.clear();
-		return slice(db, key, limit, plan, false);
-	}
 	if (blocked)
 		throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
-	for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
-		for (const { child, columns } of table.incoming) {
-			if (child.name === "demo_projects") continue;
-			const from = columns.map((column) => identifier(column.from)).join(",");
-			const to = columns.map((column) => identifier(column.to)).join(",");
-			if (
-				(
-					await db.allDynamic(
-						`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${ownedRow(table, identifier(table.name))}) LIMIT 1`,
-						[project.id],
-					)
-				)[0]
-			)
-				throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
-		}
-	}
+	// Every table is empty of the project's rows, and stays so: a retired demo takes no writes (`retiredDemo` in the
+	// registry), so no table is read again. A row of another project that still refers to this one fails the foreign
+	// key check at the end of the transaction, which rolls it back.
 	let rows = (await db.runDynamic("DELETE FROM demo_projects WHERE project=$1", [project.id])).changes;
 	rows += (await db.runDynamic("DELETE FROM projects WHERE id=$1", [project.id])).changes;
 	return { done: true, table: "projects", rows };

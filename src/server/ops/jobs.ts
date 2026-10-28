@@ -19,7 +19,7 @@ import {
 } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
 import { sweepChanges } from "../kernel/changes.ts";
-import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { allProjects, demoDeployment, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
 import { AcceptedRefusal } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runJob } from "../kernel/jobs.ts";
 import { executeMail } from "../kernel/smtp.ts";
@@ -54,7 +54,8 @@ export async function recoverAccepted(app: App, claim?: JobClaim, batchId?: numb
 					const current = await batchById(db, batch.id);
 					if (current?.state !== "accepted") return null;
 					const project = await projectById(db, current.project);
-					if (!project) return null;
+					// A retired demo takes no writes: its removal drains each table once (#914).
+					if (!project || (await demoDeployment(db, project.id))?.kind === "retired") return null;
 					// A report applied here keeps the time it was accepted at, as one applied by its own request does:
 					// its results are not dated by the restart, and a demo's history stays where the seed put it.
 					const ctx = makeCtx(app, db, project, await actorById(db, current.actor, project.id), true, current.at);

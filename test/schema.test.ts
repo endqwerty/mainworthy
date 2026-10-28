@@ -456,3 +456,124 @@ test("the migration chain upgrades the immutable baseline without replacing its 
 		await fixture.close();
 	}
 });
+
+/** A database migrated to 6 and set back to 5, with migration 6's indexes as `undo` leaves them. */
+async function atSchemaFive(undo: string): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
+	const fixture = await testDatabase();
+	const raw = new SQL(fixture.url, { max: 3, bigint: true });
+	await raw.unsafe(`UPDATE meta SET value = '5' WHERE key = 'schema_version'; ${undo}`).simple();
+	return {
+		url: fixture.url,
+		raw,
+		close: async () => {
+			await raw.close();
+			await fixture.close();
+		},
+	};
+}
+
+const removalIndexes = [
+	"search_docs_project",
+	"slot_results_run",
+	"team_events_project",
+	"batches_project_id",
+	"cases_project_id",
+	"changes_project_id",
+	"decisions_project_id",
+	"folders_project_id",
+	"merge_receipt_nodes_project_id",
+	"questions_project_id",
+	"requirements_project_id",
+	"runs_project_id",
+	"slots_run_id",
+];
+
+// A start that Cloud Run cut off in the middle of migration 6 leaves some indexes built, one invalid and the rest
+// missing; the next start finishes them and only then moves the ledger.
+test("the next start finishes an interrupted build of migration 6 and leaves no index invalid", async () => {
+	const target = await atSchemaFive(
+		"DROP INDEX runs_project_id; DROP INDEX slots_run_id; UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'cases_project_id'::regclass",
+	);
+	const database = await Database.open({ url: target.url });
+	try {
+		await migrate(database);
+		expect(await database.read(schemaVersion)).toBe(6);
+		const indexes = await target.raw.unsafe(
+			"SELECT i.relname AS name, x.indisvalid AS valid FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid WHERE i.relname = ANY($1::text[]) ORDER BY 1",
+			[`{${removalIndexes.join(",")}}`],
+		);
+		expect(indexes).toEqual([...removalIndexes].sort().map((name) => ({ name, valid: true })));
+		const invalid: { n: number }[] = await target.raw.unsafe(
+			"SELECT count(*)::int AS n FROM pg_index WHERE NOT indisvalid",
+		);
+		expect(invalid).toEqual([{ n: 0 }]);
+	} finally {
+		await database.close();
+		await target.close();
+	}
+}, 60_000);
+
+// Migration 6 used to build its indexes with plain CREATE INDEX in one transaction, so every table it had indexed
+// took no writes until the last index and the ledger committed. A transaction of the serving instance that holds a
+// late table (`runs`) open keeps the build waiting; a write to an earlier table (`search_docs`) must not wait with it.
+test("writes to a table go on while migration 6 builds the indexes after it", async () => {
+	const target = await atSchemaFive(removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
+	const database = await Database.open({ url: target.url });
+	const holder = await target.raw.reserve();
+	const writer = await target.raw.reserve();
+	try {
+		await holder.unsafe("BEGIN");
+		await holder.unsafe("LOCK TABLE runs IN ROW EXCLUSIVE MODE");
+		const migrating = migrate(database);
+		const waitingSince = performance.now();
+		for (;;) {
+			const [row] = await target.raw.unsafe(
+				"SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+			);
+			if (row.n > 0) break;
+			if (performance.now() - waitingSince > 20_000) throw new Error("migration 6 never waited for the held table");
+			await Bun.sleep(50);
+		}
+		const write = await (async () => {
+			try {
+				await writer.unsafe("BEGIN");
+				await writer.unsafe("SET LOCAL lock_timeout = '2s'");
+				await writer.unsafe("LOCK TABLE search_docs IN ROW EXCLUSIVE MODE");
+				await writer.unsafe("COMMIT");
+				return "written";
+			} catch (error) {
+				await writer.unsafe("ROLLBACK");
+				return error instanceof Error ? error.message : String(error);
+			}
+		})();
+		await holder.unsafe("COMMIT");
+		await migrating;
+		expect(write).toBe("written");
+		expect(await database.read(schemaVersion)).toBe(6);
+	} finally {
+		holder.release();
+		writer.release();
+		await database.close();
+		await target.close();
+	}
+}, 60_000);
+
+// Two instances starting together: the second asks for the migration lock again and again rather than waiting in one
+// statement, whose snapshot the first one's concurrent build would wait for while the second waits for its lock.
+test("two instances upgrading to migration 6 at once both start, and build each index once", async () => {
+	const target = await atSchemaFive(removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
+	const [first, second] = await Promise.all([Database.open({ url: target.url }), Database.open({ url: target.url })]);
+	try {
+		await Promise.all([migrate(first), migrate(second)]);
+		expect(await first.read(schemaVersion)).toBe(6);
+		const valid: { n: number }[] = await target.raw.unsafe(
+			"SELECT count(*)::int AS n FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid WHERE i.relname = ANY($1::text[]) AND x.indisvalid",
+			[`{${removalIndexes.join(",")}}`],
+		);
+		expect(valid).toEqual([{ n: removalIndexes.length }]);
+	} finally {
+		await first.close();
+		await second.close();
+		await target.close();
+	}
+}, 60_000);

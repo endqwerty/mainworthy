@@ -128,7 +128,7 @@ existing work untouched and logs why it cannot refresh.
 If a seed stops, the next start resumes its command ids and original demo time instead of swapping again.
 Featured work renews on both fresh deployments and same-revision restarts. Retired projects are hidden from the
 project list and have no project-specific grants. Instance-wide grants, including the owner's, still allow
-access by the retired key until cleanup deletes the data. Cleanup uses bounded transactions that yield to other
+reading by the retired key until cleanup deletes the data; every write to a retired project is refused. Cleanup uses bounded transactions that yield to other
 writes and sign-in. An interrupted cleanup resumes at the next start, even if `MAINWORTHY_DEMO` is unset. A failed slice rolls back,
 logs the failure and leaves its retirement mark for retry. See [configuration](./configuration.md).
 
