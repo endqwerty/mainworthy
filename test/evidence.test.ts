@@ -1993,7 +1993,7 @@ describe("holds", () => {
 			expect(await gate("head0002")).toMatchObject({ verdict: "failed" });
 			await report("head0003", [0], {});
 			expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
-				{ decision: { answer: { is: classification } }, evidenceHash: asked.evidenceHash },
+				{ decision: { answer: { is: classification } } },
 			]);
 			expect(await gate("head0002")).toMatchObject({ verdict: "failed" });
 			expect(await decide(asked, { is: classification })).toMatchObject({ status: "already" });
@@ -2001,6 +2001,37 @@ describe("holds", () => {
 			expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
 				{ state: "dissolved", decision: { answer: { is: "outdated", fixed: true }, rule: "passed" } },
 			]);
+		});
+	}
+
+	for (const classification of ["defect", "test", "expected"]) {
+		test(`a changed carried ${classification} answer requires the extended evidence`, async () => {
+			const report = (commit: string, only: number[]) =>
+				h.call(
+					"report",
+					ciReport({ commit, pr: 401, branch: "feature", n: 2, only, fail: { 0: "same cause", 1: "same cause" } }),
+				);
+			await report("carry001", [0]);
+			const asked = first((await queue()).items);
+			expect(await decide(asked, { is: classification })).toMatchObject({ status: "decided" });
+			await report("carry002", [0, 1]);
+			expect(await decide(asked, { is: classification })).toMatchObject({ status: "already" });
+			const refused = first(
+				await h.call<DecideReply[]>("decide", {
+					q: asked.q,
+					onEvidence: asked.evidenceHash,
+					answer: { is: "flaky" },
+				}),
+			);
+			expect(refused.status).toBe("conflict");
+			const current = first(await h.call<{ evidenceHash: string }[]>("get", { refs: [asked.q] }));
+			expect(current.evidenceHash).not.toBe(asked.evidenceHash);
+			expect(refused.evidence).toBe(current.evidenceHash);
+			expect(await decide({ q: asked.q, evidenceHash: "unseen" }, { is: classification })).toMatchObject({
+				status: "conflict",
+			});
+			expect(await decide({ q: asked.q, ...current }, { is: classification })).toMatchObject({ status: "already" });
+			expect(await decide({ q: asked.q, ...current }, { is: "flaky" })).toMatchObject({ status: "decided" });
 		});
 	}
 
@@ -2013,7 +2044,7 @@ describe("holds", () => {
 					commit,
 					pr: 401,
 					branch: "feature",
-					n: 51,
+					n: 52,
 					only,
 					fail: failing ? Object.fromEntries(only.map((i) => [i, "same cause"])) : {},
 				}),
@@ -2022,7 +2053,10 @@ describe("holds", () => {
 		const asked = first((await queue()).items);
 		await decide(asked, { is: "defect" });
 		await report("limit002", [50], true);
-		await report("limit003", firstTests, true);
+		const before = first(await h.call<{ evidenceHash: string }[]>("get", { refs: [asked.q] }));
+		await report("limit003", [51], true);
+		expect(await decide({ q: asked.q, ...before }, { is: "flaky" })).toMatchObject({ status: "conflict" });
+		expect(await decide(asked, { is: "defect" })).toMatchObject({ status: "already" });
 		await report("limit004", [...firstTests, 50], false);
 		expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
 			{ state: "decided", evidence: { count: 51 }, decision: { answer: { is: "defect" } } },

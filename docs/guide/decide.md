@@ -367,6 +367,10 @@ that has not reported yet: one that runs a test the question does not list, or o
 another job or a person already passed in that environment. If that job then fails with the cause, the failure is
 a new question.
 
+When a carried answer covers more tests, changing that answer requires the question's current evidence.
+An answer sent with an earlier evidence hash returns `conflict` and the current hash. Read the question again
+before changing the answer. Repeating the standing answer with its original hash still returns `already`.
+
 The answer stays when the question has more tests than it lists, which is fifty.
 It also stays when the cause once failed in an environment that no longer reports. Withdraw it then.
 It also stays while an open planned run names the question. Withdraw such an answer yourself when it no longer applies.

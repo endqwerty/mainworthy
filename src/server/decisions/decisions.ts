@@ -631,7 +631,22 @@ export async function* answerSteps(
 		});
 	}
 	const given = parsed.data as AnyAnswer;
-	if (input.onEvidence !== question.evidence_hash) {
+	const prior =
+		question.state === "decided" && question.decision !== null ? await decisionById(ctx.db, question.decision) : null;
+	const sameAnswer =
+		prior !== null &&
+		mode === "answer" &&
+		!(question.kind === "failure" && question.subject.kind === "inherited") &&
+		JSON.stringify(json(prior.answer)) === JSON.stringify(given);
+	if (
+		input.onEvidence !== question.evidence_hash &&
+		!(
+			sameAnswer &&
+			question.kind === "failure" &&
+			question.subject.kind === "cause" &&
+			input.onEvidence === prior?.on_evidence
+		)
+	) {
 		return reply(question, "conflict", {
 			needs: "the evidence changed; read the question again and answer on its current evidence",
 			evidence: question.evidence_hash,
@@ -640,16 +655,7 @@ export async function* answerSteps(
 	if (question.state === "dissolved") return reply(question, "conflict", { needs: "this question no longer applies" });
 	const asked = await askedAgain(ctx, question);
 	if (asked) return reply(question, "conflict", { needs: asked });
-	if (question.state === "decided" && question.decision !== null) {
-		const prior = await decisionById(ctx.db, question.decision);
-		if (
-			prior &&
-			mode === "answer" &&
-			!(question.kind === "failure" && question.subject.kind === "inherited") &&
-			JSON.stringify(json(prior.answer)) === JSON.stringify(given)
-		)
-			return reply(question, "already", { decision: prior.id });
-	}
+	if (sameAnswer && prior) return reply(question, "already", { decision: prior.id });
 
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const facts = yield* factsNowSteps(ctx.db, question);

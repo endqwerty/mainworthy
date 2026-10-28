@@ -2,6 +2,7 @@
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
 import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
+import { contentHash } from "../../core/hash.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
@@ -267,8 +268,8 @@ const Q = {
 		`UPDATE questions SET title = $title, evidence = $evidence, evidence_hash = $hash, basis = $basis, blocks = $blocks,
 		                      seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id`,
 	),
-	carry: sql<{ id: number; seq: number; evidence: string }>(
-		"UPDATE questions SET evidence = $evidence, carried = carried + 1, seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id",
+	carry: sql<{ id: number; seq: number; evidence: string; hash: string }>(
+		"UPDATE questions SET evidence = $evidence, evidence_hash = $hash, carried = carried + 1, seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id",
 	),
 	setState: sql<{ id: number; state: string; decision: number | null; seq: number }>(
 		"UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
@@ -590,25 +591,30 @@ export async function noteCarried(
 	occurrence?: string,
 ): Promise<QuestionRow> {
 	let evidence = question.evidence;
+	let hash = question.evidence_hash;
 	if (question.kind === "failure" && question.subject.kind === "cause" && occurrence) {
 		type Tests = { tests?: { id: number; counted?: boolean }[]; count?: number };
 		const kept = json<Tests>(evidence);
 		const incoming = json<Tests>(occurrence);
 		const tests = new Map((kept.tests ?? []).map((test) => [test.id, test]));
+		const extendsTests = incoming.tests?.some((test) => !tests.has(test.id)) ?? false;
 		for (const test of incoming.tests ?? []) {
 			const prior = tests.get(test.id);
 			tests.set(test.id, { ...test, ...prior, ...(test.counted || prior?.counted ? { counted: true } : {}) });
 		}
-		// A carry extends the pass requirements, not the target and basis a pending answer was prepared on.
+		// Keep the original target and basis, extending the tests the standing answer covers.
 		evidence = JSON.stringify({
 			...kept,
 			tests: [...tests.values()].slice(0, 50),
 			count: Math.max(tests.size, kept.count ?? 0, incoming.count ?? 0),
 		});
+		// Even tests beyond the display cap change what a replacement answer must have seen.
+		if (extendsTests || contentHash(kept) !== contentHash(json(evidence)))
+			hash = contentHash({ prior: question.evidence_hash, occurrence: json(occurrence) });
 	}
-	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq, evidence });
+	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq, evidence, hash });
 	await addRefs(ctx, question.id, refs);
-	return { ...question, evidence };
+	return { ...question, evidence, evidence_hash: hash };
 }
 
 export async function setQuestionState(
