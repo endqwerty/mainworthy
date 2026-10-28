@@ -31,9 +31,16 @@ import { failureSignature, fileSignature, type SignatureRow, signaturesByHashes 
 
 export { type SignatureRow, signatureById } from "./signatures.ts";
 
-/** SQL predicate for result id expressions: only a correction in their project withdraws them. */
+const validCorrection = (original: string, correction: string): string =>
+	`${correction}.project = ${original}.project AND ${correction}.test = ${original}.test
+	 AND ${correction}.actor = ${original}.actor AND ${correction}.target IS NOT DISTINCT FROM ${original}.target
+	 AND ${correction}.run IS NOT DISTINCT FROM ${original}.run`;
+
+/** SQL predicate for result id expressions: only a correction of the same evidence withdraws them. */
 export const uncorrectedResults = (project: string, id: string, ...others: string[]): string =>
-	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.project = ${project} AND correction.corrects ${others.length === 0 ? `= ${id}` : `IN (${[id, ...others].join(", ")})`})`;
+	`NOT EXISTS (SELECT 1 FROM results correction JOIN results corrected ON corrected.id = correction.corrects
+	 AND ${validCorrection("corrected", "correction")}
+	 WHERE correction.project = ${project} AND correction.corrects ${others.length === 0 ? `= ${id}` : `IN (${[id, ...others].join(", ")})`})`;
 
 export type TestRow = {
 	id: number;
@@ -230,7 +237,8 @@ const Q = {
  SELECT r.* FROM results r WHERE r.basis_case=$caseId AND r.target=ANY($targets::bigint[]) AND ${uncorrectedResults("r.project", "r.id")} ORDER BY r.seq,r.ord`),
 
 	correctedIds: sql<{ ids: readonly number[] }, { id: number }>(
-		"SELECT DISTINCT corrects AS id FROM results WHERE corrects=ANY($ids::bigint[])",
+		`SELECT DISTINCT correction.corrects AS id FROM results correction JOIN results corrected ON corrected.id = correction.corrects
+		 AND ${validCorrection("corrected", "correction")} WHERE correction.corrects=ANY($ids::bigint[])`,
 	),
 	setResultExcuses: sql<{
 		results: readonly number[];
@@ -494,7 +502,10 @@ const Q = {
 		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.method = 'auto'
 		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.project", "r.id")})`,
 	),
-	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
+	correctionOf: sql<{ result: number }, { id: number }>(
+		`SELECT correction.id FROM results correction JOIN results corrected ON corrected.id = correction.corrects
+		 AND ${validCorrection("corrected", "correction")} WHERE correction.corrects = $result LIMIT 1`,
+	),
 	pendingCorrections: sql<{ project: number; actor: number }, { result: number }>(
 		`SELECT (staged.value->>'corrects')::bigint AS result FROM batches, jsonb_array_elements(batches.staged::jsonb) staged(value)
 		 WHERE batches.project = $project AND batches.actor = $actor AND batches.state = 'accepted'
