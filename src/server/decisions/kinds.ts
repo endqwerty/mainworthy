@@ -30,6 +30,7 @@ import {
 	setResultExcuses,
 	targetsByIds,
 	testById,
+	testInBatch,
 	testRef,
 	UNLINKED_PAGE,
 	unlinkedInFile,
@@ -312,18 +313,23 @@ async function stands(ctx: Ctx<ReadDb>, decisionId: number): Promise<boolean> {
 export const CREATE_MAX = 100_000;
 
 /** The question about a file's tests with no case, as they are now: what raising it, or opening it again, shows. */
-export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKind): Promise<Raise> {
-	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
+export async function mapRaise(
+	ctx: Ctx<ReadDb>,
+	file: string,
+	producer: ActorKind,
+	batch: number | null = null,
+): Promise<Raise> {
+	const tests = await unlinkedInFile(ctx.db, ctx.project.id, file, 0, batch);
 	// A page that is not full holds the whole set, and the question stands on its tests. Only a larger file is
 	// counted and hashed by the database, which costs a second read.
 	const whole = tests.length < UNLINKED_PAGE;
 	const { count, digest } = whole
 		? { count: tests.length, digest: "" }
-		: await unlinkedSetInFile(ctx.db, ctx.project.id, file);
+		: await unlinkedSetInFile(ctx.db, ctx.project.id, file, batch);
 	return {
 		kind: "map",
-		key: `file:${file}`,
-		subject: { file },
+		key: batch === null ? `file:${file}` : `batch:${batch}:file:${file}`,
+		subject: batch === null ? { file } : { file, batch },
 		title:
 			count === 0
 				? `No test in ${file} is left without a case`
@@ -341,14 +347,15 @@ export async function mapRaise(ctx: Ctx<ReadDb>, file: string, producer: ActorKi
 	};
 }
 
-/** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
+/** Tests with no case: a file question, or a deferred report's subset, which a loose project's rule answers. */
 export async function* raiseMapSteps(
 	ctx: Ctx,
 	raise: Tools["raiseSteps"],
 	file: string,
 	producer: ActorKind,
+	batch: number | null = null,
 ): AsyncGenerator<undefined, Raised, void> {
-	return yield* raise(ctx, await mapRaise(ctx, file, producer));
+	return yield* raise(ctx, await mapRaise(ctx, file, producer, batch));
 }
 
 /** A link a `map` decision replaced: the test, the case it was linked to, and the decision that had linked it. */
@@ -356,13 +363,15 @@ type Relinked = [test: number, previous: number | null, by?: number | null];
 
 const mapHandler: Handler<"map"> = {
 	async *effect(ctx, witness, question, answer, tools) {
-		const { file } = json<{ file: string }>(question.subject);
+		const { file, batch = null } = json<{ file: string; batch?: number }>(question.subject);
 		switch (answer.is) {
 			case "link": {
 				const linked: Relinked[] = [];
 				for (const [testText, caseText] of answer.pairs) {
 					const test = await findTest(ctx.db, ctx.project.id, testText);
 					if (!test) throw notFound(`test ${testText}`);
+					if (batch !== null && !(await testInBatch(ctx.db, batch, test.id)))
+						throw invalid(`${testText} is not part of this question's report`);
 					if (test.kind === "manual")
 						throw invalid(`${testText} is the manual run of a case and cannot be linked to another`);
 					const row = await mustCase(ctx.db, ctx.project.id, caseText);
@@ -372,14 +381,14 @@ const mapHandler: Handler<"map"> = {
 				}
 				// The answer settles the tests it names. The file's other tests with no case are asked about now,
 				// not when a new test next turns up in the file, which may be never.
-				const rest = await unlinkedInFile(ctx.db, ctx.project.id, file);
-				if (rest.length > 0) yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer);
+				const rest = await unlinkedInFile(ctx.db, ctx.project.id, file, 0, batch);
+				if (rest.length > 0) yield* raiseMapSteps(ctx, tools.raiseSteps, file, question.producer, batch);
 				return { linked };
 			}
 			case "create": {
 				// New cases go through the same adopt path as any edit. If policy does not adopt them now, the
 				// tests stay unlinked and this question is asked again when the proposal lands.
-				let tests = await unlinkedInFile(ctx.db, ctx.project.id, file);
+				let tests = await unlinkedInFile(ctx.db, ctx.project.id, file, 0, batch);
 				if (tests.length === 0) return { linked: [] };
 				// A command is one transaction, which the database ends after two minutes. A report's worth of
 				// cases fits well inside it, made for one file or several (a policy change answers every file's
@@ -387,7 +396,9 @@ const mapHandler: Handler<"map"> = {
 				// first; one that does not fit beside the files before it waits for the next command. Refused, the
 				// question stays open.
 				const count =
-					tests.length < UNLINKED_PAGE ? tests.length : (await unlinkedSetInFile(ctx.db, ctx.project.id, file)).count;
+					tests.length < UNLINKED_PAGE
+						? tests.length
+						: (await unlinkedSetInFile(ctx.db, ctx.project.id, file, batch)).count;
 				if (count > CREATE_MAX)
 					throw invalid(
 						`${file} has ${count} tests with no case, and one answer creates at most ${CREATE_MAX}: link some of them to cases first, then create the rest`,
@@ -416,7 +427,7 @@ const mapHandler: Handler<"map"> = {
 				const folder = answer.folder ?? folderFor(file);
 				const linked: Relinked[] = [];
 				const created: string[] = [];
-				// The answer is about the whole file: each page of its tests is one proposal, adopted and linked
+				// Each page of the question's tests is one proposal, adopted and linked
 				// before the next page is read.
 				while (tests.length > 0) {
 					const edits: Edit[] = tests.map((test) => ({
@@ -452,7 +463,9 @@ const mapHandler: Handler<"map"> = {
 					created.push(...refs);
 					const last = tests.at(-1);
 					tests =
-						last && tests.length === UNLINKED_PAGE ? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id) : [];
+						last && tests.length === UNLINKED_PAGE
+							? await unlinkedInFile(ctx.db, ctx.project.id, file, last.id, batch)
+							: [];
 				}
 				ctx.mapped.created += created.length;
 				if (created.length === 0) return { linked: [] };

@@ -529,19 +529,25 @@ const Q = {
 		`UPDATE tests SET case_id = asked.case_id, linked_by = $by
 		 FROM unnest($ids::bigint[], $cases::bigint[]) AS asked(id, case_id) WHERE tests.id = asked.id`,
 	),
-	unlinkedInFile: sql<{ project: number; file: string; after: number }, TestRow>(
-		`SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
+	testInBatch: sql<{ batch: number; test: number }, { present: boolean }>(
+		"SELECT EXISTS (SELECT 1 FROM results WHERE batch=$batch AND test=$test) AS present",
 	),
-	unlinkedWithoutFile: sql<{ project: number; file: string; after: number }, TestRow>(
-		`SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
+	unlinkedInFile: sql<{ project: number; file: string; batch: number | null; after: number }, TestRow>(
+		`SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND ($batch::bigint IS NULL OR EXISTS (SELECT 1 FROM results r WHERE r.batch=$batch AND r.test=tests.id)) AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
 	),
-	unlinkedSetInFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
+	unlinkedWithoutFile: sql<{ project: number; file: string; batch: number | null; after: number }, TestRow>(
+		`SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND ($batch::bigint IS NULL OR EXISTS (SELECT 1 FROM results r WHERE r.batch=$batch AND r.test=tests.id)) AND id > $after ORDER BY id LIMIT ${UNLINKED_PAGE}`,
+	),
+	unlinkedSetInFile: sql<{ project: number; file: string; batch: number | null }, { n: number; digest: string | null }>(
 		`SELECT count(*) AS n, encode(sha256(convert_to(string_agg(id::text, ',' ORDER BY id), 'UTF8')), 'hex') AS digest
-		 FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto'`,
+		 FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' AND ($batch::bigint IS NULL OR EXISTS (SELECT 1 FROM results r WHERE r.batch=$batch AND r.test=tests.id))`,
 	),
-	unlinkedSetWithoutFile: sql<{ project: number; file: string }, { n: number; digest: string | null }>(
+	unlinkedSetWithoutFile: sql<
+		{ project: number; file: string; batch: number | null },
+		{ n: number; digest: string | null }
+	>(
 		`SELECT count(*) AS n, encode(sha256(convert_to(string_agg(id::text, ',' ORDER BY id), 'UTF8')), 'hex') AS digest
-		 FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto'`,
+		 FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' AND ($batch::bigint IS NULL OR EXISTS (SELECT 1 FROM results r WHERE r.batch=$batch AND r.test=tests.id))`,
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
@@ -2048,6 +2054,9 @@ export async function findTest(db: ReadDb, project: number, text: string): Promi
 }
 export const testsOfCase = async (db: ReadDb, project: number, caseId: number): Promise<TestRow[]> =>
 	await db.all(Q.testsOfCase, { project, id: caseId });
+export const testInBatch = async (db: ReadDb, batch: number, test: number): Promise<boolean> =>
+	(await db.get(Q.testInBatch, { batch, test }))?.present ?? false;
+
 /** What the question about tests that name no file calls their file. */
 export const NO_FILE = "(no file)";
 /**
@@ -2055,8 +2064,14 @@ export const NO_FILE = "(no file)";
  * they are those that came with no file and no class name to take one from, and with them the tests of a file that
  * is really called that: the two share one question.
  */
-export const unlinkedInFile = async (db: ReadDb, project: number, file: string, after = 0): Promise<TestRow[]> =>
-	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file, after });
+export const unlinkedInFile = async (
+	db: ReadDb,
+	project: number,
+	file: string,
+	after = 0,
+	batch: number | null = null,
+): Promise<TestRow[]> =>
+	await db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file, after, batch });
 /**
  * How many tests `unlinkedInFile` pages through, and a digest of which: SHA-256 of their ordered ids, so another set
  * cannot be made to give the same one. Both are computed in the database, so a file with a million such tests costs
@@ -2066,8 +2081,9 @@ export async function unlinkedSetInFile(
 	db: ReadDb,
 	project: number,
 	file: string,
+	batch: number | null = null,
 ): Promise<{ count: number; digest: string }> {
-	const row = await db.get(file === NO_FILE ? Q.unlinkedSetWithoutFile : Q.unlinkedSetInFile, { project, file });
+	const row = await db.get(file === NO_FILE ? Q.unlinkedSetWithoutFile : Q.unlinkedSetInFile, { project, file, batch });
 	return { count: Number(row?.n ?? 0), digest: row?.digest ?? "" };
 }
 export const unlinkedCount = async (db: ReadDb, project: number): Promise<number> =>
