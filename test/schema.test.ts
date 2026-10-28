@@ -18,7 +18,9 @@ let cleanup: () => Promise<void> = async () => {};
 
 beforeAll(async () => {
 	const fixture = await testDatabase({ schema: "empty" });
-	cleanup = fixture.close;
+	cleanup = async () => {
+		await fixture.close();
+	};
 	database = await Database.open({ url: fixture.url });
 	await migrate(database);
 	pool = new SQL(fixture.url, { max: 1, bigint: true });
