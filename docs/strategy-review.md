@@ -7,7 +7,7 @@ moves, and what we would do differently from day 1.
 The raw research is in [research/strategy-2026-10-27/](research/strategy-2026-10-27/): one file per slice, every claim
 with a link and "verified 2026-10-27" (read on the vendor's own page) or "reported" (search snippet or third party).
 The four research files were gathered by Claude Sonnet 5.5 workers; this page, the drift numbers and the spot checks are
-Claude Opus 5.5's. GPT 6.1 Sol checked the claims independently and found eight wrong; this version carries its
+Claude Opus 5.5's. GPT 6.1 Sol checked the claims independently and found several wrong; this version carries its
 corrections (the [pull request](https://github.com/endqwerty/mainworthy/pull/1024) lists them).
 [competitive-analysis.md](competitive-analysis.md) is the 2026-10-10 baseline; section 3.4 lists its corrections.
 
@@ -50,8 +50,8 @@ All counts are from `origin/main` at `4091fde9`. The commands are in [Reproduce]
 Every priority and core capability has shipped in some form:
 
 - one operation registry behind HTTP, OpenAPI, the CLI, MCP and the web client (`src/server/ops/index.ts`);
-- append-only case versions; a linked result records the version it ran as exact or assumed, and a CI result with no
-  case has none until it is linked (`docs/guide/report-results.md`, "exact", "assumed", "unresolved");
+- append-only case versions; a linked result records its case version as exact (the runner named it) or assumed (the
+  current head), and a CI result with no case records none; linking a test affects later results only (`docs/guide/report-results.md`, "exact", "assumed", "unresolved");
 - CI ingestion of JUnit XML, Playwright, Jest, Vitest, pytest and TRX (`docs/guide/report-results.md`);
 - flaky detection from same-code flips (decision 0045) and quarantine with an explicit exit rule (0085); the one CI
   rerun of decision 0128 is this repository's own workflow, not a product feature;
@@ -282,10 +282,13 @@ gap may close (prediction 2). A positioning statement in April Dunford's order, 
 reject:
 
 > For teams that must show what was tested before a release, and who test with people, scripts and now agents,
-> Mainworthy is an open-source test case manager you can host yourself. It keeps every case version, records which
-> version each result (a person's, a CI job's or an agent's) ran against, and records who decided the release was
-> ready. Unlike TestRail or Xray, the full history is not an enterprise tier, and an agent's work is recorded as the
-> agent's, not as the person who gave it a token.
+> Mainworthy is an open-source test case manager you can host yourself. It keeps every case version, ties each result
+> (a person's, a CI job's or an agent's) to a case version, exact when the runner names it, and records who decided
+> the release was ready. Unlike TestRail or Xray, the full history is not an enterprise tier, and an agent's work is
+> recorded as the agent's, not as the person who gave it a token.
+
+The last clause is a candidate distinction to verify: TestRail's and Xray's agent access is in closed beta and its
+behaviour is undocumented.
 
 ### 5.3 What is commodity and what is not
 
@@ -304,7 +307,7 @@ reject:
 | | Opportunities | Threats |
 | --- | --- | --- |
 | | O1 an agent as its own actor in history was not found elsewhere; O2 agent-run cases need a record keeper (Oligarchy); O3 regulated teams pay for full history and audit, sold as enterprise tiers; O4 consolidation (Sembi) and churn give some teams a reason to host their own | T1 "don't need a TCM": tests in code, markdown with an agent; T2 CI tools give flaky detection away (Trunk, Mergify free at small scale); T3 most test management tools offer or are testing an MCP server, many with writes, scopes and reviews; T4 a team can build its own record in a month with agents |
-| **Strengths:** S1 one model for manual, CI and agent results with the case version each ran against; S2 agents as their own actors, with scopes; S3 Apache-2.0 and self-hostable, nothing held back by tier; S4 verifiable audit export and gate; S5 build speed | **Use S to take O.** Make agent-run cases first-class: check whether a case can carry an instruction and a proof, and whether a second agent's diagnosis with a controlled cause list fits the failure causes we have (S1, S2 → O2). Sell full history and audit to customer A without an enterprise price (S3, S4 → O3). Say plainly that self-hosting is the whole product, not a tier (S3 → O4) | **Use S to blunt T.** Keep cases in the repository as files Mainworthy reads and versions, so "tests are the documentation" is an import path, not a lost sale (S1 → T1). Ingest from the CI vendors instead of competing with them (S1 → T2). Lead agent claims with the agent as its own actor, since scopes and reviews are matched (S2 → T3) |
+| **Strengths:** S1 one model for manual, CI and agent results, tied to case versions (exact or assumed); S2 agents as their own actors, with scopes; S3 Apache-2.0 and self-hostable, nothing held back by tier; S4 verifiable audit export and gate; S5 build speed | **Use S to take O.** Make agent-run cases first-class: check whether a case can carry an instruction and a proof, and whether a second agent's diagnosis with a controlled cause list fits the failure causes we have (S1, S2 → O2). Sell full history and audit to customer A without an enterprise price (S3, S4 → O3). Say plainly that self-hosting is the whole product, not a tier (S3 → O4) | **Use S to blunt T.** Keep cases in the repository as files Mainworthy reads and versions, so "tests are the documentation" is an import path, not a lost sale (S1 → T1). Ingest from the CI vendors instead of competing with them (S1 → T2). Lead agent claims with the agent as its own actor, since scopes and reviews are matched (S2 → T3) |
 | **Weaknesses:** W1 no customer; W2 scope sprawl (iOS, identity, teams); W3 invented vocabulary; W4 no measured comparison with rivals; W5 process cost; W6 one maintainer | **Fix W to reach O.** Pick a customer and freeze work that does not serve it (W1, W2). Rename toward market words where meaning allows: plan, run, test case, flaky (W3). Run the comparison phase 0 asked for, with this repository's CI output (W4) | **Avoid the worst case.** A broad product that no one picks against free CI tools and markdown files. Cut scope to one customer's workflow, keep the process light, and make adopting it cost less than one afternoon (W1, W2, W5 → T1, T2) |
 
 What each freeze candidate would save, as a starting point for the owner's choice in decision 3:
@@ -343,7 +346,7 @@ Each is dated so a later reader can check it.
    a team can keep manual cases where its CI already is, and customer A has one more reason not to adopt a separate
    tool.
 2. By 2027-04-27, at least one of TestRail, Qase or Testmo records an agent as its own actor in case history. If that
-   happens, S2 stops being unique and the headline needs another basis.
+   happens, the candidate distinction behind S2 is gone and the headline needs another basis.
 3. By 2027-01-31, Oligarchy is either public under a licence or its record (definitions, results, diagnoses) moves into
    a third-party tool. If it stays private and home-grown, customer B builds rather than buys.
 4. GitHub ships native test analytics in Actions by 2027-04-27. If so, the CI group in section 3.2 becomes free for
@@ -359,7 +362,8 @@ Each is dated so a later reader can check it.
 - **Oligarchy's original repository**, its licence and whether the public copy is authorised.
 - **Pages that failed:** Sentry's test analytics docs (404), Buildkite's workflow limits (the pricing page and
   changelog disagree), TestRail's and Testmo's help centres (403), Xray's pricing page (404), Octomind's site.
-- **Usage of mainworthy.com** beyond this repository's own CI: not measured here.
+- **Usage of mainworthy.com** beyond this repository's own CI: not measured here. That there is no customer yet is the
+  owner's statement (2026-10-27: "No customer is fine"), not a measurement.
 - **Section 2.2 is commit counting.** A commit is not a unit of effort; the numbers show direction, not cost.
 
 ## 10. Questions for the owner
