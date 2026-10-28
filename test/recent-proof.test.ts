@@ -159,21 +159,27 @@ test("a proof that goes stale while it waits for the writer proves nothing", asy
 	refused(await personalToken(w, cookie));
 });
 
-test("a session holds one proof ceremony: starting another ends the first", async () => {
+test("a person holds three proof ceremonies however many sessions start them, and the oldest end first", async () => {
 	const w = await world();
-	const cookie = await joined(w, "robin");
+	const cookies = [await joined(w, "robin")];
+	for (let i = 0; i < 3; i++) cookies.push(sessionOf(await signIn(w, "robin")));
 	const ceremonies = async () =>
-		(await pgRow<{ n: number }>(w.instance.app, "SELECT count(*)::int AS n FROM identity_ceremonies"))?.n;
+		(await pgRow<{ n: number }>(w.instance.app, "SELECT count(*)::int AS n FROM identity_ceremonies"))?.n ?? 0;
 	const before = await ceremonies();
-	const first = await begin(w, { proof: true }, jar(cookie));
-	for (let i = 0; i < 5; i++) await begin(w, { proof: true }, jar(cookie));
-	const last = await begin(w, { proof: true }, jar(cookie));
-	// However many times a signed-in person starts, they hold one place in the instance's ceremonies.
-	expect(await ceremonies()).toBe((before ?? 0) + 1);
+	const first = await begin(w, { proof: true }, jar(cookies[0] ?? null));
+	let last = first;
+	let lastCookie = cookies[0] ?? "";
+	for (const cookie of cookies)
+		for (let i = 0; i < 3; i++) {
+			last = await begin(w, { proof: true }, jar(cookie));
+			lastCookie = cookie;
+		}
+	// Twelve more starts from four sessions: the person holds three places in the instance's ceremonies.
+	expect(await ceremonies()).toBe(before + 3);
 	const stale = await authorize(w, first, { subject: subjectOf("robin") });
-	expect((await finish(w, stale, jar(cookie, first.ceremony))).status).not.toBe(200);
+	expect((await finish(w, stale, jar(cookies[0] ?? null, first.ceremony))).status).not.toBe(200);
 	const query = await authorize(w, last, { subject: subjectOf("robin") });
-	expect(must(await finish(w, query, jar(cookie, last.ceremony)))).toEqual({ proven: true });
+	expect(must(await finish(w, query, jar(lastCookie, last.ceremony)))).toEqual({ proven: true });
 });
 
 test("an invitation holds at most three acceptance ceremonies, so starting many cannot fill the instance's", async () => {
