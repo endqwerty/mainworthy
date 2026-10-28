@@ -132,25 +132,32 @@ const Q = {
 	automated: sql<{ project: number }, { case_id: number }>(
 		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND kind = 'auto' AND case_id IS NOT NULL",
 	),
+	// Follow at most 64 correction links. An unresolved branch makes the execution untimed: its final
+	// outcome could outrank every resolved branch, so using a prefix's duration would claim a time we do not know.
 	byHand: sql<
 		{ project: number; since: number; until: number },
 		{ case_id: number; runs: number; timed: number; time: number | null; average: number | null }
 	>(`
         WITH RECURSIVE executions AS (
-          SELECT r.id, t.case_id FROM results r JOIN tests t ON t.id = r.test
+          SELECT r.id, t.case_id FROM results r JOIN tests t ON t.id = r.test AND t.project = $project
           WHERE r.project = $project AND r.at >= $since AND r.at <= $until
             AND r.method = 'human' AND t.case_id IS NOT NULL AND r.corrects IS NULL
-        ), chain(root, id, outcome, duration_ms, seq, ord) AS (
-          SELECT e.id, r.id, r.outcome, r.duration_ms, r.seq, r.ord FROM executions e JOIN results r ON r.id = e.id
+        ), chain(root, id, outcome, duration_ms, seq, ord, depth) AS (
+          SELECT e.id, r.id, r.outcome, r.duration_ms, r.seq, r.ord, 0 FROM executions e JOIN results r ON r.id = e.id AND r.project = $project
           UNION ALL
-          SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord FROM chain k JOIN results c ON c.corrects = k.id
+          SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord, k.depth + 1 FROM chain k
+          JOIN results c ON c.corrects = k.id AND c.project = $project WHERE k.depth < 64
+        ), leaves AS MATERIALIZED (
+          SELECT k.*, EXISTS (
+            SELECT 1 FROM results c WHERE c.corrects = k.id AND c.project = $project
+          ) AS corrected FROM chain k
         ), standing AS (
-          SELECT e.case_id, k.duration_ms, row_number() OVER (
-            PARTITION BY k.root ORDER BY
+          SELECT e.case_id, CASE WHEN k.corrected THEN NULL ELSE k.duration_ms END AS duration_ms, row_number() OVER (
+            PARTITION BY k.root ORDER BY k.corrected DESC,
               CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
               k.seq DESC, k.ord DESC
           ) AS rank
-          FROM executions e JOIN chain k ON k.root = e.id WHERE ${uncorrectedResults("k.id")}
+          FROM executions e JOIN leaves k ON k.root = e.id WHERE k.depth = 64 OR NOT k.corrected
         )
         SELECT case_id, count(*) AS runs, count(duration_ms) AS timed,
           CASE WHEN count(duration_ms) = 0 THEN NULL

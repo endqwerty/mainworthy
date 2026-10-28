@@ -3,7 +3,7 @@ import { random } from "../src/cli/demo/cases.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { replacesInLane } from "../src/core/runs.ts";
 import { RerunsReply, type StatsKind, type StatsOf } from "../src/core/stats.ts";
-import { type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { declaredSql, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { parsePlaywright } from "../src/surfaces/formats/playwright.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -820,4 +820,81 @@ test("manual effort ranks known cost and counts corrections in the original exec
 			(r) => r.case === "C-1",
 		),
 	).toMatchObject({ runs: 1, timed: 0, untimed: 1, timeMs: null });
+});
+
+test("manual effort bounds correction traversal and keeps truncated executions untimed", async () => {
+	h = await harness();
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Long chain", methods: ["human"] } }] });
+	await h.call("report", {
+		target: { session: "bounded" },
+		results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 10 }],
+	});
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				await db.exec(`
+   INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at)
+   SELECT r.project,r.test,r.seq,r.ord+u.n,r.batch,r.target,r.method,r.actor,r.basis,r.basis_case,r.basis_version,r.basis_claim,r.outcome,r.attempt,999,r.at
+   FROM results r CROSS JOIN generate_series(1,1024) AS u(n);
+   WITH links AS (SELECT id, lag(id) OVER (ORDER BY ord) AS prior FROM results)
+   UPDATE results r SET corrects = links.prior FROM links WHERE r.id = links.id;
+   INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at,corrects)
+   SELECT project,test,seq,1025,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,'fail',attempt,333,at,id
+   FROM results WHERE corrects IS NULL;
+  `);
+			}),
+	);
+	const query = declaredSql().find((q) => q.text.includes("FROM standing WHERE rank = 1 GROUP BY case_id"));
+	if (!query?.names) throw new Error("manual effort query missing");
+	const names = query.names;
+	const plan = await h.app.database.read(async (db) => {
+		const { project } = await db.one(sql<readonly [], { project: number }>("SELECT project FROM results LIMIT 1"));
+		const values: Record<string, number> = { project, since: 0, until: Number.MAX_SAFE_INTEGER };
+		return await db.allDynamic<{ "QUERY PLAN": string }>(
+			`EXPLAIN (ANALYZE, FORMAT TEXT) ${query.text}`,
+			names.map((name) => values[name] ?? null),
+		);
+	});
+	const work = plan.map((row) => row["QUERY PLAN"]).filter((line) => line.includes("WorkTable Scan"));
+	expect(work.length).toBeGreaterThan(0);
+	for (const line of work) {
+		const loops = /actual .*loops=(\d+)/.exec(line)?.[1];
+		expect(Number(loops)).toBeLessThanOrEqual(65);
+	}
+	expect((await stats({ of: "manual-effort", days: 1 })).items).toMatchObject([
+		{ case: "C-1", runs: 1, timed: 0, untimed: 1, timeMs: null, averageMs: null },
+	]);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () => await db.exec("DELETE FROM results WHERE ord > (SELECT min(ord) + 64 FROM results)"),
+			),
+	);
+	expect((await stats({ of: "manual-effort", days: 1 })).items).toMatchObject([
+		{ case: "C-1", runs: 1, timed: 1, untimed: 0, timeMs: 999, averageMs: 999 },
+	]);
+});
+
+test("manual effort ignores cross-project corrections in traversal and standing lookup", async () => {
+	h = await harness();
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Local timing", methods: ["human"] } }] });
+	await h.call("report", {
+		target: { session: "local" },
+		results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 10 }],
+	});
+	await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.exec(`
+  INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at,corrects)
+  SELECT p.id,r.test,r.seq,r.ord+1,r.batch,r.target,r.method,r.actor,r.basis,r.basis_case,r.basis_version,r.basis_claim,r.outcome,r.attempt,999,r.at,r.id
+  FROM results r CROSS JOIN projects p WHERE p.key = 'other';
+ `),
+			),
+	);
+	expect((await stats({ of: "manual-effort", days: 1 })).items).toMatchObject([
+		{ case: "C-1", runs: 1, timed: 1, timeMs: 10, averageMs: 10 },
+	]);
 });
