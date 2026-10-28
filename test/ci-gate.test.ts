@@ -1,19 +1,31 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Mainworthy: the result is Mainworthy's gate, and a report that is missing or says less than happened is not a pass.
-import { expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
+import { budget, FAIL_MULTIPLE } from "../scripts/budget.ts";
 import { runCiGate } from "../scripts/ci-gate.ts";
 import { chooseInstance, contractDifferences, deploymentFetch, type Probe, startOwn } from "../scripts/ci-instance.ts";
+import { beginDatabaseRun, drainRecordedDatabases } from "../scripts/work/test-databases.ts";
 import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 import { inThisProcess, type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
 import { sql } from "../src/server/kernel/db.ts";
 import { openApi } from "../src/surfaces/http.ts";
+
+// Gate subprocesses release databases to this file, outside each behavioral test's deadline.
+const ownDatabases = beginDatabaseRun(process.cwd());
+const cleanupBaselineMs = 20_000;
+afterAll(async () => {
+	const began = performance.now();
+	await drainRecordedDatabases(ownDatabases.directory);
+	await rm(ownDatabases.directory, { recursive: true, force: true });
+	budget("ci-gate database cleanup", performance.now() - began, cleanupBaselineMs, "ms");
+}, FAIL_MULTIPLE * cleanupBaselineMs);
 
 /** A file whose tests did not run at all, as on a runner with no browser. */
 const SKIPPED = Symbol("every test skipped");
@@ -116,6 +128,7 @@ async function gate(
 					PATH: process.env.PATH ?? "",
 					HOME: root,
 					MAINWORTHY_TEST_PG: process.env.MAINWORTHY_TEST_PG ?? "",
+					MAINWORTHY_TEST_DATABASES: ownDatabases.directory,
 					// What the job leaves in the temporary directory is this test's to count.
 					TMPDIR: join(root, "tmp"),
 					MAINWORTHY_URL: instance.url,
@@ -149,6 +162,7 @@ async function gate(
 					}
 					return {
 						code: result.code,
+						releasedDatabases: 0,
 						output: result.stdout + result.stderr,
 						summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
 						left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(result.stdout))],
@@ -189,6 +203,9 @@ async function gate(
 				const [stdout, stderr, code] = await Promise.all([printed(), new Response(child.stderr).text(), child.exited]);
 				return {
 					code,
+					releasedDatabases: (await readdir(ownDatabases.directory)).filter(
+						(name) => name.startsWith(`mw_test_${child.pid}_`) && name.endsWith(".released"),
+					).length,
 					output: stdout + stderr,
 					summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
 					/** What the job left behind: files in its temporary directory, and its own Mainworthy if that still runs. */
@@ -634,7 +651,8 @@ test("a shard that left no report fails the job, and the gate waits for that sha
 	);
 	expect(result.output).not.toContain("::warning::");
 	expect(result.batches).toBe(0);
-	// Its own Mainworthy is stopped and its data removed when the job ends.
+	// Its server and local files are gone; PostgreSQL cleanup is handed to the file teardown.
+	expect(result.releasedDatabases).toBe(1);
 	expect(result.output).toMatch(/^Started a Mainworthy for this job: http:\/\/127\.0\.0\.1:\d+ \(process \d+\)$/m);
 	expect(result.left).toEqual([]);
 	expect(result.output).toContain("job tests  shard 1/2");
