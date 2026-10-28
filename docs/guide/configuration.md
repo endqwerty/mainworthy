@@ -270,7 +270,7 @@ The four variables are set together or not at all. Startup stops when only some 
 
 Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through the identity provider](./access.md#through-the-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
 
-To confirm it is somebody before a sign-in change, Mainworthy sends them back to the provider with `max_age=0`, which asks the provider to sign them in again. It also asks for the `auth_time` claim, and takes the proof only when the ID token says the person signed in there within the last ten minutes. A provider that leaves the claim out gives no proof, so enable it where the provider offers the choice. [Confirm it is you](./access.md#confirm-it-is-you) has the rest.
+To confirm it is somebody before a sign-in change, Mainworthy sends them back to the provider with `max_age=0`, which asks the provider to sign them in again. It also asks for the `auth_time` claim, and takes the proof only when the ID token says the person signed in there after the confirmation began. The proof lasts ten minutes from that sign-in. A provider that leaves the claim out gives no proof, so enable it where the provider offers the choice. [Confirm it is you](./access.md#confirm-it-is-you) has the rest.
 
 An identity is the provider's issuer and its subject for the person. If you change `MAINWORTHY_OIDC_ISSUER`, identities linked at the old issuer sign nobody in: sign in with the owner token, link your new identity, and invite everybody else again.
 

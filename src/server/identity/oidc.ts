@@ -183,7 +183,8 @@ export async function finishOidc(
 	app: App,
 	input: { query: string; browser: string | null; redirect: string },
 ): Promise<
-	{ ok: true; purpose: OidcPurpose; identity: Identity; generation: string } | { ok: false; why: OidcRefusal }
+	| { ok: true; purpose: OidcPurpose; identity: Identity; generation: string; begun: number }
+	| { ok: false; why: OidcRefusal }
 > {
 	const params = new URLSearchParams(input.query);
 	const state = params.get("state");
@@ -217,6 +218,7 @@ export async function finishOidc(
 			ok: true,
 			purpose: kept.purpose,
 			generation,
+			begun: kept.deadline - CEREMONY_MS,
 			identity: {
 				issuer: claims.iss,
 				subject: claims.sub,

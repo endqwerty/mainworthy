@@ -581,12 +581,14 @@ export async function finishOidcSignIn(
 	}
 	if (purpose.purpose === "proof") {
 		const proving = purpose;
-		// Proof is a sign-in at the provider that it says happened in the last ten minutes. An answer that does not
+		// Proof is a sign-in at the provider that it says happened during this ceremony. An answer that does not
 		// say when (a provider that leaves out `auth_time`, or Google without it enabled) would be a silent single
 		// sign-on from whoever sits at the browser, so it proves nothing; a time still to come, beyond the clock
-		// tolerance the library allows a token, proves nothing either.
+		// tolerance the library allows a token, proves nothing either. A sign-in from before the ceremony began is
+		// one the provider did not ask for again, whatever `max_age` said, so it proves nothing.
 		const authTime = identity.authTime;
 		if (authTime === null || authTime - app.now() > AUTH_TIME_SKEW_MS) return no("unverified");
+		if (authTime < judged.begun - AUTH_TIME_SKEW_MS) return no("stale");
 		return await commit(app, { identity: [proving.actor] }, async (db): Promise<OidcFinished> => {
 			// Judged on the clock of the commit: a proof that went stale while waiting for the writer proves nothing.
 			if (app.now() - authTime > PROOF_MS) return no("stale");
@@ -596,7 +598,9 @@ export async function finishOidcSignIn(
 				return no("context");
 			const row = await oidcByHandle(db, handle);
 			if (!row || row.actor !== proving.actor) return no("other-identity");
-			if (!(await dateSessionProof(app, db, { actor: proving.actor, context: CONTEXT.session(proving.session) })))
+			// Proof lasts ten minutes from the sign-in at the provider, not from its answer arriving here.
+			const at = Math.min(authTime, app.now());
+			if (!(await dateSessionProof(app, db, { actor: proving.actor, context: CONTEXT.session(proving.session) }, at)))
 				return no("changed-meanwhile");
 			await noteCredentialUse(db, row.id, app.now());
 			return { ok: true, proven: true };

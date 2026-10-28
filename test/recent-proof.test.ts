@@ -105,14 +105,21 @@ test("a provider session has no proof until its person signs in at the provider 
 	expect(said(await proofBegin(w, jar(first)))).toBe("401 unauthenticated");
 });
 
-test("the provider's word is proof only when it signed the person in within the last ten minutes", async () => {
+test("the provider's word is proof only for a sign-in during this ceremony, and lasts ten minutes from it", async () => {
 	const w = await world();
 	const cookie = await joined(w, "robin");
-	const old = await prove(w, cookie, "robin", seconds(w.clock.now() - PROOF_MS) - 1);
-	expect(said(old)).toBe("403 forbidden");
+	// A provider that ignored `max_age=0` answers with the sign-in it already had, from before the ceremony.
+	expect(said(await prove(w, cookie, "robin", seconds(w.clock.now()) - 31))).toBe("403 forbidden");
 	refused(await personalToken(w, cookie));
-	expect(must(await prove(w, cookie, "robin", seconds(w.clock.now() - PROOF_MS)))).toEqual({ proven: true });
+	// Signed in at the provider when the ceremony began, the answer arrives four minutes later.
+	const began = w.clock.now();
+	const begun = await begin(w, { proof: true }, jar(cookie));
+	w.clock.advance(4 * 60_000);
+	const query = await authorize(w, begun, { subject: subjectOf("robin"), authTime: seconds(began) });
+	expect(must(await finish(w, query, jar(cookie, begun.ceremony)))).toEqual({ proven: true });
 	expect((await personalToken(w, cookie)).status).toBe(200);
+	w.clock.advance(seconds(began) * 1000 + PROOF_MS + 1 - w.clock.now());
+	refused(await personalToken(w, cookie));
 });
 
 test("an answer that does not say when the person signed in, or says a time to come, proves nothing", async () => {
@@ -133,15 +140,15 @@ test("a proof that goes stale while it waits for the writer proves nothing", asy
 	const begun = await begin(w, { proof: true }, jar(cookie));
 	const query = await authorize(w, begun, {
 		subject: subjectOf("robin"),
-		authTime: seconds(w.clock.now() - PROOF_MS) + 1,
+		authTime: seconds(w.clock.now()),
 	});
-	// The answer is judged fresh before the write gate, and two seconds pass while it waits there.
+	// The answer is judged fresh before the write gate, and ten minutes pass while it waits there.
 	const database = w.instance.app.database;
 	const write = database.write.bind(database);
 	let writes = 0;
 	database.write = ((fn: Parameters<typeof write>[0]) => {
 		writes++;
-		if (writes === 1) w.clock.advance(2000);
+		if (writes === 1) w.clock.advance(PROOF_MS + 1000);
 		return write(fn);
 	}) as typeof database.write;
 	try {

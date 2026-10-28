@@ -402,8 +402,8 @@ changes that give `admin`, and importing an archive. Proof lasts ten minutes.
   sign in again rather than reuse its own session. The provider must sign in the same person: another identity is
   refused.
 
-The provider must say when you signed in there (the ID token's `auth_time`), and that must be within the last ten
-minutes. A provider that does not say gives no proof: whoever runs the instance enables the claim at the provider
+The provider must say when you signed in there (the ID token's `auth_time`), and that must be after you pressed
+**Confirm with**. The proof lasts ten minutes from that sign-in. A provider that does not say gives no proof: whoever runs the instance enables the claim at the provider
 (for Google, see [Google accounts](./configuration.md#google-accounts)). A session opened with a token proves by
 signing in with the token again.
 
