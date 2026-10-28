@@ -1576,15 +1576,35 @@ check(
 			for (const path of ["/p/scratch/queue", "/p/scratch/suite/c/1"]) {
 				h = await openPage(server, { path });
 				await h.page.getByRole("button", { name: "Create GitHub issue", exact: true }).waitFor();
+				const previewResponse = h.page.waitForResponse(
+					async (response) =>
+						response.url().endsWith("/tracker") && response.request().postDataJSON()?.do === "preview",
+				);
 				await h.page.keyboard.press("Alt+g");
+				const previewReply = await (await previewResponse).json();
+				const preview = z
+					.object({
+						result: z.object({ destination: z.string(), title: z.string(), body: z.string(), confirm: z.string() }),
+					})
+					.parse(previewReply).result;
 				await h.page
 					.getByText(
 						"The issue includes the failure, target, build URL and recorded case content. The repository may be public.",
 					)
 					.waitFor();
 				await h.page.locator(".tracker-create pre").filter({ hasText: "Tracker create case" }).waitFor();
+				expect(await h.page.locator(".tracker-create pre").textContent()).toBe(
+					`Destination: ${preview.destination}\nTitle: ${preview.title}\n\n${preview.body}`,
+				);
+				expect(preview.body).toContain("Environment:");
+				expect(preview.body).toContain("Test:");
 				await Promise.all([
-					h.page.waitForResponse((response) => response.url().endsWith("/tracker")),
+					h.page.waitForResponse(
+						(response) =>
+							response.url().endsWith("/tracker") &&
+							response.request().postDataJSON()?.do === "create" &&
+							response.request().postDataJSON()?.confirm === preview.confirm,
+					),
 					h.page.getByRole("button", { name: "Send to tracker", exact: true }).click(),
 				]);
 				await instance.minute();

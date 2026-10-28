@@ -692,7 +692,7 @@ Announce a deployment and bind its build label to an attested artifact. Pipeline
 
 ### tracker
 
-Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking.
+Preview or queue a defect from a failed result, or validate an existing issue for linking.
 
 |  |  |
 | --- | --- |
@@ -707,13 +707,17 @@ Queue a defect from a failed result: create a tracker issue or validate an exist
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `[1].do` | `"create"` | yes |  |
+| `[1].do` | `"preview"` | yes |  |
 | `[1].result` | `integer` | yes |  |
 | `[1].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
-| `[2].do` | `"link"` | yes |  |
+| `[2].do` | `"create"` | yes |  |
 | `[2].result` | `integer` | yes |  |
-| `[2].key` | `string` | yes |  |
+| `[2].confirm` | `string` | no |  |
 | `[2].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
+| `[3].do` | `"link"` | yes |  |
+| `[3].result` | `integer` | yes |  |
+| `[3].key` | `string` | yes |  |
+| `[3].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 
 </details>
 

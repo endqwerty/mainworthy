@@ -44,7 +44,7 @@ import {
 } from "./schema.ts";
 import { StatsReply } from "./stats-replies.ts";
 import { TeamReply, TeamSource } from "./team-replies.ts";
-import { TrackerReceipt } from "./tracker.ts";
+import { TrackerPreview, TrackerReceipt } from "./tracker.ts";
 
 export const CaseStamp = z.object({
 	ref: schemaText,
@@ -855,7 +855,7 @@ export const REPLIES = {
 	attach: Attachment,
 	attachment: AttachmentReply,
 	audit: AuditReply,
-	tracker: TrackerReceipt,
+	tracker: z.union([TrackerReceipt, TrackerPreview]),
 	"tracker-status": TrackerReceipt,
 	handoff: HandoffReceipt,
 	"handoff-status": HandoffStatus,

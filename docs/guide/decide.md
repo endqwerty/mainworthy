@@ -491,11 +491,16 @@ A link then takes a Jira key. Mainworthy still checks existing holds from either
 On a failure question in the queue or the case's history, choose **Create GitHub issue** (or **Create tracker issue** for Jira).
 The action appears only when the server reports a configured tracker and your project grant includes `read` and `produce`.
 Use <kbd>Alt</kbd>+<kbd>g</kbd>, or find the action for the question in the palette. In a case with several failures, choose the question in the palette.
-Review the destination, failure, target, build URL and recorded case content, then choose **Send to tracker**.
+Review the exact destination, title and body returned by the server, then choose **Send to tracker**.
+The body includes the project, case basis, test reference and name, result and outcome, raw target, environment, build URL, failure and recorded case content.
+The web sends the preview’s confirmation digest. If the destination or content changed, the server refuses with `conflict`; cancel and open the review again before sending.
 The request uses the question's latest sample failed result. The screen shows the created issue's link or the error returned by the server.
 Creating an issue does not answer the question or excuse the failure; use the issue reference in a defect answer when appropriate.
 
 Use `mainworthy tracker` or the API to create an issue from a failed or errored result.
+The CLI can create without a confirmation digest because it has no review step.
+API callers can send `do: "preview"` with the same result and command id as creation, then send `do: "create"` with the returned `confirm` digest.
+Preview is a read: it queues nothing and does not consume the command id.
 The request sends the failure message and detail, the tested target, and the reported build URL to that destination.
 It also sends the recorded case version and its content when known.
 Review what the report contains before sending it to a public repository or shared Jira project.

@@ -5,7 +5,17 @@ const request = z.string().min(8).max(64);
 const result = z.number().int().positive();
 
 export const TrackerInput = z.discriminatedUnion("do", [
-	z.strictObject({ do: z.literal("create"), result, ...projectCommand, cmd: request }),
+	z.strictObject({ do: z.literal("preview"), result, ...projectCommand, cmd: request }),
+	z.strictObject({
+		do: z.literal("create"),
+		result,
+		confirm: z
+			.string()
+			.regex(/^[a-f0-9]{64}$/)
+			.optional(),
+		...projectCommand,
+		cmd: request,
+	}),
 	z.strictObject({ do: z.literal("link"), result, key: z.string().min(1).max(100), ...projectCommand, cmd: request }),
 ]);
 export type TrackerInput = z.infer<typeof TrackerInput>;
@@ -26,3 +36,11 @@ export const TrackerReceipt = z.object({
 	error: z.string().nullable(),
 });
 export type TrackerReceipt = z.infer<typeof TrackerReceipt>;
+
+export const TrackerPreview = z.object({
+	destination: z.string(),
+	title: z.string(),
+	body: z.string(),
+	confirm: z.string(),
+});
+export type TrackerPreview = z.infer<typeof TrackerPreview>;
