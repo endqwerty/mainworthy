@@ -6,7 +6,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
 import * as identity from "../src/server/identity/identity.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
-import { pgRun } from "./identity-db.ts";
+import { pgRow, pgRun } from "./identity-db.ts";
 import {
 	authorize,
 	bearer,
@@ -157,6 +157,23 @@ test("a proof that goes stale while it waits for the writer proves nothing", asy
 		database.write = write;
 	}
 	refused(await personalToken(w, cookie));
+});
+
+test("a session holds one proof ceremony: starting another ends the first", async () => {
+	const w = await world();
+	const cookie = await joined(w, "robin");
+	const ceremonies = async () =>
+		(await pgRow<{ n: number }>(w.instance.app, "SELECT count(*)::int AS n FROM identity_ceremonies"))?.n;
+	const before = await ceremonies();
+	const first = await begin(w, { proof: true }, jar(cookie));
+	for (let i = 0; i < 5; i++) await begin(w, { proof: true }, jar(cookie));
+	const last = await begin(w, { proof: true }, jar(cookie));
+	// However many times a signed-in person starts, they hold one place in the instance's ceremonies.
+	expect(await ceremonies()).toBe((before ?? 0) + 1);
+	const stale = await authorize(w, first, { subject: subjectOf("robin") });
+	expect((await finish(w, stale, jar(cookie, first.ceremony))).status).not.toBe(200);
+	const query = await authorize(w, last, { subject: subjectOf("robin") });
+	expect(must(await finish(w, query, jar(cookie, last.ceremony)))).toEqual({ proven: true });
 });
 
 test("proof is of the person's own identity: another person's, or one nobody linked, proves nothing", async () => {
