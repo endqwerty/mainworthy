@@ -61,6 +61,7 @@ import {
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
 import { recordQuarantines, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { announce } from "../evidence/releases.ts";
+import { MAP_FILES_PER_PAGE, saveReportMapPage } from "../evidence/report-maps.ts";
 import {
 	actorByName,
 	actorLabel,
@@ -100,7 +101,6 @@ import { enrollCommitStatus } from "../statuses/statuses.ts";
 import { selectCases } from "../suite/read.ts";
 import { type CaseRow, caseRef, mustCase, sealSteps } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
-import { MAP_FILES_PER_PAGE } from "./report-maps.ts";
 
 export const announceOp = defineOp({
 	name: "announce",
@@ -330,12 +330,14 @@ export async function* processBatchSteps(
 		yield;
 	}
 	for (let offset = MAP_FILES_PER_PAGE; offset < orderedFiles.length; offset += MAP_FILES_PER_PAGE) {
-		await enqueueJob(ctx.db, {
-			kind: "report-maps",
-			key: `${batch.id}:${offset}`,
-			input: { project: ctx.project.id, producer, files: orderedFiles.slice(offset, offset + MAP_FILES_PER_PAGE) },
+		await saveReportMapPage(ctx.db, {
+			id: `${batch.id}:${offset}`,
+			project: ctx.project.id,
+			batch: batch.id,
+			producer,
+			files: orderedFiles.slice(offset, offset + MAP_FILES_PER_PAGE),
 			actor: batch.actor,
-			acceptedAt: ctx.now,
+			at: ctx.now,
 		});
 		yield;
 	}
