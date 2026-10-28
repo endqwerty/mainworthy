@@ -229,7 +229,8 @@ check(
 check(
 	"R3C-5 a select changes once, when the choice is made from its open list, and gives the focus back then",
 	async () => {
-		const server = await startServer({ mode: "server", cases: 2 });
+		// The policy selects require a preset; the demo seeds a custom release-approval policy.
+		const server = await startServer({ mode: "server", cases: 2, preset: "standard" });
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
