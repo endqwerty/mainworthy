@@ -48,7 +48,7 @@ To set up a checkout, follow these steps:
 	```
 
 	The server prints its address, `http://127.0.0.1:7357`, and the data directory it uses. On a loopback address
-	the server runs in local mode and signs you in as the owner without a password.
+	the server runs in local mode and signs you in as the owner with no step.
 
 `scripts/preflight.ts` checks the Bun version and the installed packages before the check runs. If either is
 missing, it prints one line that says what to do and exits with code 4.

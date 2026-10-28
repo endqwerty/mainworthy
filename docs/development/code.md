@@ -15,7 +15,7 @@ design. Read it before you change identity, sessions, runs or policy.
 | `src/server/evidence/` | tests, targets, batches, results, causes, findings, flaky detection, quarantine, attachments, stats |
 | `src/server/runs/` | change runs, planned runs, slots and the verdict |
 | `src/server/decisions/` | questions, answers and the ledger of decisions, and the handlers for each kind of question |
-| `src/server/identity/` | actors, tokens, sessions, passwords, passkeys, TOTP, OIDC, invitations, teams and the sign-in limiter |
+| `src/server/identity/` | actors, tokens, sessions, OIDC identities, invitations, teams and the sign-in limiter |
 | `src/server/policy/` | the clause table that says who answers each kind of question |
 | `src/server/trackers/`, `src/server/statuses/` | defect issues on GitHub or Jira, and commit statuses on GitHub |
 | `src/server/handoffs/` | delivery of failure questions to coding agents and the delivery receipts |

@@ -85,7 +85,7 @@ $ tail -n 1 mainworthy.ndjson
 
 You can read the archive with any tool that reads text or search it with `grep`. If the data is suitable for version control, you can keep the archive there.
 
-The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships, team history, recovery addresses and their verification status. It leaves out tokens, sessions, passwords, passkeys, authenticators, passkey handles and invitations. It also leaves out the search and assertion-presence indexes. Mainworthy rebuilds both on import. Tracker delivery requests are excluded, so restoring an archive never sends an issue again.
+The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships and team history. It leaves out tokens, sessions, linked identities and invitations. It also leaves out the search and assertion-presence indexes. Mainworthy rebuilds both on import. Tracker delivery requests are excluded, so restoring an archive never sends an issue again.
 
 The archive leaves out which changes have ended. After an import every change is open. Questions that were closed when a change ended stay closed. If a failure on such a change is reported again, use `mainworthy change` to record again that the change ended.
 
@@ -106,7 +106,7 @@ The archive preserves IDs, head hashes and verdicts. It includes actors who acte
 or have a grant on it. The archive also includes the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
 grants travel with them. Other projects, their grants, instance metadata and commands outside the project stay out.
 Relevant teams, their memberships, grants on this project or every project, and history for that scope travel too. Other project team grants and their events stay out.
-Recovery addresses and their verification status travel for the included people. Pending verification and reset links never travel. Tokens and other sign-in credentials never travel.
+Tokens, linked identities and other sign-in records never travel.
 
 The HTTP equivalent is `GET /api/export?project=shop`, with the same instance admin requirement as a full export.
 An unknown key is an error. Without `--project`, the command exports the whole instance, even when
@@ -400,7 +400,7 @@ imports keep their existing operator authority.
 To import an archive, follow these steps:
 
 1. Start a new instance, and make no changes before importing, apart from the sign-in a browser import needs (step 2).
-2. Run `mainworthy import` with the archive. The CLI imports with a bearer token or in local mode, so it needs no recent proof. To import from a browser session instead, first set the owner's password and prove it with `POST /api/account/proof`.
+2. Run `mainworthy import` with the archive. The CLI imports with a bearer token or in local mode, so it needs no recent proof. To import from a browser session instead, sign in with the owner token, or [confirm it is you](./access.md#confirm-it-is-you) with the provider, within ten minutes of the import.
 
 ```
 $ mainworthy import mainworthy.ndjson.gz
@@ -464,13 +464,13 @@ This build uses archive format 1 and schema 44. Import validates the table and c
 before committing. It does not open or convert a SQLite database file. Preserve the original database and a
 matching executable for archives whose older schema this build refuses.
 
-After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey, authenticator or invitation either. The people, agents and pipelines are still there with their grants. Verified recovery addresses stay verified; with configured mail, they can authorize a password reset.
+After an import in server mode, the tokens are gone, because the archive carries none. It carries no linked identity or invitation either. The people, agents and pipelines are still there with their grants.
 
 To restore access in server mode, follow these steps:
 
 1. Restart the server. With no owner token configured, the server prints a new one. With `MAINWORTHY_OWNER_TOKEN` set, the server uses that value.
 2. Make new tokens for the others with `mainworthy token new`.
-3. As the owner, invite each person again with `mainworthy invite new <name>`. For an existing person, the command prints a recovery link.
+3. As the owner, sign in with the owner token, link your identity at the provider, and invite each person again with `mainworthy invite new <name>`. For an existing person, the command prints a recovery link, which they accept by signing in at the provider.
 
 In local mode, Mainworthy refreshes the owner and you can carry on.
 

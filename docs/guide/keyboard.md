@@ -238,9 +238,8 @@ A step number typed before <kbd>f</kbd> marks the failed step. [Planned runs](./
 | <kbd>n</kbd> | New token, in the Tokens section |
 | <kbd>n</kbd> | New project, in the Projects section |
 | <kbd>n</kbd> | New invitation, in the People section. Focuses the person's name. |
-| <kbd>n</kbd> | New password, in the Your sign-in section |
 
-Settings has no key that ends a session or removes a passkey. <kbd>Tab</kbd> reaches "End" and "Remove".
+Settings has no key that ends a session or unlinks an identity. <kbd>Tab</kbd> reaches "End" and "Remove".
 
 ## The sign-in page and an invitation
 
@@ -251,8 +250,7 @@ Both pages use plain forms with these keys.
 | --- | --- |
 | <kbd>Tab</kbd> | Next field or button, in the order they are on the page |
 | <kbd>↵</kbd> | Send the current form to sign in or accept the invitation |
-| <kbd>Space</kbd> | Ticks "Make a passkey on this device" on an invitation, when the caret is on it |
 
-The caret starts in the name on the sign-in page and in the password on an invitation.
+Focus starts on the provider's button on the sign-in page, and on **Accept with** and the provider's name on an invitation.
 If the browser is signed in as somebody else, an invitation first asks whether to sign that person out. Focus starts on **Continue**.
 A pressed button keeps keyboard focus while its request runs and after a refusal. The next <kbd>↵</kbd> tries again.

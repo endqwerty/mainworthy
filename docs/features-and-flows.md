@@ -60,7 +60,7 @@ actions, switches projects and searches the docs. `?` lists the keys of the scre
   history. Teams group people and carry grants per project.
 - **Projects** makes projects. **Connect** shows how to point a pipeline at the instance. **Your home** saves
   where the app opens for you.
-- **Your sign-in** holds your password, passkeys, authenticator app and recovery email. **Your sessions** lists
+- **Your sign-in** links your identities at the identity provider and makes your command-line tokens. **Your sessions** lists
   and ends your browser sessions.
 
 ## The command line
@@ -75,7 +75,7 @@ Every operation is a command. These adapters do more than send one operation:
 | `new`, `get --md`, `fmt` | writes a case from Markdown or an outline, prints a case as Markdown, and formats case Markdown |
 | `import`, `import-csv` | restores an archive into an empty instance, or proposes cases from CSV, TestRail or Qase |
 | `export`, `audit` | writes an archive of an instance or a project, and exports or verifies an audit file |
-| `token`, `actor`, `invite`, `login`, `policy` | manages tokens, actors and grants, invitations, a personal CLI token and the policy |
+| `token`, `actor`, `invite`, `policy` | manages tokens, actors and grants, invitations and the policy |
 | `mcp` | serves MCP on stdin and stdout for an agent |
 | `seed <project>` | fills a new project with a shop's suite, two weeks of history and a queue |
 | `health`, `open`, `version` | checks that the server answers, prints its URL, prints the CLI and API versions |
@@ -174,13 +174,15 @@ planned run that asked for agents.
 
 ### Sign in
 
-1. A browser signs in with a name and password (with an authenticator code if one is enrolled), a passkey, an
-   OIDC provider the instance names, or a token. A browser never keeps a token: `POST /api/login` opens a
-   session and sets a cookie of which the server stores only a hash.
-2. A person joins or recovers an account through an invitation link that works once, for up to 30 days. It can
-   be sent by mail.
-3. A session ends at sign-out, when what opened it is revoked, after 14 days unused or after 90 days.
-4. `mainworthy login` exchanges a password for a personal CLI token, shown once.
+1. A person signs in through the OpenID Connect provider the instance names; the owner can also type the owner
+   token, and anyone can sign in with a token. A browser never keeps a token: `POST /api/login` opens a session
+   and sets a cookie of which the server stores only a hash.
+2. A person joins or recovers an account through an invitation link that works once, for up to 30 days, and is
+   accepted by signing in at the provider. An instance with no provider makes no invitation.
+3. A sign-in change, a token or invitation made in a browser, an `admin` grant and an archive import need proof
+   from the last ten minutes: a token sign-in, or "Confirm with" the provider.
+4. A session ends at sign-out, when what opened it is revoked, after 14 days unused or after 90 days.
+5. A person makes a personal CLI token in Settings, shown once.
 
 ### Move data in and out
 
@@ -223,14 +225,14 @@ Each table has one owning module. Other modules read the rows through the owner'
 | runs | `runs`, `slots`, `slot_results`, `run_tests`, `depends_on` | `plan`, `report` and decisions | `gate`, `get`, `find`, the detectors |
 | decisions | `questions`, `question_refs`, `answers`, `decisions` | the detectors behind `propose`, `report`, `claim`, `plan` and `change`, and `decide` | `inbox`, `get`, `gate`, `timeline`, `impact`, `audit` |
 | policy | `policies` | a new project, then accepted policy proposals | every operation that routes a question |
-| identity | `actors`, `grants`, `tokens`, `sessions`, `credentials`, `passkey_users`, `invitations`, `teams`, `team_members`, `team_grants`, `team_events`, `mail_contacts`, `orgs` | `admin`, `credential`, `invitation`, `session`, sign-in | every request, through `admit` |
+| identity | `actors`, `grants`, `tokens`, `sessions`, `credentials`, `invitations`, `teams`, `team_members`, `team_grants`, `team_events`, `orgs` | `admin`, `credential`, `invitation`, `session`, sign-in | every request, through `admit` |
 | trackers | `tracker_requests`, `tracker_polls` | `tracker` and its workers | `tracker-status`, the queue |
 | statuses | `commit_statuses`, `commit_status_delivery` | `report` and the delivery worker | the delivery worker |
 | kernel | `projects`, `counters`, `commands`, `demo_projects` | every write: the sequence number, references and command ids | `since`, `command` |
 
-An archive carries every table except `tokens`, `sessions`, `credentials`, `passkey_users` and `invitations`,
+An archive carries every table except `tokens`, `sessions`, `credentials` and `invitations`,
 the tracker and status delivery tables, and a few that belong to one instance, such as `change_ends`. So actors,
-grants, teams and recovery contacts travel, and nobody's secrets do.
+grants and teams travel, and nobody's secrets or identities do.
 
 Every committed write publishes an event on `/api/p/<project>/events` with the project's sequence number, the
 operation, the actor and what it touched. The web UI listens there and refetch only what an

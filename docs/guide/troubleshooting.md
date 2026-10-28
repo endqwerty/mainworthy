@@ -66,16 +66,16 @@ operation is sent after a failed health probe.
 
 ### `limited: too many attempts`
 
-Anonymous passkey/provider starts have a separate allowance of 300 per public IPv4 address or IPv6 /56 per minute. Each ceremony kind also has a shared capacity of 10,000 pending records. When full, new starts return `503 busy`; existing proofs still finish, and capacity returns as records expire or are consumed.
+Anonymous provider sign-in starts have a separate allowance of 300 per public IPv4 address or IPv6 /56 per minute. Each ceremony kind also has a shared capacity of 10,000 pending records. When full, new starts return `503 busy`; existing proofs still finish, and capacity returns as records expire or are consumed.
 If that source allowance is exhausted, wait for `Retry-After` before starting again. These waits do not escalate or extend on retry.
-They never cause password refusals, and valid answers to pending ceremonies still finish. A working invitation still opens its form.
+They never count as failed attempts, and valid answers to pending sign-ins still finish. A working invitation still opens its page.
 
 For token authentication, five wrong tokens from one address or five with the same prefix within 15 minutes trigger a wait.
 Wait for the time the message names, then try the right token. Each further wrong attempt doubles the wait, up to 15 minutes.
 
 A valid token the server generated still works if you share an address with someone making wrong attempts. A new token supplied through `MAINWORTHY_OWNER_TOKEN` counts as chosen and must wait. Copying an existing server-generated token into that variable preserves its exemption.
 
-Password sign-in can return the same message. Within 15 minutes, five wrong passwords for one name block password sign-in for that name from every address. Five wrong passwords from one address block that address. The block also applies to the right password. After the wait ends, type the right password once. Someone who keeps trying wrong passwords for your name can keep password sign-in blocked. If you have a passkey, use it to sign in. Mainworthy keeps no request log. The proxy's log may show where the guesses come from.
+Sign-in through the identity provider can return the same message. Refused provider answers and wrong invitation codes count against the address they came from, as wrong tokens do. Wait for the time the message names, then sign in again. Mainworthy keeps no request log. The proxy's log may show where the failed attempts come from.
 
 In the web UI, the sign-in page, an invitation, and "Your sign-in" in Settings keep what you typed. These forms display "Too many attempts. Try again in N seconds." under the attempted action. The page does not resend what you typed. Press the button after the wait.
 
@@ -115,15 +115,9 @@ One report may be at most 64 MB. Split the results into several `mainworthy repo
 
 ### The page sends me back to sign in
 
-By default, a browser's session ends after 14 days without use or 90 days in total. The operator can [change those lifetimes](./configuration.md). Revoking a token or removing a password or passkey ends the sessions created with that token or credential. Changing your password signs out your other browsers that used the old one. Sign in again with a working password, passkey or token.
+By default, a browser's session ends after 14 days without use or 90 days in total. The operator can [change those lifetimes](./configuration.md). Revoking a token or unlinking an identity ends the sessions created with that token or identity. Sign in again through the identity provider or with a working token.
 
 Another tab may have signed in as someone else. Mainworthy refuses requests from the earlier tab instead of recording your text under their name. Sign in again as yourself to recover your drafts.
-
-### "This browser could not use a passkey here"
-
-A passkey belongs to the host name in `MAINWORTHY_PUBLIC_URL`. If you open the instance at another address, the browser refuses to create or use a passkey there. For example, `127.0.0.1` in place of `localhost`, or another proxy host name, counts as a different address. Open the instance at the address in that variable. If your browser has no passkeys at all, the page shows no passkey button. Sign in with your name and password, or a token.
-
-"No passkey was used: the request was cancelled or ran out of time" means the browser's own dialog was closed or left open too long. Press the button again. "This passkey is already registered" means the device already holds one of your passkeys for this instance.
 
 ### "This invitation does not work any more"
 
@@ -131,18 +125,26 @@ An invitation link works once, until its expiry time. A new invitation for the s
 
 "This address holds no invitation" means the page was opened or reloaded without the part after the `#`. The page takes the code out of the address bar when it reads it. Open the link you were given again.
 
-### I lost my password or my passkey
+### I cannot sign in at the identity provider
 
-If mail is enabled and you have a verified email address, follow these steps:
+Mainworthy keeps no password, so it has nothing to reset. Recover your account at the provider, as its own help
+says. If that account is gone, or you want to sign in with another one, ask the owner for a recovery link. An admin
+who is still signed in can make their own under Settings, People, **Recovery link**. See
+[a lost identity](./access.md#a-lost-identity).
 
-1. Use **Forgot your password?** on the sign-in page.
-2. Enter your verified email address.
-3. If no reset link arrives, check the address.
-4. If the address is correct, ask for another link.
+### "That did not sign you in" after the provider
 
-The reply never says whether the address belongs to an account. A password reset keeps the requirement to use an enrolled authenticator.
+The provider signed you in, but no person on this instance has that identity linked. Accept your invitation with
+the account you mean to use, or sign in another way and link the identity in Settings, **Your sign-in**. An admin
+can make you an invitation. If the instance's provider changed, identities linked at the old one no longer sign
+in: ask for a recovery link.
 
-If mail is disabled, you have no verified address, or you also lost an authenticator, ask the owner for a recovery link. An admin who is still signed in can make their own under Settings, People, **Recovery link**. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
+### "Confirm it is you" keeps asking
+
+A change to your sign-in, a new token, an invitation, granting `admin` and importing an archive need proof from
+the last ten minutes in this browser. Press **Confirm with** and the provider's name, and sign in at the provider
+when it asks. A session opened with a token proves by signing in with the token again. See
+[confirm it is you](./access.md#confirm-it-is-you).
 
 ### The token is not accepted behind a proxy
 
@@ -175,7 +177,6 @@ On a run page, an unreadable or lost report reply leaves the outcome unknown unt
 If that check also fails, keep the run page open. Press a result key on the affected slot to check the same request again.
 That press resolves the earlier result before you can record another one. If the server refuses the resent report,
 the page shows the refusal and keeps the note. The next result key can send a new result.
-Settings reads the credential list again after a possible passkey addition.
 
 ### A list is loading while reports or edits arrive
 
