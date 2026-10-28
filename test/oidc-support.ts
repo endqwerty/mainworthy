@@ -14,8 +14,12 @@ export type Next = {
 	subject: string;
 	email?: string;
 	name?: string;
-	/** When the person last signed in at the provider, in seconds since 1970: the ID token's `auth_time`. */
-	authTime?: number;
+	/**
+	 * When the person last signed in at the provider, in seconds since 1970: the ID token's `auth_time`. Absent, the
+	 * provider says "now" when asked to sign the person in again (`max_age=0`), as a provider that supports it does;
+	 * null leaves the claim out, as a provider that does not support it does.
+	 */
+	authTime?: number | null;
 	/** What to change in the ID token, or in the reply, for this one sign-in. */
 	twist?: {
 		key?: "other";
@@ -87,8 +91,12 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 					back.searchParams.set("error", next.twist.error);
 				} else {
 					const code = randomBytes(16).toString("base64url");
+					const fresh =
+						next.authTime === undefined && url.searchParams.get("max_age") === "0"
+							? { ...next, authTime: Math.floor(Date.now() / 1000) }
+							: next;
 					codes.set(code, {
-						next,
+						next: fresh,
 						nonce: url.searchParams.get("nonce") ?? "",
 						challenge: url.searchParams.get("code_challenge") ?? "",
 						redirect,
@@ -125,7 +133,7 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 				const claims: Record<string, unknown> = { nonce: twist.nonce ?? nonce };
 				if (next.email !== undefined) Object.assign(claims, { email: next.email, email_verified: true });
 				if (next.name !== undefined) claims.name = next.name;
-				if (next.authTime !== undefined) claims.auth_time = next.authTime;
+				if (next.authTime !== undefined && next.authTime !== null) claims.auth_time = next.authTime;
 				const idToken = await new SignJWT(claims)
 					.setProtectedHeader({ alg: "ES256", kid: "k1" })
 					.setIssuer(twist.issuer ?? issuer)

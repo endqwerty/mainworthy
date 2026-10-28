@@ -402,9 +402,10 @@ changes that give `admin`, and importing an archive. Proof lasts ten minutes.
   sign in again rather than reuse its own session. The provider must sign in the same person: another identity is
   refused.
 
-When the provider reports when you last signed in there (the ID token's `auth_time`), it must be within the last
-ten minutes. Some providers do not report it; Google does not. With those, the fresh round trip to the provider is
-the proof, and how hard the provider asks depends on its own settings.
+The provider must say when you signed in there (the ID token's `auth_time`), and that must be within the last ten
+minutes. A provider that does not say gives no proof: whoever runs the instance enables the claim at the provider
+(for Google, see [Google accounts](./configuration.md#google-accounts)). A session opened with a token proves by
+signing in with the token again.
 
 Another browser's proof does not count for this session. A bearer token cannot provide session proof, so use a
 signed-in browser for these changes, or the local CLI. The local-mode owner and accepting an invitation need no

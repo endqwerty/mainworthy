@@ -230,7 +230,9 @@ export async function begin(w: World, body: Record<string, unknown> = {}, header
 /** The provider's answer to a ceremony: the query the provider sent the browser back to the page with. */
 export async function authorize(w: World, begun: Begun, who: Next): Promise<string> {
 	if (!w.idp) throw new Error("this instance has no identity provider");
-	w.idp.next(who);
+	// Asked to sign the person in again, the provider says it did so now, on the test's clock.
+	const again = begun.url.searchParams.get("max_age") === "0" && who.authTime === undefined;
+	w.idp.next(again ? { ...who, authTime: Math.floor(w.clock.now() / 1000) } : who);
 	const answer = await fetch(begun.url, { redirect: "manual" });
 	const location = new URL(answer.headers.get("location") ?? "");
 	if (location.origin + location.pathname !== `${PUBLIC}/signin/oidc`)
@@ -276,11 +278,14 @@ export async function joined(
 /** Signs in through the provider as the person `name` joined as. */
 export const signIn = (w: World, name: string) => viaProvider(w, { subject: subjectOf(name) });
 
-/** The person signed in with `cookie` signs in at the provider again, before a sign-in change. */
-export const prove = (w: World, cookie: string, name: string, authTime?: number) =>
+/**
+ * The person signed in with `cookie` signs in at the provider again, before a sign-in change. The provider says it
+ * happened now on the test's clock unless `authTime` (seconds) says otherwise; null leaves the claim out.
+ */
+export const prove = (w: World, cookie: string, name: string, authTime?: number | null) =>
 	viaProvider(
 		w,
-		{ subject: subjectOf(name), ...(authTime === undefined ? {} : { authTime }) },
+		{ subject: subjectOf(name), authTime: authTime === undefined ? Math.floor(w.clock.now() / 1000) : authTime },
 		{ proof: true },
 		cookie,
 	);
