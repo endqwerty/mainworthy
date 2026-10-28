@@ -156,7 +156,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (entry.why === "unverified")
 			return failed(
 				"forbidden",
-				"the identity provider did not say when you last signed in there, so this cannot confirm it is you. Whoever runs this instance turns on the auth_time claim at the provider; a session opened with a token confirms by signing in with the token again",
+				"the identity provider did not say a usable time for when you last signed in there (none, or one still to come), so this cannot confirm it is you. Whoever runs this instance turns on the auth_time claim at the provider; a session opened with a token confirms by signing in with the token again",
 			);
 		if (entry.why === "stale")
 			return failed(

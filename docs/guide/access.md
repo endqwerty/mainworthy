@@ -94,7 +94,7 @@ The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./confi
 
 Sign in through the instance's identity provider, then open Settings, **Your sign-in**, **Your command-line tokens**.
 Creating a personal token or issuing any token under **Tokens** requires [recent proof](#confirm-it-is-you) in that
-browser session. Settings asks inline when needed and retries after proof. Admin token issuance with a bearer
+browser session. Settings asks inline when needed; after confirming, make the token again. Admin token issuance with a bearer
 token and local CLI issuance keep their existing authority.
 You need no admin capability. As the local owner, you can make one without signing in.
 
