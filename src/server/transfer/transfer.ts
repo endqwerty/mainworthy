@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { Attachment, AttachmentData } from "../../core/attachments.ts";
+import { claimHash, versionHash } from "../../core/hash.ts";
 import { Policy } from "../../core/kinds.ts";
 import { CaseBody } from "../../core/model.ts";
 import { ResultIn, resultDuration } from "../../core/ops.ts";
@@ -75,6 +76,10 @@ const Q = {
 		`SELECT r.id, r.corrects FROM results r LEFT JOIN results earlier ON earlier.id = r.corrects
  WHERE r.corrects IS NOT NULL AND (earlier.id IS NULL OR earlier.project <> r.project
  OR earlier.test <> r.test OR earlier.actor <> r.actor) LIMIT 1`,
+	),
+	invalidHeadHash: sql<readonly [], { id: number; head: number }>(
+		`SELECT c.id, c.head FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
+ WHERE c.head_hash IS DISTINCT FROM v.hash LIMIT 1`,
 	),
 	heads: sql<readonly [], { id: number; project: number; tags: string; body: string | null }>(
 		`SELECT c.id, c.project, c.tags, v.body FROM cases c
@@ -572,12 +577,19 @@ export async function importArchive(
 					if (!entry.r.has(column) && !table.nullable.has(column)) throw invalid(`missing column ${entry.t}.${column}`);
 				}
 				if (entry.t === "versions") {
+					let body: CaseBody;
 					try {
-						CaseBody.parse(JSON.parse(z.string().parse(entry.r.get("body"))));
+						body = CaseBody.parse(JSON.parse(z.string().parse(entry.r.get("body"))));
 					} catch {
 						throw invalid(
 							`invalid archive versions.body for row (case_id ${entry.r.get("case_id")}, no ${entry.r.get("no")}) on line ${position}: expected a valid CaseBody`,
 						);
+					}
+					for (const [column, computed] of Object.entries({ hash: versionHash(body), claim_hash: claimHash(body) })) {
+						if (entry.r.get(column) !== computed)
+							throw invalid(
+								`invalid archive versions.${column} for row (case_id ${entry.r.get("case_id")}, no ${entry.r.get("no")}) on line ${position}: case body hash mismatch`,
+							);
 					}
 				}
 				const duration = entry.r.get("duration_ms");
@@ -639,6 +651,9 @@ export async function importArchive(
 				throw invalid(
 					`invalid archive results.corrects for row ${correction.id}: result ${correction.corrects} must exist with the same project, test and actor`,
 				);
+			const head = await db.get(Q.invalidHeadHash);
+			if (head)
+				throw invalid(`invalid archive cases.head_hash for row ${head.id}: does not match head version ${head.head}`);
 			await rebuildSearch(db);
 			// Earlier versions are history; the policy in force is what the next report is asked under.
 			const current = await db.all(Q.policy);
