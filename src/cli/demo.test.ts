@@ -673,6 +673,44 @@ test("a retired demo refuses every write, to its records and to who may use it, 
 	});
 }, 60_000);
 
+// The refusal is told only to a caller who may use the retired demo: one with no grant there learns of it nothing a
+// project that does not exist would not tell it (the registry's rule, #914).
+test("a caller with no grant on a retired demo is told what it would be told of a missing project", async () => {
+	await withInstance(async ({ instance, client }) => {
+		const { app } = instance;
+		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
+		app.config.commit = A;
+		await refreshDemo(instance, "demo", tiny);
+		app.config.commit = B;
+		await refreshDemo(instance, "demo", tiny);
+		const [retired] = await app.database.read(retiredDemos);
+		if (!retired) throw new Error("revision B retired no demo");
+		const created = z
+			.object({ token: z.string() })
+			.parse(
+				await client.call("admin", {
+					do: "token.create",
+					actor: "outsider",
+					kind: "ci",
+					can: ["read"],
+					project: "demo",
+				}),
+			);
+		const propose = async (key: string) => {
+			const response = await fetch(`${instance.url}/api/p/${key}/propose`, {
+				method: "POST",
+				headers: { authorization: `Bearer ${created.token}`, "content-type": "application/json" },
+				body: JSON.stringify({ edits: [{ op: "create", body: { title: "From outside" } }] }),
+			});
+			const body = z
+				.object({ error: z.object({ code: z.string(), message: z.string() }) })
+				.parse(await response.json());
+			return { status: response.status, code: body.error.code, message: body.error.message.replaceAll(key, "<key>") };
+		};
+		expect(await propose(retired.key)).toEqual(await propose("~demo-999999"));
+	});
+}, 60_000);
+
 test("retired demos that cannot be removed stop at two: later revisions keep the demo they have", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
