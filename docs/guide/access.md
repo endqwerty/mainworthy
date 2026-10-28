@@ -422,7 +422,7 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
 
 Starting a passkey or provider sign-in has a separate limit of 300 successful starts per public IPv4 address or IPv6 /56 in one minute.
-Web and iPhone starts share it. People sharing that address or network share its allowance too.
+Every start from that address shares it. People sharing that address or network share its allowance too.
 A blocked start says how long to wait, with `429 limited` and `Retry-After` seconds in the API.
 The wait never escalates, and retries do not extend it. No instance-wide start allowance lets another network block your first attempt.
 Unavailable passkey options and an unreachable provider do not spend the allowance. Signed-in provider linking and a working invitation bypass it.

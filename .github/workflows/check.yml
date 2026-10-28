@@ -31,7 +31,7 @@
 # (`gh run rerun <run> --job <id>`). A push to `main` has no pull request and skips it.
 #
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
-# and when the type-check, the lint, the image, the iPhone app or the description failed.
+# and when the type-check, the lint, the image or the description failed.
 name: check
 
 on:
@@ -328,7 +328,7 @@ jobs:
             docker logs postgres
             docker rm --force postgres
           fi
-      - name: The scope, the type-check, the lint, the image, the iPhone app, the description and every shard's job passed
+      - name: The scope, the type-check, the lint, the image, the description and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
         # or left nothing to upload, and after a re-run the gate above would then read its older attempt's. A job
         # the scope did not ask for is skipped, and passes only then.

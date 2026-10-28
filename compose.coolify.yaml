@@ -55,9 +55,6 @@ services:
       # The address people open the instance at. Passkeys belong to its host name and an invitation link starts
       # with it. Empty means no passkeys and a link without a host.
       MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}
-      # The iPhone apps the site vouches for, so the phone offers the logins saved for it in the app: team id and
-      # bundle identifier, comma-separated. Empty means /.well-known/apple-app-site-association is not found.
-      MAINWORTHY_APPLE_APPS: ${MAINWORTHY_APPLE_APPS:-}
       # The marked project the server swaps and fills with the demo again once per known deployed revision, so it shows this build. Only
       # a project `mainworthy seed` made is replaced. Unset means `demo`; set it empty in Coolify for none (hence
       # `-`, not `:-`, which would read an empty value as unset).

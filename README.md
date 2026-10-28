@@ -5,7 +5,7 @@ about them. Its gate answers whether a change is worthy of `main`.
 
 Mainworthy is a test case management system for software QA. The MVP shipped on 2026-10-12 and remains a
 preview. [Decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) records the MVP's scope. The GitHub
-milestones M1 to M7 and the separate `iOS app` milestone track the remaining work.
+milestones M1 to M7 track the remaining work; the iPhone app is frozen (2026-10-27).
 [Issue #64](https://github.com/endqwerty/mainworthy/issues/64) keeps the current work order.
 [docs/roadmap.md](docs/roadmap.md) describes the phases and milestone goals.
 It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the-project-is-called-mainworthy.md)).

@@ -4,7 +4,7 @@ Mainworthy is open source under the Apache License 2.0. This page describes its 
 
 ## Mainworthy's licence
 
-Mainworthy is licensed under the [Apache License 2.0](../../LICENSE), and its copyright notice is in [NOTICE](../../NOTICE). The licence covers Mainworthy's own code and documentation, including the server, the web UI, the command line, the agent skill and the iPhone app. Material from others keeps its own licence, as listed below.
+Mainworthy is licensed under the [Apache License 2.0](../../LICENSE), and its copyright notice is in [NOTICE](../../NOTICE). The licence covers Mainworthy's own code and documentation, including the server, the web UI, the command line and the agent skill. Material from others keeps its own licence, as listed below.
 
 You may use Mainworthy for any purpose, change it, run it for others and sell it. Section 3 grants a patent licence for certain claims covered by contributors' work, subject to its conditions. When you give a copy to someone else, changed or not, do the following:
 

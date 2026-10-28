@@ -83,7 +83,7 @@ Several worktrees can run `bun run check` at once. Each run takes half the CPU t
 starts (by the load average), at least two and at most half of all threads, so a check alone keeps its speed.
 Use `bun run check --workers=<n>` or `bun run test --workers=<n>` to choose a cap for that run.
 The performance job needs an idle machine because its elapsed times measure the product. CI gives it a
-runner of its own. The iPhone simulator lane is separate and still uses one simulator.
+runner of its own.
 
 ## What the check does
 

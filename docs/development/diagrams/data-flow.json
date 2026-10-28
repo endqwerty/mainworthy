@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "0f0e9f5182fc5fbe811f29a764bcb314c81f9939",
+      "revision": "4091fde9c51308657959825acad1274dea853d4d",
       "link_mode": "local-only"
     },
     "legend": {
@@ -41,7 +41,7 @@
       "id": "person",
       "type": "frontend",
       "label": "A person",
-      "sublabel": "Web UI · iPhone app",
+      "sublabel": "Web UI",
       "stage": 0,
       "row": 0,
       "width": 150,
@@ -51,11 +51,6 @@
           "path": "src/web/lib/data.ts",
           "line": 95,
           "end_line": 125
-        },
-        {
-          "path": "ios/Kit/Sources/MainworthyScreens/Workspace.swift",
-          "line": 96,
-          "end_line": 118
         }
       ]
     },
@@ -480,11 +475,6 @@
           "path": "src/web/lib/data.ts",
           "line": 81,
           "end_line": 125
-        },
-        {
-          "path": "ios/Kit/Sources/MainworthyScreens/Workspace.swift",
-          "line": 96,
-          "end_line": 118
         }
       ],
       "yOffset": -28
@@ -785,7 +775,7 @@
       "title": "Consumers read the same record",
       "items": [
         "mainworthy gate exits 0 passed, 1 failed, 2 blocked or 3 pending. Configured statuses reread the current gate and deliver GitHub commit statuses.",
-        "Committed project events at /api/p/:project/events invalidate web query keys and trigger refetch; reconnect refreshes the project. The iPhone app follows the same stream and refreshes its screens.",
+        "Committed project events at /api/p/:project/events invalidate web query keys and trigger refetch; reconnect refreshes the project.",
         "Reports use stats to read evidence and suite data. Explicit tracker requests create or link defect issues through GitHub or Jira; a failure alone does not create an issue. Transfer exports eligible tables and blobs; audit exports the decision and evidence record."
       ]
     }
