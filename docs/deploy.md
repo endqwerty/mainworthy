@@ -699,7 +699,10 @@ are needed to be kept, the demo seed would be updated." So the demo's state is n
 server to wait.
 
 Retired projects have no project-specific grants and are hidden from the project list. Instance-wide grants,
-including the owner's, still allow reads and writes by the retired key until cleanup deletes the data.
+including the owner's, still allow reads by the retired key until cleanup deletes the data, but no writes: from the
+transaction that retires it, every write that names the project is refused (`<key> is a retired demo being removed,
+and takes no more writes`), whatever surface sends it, including reports, proposals, work, and the grants and tokens
+on it. A report accepted just before the retirement is not finished, and the background recovery leaves it too.
 Cleanup runs on start and after refresh, including when MAINWORTHY_DEMO is unset. It deletes at most 32 owned
 rows per gate turn and transaction,
 with foreign keys enforced, then yields to foreground work. A final transaction deletes the mark and project
@@ -718,7 +721,11 @@ travel in an archive. Active-project exports remain available.
 
 A slice reads only the retired project's own rows, by index, so what it costs follows the size of the retired demo,
 not of the other projects on the instance (#914). A drain reads the schema once and skips the tables it has already
-emptied; one last pass over every table runs before the project row goes. A table owned through its parents (a
+emptied. Since a retired demo takes no writes, a table the drain has emptied stays empty, and nothing reads it
+again: the last slice deletes the mark and the project row and reads no table. (Before, it read every table again
+from its first row, past the index entries of every row the drain had removed: one transaction that grew with the
+whole demo.) If a row appears anyway, the project row's foreign keys refuse its deletion, that slice rolls back, and
+the next drain, which starts its reading afresh, removes the row. A table owned through its parents (a
 result's excuses, a run's slots, a slot's lease through its slot and run) is read under one batch of 256 of its own
 parents at a time. The drain keeps its place at every level of the chain from slice to slice, reading each level in
 index order (the top one by `(project, id)`, a lower one by `(parent column, id)`), and a slice that finds a batch
@@ -731,21 +738,30 @@ A table whose rows refer to other rows of the same table (`folders.parent`, `dec
 slice in `(project, id)` order, and is then deleted 32 rows a slice from batches of 256 read in the same order. A row another row referred to
 could only go after that one, so a chain of folders (someone with `produce` on the demo can make thousands with
 `propose`) let one row go per slice, each slice reading the whole chain to find it: 50 million rows and index entries
-read for a chain of 5,000. Now each row is read a fixed number of times. The last slice, before the project row goes,
-still reads once past the index entries of every row the drain removed, until PostgreSQL's maintenance clears them.
+read for a chain of 5,000. Now each row is read a fixed number of times. A table with an index in (owner, `id`)
+order is walked down to its own rows the same way, so a slice reads past the rows it removed at most once.
+
+What a slice still reads beyond its batch: the foreign-key checks PostgreSQL makes when it deletes a row, which pass
+the index entries of the rows that referred to it. A row many others referred to (one report's batch) costs that
+many, once. The last slice's checks pass the removed rows of any table the drain deleted through another index; on a
+test demo of 4,000 rows of each kind, that slice read 691 rows and index entries, against 21,950 before.
 Slices use index scans and never sort or use bitmap scans, so a slice's `LIMIT` stops the scan. On a copy with 20 seeded projects (1.06
 million results) and one retired default demo (102,304 rows, 28,000 of them results), the drain took 140 s before
 this, with a median slice of 35 ms, a longest of 289 ms, and plans that read up to 490,000 rows of other projects to
 find none; after it, 46 s, a median of 2.2 ms and a longest of 27 ms.
 
-Migration 6 builds the indexes the drain reads by with a plain `CREATE INDEX`: one each on `search_docs`,
+Migration 6 adds the indexes the drain reads by: one each on `search_docs`,
 `slot_results` and `team_events`, and one on `(project, id)` for each table a slice reads in batches (`batches`,
 `cases`, `changes`, `decisions`, `folders`, `merge_receipt_nodes`, `questions`, `requirements` and `runs`), and one on `slots`
-`(run, id)` for leases, read through their slots. Each holds writes to
-its table until the migration commits. The new build runs it at startup,
-before it serves; an older instance still serving during the rollout waits that long to write to those tables. The
-build time follows their row count: about 0.15 s per index for a million rows on a desktop, and the instance's
-tables hold far fewer.
+`(run, id)` for leases, read through their slots. An upgrade builds them one at a time with `CREATE INDEX
+CONCURRENTLY`, outside a transaction, so an older instance still serving during the rollout keeps writing to those
+tables while they are built. Each index that finishes stays built: a start that Cloud Run's startup probe cuts off
+resumes with the next one, and an index left invalid by a build cut off midway is dropped and built again. The schema
+ledger moves to 6 only when every index is valid. An instance waiting to migrate asks for the migration lock every
+200 ms rather than waiting in one statement, because a concurrent build waits for every older snapshot, that waiting
+statement's included. A build also waits for transactions already open, up to the 120 s each may last. A new database
+builds them in its first transaction, while its tables are empty. The build time follows the tables' row count:
+about 0.15 s per index for a million rows on a desktop, and the instance's tables hold far fewer.
 
 No whole-database audit or worker retry runs under the demo gate. Each swap and deletion slice is checked against
 a 500 ms acceptance ceiling, alongside successful unrelated HTTP reads, writes and token sign-ins on a populated

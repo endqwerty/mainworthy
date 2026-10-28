@@ -12,6 +12,7 @@ import {
 	type Actor,
 	beginCommand,
 	type Ctx,
+	demoDeployment,
 	demoSince,
 	findCommand,
 	findProject,
@@ -21,6 +22,7 @@ import {
 	lockNamedProject,
 	lockProject,
 	makeCtx,
+	type ProjectRow,
 	recordCommand,
 	recordInstanceCommand,
 	stampSeq,
@@ -230,8 +232,13 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 		if (initial) await lockCallActors(db, initial, call.op, input);
 		const current = call.reference ? (await resolveCaller(app, db, call.reference, 0))?.actor : await call.actor(0);
 		if (current && current.id !== initial?.id) throw new Busy();
+		const named: ProjectRow[] = [];
+		const lockNamed = async (key: string) => {
+			const row = await lockNamedProject(db, key);
+			if (row) named.push(row);
+		};
 		if (ops[call.op]?.scope === "project" && call.project) {
-			await lockNamedProject(db, call.project);
+			await lockNamed(call.project);
 		}
 		if (
 			ops[call.op]?.scope === "instance" &&
@@ -240,14 +247,20 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 			"project" in input &&
 			typeof input.project === "string"
 		) {
-			await lockNamedProject(db, input.project);
+			await lockNamed(input.project);
 		}
 		if (call.op === "admin" && typeof input === "object" && input !== null && "do" in input) {
 			if (input.do === "actor.forget") await lockAllProjects(db);
 			else if (input.do === "project.demo" && "key" in input && typeof input.key === "string") {
-				await lockNamedProject(db, input.key);
+				await lockNamed(input.key);
 			}
 		}
+		// A retired demo takes no write from the moment its retirement commits, which happened under the same row lock:
+		// its removal drains each table once and does not read it again (#914). Reading its policy is no write.
+		const reading = call.op === "admin" && "do" in input && input.do === "policy.show";
+		for (const row of named)
+			if (!reading && (await demoDeployment(db, row.id))?.kind === "retired")
+				return fail("conflict", `${row.key} is a retired demo being removed, and takes no more writes`);
 		if (typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string")
 			await lockCommand(db, input.cmd);
 		const reply = await executeInSnapshot(app, db, ops, call);
@@ -441,6 +454,9 @@ async function executeInSnapshot(
 						const refreshed = await lockProject(db, found.id);
 						if (!refreshed || refreshed.identity !== found.identity)
 							throw new OpError("conflict", "the project changed while the report was accepted");
+						// Retired between the report's two transactions: its removal may already have drained the tables.
+						if ((await demoDeployment(db, refreshed.id))?.kind === "retired")
+							throw new OpError("conflict", `${refreshed.key} became a retired demo while the report was accepted`);
 						ctx.project = refreshed;
 						ctx.actor = await actorById(db, actor.id, refreshed.id);
 						ctx.seq = refreshed.seq + 1;

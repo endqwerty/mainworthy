@@ -635,6 +635,44 @@ test("behind a proxy secret, a refresh seeds the demo in this process and sends 
 	}, settings);
 }, 60_000);
 
+// The removal of a retired demo reads each table once, so nothing may write to it after it is retired (#914).
+test("a retired demo refuses every write, to its records and to who may use it, and can still be read", async () => {
+	await withInstance(async ({ instance, client }) => {
+		const { app } = instance;
+		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
+		app.config.commit = A;
+		await refreshDemo(instance, "demo", tiny);
+		app.config.commit = B;
+		await refreshDemo(instance, "demo", tiny);
+		const [retired] = await app.database.read(retiredDemos);
+		if (!retired) throw new Error("revision B retired no demo");
+		const before = await snapshot(app);
+		const old = client.with({ project: retired.key });
+		const refusals: string[] = [];
+		const refused = async (write: Promise<unknown>) => {
+			const outcome = await write.then(
+				() => "written",
+				(error: unknown) => (error instanceof Error ? error.message : String(error)),
+			);
+			refusals.push(outcome);
+		};
+		await refused(old.call("propose", { edits: [{ op: "create", body: { title: "Into the retired demo" } }] }));
+		await refused(
+			old.call("report", {
+				target: { commit: "c".repeat(40) },
+				results: [{ test: { key: "unit::late" }, outcome: "pass" }],
+			}),
+		);
+		await refused(client.call("admin", { do: "grant.set", actor: "pipeline", project: retired.key, can: ["read"] }));
+		await refused(
+			client.call("admin", { do: "token.create", actor: "late", kind: "ci", project: retired.key, expires: "1h" }),
+		);
+		expect(refusals).toEqual(Array(4).fill(`${retired.key} is a retired demo being removed, and takes no more writes`));
+		expect(await snapshot(app)).toEqual(before);
+		expect((await old.call("find", { in: "cases", limit: 5 })).items.length).toBeGreaterThan(0);
+	});
+}, 60_000);
+
 test("retired demos that cannot be removed stop at two: later revisions keep the demo they have", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
