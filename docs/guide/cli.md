@@ -289,7 +289,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy history` | The versions of a case, or the step-level diff between two of them. |
 | `mainworthy timeline` | One timeline for a case: versions, moves, results from every producer, findings, reviews and its questions. |
 | `mainworthy check` | Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links. |
-| `mainworthy stats` | Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, coverage by requirement. |
+| `mainworthy stats` | Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, manual effort, coverage by requirement. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy handoff-status` | Read whether a failure question's latest hand-off to an agent was sent, or why it failed. |

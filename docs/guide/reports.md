@@ -20,7 +20,7 @@ From the command line, `mainworthy stats --of <report>` prints the same report a
 `mainworthy stats --of flaky --days 14`. Over HTTP it is `POST /api/p/<project>/stats` (see [the API](./api.md#stats)).
 Agents read reports this way too: `stats` is not one of the agent tools.
 
-The flaky, rerun and automation reports show 20 rows per page, and coverage shows 100. Each list says
+The flaky, rerun, manual effort and automation reports show 20 rows per page, and coverage shows 100. Each list says
 "Showing N of M". The headline numbers count every row. Choose **Next page** or **Previous page**, or press
 <kbd>n</kbd> or <kbd>p</kbd>, to reach the rest. On a phone, open **Actions** and choose **Next report page** or
 **Previous report page**. Changing the day window starts at the first page. If live updates remove the page
@@ -93,6 +93,25 @@ The backlog lists the cases that can be automated and are not, the ones run by h
 first. Where people recorded how long a run took, the time is shown too. Each case's total stops at
 9,007,199,254,740,991 ms, including larger historical or restored durations. A reported zero is zero;
 when no run reported a duration, the time stays unknown.
+
+## Manual effort
+
+Choose **Manual effort** to rank active cases by known manual time, greatest first. A few long executions
+rank above many short ones when their known total is greater. Cases with linked automated tests stay in the
+report while people still run them, marked **has automation**. Cases marked as unable to be automated also appear.
+The Automation report keeps its rate and frequency backlog.
+
+Each row shows the execution count, timed and untimed counts, known total, and average over timed executions.
+A mixed total says **partial**. When no execution was timed, both time values say **Unknown**; a reported zero
+stays zero. Unknown totals sort after known totals. Equal totals sort by execution count, then case number.
+Totals and averages stop at JavaScript's largest safe integer, 9,007,199,254,740,991 ms.
+
+The selected number of 24-hour periods and the exact start and end are shown. A correction replaces the
+original execution's timing once, in its original period, even when the correction arrived later. For imported
+history with competing corrections, the worse outcome wins, then the later result, as in the rerun report.
+The average describes only timed work; missing timings are never estimated.
+
+Use `mainworthy stats --of manual-effort --days 30` for the same paginated report as JSON.
 
 ## Coverage by requirement
 
