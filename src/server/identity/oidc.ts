@@ -26,8 +26,11 @@ import { Ceremonies, ceremonyGeneration, ceremonyWrite } from "./ceremonies.ts";
 import { type LimiterAnswer, startAddressKey } from "./limiter.ts";
 
 /** How long a ceremony waits for the browser to come back from the provider. */
-/** How many acceptance ceremonies one invitation may have under way at once. */
-const INVITATION_CEREMONIES = 3;
+/**
+ * How many ceremonies one person (a link or proof, whatever session began it) or one invitation (an acceptance) may
+ * have under way at once: enough for two tabs or two people at the same moment, too few to fill the instance's.
+ */
+const OWNER_CEREMONIES = 3;
 export const CEREMONY_MS = 5 * 60_000;
 
 /**
@@ -141,7 +144,7 @@ export async function beginOidc(
 	const purpose = input.purpose;
 	const owner =
 		purpose.purpose === "link" || purpose.purpose === "proof"
-			? `session ${purpose.session}`
+			? `actor ${purpose.actor}`
 			: purpose.purpose === "join"
 				? `invitation ${purpose.invitation}`
 				: (startAddressKey(input.address) ?? "unknown");
@@ -161,10 +164,10 @@ export async function beginOidc(
 			{ purpose: input.purpose, browser: input.browser, nonce, verifier, deadline },
 			owner,
 			now,
-			// A signed-in session's link or proof replaces the one it began before, so a session holds one place. An
-			// invitation holds a few, so that two people accepting it at the same moment both finish; only an anonymous
-			// sign-in, which the start limiter counts, has no owner limit.
-			purpose.purpose === "sign-in" ? undefined : purpose.purpose === "join" ? INVITATION_CEREMONIES : 1,
+			// A person's links and proofs, from however many sessions, and an invitation's acceptances each hold a few
+			// places; each ceremony still finishes only in the session that began it. Only an anonymous sign-in, which the
+			// start limiter counts, has no owner limit.
+			purpose.purpose === "sign-in" ? undefined : OWNER_CEREMONIES,
 		),
 	);
 	return client.buildAuthorizationUrl(configuration, {
