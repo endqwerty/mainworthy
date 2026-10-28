@@ -109,6 +109,8 @@ Totals and averages stop at JavaScript's largest safe integer, 9,007,199,254,740
 The selected number of 24-hour periods and the exact start and end are shown. A correction replaces the
 original execution's timing once, in its original period, even when the correction arrived later. For imported
 history with competing corrections, the worse outcome wins, then the later result, as in the rerun report.
+The report follows up to 64 correction links per execution. If any branch continues beyond that, the execution
+still counts but its timing is unknown. Corrections from another project do not affect its timing.
 The average describes only timed work; missing timings are never estimated.
 
 Use `mainworthy stats --of manual-effort --days 30` for the same paginated report as JSON.
