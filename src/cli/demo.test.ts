@@ -685,17 +685,15 @@ test("a caller with no grant on a retired demo is told what it would be told of 
 		await refreshDemo(instance, "demo", tiny);
 		const [retired] = await app.database.read(retiredDemos);
 		if (!retired) throw new Error("revision B retired no demo");
-		const created = z
-			.object({ token: z.string() })
-			.parse(
-				await client.call("admin", {
-					do: "token.create",
-					actor: "outsider",
-					kind: "ci",
-					can: ["read"],
-					project: "demo",
-				}),
-			);
+		const created = z.object({ token: z.string() }).parse(
+			await client.call("admin", {
+				do: "token.create",
+				actor: "outsider",
+				kind: "ci",
+				can: ["read"],
+				project: "demo",
+			}),
+		);
 		const propose = async (key: string) => {
 			const response = await fetch(`${instance.url}/api/p/${key}/propose`, {
 				method: "POST",
