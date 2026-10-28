@@ -101,10 +101,7 @@ export async function migrate(database: Database): Promise<void> {
 			}
 			if (version !== 0) {
 				const ledger = new Map((await db.all(Q.ledger)).map((row) => [row.key, row.value]));
-				if (
-					ledger.get("baseline_hash") !== hash ||
-					ledger.get("archive_version") !== String(archiveOf(version))
-				) {
+				if (ledger.get("baseline_hash") !== hash || ledger.get("archive_version") !== String(archiveOf(version))) {
 					throw new Error("Database baseline does not match this build");
 				}
 				if (version < 2) {
