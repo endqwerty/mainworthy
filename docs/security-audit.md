@@ -112,8 +112,14 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   from, each issue and what answered it. The owner then knows which revision on which `main` was audited, and by which
   copy of the audit.
 - **When the owner says to merge** (`ship`, [landing-a-stack.md](landing-a-stack.md)): just before the merge, check
-  that each head and base is still the audited pair; if one is not, audit it again first. In a stack, every layer is
-  audited.
+  that each head and base is still the audited pair; if one is not, audit it again first.
+- **A stack may be audited as one** when every layer has already had its own audit, or when it has five layers or
+  more (the owner, 2026-10-28: "Definitely make it a rule that if an audit has already been done the stack can be
+  audited all together. Furthermore when large stacks are being worked on, 5 or more, then auditing all at once is
+  reasonable"). Otherwise each layer is audited against the one below. To audit it as one, open a pull request from
+  the top layer's branch to `main`, audit that pull request with every layer's earlier rounds and their answers as
+  `--context`, and close it once the stack has landed. The stack lands only while its top head and `main` are the
+  pair that round read; a layer or base that changes after it needs another round of the whole stack.
 - **One merge at a time.** A merge that lands first moves `main` under the next one, and GitHub's rebase merge puts
   the next head on the new `main`. So land one pull request at a time, and only while nothing else lands on `main`.
   Just before each merge, read the head (`gh pr view <number> --json headRefOid`) and `main`
