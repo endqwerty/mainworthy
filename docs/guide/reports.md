@@ -133,6 +133,6 @@ Each page uses the project's current policy, so **Create** cases and **Ask** que
 shortly after the report receipt. A deferred question covers only tests in its originating report,
 using that report's actor; tests from later reports keep their own adoption requirements. Interrupted pages retry without duplicating their decisions.
 
-Deferred file mapping survives both project and instance export. After import, background jobs finish those pages under the restored policy. Archive version 44 includes pending pages; archives from earlier versions must be exported again with this version before importing.
+Deferred file mapping survives both project and instance export. After import, background jobs finish those pages under the restored policy. Archive version 45 includes pending pages; archives from earlier versions must be exported again with this version before importing.
 
 Answering a file question refreshes overlapping deferred questions about that file. Questions with no tests left to link close; each remaining question keeps its own report scope and producer.

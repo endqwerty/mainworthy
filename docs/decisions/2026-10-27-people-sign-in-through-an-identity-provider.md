@@ -50,7 +50,8 @@ four variables, and a self-hosted instance points at the customer's own provider
 
 ## What it costs
 
-Stored passwords, passkeys, authenticators and recovery codes are deleted by a migration; before 1.0 there is
+Stored passwords, passkeys, authenticators and recovery codes are deleted by migration 8; before 1.0 there is
 no path to keep them. On an existing instance the owner signs in with the owner token and links a provider
-identity; anyone else gets a new invitation.
+identity; anyone else gets a new invitation. Archive format 45 leaves out recovery email addresses; older archives
+must be exported again before importing.
 The native iPhone sign-in left with the app ([freeze](2026-10-27-freeze-what-the-customer-does-not-need.md)).
