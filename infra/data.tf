@@ -41,6 +41,20 @@ resource "google_sql_database_instance" "app" {
       name  = "cloudsql.iam_authentication"
       value = "on"
     }
+    # Who held a lock someone waited on more than a second, and which statements took more than one (#1084). Bound
+    # values stay out of the log; none of the three restarts the instance.
+    database_flags {
+      name  = "log_lock_waits"
+      value = "on"
+    }
+    database_flags {
+      name  = "log_min_duration_statement"
+      value = "1000"
+    }
+    database_flags {
+      name  = "log_parameter_max_length"
+      value = "0"
+    }
     # Which statements take the time, split into lock, I/O and execution (#1084). Free on Enterprise, kept seven days;
     # client addresses stay off.
     insights_config {

@@ -580,10 +580,10 @@ export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, cal
 	if (misplaced) return misplaced;
 	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
 	try {
-		return await app.database.write(
-			async (db) => await execute(app, db, ops, call),
-			call.signal ? { signal: call.signal } : {},
-		);
+		return await app.database.write(async (db) => await execute(app, db, ops, call), {
+			name: call.project ? `${call.op} in ${call.project}` : call.op,
+			...(call.signal ? { signal: call.signal } : {}),
+		});
 	} catch (error) {
 		if (call.signal?.aborted) throw call.signal.reason;
 		return failure(call.op, error);

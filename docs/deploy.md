@@ -88,6 +88,9 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
   and every session starts as that role, so tables have one owner.
 - Query Insights is on for the database, without client addresses: Cloud SQL's console shows each statement's time
   split into lock, I/O and execution, kept seven days, and Cloud Monitoring's `insights/*` metrics carry the same.
+- Slow work is logged. PostgreSQL logs a statement over one second and a lock wait over one second, naming the
+  sessions holding it, without bound values (`cloudsql.googleapis.com/postgres.log`). The app logs a write over five
+  seconds as `[mainworthy] slow write: <op> in <project> took … ms: … ms waiting for a connection, … ms holding it`.
 - Connections: a deploy runs two revisions, each with up to 2 read, 2 write, 1 job, 2 admission, 1 `LISTEN` and 1
   migration connection: 18, plus an operator's session, under `db-f1-micro`'s 25.
 

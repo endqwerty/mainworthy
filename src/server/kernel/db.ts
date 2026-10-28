@@ -152,6 +152,8 @@ export class Busy extends Error {
 		this.name = "Busy";
 	}
 }
+/** A write that takes longer is logged, split into waiting for a connection and holding one (#1084). */
+export const SLOW_WRITE_MS = 5_000;
 export const MIGRATION_LOCK = 0x4d574d4947520001n;
 const EXCLUSIVE_POLL_MS = 200;
 const CLIENT_CHECK_MS = 1_000;
@@ -549,7 +551,10 @@ export type OpenOptions = {
 	writePool?: number;
 	acquireTimeoutMs?: number;
 	lockWaitMs?: number;
+	slowWriteMs?: number;
 };
+/** `name` says what a slow write was doing in the log line about it. */
+type WriteOptions = { signal?: AbortSignal; name?: string };
 let migration: <T>(database: Database, fn: (db: WriteDb, outside: Outside) => T | Promise<T>) => Promise<T>;
 export class Database {
 	private notifications: SQL | undefined;
@@ -595,7 +600,7 @@ export class Database {
 	}
 	static async open(input: OpenOptions): Promise<Database> {
 		if (!input.url) throw new Error("MAINWORTHY_DATABASE_URL is required; see compose.yaml");
-		for (const value of [input.lockWaitMs, input.acquireTimeoutMs]) {
+		for (const value of [input.lockWaitMs, input.acquireTimeoutMs, input.slowWriteMs]) {
 			if (value !== undefined && (!Number.isSafeInteger(value) || value < 1))
 				throw new Error("database timeout must be a positive whole number of milliseconds");
 		}
@@ -677,7 +682,7 @@ export class Database {
 			await this.dispose(lease);
 		}
 	}
-	async write<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+	async write<T>(fn: (db: WriteDb) => T | Promise<T>, options: WriteOptions = {}): Promise<T> {
 		const finished = Promise.withResolvers<void>();
 		this.activeWrites.add(finished.promise);
 		try {
@@ -688,7 +693,7 @@ export class Database {
 		}
 	}
 	/** Small independent pool for anonymous sign-in accounting and ceremony allocation. */
-	async admission<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+	async admission<T>(fn: (db: WriteDb) => T | Promise<T>, options: WriteOptions = {}): Promise<T> {
 		const finished = Promise.withResolvers<void>();
 		this.activeWrites.add(finished.promise);
 		try {
@@ -699,7 +704,7 @@ export class Database {
 		}
 	}
 	/** Only job bookkeeping uses this pool; a job's network call never holds a domain connection while waiting. */
-	async jobWrite<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
+	async jobWrite<T>(fn: (db: WriteDb) => T | Promise<T>, options: WriteOptions = {}): Promise<T> {
 		const finished = Promise.withResolvers<void>();
 		this.activeWrites.add(finished.promise);
 		try {
@@ -709,11 +714,8 @@ export class Database {
 			this.activeWrites.delete(finished.promise);
 		}
 	}
-	private async writeLease<T>(
-		fn: (db: WriteDb) => T | Promise<T>,
-		options: { signal?: AbortSignal },
-		pool: SQL,
-	): Promise<T> {
+	private async writeLease<T>(fn: (db: WriteDb) => T | Promise<T>, options: WriteOptions, pool: SQL): Promise<T> {
+		const asked = performance.now();
 		const lease = await this.lease(pool, options.signal).catch((error: unknown) => {
 			if (options.signal?.aborted) throw options.signal.reason;
 			if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
@@ -721,6 +723,7 @@ export class Database {
 			throw error;
 		});
 		lease.signal = options.signal;
+		const leased = performance.now();
 		const db = new Scope(lease, true);
 		try {
 			// A process that exits mid-statement, as a stopping server does at its deadline, leaves the statement running;
@@ -746,6 +749,12 @@ export class Database {
 				if (lease.tx && !lease.lost) await db.rollback();
 			} finally {
 				await this.dispose(lease);
+				const waited = Math.round(leased - asked);
+				const held = Math.round(performance.now() - leased);
+				if (waited + held >= (this.options.slowWriteMs ?? SLOW_WRITE_MS))
+					console.warn(
+						`[mainworthy] slow write: ${options.name ?? "a write"} took ${waited + held} ms: ${waited} ms waiting for a connection, ${held} ms holding it`,
+					);
 			}
 		}
 	}
