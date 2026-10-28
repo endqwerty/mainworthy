@@ -356,7 +356,7 @@ When you select an ended answer, the footer and command palette leave out "Undo 
 The answer ends only when that commit's run shows all of the following.
 
 - No test fails with the cause, whether an answer explains the failure or not.
-- Every test the question lists passes, in each environment where a pipeline or a person has seen it fail with the cause in this scope.
+- Every test the question lists passes, including tests covered when the answer carries to later failures, in each environment where a pipeline or a person has seen it fail with the cause in this scope.
   A passing retry of the failing commit counts. The job that runs a test does not matter, so a sharded pipeline can move tests between jobs.
   A shard that has not reported one of those tests yet keeps the answer. So does a test that the fix renamed or removed.
 

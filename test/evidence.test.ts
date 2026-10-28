@@ -1981,6 +1981,53 @@ describe("holds", () => {
 		expect(await state(asked.q)).toBe("dissolved");
 	});
 
+	for (const classification of ["defect", "test", "expected"]) {
+		test(`a carried ${classification} must wait for every failing test to pass`, async () => {
+			const report = (commit: string, only: number[], fail: Record<number, string>, job = "tests") =>
+				h.call("report", ciReport({ commit, pr: 400, branch: "feature", n: 2, only, fail, job }));
+			await report("head0001", [0], { 0: "same cause" });
+			const asked = first((await queue()).items);
+			expect(await decide(asked, { is: classification })).toMatchObject({ status: "decided" });
+			await report("head0002", [0, 1], { 0: "same cause", 1: "same cause" });
+			expect(await gate("head0002")).toMatchObject({ verdict: "failed" });
+			await report("head0003", [0], {});
+			expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
+				{ decision: { answer: { is: classification } }, evidenceHash: asked.evidenceHash },
+			]);
+			expect(await gate("head0002")).toMatchObject({ verdict: "failed" });
+			expect(await decide(asked, { is: classification })).toMatchObject({ status: "already" });
+			await report("head0003", [1], {}, "late");
+			expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
+				{ state: "dissolved", decision: { answer: { is: "outdated", fixed: true }, rule: "passed" } },
+			]);
+		});
+	}
+
+	test("a carried cause beyond fifty listed tests keeps its answer even after every listed test passes", async () => {
+		const firstTests = Array.from({ length: 50 }, (_, i) => i);
+		const report = (commit: string, only: number[], failing: boolean) =>
+			h.call(
+				"report",
+				ciReport({
+					commit,
+					pr: 401,
+					branch: "feature",
+					n: 51,
+					only,
+					fail: failing ? Object.fromEntries(only.map((i) => [i, "same cause"])) : {},
+				}),
+			);
+		await report("limit001", firstTests, true);
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
+		await report("limit002", [50], true);
+		await report("limit003", firstTests, true);
+		await report("limit004", [...firstTests, 50], false);
+		expect(await h.call("get", { refs: [asked.q] })).toMatchObject([
+			{ state: "decided", evidence: { count: 51 }, decision: { answer: { is: "defect" } } },
+		]);
+	});
+
 	test("every test the question saw before the answer must pass, in whatever order they reported", async () => {
 		const fail = { 0: "the basket is empty after sign-in" };
 		const report = (commit: string, file: string, failing: boolean) =>

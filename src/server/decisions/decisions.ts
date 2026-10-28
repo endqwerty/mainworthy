@@ -248,10 +248,10 @@ export async function* raiseSteps(ctx: Ctx, r: Raise): AsyncGenerator<undefined,
 	}));
 	for (const { question, decision, terms } of standing) {
 		if (!stillHolds(terms, occurrence)) continue;
-		await noteCarried(ctx, question, r.refs);
+		const carried = await noteCarried(ctx, question, r.refs, JSON.stringify(r.evidence));
 		const parties = (r.evidence as { parties?: number[] }).parties;
 		if (parties && parties.length > 0) await addQuestionParties(ctx, question, parties);
-		return { s: "carried", question, decision };
+		return { s: "carried", question: carried, decision };
 	}
 	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
 	// new occurrence is asked about, and what was decided where it was decided is left as it is. Any other way

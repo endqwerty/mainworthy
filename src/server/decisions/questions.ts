@@ -267,8 +267,8 @@ const Q = {
 		`UPDATE questions SET title = $title, evidence = $evidence, evidence_hash = $hash, basis = $basis, blocks = $blocks,
 		                      seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id`,
 	),
-	carry: sql<{ id: number; seq: number }>(
-		"UPDATE questions SET carried = carried + 1, seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id",
+	carry: sql<{ id: number; seq: number; evidence: string }>(
+		"UPDATE questions SET evidence = $evidence, carried = carried + 1, seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id",
 	),
 	setState: sql<{ id: number; state: string; decision: number | null; seq: number }>(
 		"UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
@@ -583,9 +583,32 @@ export async function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly 
 	return added;
 }
 
-export async function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<void> {
-	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
+export async function noteCarried(
+	ctx: Ctx,
+	question: QuestionRow,
+	refs: readonly string[],
+	occurrence?: string,
+): Promise<QuestionRow> {
+	let evidence = question.evidence;
+	if (question.kind === "failure" && question.subject.kind === "cause" && occurrence) {
+		type Tests = { tests?: { id: number; counted?: boolean }[]; count?: number };
+		const kept = json<Tests>(evidence);
+		const incoming = json<Tests>(occurrence);
+		const tests = new Map((kept.tests ?? []).map((test) => [test.id, test]));
+		for (const test of incoming.tests ?? []) {
+			const prior = tests.get(test.id);
+			tests.set(test.id, { ...test, ...prior, ...(test.counted || prior?.counted ? { counted: true } : {}) });
+		}
+		// A carry extends the pass requirements, not the target and basis a pending answer was prepared on.
+		evidence = JSON.stringify({
+			...kept,
+			tests: [...tests.values()].slice(0, 50),
+			count: Math.max(tests.size, kept.count ?? 0, incoming.count ?? 0),
+		});
+	}
+	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq, evidence });
 	await addRefs(ctx, question.id, refs);
+	return { ...question, evidence };
 }
 
 export async function setQuestionState(
