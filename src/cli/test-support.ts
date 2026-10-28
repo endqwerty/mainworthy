@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { z } from "zod";
+import { budget, FAIL_MULTIPLE } from "../../scripts/budget.ts";
 import { testDatabase } from "../../test/db.ts";
 import { type Instance, start } from "../app/start.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
@@ -69,7 +70,7 @@ function refuseLateOutput(): void {
 	if (text) throw new Error(`a command wrote after it had ended, which run did not return: ${JSON.stringify(text)}`);
 }
 
-export type InProcess = { environment: Record<string, string>; cwd: string; input: string; limitMs?: number };
+export type InProcess = { environment: Record<string, string>; cwd: string; input: string; baselineMs?: number };
 
 /**
  * Runs `body` with what a child process would have: its environment, directory, standard input and output. They
@@ -81,8 +82,8 @@ export type InProcess = { environment: Record<string, string>; cwd: string; inpu
  * It returns what `body` wrote through `process.stdout.write` and `process.stderr.write` until it ended, which is
  * every way the command line writes (a test in `main.test.ts` holds `src/cli` to that). Two things a process gives
  * and this cannot are kept from passing silently. Output written after `body` ended fails the next command or the
- * end of the test (`refuseLateOutput`). A `body` that outlives `limitMs` cannot be stopped as a child is: the run
- * is refused, and so is every run after it until that body has ended.
+ * end of the test (`refuseLateOutput`). A `body` that outlives ten times its time baseline cannot be stopped as a
+ * child is: the run is refused, and so is every run after it until that body has ended.
  */
 export function inThisProcess(label: string, body: () => Promise<number>, given: InProcess): Promise<CliResult> {
 	const turn = inProcess.then(async (): Promise<CliResult> => {
@@ -100,13 +101,20 @@ export function inThisProcess(label: string, body: () => Promise<number>, given:
 			stderr: process.stderr.write,
 			stdin: Bun.stdin,
 		};
-		const limitMs = given.limitMs ?? 10_000;
+		const baselineMs = given.baselineMs ?? 10_000;
+		const limitMs = FAIL_MULTIPLE * Math.max(baselineMs, 1);
+		const began = performance.now();
 		const overdue = new Error(`${label} did not finish in ${limitMs / 1000} s`);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			for (const key of Object.keys(process.env)) delete process.env[key];
 			Object.assign(process.env, given.environment);
-			for (const key of ["MAINWORTHY_TEST_PG", "MAINWORTHY_TEST_DATABASES", "MAINWORTHY_TEST_CHILDREN"]) {
+			for (const key of [
+				"MAINWORTHY_TEST_PG",
+				"MAINWORTHY_TEST_DATABASES",
+				"MAINWORTHY_TEST_CHILDREN",
+				"MAINWORTHY_BUDGET_REPORTS",
+			]) {
 				if (saved.env[key] !== undefined) process.env[key] = saved.env[key];
 			}
 			process.chdir(given.cwd);
@@ -132,6 +140,7 @@ export function inThisProcess(label: string, body: () => Promise<number>, given:
 				printError(error);
 				code = 4;
 			}
+			budget(label, performance.now() - began, baselineMs, "ms");
 			return { stdout: out.join(""), stderr: err.join(""), code };
 		} finally {
 			clearTimeout(timer);
@@ -207,7 +216,9 @@ export async function withInstance<T>(
 					stdout: "pipe",
 					stderr: "pipe",
 				});
-				const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000);
+				const began = performance.now();
+				const baselineMs = 10_000;
+				const timeout = setTimeout(() => child.kill("SIGKILL"), FAIL_MULTIPLE * baselineMs);
 				try {
 					child.stdin.write(options.input ?? "");
 					await child.stdin.end();
@@ -216,6 +227,7 @@ export async function withInstance<T>(
 						new Response(child.stderr).text(),
 						child.exited,
 					]);
+					budget(`mainworthy ${argv.join(" ")}`, performance.now() - began, baselineMs, "ms");
 					return { stdout, stderr, code };
 				} finally {
 					clearTimeout(timeout);

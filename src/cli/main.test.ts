@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1245,6 +1245,35 @@ test("the command line reaches the terminal only through the two write functions
 	expect(found).toEqual([]);
 });
 
+test("an in-process command above its time baseline warns and returns its result", async () => {
+	const clock = spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(11_000);
+	const reports = process.env.MAINWORTHY_BUDGET_REPORTS;
+	delete process.env.MAINWORTHY_BUDGET_REPORTS;
+	const warning = spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		const result = await inThisProcess("over baseline", async () => 2, {
+			environment: {},
+			cwd: tmpdir(),
+			input: "",
+		});
+		expect(result.code).toBe(2);
+		expect(warning).toHaveBeenCalledWith("WARNING: over baseline: 11000 ms exceeds baseline 10000 ms.");
+		clock.mockReturnValueOnce(0).mockReturnValueOnce(100_001);
+		await expect(
+			inThisProcess("beyond budget", async () => 0, {
+				environment: {},
+				cwd: tmpdir(),
+				input: "",
+			}),
+		).rejects.toThrow("is more than 10 times its baseline of 10000 ms");
+	} finally {
+		clock.mockRestore();
+		warning.mockRestore();
+		if (reports === undefined) delete process.env.MAINWORTHY_BUDGET_REPORTS;
+		else process.env.MAINWORTHY_BUDGET_REPORTS = reports;
+	}
+});
+
 // Two things a process gives and a call in the test's process cannot: its output is complete when it exits, and it
 // can be stopped. `inThisProcess` keeps each from passing silently.
 test("a command that writes after it ended, or outlives its time, fails where it was run in the process", async () => {
@@ -1278,7 +1307,7 @@ test("a command that writes after it ended, or outlives its time, fails where it
 	const slow = new Promise<number>((resolve) => {
 		end = () => resolve(0);
 	});
-	await expect(inThisProcess("slow", () => slow, { ...given, limitMs: 20 })).rejects.toThrow(
+	await expect(inThisProcess("slow", () => slow, { ...given, baselineMs: 2 })).rejects.toThrow(
 		"slow did not finish in 0.02 s",
 	);
 	untouched();
