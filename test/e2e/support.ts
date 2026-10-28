@@ -14,6 +14,7 @@ import {
 } from "playwright-core";
 import { z } from "zod";
 import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint } from "../../scripts/check-plan.ts";
+import { markOwned, sweepOwned } from "../../scripts/work/scratch.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
@@ -83,8 +84,10 @@ export async function startServer({
 	/** Where failures of the first project are handed to an agent (`MAINWORTHY_HANDOFF_*`). */
 	handoff?: { url: string; secret: string };
 } = {}): Promise<Server> {
+	sweepOwned(tmpdir(), "mainworthy-e2e-");
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
+	markOwned(dataDir);
 	const token = crypto.randomUUID();
 	const executable = source ? undefined : process.env.MAINWORTHY_E2E_SERVER;
 	let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
@@ -139,7 +142,7 @@ export async function startServer({
 				detached: true,
 			},
 		);
-		// Transfer cleanup to the supervisor, which waits for fixture exit before releasing these. A normal
+		// The supervisor owns cleanup while the worker is gone; the worker also removes data after its exit. A normal
 		// worker exit under Bun 1.4.3 --no-orphans can kill the supervisor before cleanup, leaving directories
 		// behind. Do not delete them in the worker's exit hook: the fixture can still own its database then.
 		ownedDirectories.delete(dataDir);
@@ -148,6 +151,17 @@ export async function startServer({
 		ownedDirectories.delete(dataDir);
 		throw error;
 	}
+	const killFixture = () => {
+		try {
+			const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
+			if (Number.isSafeInteger(pid) && pid > 0) process.kill(-pid, "SIGKILL");
+		} catch {}
+	};
+	const exited = child.exited.then(async (code) => {
+		if (code !== 0) killFixture();
+		await rm(dataDir, { recursive: true, force: true });
+		return code;
+	});
 	let stopping: Promise<void> | undefined;
 	const stop = () =>
 		(stopping ??= (async () => {
@@ -155,19 +169,14 @@ export async function startServer({
 			// The supervisor stops a blocked fixture inside 1.5 seconds. Its own cleanup then drops the fixture's
 			// database, about 7 seconds on a cluster that has just started (#961), so it gets longer, but less than
 			// the 20-second test timeout (test/preflight.ts). Both bounds only catch a supervisor failure.
-			const fixture = setTimeout(() => {
-				try {
-					const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
-					if (Number.isSafeInteger(pid) && pid > 0) process.kill(-pid, "SIGKILL");
-				} catch {}
-			}, 3_000);
+			const fixture = setTimeout(killFixture, 3_000);
 			const supervisor = setTimeout(() => {
 				try {
 					process.kill(-child.pid, "SIGKILL");
 				} catch {}
 			}, 15_000);
 			try {
-				const code = await child.exited;
+				const code = await exited;
 				if (code !== 0) throw new Error(`Mainworthy e2e supervisor exited with ${code}`);
 			} finally {
 				clearTimeout(fixture);

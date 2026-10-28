@@ -64,6 +64,7 @@ import {
 } from "./chromium-diagnostics.ts";
 import { requireReady } from "./preflight.ts";
 import { ownedChildren, registerOwnedChild } from "./work/processes.ts";
+import { markOwned, sweepOwned } from "./work/scratch.ts";
 
 requireReady("check");
 
@@ -80,7 +81,10 @@ const everyFile = phases.includes("parallel") && shard === undefined && chosen =
 const whole = everyFile && workers === undefined;
 
 const started = performance.now();
+sweepOwned(tmpdir(), "mainworthy-check-");
 const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
+markOwned(scratch);
+process.once("exit", () => rmSync(scratch, { recursive: true, force: true }));
 const databaseRuns = await import("./work/test-databases.ts");
 const recoveredDatabases = await databaseRuns.recoverTestDatabases(process.cwd());
 if (recoveredDatabases) console.log(`check: recovered ${recoveredDatabases} recorded test databases from an ended run`);
@@ -136,6 +140,7 @@ const leave = (code: number): Promise<never> => {
 			`check: ${leaked.length} owned ${leaked.length === 1 ? "child" : "children"} still alive${leaked.length ? ` (pids: ${leaked.join(", ")})` : ""}`,
 		);
 		let exit = code || (browserFailed || leaked.length > 0 ? 1 : 0);
+		rmSync(scratch, { recursive: true, force: true });
 		let reaped = 0;
 		try {
 			reaped = await databaseReaper.stop();
@@ -165,7 +170,6 @@ const leave = (code: number): Promise<never> => {
 		} else console.error(`check: database cleanup waits for owned children; records kept at ${databaseRun.directory}`);
 		console.log(`${"total".padEnd(16)} ${seconds((performance.now() - started) / 1000).padStart(8)}`);
 		if (junit && testOutcome) await Bun.write(outcomePath(junit), `${JSON.stringify({ ...testOutcome, exit })}\n`);
-		rmSync(scratch, { recursive: true, force: true });
 		process.exit(exit);
 	})();
 	return leaving;

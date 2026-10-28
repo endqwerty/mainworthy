@@ -3,13 +3,14 @@ import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { registerOwnedChild } from "../../scripts/work/processes.ts";
-
+import { markOwned } from "../../scripts/work/scratch.ts";
 import { drainDatabaseDrops, testDatabase } from "../db.ts";
 
-const database = await testDatabase();
 const config = z
 	.object({ command: z.array(z.string()).min(1), data: z.string() })
 	.parse(JSON.parse(process.argv[2] ?? "null"));
+markOwned(config.data);
+const database = await testDatabase();
 const unregister = await registerOwnedChild(process.pid);
 // detached creates a new session/process group on macOS as well as Linux. Explicit stdio keeps the
 // worker's lifetime pipe out of the fixture; it receives a new pipe with this supervisor as sole writer.
@@ -27,7 +28,10 @@ const exited = new Promise<number>((resolve) => {
 });
 const pid = child.pid;
 const unregisterFixture = pid === undefined ? async () => {} : await registerOwnedChild(pid);
-if (pid !== undefined) await writeFile(join(config.data, "fixture-pid"), String(pid));
+if (pid !== undefined) {
+	markOwned(config.data, [process.pid, pid]);
+	await writeFile(join(config.data, "fixture-pid"), String(pid));
+}
 // A fixture can publish its URL immediately; readiness must include its completed PID metadata.
 child.stdout?.pipe(process.stdout);
 const signal = (name: NodeJS.Signals) => {
@@ -49,9 +53,9 @@ const shutdown = () =>
 		// The leader can exit before its descendants. Kill only its private group before releasing resources.
 		signal("SIGKILL");
 		await unregisterFixture();
+		await rm(config.data, { recursive: true, force: true });
 		await database.close();
 		if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
-		await rm(config.data, { recursive: true, force: true });
 		await unregister();
 		process.exit(0);
 	})());

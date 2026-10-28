@@ -1,9 +1,18 @@
 // Real worker exits, signals and PostgreSQL drops belong to the serial process checks.
 import { expect, onTestFinished, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { z } from "zod";
-import { make, remove } from "../scripts/work/scratch.ts";
+import { make, markOwned, remove, sweepOwned } from "../scripts/work/scratch.ts";
 
 for (const managed of [false, true])
 	test(`database cleanup preserves ${managed ? "runner ownership" : "direct-file behavior"}`, async () => {
@@ -272,7 +281,7 @@ for (const ending of ["success", "failure", "SIGINT", "SIGTERM", "SIGKILL"] as c
    test("a managed fixture",async()=> {
     const database = await testDatabase({schema:"empty"});
     await database.close();
-    await Bun.write(${JSON.stringify(readyFile)},JSON.stringify({directory:process.env.MAINWORTHY_TEST_DATABASES}));
+    await Bun.write(${JSON.stringify(readyFile)},JSON.stringify({directory:process.env.MAINWORTHY_TEST_DATABASES,scratch:process.env.MAINWORTHY_BUDGET_REPORTS}));
     ${ending === "failure" ? 'throw new Error("expected probe failure");' : ending.startsWith("SIG") ? "await new Promise(() => {});" : ""}
    });
   `,
@@ -292,7 +301,9 @@ for (const ending of ["success", "failure", "SIGINT", "SIGTERM", "SIGKILL"] as c
 			const deadline = Date.now() + 8000;
 			while (!existsSync(readyFile) && child.exitCode === null && Date.now() < deadline) await Bun.sleep(10);
 			expect(existsSync(readyFile)).toBe(true);
-			const ready = z.object({ directory: z.string() }).parse(JSON.parse(readFileSync(readyFile, "utf8")));
+			const ready = z
+				.object({ directory: z.string(), scratch: z.string() })
+				.parse(JSON.parse(readFileSync(readyFile, "utf8")));
 			if (ending !== "success" && ending !== "failure") child.kill(ending);
 			const rc = await child.exited;
 			const [out, err] = await output;
@@ -311,6 +322,7 @@ for (const ending of ["success", "failure", "SIGINT", "SIGTERM", "SIGKILL"] as c
 				expect(out).toContain("1 test databases removed; peak live 1");
 			}
 			expect(existsSync(ready.directory)).toBe(false);
+			expect(existsSync(dirname(ready.scratch))).toBe(false);
 		} finally {
 			child.kill("SIGKILL");
 			await child.exited;
@@ -319,3 +331,56 @@ for (const ending of ["success", "failure", "SIGINT", "SIGTERM", "SIGKILL"] as c
 			remove(root);
 		}
 	}, 20000);
+
+test("scratch recovery removes only marked directories with dead owners", async () => {
+	const root = make("scratch-recovery");
+	const child = Bun.spawn([process.execPath, "-e", ""], { stdout: "ignore", stderr: "ignore" });
+	await child.exited;
+	try {
+		for (const prefix of ["mainworthy-check-", "mainworthy-e2e-"] as const) {
+			const dead = join(root, `${prefix}${child.pid}-dead`);
+			const live = join(root, `${prefix}${process.pid}-live`);
+			const unknown = join(root, `${prefix}${child.pid}-unknown`);
+			for (const directory of [dead, live, unknown]) mkdirSync(directory);
+			markOwned(dead, [child.pid]);
+			markOwned(live, [child.pid, process.pid]);
+			const copy = `${dead}-copy`,
+				alias = `${dead}-link`;
+			cpSync(dead, copy, { recursive: true });
+			symlinkSync(dead, alias);
+			sweepOwned(root, prefix);
+			expect(existsSync(dead)).toBe(false);
+			expect(existsSync(live)).toBe(true);
+			expect(existsSync(unknown)).toBe(true);
+			expect(existsSync(copy)).toBe(true);
+			expect(lstatSync(alias).isSymbolicLink()).toBe(true);
+		}
+	} finally {
+		remove(root);
+	}
+});
+
+test("the fixture parent removes data after a killed supervisor exits", async () => {
+	const { startServer } = await import("./e2e/support.ts");
+	const { processTable } = await import("../scripts/work/processes.ts");
+	const server = await startServer({ source: true });
+	const procs = await processTable();
+	const supervisor = procs.find(
+		(proc) =>
+			proc.command.startsWith(process.execPath) &&
+			proc.command.includes("test/e2e/supervise.ts") &&
+			proc.command.includes(`mainworthy-e2e-${process.pid}-`),
+	);
+	const data = /"data":"([^"\n]+)"/.exec(supervisor?.command ?? "")?.[1];
+	if (!supervisor || !data) throw new Error("missing own fixture supervisor");
+	try {
+		const fixture = Number(readFileSync(join(data, "fixture-pid"), "utf8"));
+		process.kill(-fixture, "SIGKILL");
+		process.kill(supervisor.pid, "SIGKILL");
+		await expect(server.stop()).rejects.toThrow();
+		expect(existsSync(data)).toBe(false);
+	} finally {
+		await server.stop().catch(() => {});
+		await import("node:fs/promises").then((fs) => fs.rm(data, { recursive: true, force: true }));
+	}
+});
