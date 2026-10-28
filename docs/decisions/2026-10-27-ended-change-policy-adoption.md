@@ -7,9 +7,11 @@
 
 An unused ended change keeps its last recalculated gate across policy adoption.
 Open changes, all their commits, and evidence consumed by planned runs update
-immediately, including closed planned runs. Reopening reconciles before returning.
-Skipped history is reconciled before any later authoritative use. Planning reconciles matching ended source runs before importing
-their evidence; a new merge receipt reconciles an ended change before freezing its
+immediately, including closed planned runs. A run retained under an ended change
+is still selected when any open change names its repository-qualified commit as
+head. Reopening selects both owned runs and the resolved head before returning.
+Skipped history is reconciled before any later authoritative use. Planning
+reconciles matching ended source runs before importing their evidence; a new merge receipt reconciles its exact head run before freezing its
 gate. Both use the full inherited-decision reconciliation in the project transaction,
 including removal of exact result excuses forbidden by the current policy.
 
@@ -30,7 +32,7 @@ for open changes and retained plans. Keeping every historical gate aligned with
 policy was rejected because it retains the history-dependent write delay.
 
 Runs retain no last-reconciled policy version. Rather than add a marker, these entry
-points conservatively reconcile matching ended runs on use. Ordinary gate reads do
+points conservatively reconcile source runs on use. Ordinary gate reads do
 not trigger reconciliation. An existing receipt stays frozen on a repeated merge.
 Landing already reconciles a changed commit scope, including planned consumers.
 Base comparisons under decision 0042 read effective raw results independently of

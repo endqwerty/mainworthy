@@ -1291,3 +1291,43 @@ for (const use of ["plan", "merge"] as const) {
 		expect((await gate("change01")).tally.excused).toBe(0);
 	});
 }
+
+for (const evidence of ["empty", "inherited"] as const) {
+	for (const use of ["adoption", "reopen", "merge"] as const) {
+		test(`shared head ${evidence} standing reconciles on ${use}`, async () => {
+			const adopt = async (edit: { emptyReports: "nothing-required" | "pending" } | { preset: "standard" }) => {
+				await h.call("propose", { edits: [{ op: "policy", ...edit }] });
+				const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+				if (!q) throw new Error("no adoption");
+				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			};
+			const ci = await h.actor("shared-head-ci", "ci", ["read", "record"]);
+			if (evidence === "empty") await adopt({ emptyReports: "nothing-required" });
+			else await base();
+			for (const pr of [69, 70]) {
+				const report = ciReport({
+					commit: "shared01",
+					pr,
+					base: "base0001",
+					n: evidence === "empty" ? 0 : 2,
+					...(evidence === "inherited" ? { fail: { 0: "same cause" } } : {}),
+				});
+				await h.call("report", { ...report, ...(evidence === "empty" ? { nothingRequired: true } : {}) }, ci);
+			}
+			expect(await h.call("gate", { change: "pr:70" })).toMatchObject({ verdict: "passed" });
+			await h.call("change", { change: "pr:69", state: "closed" });
+			if (use !== "adoption") await h.call("change", { change: "pr:70", state: "closed" });
+			await adopt(evidence === "empty" ? { emptyReports: "pending" } : { preset: "standard" });
+			const expected = evidence === "empty" ? { verdict: "pending" } : { verdict: "blocked", tally: { excused: 0 } };
+			if (use === "reopen") await h.call("change", { change: "pr:70", state: "open" });
+			if (use === "merge" || use === "adoption") {
+				if (use === "adoption") expect(await h.call("gate", { change: "pr:70" })).toMatchObject(expected);
+				await h.call("change", { change: "pr:70", state: "merged" });
+				expect(await h.call("impact", { change: "pr:70" })).toMatchObject({
+					change: { mergeReceipt: { gate: expected } },
+				});
+			}
+			expect(await h.call("gate", { change: "pr:70" })).toMatchObject(expected);
+		});
+	}
+}

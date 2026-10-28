@@ -425,12 +425,13 @@ It makes no certification claim.
 
 Adopting a policy updates open changes, including their older commits, and planned
 runs that use change evidence. This includes closed planned runs with pinned results.
-An ended change with no planned consumer keeps its last recalculated gate answer
-when policy changes. Its historical gate may therefore disagree with today's policy.
+A commit shared with an open change updates even if its run belongs to an ended
+change. An ended change with no open head or planned consumer using its commit
+keeps its last recalculated gate answer when policy changes. Its historical gate may therefore disagree with today's policy.
 Reopening the change recalculates its standing under the current policy before the
 request returns. Starting a plan that counts its evidence also reconciles the ended
-source under the current policy before importing results. Reporting a previously
-closed change as merged reconciles it before recording the merge receipt. These
+source under the current policy before importing results. Reporting a change as
+merged reconciles its exact head run before recording a new merge receipt. These
 steps remove inherited excuses that the current policy no longer allows.
 
 This is not a frozen snapshot. Reports, base corrections and other evidence changes
