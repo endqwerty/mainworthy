@@ -80,3 +80,45 @@ export function remove(given: string, root = defaultRoot()): string {
 	} else rmSync(real, { recursive: true });
 	return real;
 }
+
+/** A temporary run uses the same path-bound marker as task scratch, plus all processes that can still use it. */
+export function markOwned(directory: string, pids: readonly number[] = [process.pid]): void {
+	const real = realpathSync(directory);
+	writeFileSync(join(real, MARKER), `${real}\n`);
+	writeFileSync(join(real, `${MARKER}-owner`), `${pids.join("\n")}\n`);
+}
+
+/** Recover only marked run directories. An unknown process state is treated as alive. */
+export function sweepOwned(root: string, prefix: "mainworthy-check-" | "mainworthy-e2e-"): void {
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+		const directory = join(realpathSync(root), entry.name);
+		try {
+			if (!hasOwnMarker(directory)) continue;
+			const pids = readFileSync(join(directory, `${MARKER}-owner`), "utf8")
+				.trim()
+				.split("\n")
+				.map(Number);
+			if (!pids.length || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) continue;
+			const namePid = prefix === "mainworthy-e2e-" ? Number(/^mainworthy-e2e-(\d+)-/.exec(entry.name)?.[1]) : undefined;
+			if (namePid !== undefined) {
+				if (!Number.isSafeInteger(namePid) || namePid <= 0) continue;
+				pids.push(namePid);
+			}
+			if (
+				pids.some((pid) => {
+					try {
+						process.kill(pid, 0);
+						return true;
+					} catch (error) {
+						return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+					}
+				})
+			)
+				continue;
+			rmSync(directory, { recursive: true, force: true });
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+		}
+	}
+}
