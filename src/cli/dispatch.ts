@@ -9,7 +9,6 @@ import { line } from "./output.ts";
 export const ADAPTER_COMMANDS: ReadonlyMap<string, () => Promise<AdapterCommand>> = new Map([
 	["announce", async () => (await import("./commands/announce.ts")).announceCommand],
 	["report", async () => (await import("./commands/report.ts")).reportCommand],
-	["login", async () => (await import("./commands/login.ts")).loginCommand],
 	["gate", async () => (await import("./commands/gate.ts")).gateCommand],
 	["token", async () => (await import("./commands/token.ts")).tokenCommand],
 	["invite", async () => (await import("./commands/invite.ts")).inviteCommand],
@@ -124,11 +123,7 @@ export async function runCli(
 	const client = new Client({
 		...(name === "audit" && args.positionals[0] === "verify"
 			? { url: "http://127.0.0.1:7357", token: undefined, project: undefined }
-			: clientOptions(
-					args,
-					name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
-					clientEnv,
-				)),
+			: clientOptions(args, name === "health" || name === "fmt" || name === "version" ? "none" : "token", clientEnv)),
 		...(request ? { request } : {}),
 	});
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))

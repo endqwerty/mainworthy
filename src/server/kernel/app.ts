@@ -8,7 +8,6 @@ import { CHANGE_CHANNEL, recordChange } from "./changes.ts";
 import { Database, type WriteDb } from "./db.ts";
 import type { JobService } from "./job-auth.ts";
 import { jobKeyOf } from "./job-input.ts";
-import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
 export type Config = {
@@ -51,18 +50,11 @@ export type Config = {
 	proxy: TrustedProxy | null;
 	/**
 	 * The address people open the instance at, as they type it: `MAINWORTHY_PUBLIC_URL`, for example
-	 * `https://mainworthy.com`. A passkey belongs to the host name in it, and an invitation link starts with it.
-	 * It is the one source of both: a request's `Host` never is. Absent, the instance has no passkeys and an
-	 * invitation link is printed without a host. The start refuses a value a browser would not take
-	 * (`publicAddress` in the identity module, which knows what a browser takes).
+	 * `https://mainworthy.com`. An invitation link starts with it and the identity provider sends people back to
+	 * it. It is the one source of both: a request's `Host` never is. Absent, an invitation link is printed without
+	 * a host. The start refuses a value it cannot use (`publicAddress` in the identity module).
 	 */
 	publicUrl?: string;
-	requireAdminMfa?: boolean;
-	/**
-	 * What hashing a password costs, where it is not what the build ships with. A test sets it, because a
-	 * test hashes hundreds of passwords; nothing reads it from the environment.
-	 */
-	passwordCost?: { memoryCost: number; timeCost: number };
 	github?: { project: string; repository: string; token: string };
 	githubStatuses?: boolean;
 	jira?: { project: string; site: string; projectKey: string; issueType: string; email: string; token: string };
@@ -71,7 +63,6 @@ export type Config = {
 	 * such as a T3 Code webhook task that starts a thread for each request.
 	 */
 	handoff?: { project: string; url: string; secret: string };
-	mail?: MailConfig | undefined;
 	/** The identity provider people may sign in through, when the operator named one (`oidcOf`). */
 	oidc?: OidcConfig;
 };
@@ -79,10 +70,9 @@ export type Config = {
 /**
  * An OpenID Connect provider: `MAINWORTHY_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET` and `_NAME`, set together
  * or not at all. The provider sends a person back to `MAINWORTHY_PUBLIC_URL` and `/signin/oidc`, so that is
- * needed too. `mfa` is `MAINWORTHY_OIDC_MFA`: the operator's word that the provider asks everybody for a second
- * factor, which is what lets an admin in through it where `requireAdminMfa` asks for one.
+ * needed too. It is the only way a person signs in (decision 2026-10-27): it owns their second factor.
  */
-export type OidcConfig = { issuer: string; clientId: string; clientSecret: string; name: string; mfa: boolean };
+export type OidcConfig = { issuer: string; clientId: string; clientSecret: string; name: string };
 
 /**
  * A proxy whose word for the client's address is believed, proved by its connecting address or a secret header.
@@ -280,11 +270,9 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
 		proxy: proxyOf(env),
 		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
-		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
 		...jiraOf(env),
 		...handoffOf(env),
-		mail: mailConfig(env),
 		...oidcOf(env),
 	};
 }
@@ -295,9 +283,6 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 function oidcOf(env: Record<string, string | undefined>): Pick<Config, "oidc"> {
 	const [issuer, clientId, clientSecret, name] = OIDC_NAMES.map((name) => env[`MAINWORTHY_OIDC_${name}`]?.trim() ?? "");
-	const mfa = env.MAINWORTHY_OIDC_MFA;
-	if (mfa !== undefined && mfa !== "" && mfa !== "true" && mfa !== "false")
-		throw new Error("MAINWORTHY_OIDC_MFA must be true or false");
 	if (!issuer && !clientId && !clientSecret && !name) return {};
 	if (!issuer || !clientId || !clientSecret || !name)
 		throw new Error(
@@ -317,7 +302,7 @@ function oidcOf(env: Record<string, string | undefined>): Pick<Config, "oidc"> {
 		throw new Error("MAINWORTHY_OIDC_ISSUER must be the issuer address without a query, a fragment or credentials.");
 	if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)))
 		throw new Error("MAINWORTHY_OIDC_ISSUER must use https (plain http only on this machine's loopback address).");
-	return { oidc: { issuer, clientId, clientSecret, name, mfa: mfa === "true" } };
+	return { oidc: { issuer, clientId, clientSecret, name } };
 }
 
 function jiraOf(env: Record<string, string | undefined>): Pick<Config, "jira"> {
@@ -392,13 +377,6 @@ function handoffOf(env: Record<string, string | undefined>): Pick<Config, "hando
 	if (!/^[!-~]{16,512}$/.test(secret))
 		throw new Error("MAINWORTHY_HANDOFF_SECRET must be at least 16 characters without whitespace.");
 	return { handoff: { project, url, secret } };
-}
-
-function adminMfaOf(env: Record<string, string | undefined>): boolean {
-	const value = env.MAINWORTHY_REQUIRE_ADMIN_MFA;
-	if (value === undefined || value === "" || value === "false") return false;
-	if (value === "true") return true;
-	throw new Error("MAINWORTHY_REQUIRE_ADMIN_MFA must be true or false");
 }
 
 function jobConfig(env: Record<string, string | undefined>): Pick<Config, "jobCaller" | "jobRunner"> {

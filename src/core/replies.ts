@@ -22,8 +22,6 @@ import {
 	PersonalTokenCreated,
 	PersonalTokenRow,
 	SessionRow,
-	TotpConfirmed,
-	TotpEnrolment,
 } from "./people-replies.ts";
 import { PlacementEdit, QuarantineEdit } from "./proposals.ts";
 import { ResultLocation, ResultTrail } from "./results.ts";
@@ -807,28 +805,10 @@ export const AdminReply = z.union([
 ]);
 export const SessionReply = z.union([z.array(SessionRow), z.looseObject({ ended: z.literal(true), current: flag })]);
 export const CredentialReply = z.union([
-	z.object({ email: text.nullable(), verified: flag }),
-	TotpEnrolment,
-	TotpConfirmed,
 	z.array(CredentialRow),
 	PersonalTokenCreated,
 	z.array(PersonalTokenRow),
 	z.object({ revoked: flag }),
-	z.object({
-		challenge: text,
-		rp: z.object({ id: text, name: text }),
-		user: z.object({ id: text, name: text, displayName: text }),
-		pubKeyCredParams: z.array(z.object({ type: text, alg: number })).readonly(),
-		timeout: number,
-		attestation: text,
-		authenticatorSelection: z.object({
-			residentKey: text,
-			requireResidentKey: z.literal(true),
-			userVerification: text,
-		}),
-		excludeCredentials: z.array(z.object({ type: text, id: text, transports: texts.readonly() })).readonly(),
-	}),
-	z.object({ id: whole, label: text }),
 	z.object({ removed: z.literal(true), sessionsEnded: whole }),
 ]);
 export const InvitationReply = z.union([InvitationCreated, z.array(InvitationRow), z.object({ revoked: flag })]);

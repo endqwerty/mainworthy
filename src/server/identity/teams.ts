@@ -4,9 +4,8 @@ import type { App } from "../kernel/app.ts";
 import { type Actor, allProjects, findProject, lockProject } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import { hasAdminGrant, providerVouches } from "./identity.ts";
 import { lockCallActors, lockIdentity } from "./locks.ts";
-import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
+import { requireRecentProof } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
 type Grant = { project: number; can: string };
@@ -170,7 +169,6 @@ export async function manageTeams(
 	let can: string | null = null;
 	let changed = false;
 	let action: Action;
-	const adminsBefore = new Map<number, boolean>();
 	switch (input.do) {
 		case "team.member.add":
 		case "team.member.remove": {
@@ -182,8 +180,6 @@ export async function manageTeams(
 			if (found.kind !== "human") throw invalid("only a person can join a team");
 			person = found.id;
 			action = input.do === "team.member.add" ? "member.add" : "member.remove";
-			if (app.config.requireAdminMfa && action === "member.add")
-				adminsBefore.set(person, await hasAdminGrant(db, person));
 			changed =
 				(await db.run(action === "member.add" ? Q.add : Q.remove, { team: team.id, actor: person })).changes > 0;
 			break;
@@ -203,12 +199,7 @@ export async function manageTeams(
 				can = JSON.stringify([...new Set(input.can)].sort());
 				const previous = (await db.all(Q.grants, { team: team.id })).find((grant) => grant.project === project);
 				changed = previous?.can !== can;
-				if (changed) {
-					if (app.config.requireAdminMfa)
-						for (const member of await db.all(Q.members, { team: team.id }))
-							adminsBefore.set(member.id, await hasAdminGrant(db, member.id));
-					await db.run(Q.grant, { team: team.id, project, can });
-				}
+				if (changed) await db.run(Q.grant, { team: team.id, project, can });
 			}
 			break;
 		}
@@ -217,9 +208,6 @@ export async function manageTeams(
 			throw invalid(`unknown team action ${JSON.stringify(_exhaustive)}`);
 		}
 	}
-	for (const [actor, wasAdmin] of adminsBefore)
-		if (changed && !wasAdmin && (await hasAdminGrant(db, actor)))
-			await endSessionsWithoutFactor(db, actor, app.now(), providerVouches(app));
 	if (changed) await db.run(Q.event, { team: team.id, by: by.id, at: app.now(), action, person, project, can });
 	return { team: name, changed };
 }

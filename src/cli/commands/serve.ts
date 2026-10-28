@@ -38,7 +38,7 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	// Local mode signs the owner in with no step, so the line says who you are. A server signs nobody in on its own.
 	const who =
 		config.mode === "server"
-			? `owner ${instance.owner.name} · sign in with a token, a password or a passkey`
+			? `owner ${instance.owner.name} · sign in with a token${config.oidc ? ` or through ${config.oidc.name}` : ""}`
 			: `you are ${instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`}`;
 	line(`Mainworthy ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
 	const policy = await instance.app.database.read(async (db) => {

@@ -92,7 +92,7 @@ export type InstanceCtx<D extends ReadDb = WriteDb> = {
 	 * Where the caller is signed in, as an opaque text that is the same for every request of one browser
 	 * session and differs for every other (`Session.context` in the identity module), or null for a token and
 	 * for no request at all. An operation that begins something another request finishes keeps it, and
-	 * compares it: a passkey registration is finished where it was begun.
+	 * compares it: a proof of who the caller is counts only in the session it was made in.
 	 */
 	context: string | null;
 };

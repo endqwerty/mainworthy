@@ -6,11 +6,15 @@ import jobs from "./migrations/0004-jobs.sql" with { type: "text" };
 import reportSpans from "./migrations/0005-report-spans.sql" with { type: "text" };
 import projectRemovalIndexes from "./migrations/0006-project-removal-indexes.sql" with { type: "text" };
 import reportMapPages from "./migrations/0007-report-map-pages.sql" with { type: "text" };
+import identityProviderOnly from "./migrations/0008-identity-provider-only.sql" with { type: "text" };
 import baseline from "./schema.sql" with { type: "text" };
 
-// PostgreSQL starts a new schema lineage; archive 43 follows the final SQLite archive format (42).
-export const SCHEMA_VERSION = 7;
-export const ARCHIVE_VERSION = 44;
+// PostgreSQL starts a new schema lineage; archive 43 followed the final SQLite archive format (42), migration 7
+// moved it to 44 and migration 8 to 45.
+export const SCHEMA_VERSION = 8;
+export const ARCHIVE_VERSION = 45;
+/** The archive format each schema version records in its ledger. */
+const archiveOf = (version: number): number => (version < 7 ? 43 : version < 8 ? 44 : ARCHIVE_VERSION);
 export const migrationHash = createHash("sha256")
 	.update(projectLocks)
 	.update(sharedIdentity)
@@ -18,6 +22,7 @@ export const migrationHash = createHash("sha256")
 	.update(reportSpans)
 	.update(projectRemovalIndexes)
 	.update(reportMapPages)
+	.update(identityProviderOnly)
 	.digest("hex");
 const hash = createHash("sha256").update(baseline).digest("hex");
 
@@ -98,7 +103,7 @@ export async function migrate(database: Database): Promise<void> {
 				const ledger = new Map((await db.all(Q.ledger)).map((row) => [row.key, row.value]));
 				if (
 					ledger.get("baseline_hash") !== hash ||
-					ledger.get("archive_version") !== String(version < 7 ? 43 : ARCHIVE_VERSION)
+					ledger.get("archive_version") !== String(archiveOf(version))
 				) {
 					throw new Error("Database baseline does not match this build");
 				}
@@ -127,6 +132,7 @@ export async function migrate(database: Database): Promise<void> {
 			await db.exec(reportSpans);
 			await db.exec(projectRemovalIndexes);
 			await db.exec(reportMapPages);
+			await db.exec(identityProviderOnly);
 			for (const [key, value] of Object.entries({
 				schema_version: String(SCHEMA_VERSION),
 				baseline_hash: hash,
@@ -142,6 +148,10 @@ export async function migrate(database: Database): Promise<void> {
 				await db.exec(reportMapPages);
 				await db.exec("UPDATE meta SET value = '7' WHERE key = 'schema_version'");
 				await db.exec("UPDATE meta SET value = '44' WHERE key = 'archive_version'");
+			}
+			if ((await schemaVersion(db)) < 8) {
+				await db.exec(identityProviderOnly);
+				await db.exec("UPDATE meta SET value = '8' WHERE key = 'schema_version'");
 			}
 		});
 	});

@@ -1,8 +1,8 @@
-// What a signed-in caller does about signing in: their sessions, their passwords and passkeys, and the
+// What a signed-in caller does about signing in: their sessions, their identities and tokens, and the
 // invitations an admin hands out. The inputs of the three operations and what each replies, declared once for
 // the server, the CLI and the web client.
 //
-// No input here carries a password or an invitation's code. Those go through the sign-in routes
+// No input here carries an invitation's code or a provider's answer. Those go through the sign-in routes
 // (`src/surfaces/signin.ts`), never through an operation: the registry keeps a digest of a request that
 // carries a command id, and the CLI takes an operation's input as flags.
 import { z } from "zod";
@@ -18,24 +18,13 @@ export {
 	INVITATION_LASTS,
 	InvitationCreated,
 	InvitationRow,
-	PASSWORD_LENGTH,
-	PasswordEntry,
 	PERSONAL_TOKEN_LASTS,
 	PersonalTokenCreated,
 	PersonalTokenRow,
 	SessionRow,
-	TotpConfirmed,
-	TotpEnrolment,
-	whyNotPassword,
 } from "./people-replies.ts";
 
 const actor = z.string().max(64);
-export const EmailAddress = z
-	.string()
-	.trim()
-	.max(254)
-	.email()
-	.transform((text) => text.toLowerCase());
 
 export const SessionInput = z.discriminatedUnion("do", [
 	z.object({
@@ -52,31 +41,13 @@ export const SessionInput = z.discriminatedUnion("do", [
 export type SessionInput = z.infer<typeof SessionInput>;
 
 export const CredentialInput = z.discriminatedUnion("do", [
-	z.strictObject({ do: z.literal("email.get"), actor: actor.optional() }),
-	z.strictObject({ do: z.literal("email.set"), actor: actor.optional(), email: EmailAddress.nullable() }),
 	z.object({
 		do: z.literal("list"),
 		actor: actor.optional().describe("Whose. Absent: your own. Somebody else's is for an admin who is a person."),
 	}),
-	z.object({ do: z.literal("passkey.begin") }),
-	z.strictObject({ do: z.literal("totp.begin") }),
-	z.strictObject({
-		do: z.literal("totp.confirm"),
-		challenge: z.string().min(1).max(128),
-		code: z.string().regex(/^\d{6}$/),
-	}),
-	z.object({
-		do: z.literal("passkey.add"),
-		passkey: z
-			.record(z.string(), z.unknown())
-			.describe(
-				"What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports.",
-			),
-		label: z.string().trim().min(1).max(60).describe("What you call this passkey: the device it is on."),
-	}),
 	z.object({
 		do: z.literal("remove"),
-		id: z.number().int().describe("The credential, from the list. The last one a person has is not removed."),
+		id: z.number().int().describe("The identity, from the list. The last one a person has is not removed."),
 		cmd,
 	}),
 	z.strictObject({
@@ -92,7 +63,9 @@ export const CredentialInput = z.discriminatedUnion("do", [
 				},
 				{ error: `how long it lasts: ${DURATION_FORMAT}; at most 365d` },
 			)
-			.describe("Default: 30d. At most 365d. A password or passkey session creates your own token, shown once."),
+			.describe(
+				"Default: 30d. At most 365d. A session opened through the identity provider creates your own token, shown once.",
+			),
 		cmd,
 	}),
 	z.strictObject({ do: z.literal("token.list") }),
@@ -103,9 +76,8 @@ export type CredentialInput = z.infer<typeof CredentialInput>;
 export const InvitationInput = z.discriminatedUnion("do", [
 	z.object({
 		do: z.literal("create"),
-		email: EmailAddress.optional().describe("Send the link to this address when mail is enabled."),
 		name: actor.describe(
-			"The person. A new name: an invitation to join. A person who exists: a recovery, which replaces every way they sign in once it is accepted.",
+			"The person. A new name: an invitation to join. A person who exists: a recovery, which replaces their identities and tokens once it is accepted.",
 		),
 		can: z
 			.array(Capability)

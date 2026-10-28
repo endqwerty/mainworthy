@@ -698,7 +698,7 @@ export class Database {
 			this.activeWrites.delete(finished.promise);
 		}
 	}
-	/** Only job bookkeeping uses this pool; SMTP never holds a domain connection while waiting. */
+	/** Only job bookkeeping uses this pool; a job's network call never holds a domain connection while waiting. */
 	async jobWrite<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
 		const finished = Promise.withResolvers<void>();
 		this.activeWrites.add(finished.promise);
