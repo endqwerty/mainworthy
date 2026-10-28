@@ -210,7 +210,7 @@ export function describeChoice(choice: Choice): string {
 
 /** A Mainworthy this job started. */
 export type Own = {
-	/** Kills the server, waits for its exit, then removes its data. Concurrent calls share the same cleanup. */
+	/** Stops the server and removes local data; managed database drops belong to the runner. Calls share cleanup. */
 	stop: () => Promise<void>;
 	/** The environment a `mainworthy` command needs to reach it, once it listens. */
 	ready: Promise<Environment>;
@@ -244,7 +244,7 @@ export function startOwn(cli: string): Own {
 			return { child, database };
 		} catch (error) {
 			await database.close();
-			await drainDatabaseDrops();
+			if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
 			rmSync(data, { recursive: true, force: true });
 			throw error;
 		}
@@ -270,7 +270,7 @@ export function startOwn(cli: string): Own {
 				clearTimeout(timeout);
 			}
 			await database.close();
-			await drainDatabaseDrops();
+			if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
 			rmSync(data, { recursive: true, force: true });
 		})();
 		return stopping;
