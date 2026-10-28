@@ -1900,7 +1900,7 @@ describe("Mainworthy instance archives", () => {
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
 		expect(text).toContain(`"schema":${ARCHIVE_VERSION},`);
-		expect(ARCHIVE_VERSION).toBe(44);
+		expect(ARCHIVE_VERSION).toBe(45);
 		await refuse(
 			text.replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
