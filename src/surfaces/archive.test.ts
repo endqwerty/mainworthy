@@ -157,7 +157,7 @@ test("CLI project export replays only that project over HTTP and keeps the sourc
 					edits: [{ op: "create", body: { title: "Valid risk", fields: { risk: "high" } } }],
 				}),
 			).toMatchObject({ status: "adopted" });
-			for (const table of ["tokens", "sessions", "credentials", "invitations", "passkey_users"]) {
+			for (const table of ["tokens", "sessions", "credentials", "invitations"]) {
 				expect(
 					await target.instance.app.database.read((db) =>
 						db.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, []),

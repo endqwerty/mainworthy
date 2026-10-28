@@ -164,8 +164,7 @@ async function deviceReply(
 const ownedRequests = {
 	session: () => session(),
 	"explicit session": () => session({ owner: deviceSession() }),
-	"signed-in exchange": () =>
-		exchange("/api/account/password", { body: { next: "a replacement password" }, signedIn: true }),
+	"signed-in exchange": () => exchange("/api/login/oidc", { body: { link: true }, signedIn: true }),
 	operation: () => call("credential", { do: "list" }),
 };
 
@@ -284,13 +283,7 @@ for (const storage of [undefined, "unavailable", "read-only", "write-only"] as c
 				{ login: { signedIn: true }, logout: "success", ...(storage ? { storage } : {}) },
 			));
 
-for (const result of [
-	{ signedIn: false, secondFactor: { challenge: "second-factor", expiresAt: 123 } },
-	{ linked: true },
-	{ requested: true },
-	{ verified: true },
-	{ changed: true },
-])
+for (const result of [{ linked: true }, { proven: true }])
 	test(`a non-session login reply ${JSON.stringify(result)} leaves a held session current`, () =>
 		deviceReply(
 			async ({ arrived, release }) => {

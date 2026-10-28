@@ -1,5 +1,5 @@
 // What a person does about their own sign-in in Settings, and what an admin does about other people's: the
-// password, the sessions, and invitations.
+// identities at the provider, the sessions, and invitations.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
@@ -7,42 +7,30 @@ import type { Capability } from "../../src/core/kinds.ts";
 import {
 	advanceClock,
 	browserAvailable,
+	confirmWithProvider,
 	eventually,
+	joinPerson,
+	linkIdentity,
 	openPage,
 	type PageHarness,
+	proveIdentity,
 	type Server,
 	startServer,
 } from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
-	if (browserAvailable) server = await startServer({ mode: "server" });
+	if (browserAvailable) server = await startServer({ mode: "server", provider: true });
 });
 afterAll(async () => {
 	await server?.stop();
 });
 
-const OLD = "the first password";
-const NEW = "the second password";
-
 /**
- * A person who signs in with a name and a password, made as a script would: invited by the owner, accepted
- * with no page. Accepting signs the script in, and it signs out again, so the person starts with no session.
+ * A person who signs in through the provider, made as a script would: invited by the owner and accepted with no
+ * page, then signed out, so the person starts with no session.
  */
-async function person(name: string, can?: Capability[]): Promise<void> {
-	const made = await server.api("invitation", { do: "create", name, ...(can ? { can } : {}) });
-	if (!("code" in made)) throw new Error("no invitation was made");
-	const post = (path: string, body: unknown, cookie?: string) =>
-		fetch(`${server.url}${path}`, {
-			method: "POST",
-			headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
-			body: JSON.stringify(body),
-		});
-	const accepted = await post("/api/login", { invitation: made.code, password: OLD });
-	if (!accepted.ok) throw new Error(`the invitation was not accepted: ${accepted.status}`);
-	const cookie = accepted.headers.getSetCookie().find((set) => set.startsWith("mainworthy_sid="));
-	await post("/api/logout", {}, cookie?.split(";")[0]);
-}
+const person = (name: string, can?: Capability[]): Promise<void> => joinPerson(server, name, can ? { can } : {});
 const section = (page: Page, name: string) => page.getByRole("option", { name, exact: true }).click();
 const rows = (page: Page) => page.locator(".settings-row");
 
@@ -64,7 +52,7 @@ test.skipIf(!browserAvailable)(
 			{ token: issuedToken.token },
 		);
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
-		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
+		const other = await openPage(server, { as: { name: "forget-web" } });
 		try {
 			const { page } = admin;
 			await section(page, "People");
@@ -81,10 +69,7 @@ test.skipIf(!browserAvailable)(
 			await trigger.scrollIntoViewIfNeeded();
 			await trigger.click();
 			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
-			expect(await page.locator("#detail").innerText()).toContain("authenticator secrets and recovery-code hashes");
-			expect(await page.locator("#detail").innerText()).toContain(
-				"Linked provider identities and recovery email addresses are erased",
-			);
+			expect(await page.locator("#detail").innerText()).toContain("Linked provider identities are erased");
 			const confirm = page.getByRole("button", { name: "Forget forget-web", exact: true });
 			expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
 			expect(
@@ -130,7 +115,7 @@ test.skipIf(!browserAvailable)(
 			expect(await refreshed.locator("b").innerText()).toBe("forgotten-3");
 			expect(await refreshed.getByRole("button", { name: /^Revoke / }).count()).toBe(0);
 			await other.page.reload();
-			await other.page.locator("#signin-name").waitFor();
+			await other.page.locator("#token").waitFor();
 			await page.goto(`${server.url}/p/scratch/suite/c/1`);
 			await page.getByRole("button", { name: "Keep forget-web's case text", exact: true }).waitFor();
 			expect(await page.locator("#detail").innerText()).toContain("Ask forget-web to open the cart");
@@ -199,7 +184,7 @@ test.skipIf(!browserAvailable)(
 		await person("forget-admin", ["read", "admin"]);
 		await person("forget-phone", ["read"]);
 		const admin = await openPage(server, {
-			as: { name: "forget-admin", password: OLD },
+			as: { name: "forget-admin" },
 			path: "/p/scratch/settings",
 			device: "phone",
 		});
@@ -276,87 +261,42 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"changing the password ends the person's other session; the sessions list ends another session, then this browser's",
+	"removing an identity ends the sessions opened with it; the sessions list ends another session, then this browser's",
 	async () => {
 		await person("sam", ["read", "answer"]);
 		let one: PageHarness | null = null;
 		let two: PageHarness | null = null;
 		try {
-			one = await openPage(server, { as: { name: "sam", password: OLD }, path: "/p/scratch/settings" });
-			two = await openPage(server, { as: { name: "sam", password: OLD } });
+			one = await openPage(server, { as: { name: "sam" }, path: "/p/scratch/settings" });
 			const { page } = one;
+			// sam links a second identity, and another browser signs in with it.
+			const laptop = { subject: "sub-sam-laptop", email: "sam-laptop@example.com" };
+			await proveIdentity(one.context, server, "sam");
+			await linkIdentity(one.context, server, "sam", laptop);
+			two = await openPage(server, { as: { name: "sam", identity: laptop } });
 
 			await section(page, "Your sessions");
 			await rows(page).nth(1).waitFor();
 			expect(await rows(page).count()).toBe(2);
 			expect(await rows(page).filter({ hasText: "this browser" }).count()).toBe(1);
-			expect(await rows(page).first().innerText()).toContain("password");
-			// Where each was opened and last used from, as the server saw the browser.
-			for (const text of await rows(page).allInnerTexts()) {
-				expect(text).toMatch(/opened with the password from 127\.0\.0\.1 · /);
-				expect(text).toMatch(/last used \S+ from 127\.0\.0\.1 · /);
-			}
+			expect(await rows(page).filter({ hasText: "this browser" }).innerText()).toContain(
+				"opened with Example ID (sam@example.com) from 127.0.0.1 · ",
+			);
+			expect(await rows(page).filter({ hasNotText: "this browser" }).innerText()).toContain(
+				"opened with Example ID (sam-laptop@example.com) from 127.0.0.1 · ",
+			);
+			// Where each was last used from, as the server saw the browser.
+			for (const text of await rows(page).allInnerTexts()) expect(text).toMatch(/last used \S+ from 127\.0\.0\.1 · /);
 
-			// A wrong current password changes nothing, says so beside the field, and keeps what was typed.
+			// Removing the laptop's identity ends the session it opened, and not this one.
 			await section(page, "Your sign-in");
-			// `n` goes to the new password, as it goes to a new token or a new project in their sections.
-			await page.locator("#password-next").waitFor();
-			await page.keyboard.press("n");
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("password-next");
-			await page.keyboard.type(NEW);
-			await page.getByText("19 characters", { exact: true }).waitFor();
-			await page.locator("#password-current").fill("not the password");
-			await page.locator("#password-again").fill(NEW);
-			// Wrong too often: the wait is said beside the current password, and nothing typed is lost. A test
-			// answers in the server's place, because a real block would refuse the right password below as well.
-			await page.route("**/api/account/password", (route) =>
-				route.fulfill({
-					status: 429,
-					headers: { "retry-after": "7" },
-					json: { ok: false, error: { code: "limited", message: "too many attempts; try again in 7 seconds" } },
-				}),
-			);
-			await page.locator("#password-again").press("Enter");
+			await page.getByRole("button", { name: "Remove Example ID (sam-laptop@example.com)", exact: true }).click();
 			await page
-				.locator("#password-current + [role=status]")
-				.filter({ hasText: "Too many attempts. Try again in 7 seconds." })
-				.waitFor();
-			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
-			expect(await page.locator("#app").count()).toBe(1);
-			await page.unroute("**/api/account/password");
-			// This time from the button, by the keyboard. It keeps the keys through the request and the refusal.
-			await page.keyboard.press("Tab");
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Change password");
-			await page.keyboard.press("Enter");
-			await page.getByRole("status").filter({ hasText: "The current password is not right." }).waitFor();
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Change password");
-			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
-
-			// No reply at all. Here the request never left, with the wrong current password in it, so nothing
-			// changed; the page cannot know that, and says only what it knows. It reads the list again.
-			await page.route("**/api/account/password", (route) => route.abort());
-			const reread = page.waitForRequest((request) => request.url().endsWith("/api/credential"));
-			await page.keyboard.press("Enter");
-			const lost = page
 				.getByRole("status")
-				.filter({ hasText: "the page cannot tell whether the password was changed" });
-			await lost.waitFor();
-			expect(await lost.innerText()).toBe(
-				"No readable answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
-			);
-			await reread;
-			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
-			await page.unroute("**/api/account/password");
-
-			await page.locator("#password-current").fill(OLD);
-			await page.keyboard.press("Enter");
-			await page.getByRole("status").filter({ hasText: "Password changed. 1 other session ended." }).waitFor();
-			// The fields are empty again: the password is not left on the page.
-			expect(await page.locator("#password-next").inputValue()).toBe("");
-
-			// The other browser is signed out; this one is not.
+				.filter({ hasText: "Example ID (sam-laptop@example.com) was removed. 1 other session ended." })
+				.waitFor();
 			await two.page.reload();
-			await two.page.locator("#signin-name").waitFor();
+			await two.page.locator("#token").waitFor();
 			await section(page, "Your sessions");
 			await eventually(
 				() => rows(page).count(),
@@ -364,10 +304,9 @@ test.skipIf(!browserAvailable)(
 			);
 			expect(await page.locator("#app").count()).toBe(1);
 
-			// The other browser signs in again, with the new password, and is in the list.
-			await two.page.locator("#signin-name").fill("sam");
-			await two.page.locator("#signin-password").fill(NEW);
-			await two.page.keyboard.press("Enter");
+			// The other browser signs in again, with the identity sam has left, and is in the list.
+			server.idp?.next({ subject: "sub-sam" });
+			await two.page.getByRole("button", { name: "Sign in with Example ID", exact: true }).click();
 			await two.page.locator("#app").waitFor();
 			await section(page, "Your sign-in");
 			await section(page, "Your sessions");
@@ -380,20 +319,14 @@ test.skipIf(!browserAvailable)(
 				(count) => count === 1,
 			);
 			await two.page.reload();
-			await two.page.locator("#signin-name").waitFor();
+			await two.page.locator("#token").waitFor();
 
 			// Ending this browser's own session is signing out.
 			await rows(page).filter({ hasText: "this browser" }).getByRole("button", { name: "End" }).click();
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
-			// What this journey asked for: the wait a test answered, the wrong current password, and the request
-			// a test dropped.
-			expect(one.errors).toEqual([
-				"Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
-				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
-				"Failed to load resource: net::ERR_FAILED",
-			]);
+			expect(one.errors).toEqual([]);
 			expect(two.errors).toEqual([]);
 		} finally {
 			await one?.close();
@@ -409,11 +342,13 @@ test.skipIf(!browserAvailable)(
 		await person("tess", ["read"]);
 		let browser: PageHarness | null = null;
 		try {
-			browser = await openPage(server, { path: "/p/scratch/settings" });
+			// The owner signs in with the token, which proves it is them for ten minutes, and has an identity at the
+			// provider to confirm with after that.
+			browser = await openPage(server, {
+				path: "/p/scratch/settings",
+				setup: (_, context) => linkIdentity(context, server, "robin"),
+			});
 			const { page } = browser;
-			expect((await page.request.post(`${server.url}/api/account/password`, { data: { next: OLD } })).status()).toBe(
-				200,
-			);
 			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 			/** The newest invitation for a name, of one purpose, as the server lists it. */
 			const invitation = async (name: string, purpose: "join" | "recover") => {
@@ -421,7 +356,7 @@ test.skipIf(!browserAvailable)(
 				return Array.isArray(list) ? list.filter((row) => row.name === name && row.purpose === purpose).at(-1) : null;
 			};
 			const shows = (code: string) =>
-				fetch(`${server.url}/api/login/challenge`, {
+				fetch(`${server.url}/api/login/invitation`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ invitation: code }),
@@ -469,10 +404,6 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Tab");
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Make invitation link");
 			await page.keyboard.press("Enter");
-
-			const joinProof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await joinProof.getByLabel("Password", { exact: true }).fill(OLD);
-			await joinProof.getByRole("button", { name: "Confirm credential", exact: true }).click();
 
 			// The keys go to the link's "Copy link": the button that sent the form is for the next person.
 			const link = page.getByLabel("Invitation link");
@@ -528,17 +459,23 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#invite-name").fill("");
 
 			await advanceClock(server, 10 * 60_000 + 1);
-			// The recovery link asks first, and says what it replaces.
-			await page.getByRole("button", { name: "Recovery link for tess" }).click();
-			await page.getByText("revokes all their tokens", { exact: false }).waitFor();
+			// The recovery link asks first, and says what it replaces. The token's proof has run out by now, so the
+			// owner confirms at the provider, comes back to People and asks again.
+			const recover = async () => {
+				await page.getByRole("button", { name: "Recovery link for tess" }).click();
+				await page
+					.getByText("it replaces their identities and tokens and ends their sessions", { exact: false })
+					.waitFor();
+				await page.getByRole("button", { name: "Make the recovery link" }).click();
+			};
+			await recover();
 			expect(await invitation("tess", "recover")).toBeUndefined();
-			await page.getByRole("button", { name: "Make the recovery link" }).click();
-			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await proof.getByLabel("Password", { exact: true }).fill(OLD);
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await confirmWithProvider(page, server, "robin");
+			expect(await invitation("tess", "recover")).toBeUndefined();
+			await recover();
 			await link.waitFor();
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Copy link");
-			await page.getByText("every password, passkey and token they had stops working", { exact: false }).waitFor();
+			await page.getByText("the identities and tokens they had stop working", { exact: false }).waitFor();
 			expect(await invitation("tess", "recover")).toMatchObject({ state: "open" });
 			expect(await shows((await link.inputValue()).split("#")[1] ?? "")).toBe(200);
 			await page.getByRole("button", { name: "Dismiss link" }).click();
@@ -566,7 +503,6 @@ test.skipIf(!browserAvailable)(
 			expect(await invitation("mia", "join")).toMatchObject({ state: "open" });
 			expect(browser.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
-				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
 				"Failed to load resource: net::ERR_FAILED",
 			]);
 		} finally {
@@ -584,7 +520,7 @@ test.skipIf(!browserAvailable)(
 		let reader: PageHarness | null = null;
 		let admin: PageHarness | null = null;
 		try {
-			reader = await openPage(server, { as: { name: "uri", password: OLD }, path: "/p/scratch/settings" });
+			reader = await openPage(server, { as: { name: "uri" }, path: "/p/scratch/settings" });
 			await reader.page.getByRole("option", { name: "Your sessions", exact: true }).waitFor();
 			const listed = reader.page.getByRole("listbox", { name: "Settings sections" }).getByRole("option");
 			expect(await listed.allInnerTexts()).toEqual([
@@ -598,7 +534,9 @@ test.skipIf(!browserAvailable)(
 			]);
 			expect(reader.errors).toEqual([]);
 
-			admin = await openPage(server, { as: { name: "ada", password: OLD }, path: "/p/scratch/settings" });
+			admin = await openPage(server, { as: { name: "ada" }, path: "/p/scratch/settings" });
+			// ada confirmed it is her at the provider a moment ago: her own recovery link asks no more.
+			await proveIdentity(admin.context, server, "ada");
 			const { page } = admin;
 			await section(page, "People");
 			// ada administers and does not own the instance. The server lets ada make a recovery link for ada and
@@ -632,20 +570,23 @@ test.skipIf(!browserAvailable)(
 	async () => {
 		await person("personal-web", ["read"]);
 		const browser = await openPage(server, {
-			as: { name: "personal-web", password: OLD },
+			as: { name: "personal-web" },
 			path: "/p/scratch/settings",
 		});
 		try {
 			const { page } = browser;
 			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 			await section(page, "Your sign-in");
-			await page.getByLabel("Token label", { exact: true }).fill("Laptop CLI");
-			expect(await page.getByLabel("Token lifetime", { exact: true }).inputValue()).toBe("30d");
-			await advanceClock(server, 10 * 60_000 + 1);
-			await page.getByRole("button", { name: "Create personal token", exact: true }).click();
-			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await proof.getByLabel("Password", { exact: true }).fill(OLD);
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			const create = async () => {
+				await page.getByLabel("Token label", { exact: true }).fill("Laptop CLI");
+				expect(await page.getByLabel("Token lifetime", { exact: true }).inputValue()).toBe("30d");
+				await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+			};
+			// Signing in at the provider gave no proof: making a token asks for it, through the provider.
+			await create();
+			await confirmWithProvider(page, server, "personal-web");
+			await page.getByRole("heading", { name: "Your sign-in", exact: true }).waitFor();
+			await create();
 			const secret = page.getByLabel("Your new command-line token", { exact: true });
 			await secret.waitFor();
 			const token = await secret.inputValue();

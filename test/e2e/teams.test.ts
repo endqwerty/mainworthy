@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import api1Actors from "../fixtures/cli/actor-list-api1.json";
-import { advanceClock, browserAvailable, openPage, type PageHarness, startServer } from "./support.ts";
+import {
+	advanceClock,
+	browserAvailable,
+	confirmWithProvider,
+	linkIdentity,
+	openPage,
+	type PageHarness,
+	startServer,
+} from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"People manages teams and shows their grants; removing membership ends permission immediately",
@@ -93,35 +101,46 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"admin team grants and membership additions prompt for the caller's proof",
 	async () => {
-		const server = await startServer({ mode: "server" });
+		const server = await startServer({ mode: "server", provider: true });
 		let browser: PageHarness | null = null;
 		try {
 			await server.api("admin", { do: "token.create", actor: "team-target", kind: "human", can: ["read"] });
-			browser = await openPage(server, { path: "/p/scratch/settings" });
+			// The owner has an identity at the provider to confirm with; the token's own sign-in proof runs out first.
+			browser = await openPage(server, {
+				path: "/p/scratch/settings",
+				setup: (_, context) => linkIdentity(context, server, "robin"),
+			});
 			const { page } = browser;
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
-				).status(),
-			).toBe(200);
+			await advanceClock(server, 10 * 60_000 + 1);
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			const teams = page.getByRole("region", { name: "Teams", exact: true });
 			await teams.getByLabel("New team name").fill("Administrators");
 			await teams.getByRole("button", { name: "Create team", exact: true }).click();
 			await teams.getByRole("heading", { name: "Administrators", exact: true }).waitFor();
-			await teams.getByRole("checkbox", { name: "admin", exact: true }).check();
-			const confirm = async () => {
-				const proof = teams.getByRole("region", { name: "Confirm your sign-in", exact: true });
-				await proof.getByLabel("Password", { exact: true }).fill("the owner password");
-				await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			// The page that comes back from the provider has no team chosen yet.
+			const chosen = async () => {
+				await teams.getByLabel("Team to manage", { exact: true }).selectOption("Administrators");
+				await teams.getByRole("heading", { name: "Administrators", exact: true }).waitFor();
 			};
-			await teams.getByRole("button", { name: "Set team grant", exact: true }).click();
-			await confirm();
+			const grant = async () => {
+				await chosen();
+				await teams.getByRole("checkbox", { name: "admin", exact: true }).check();
+				await teams.getByRole("button", { name: "Set team grant", exact: true }).click();
+			};
+			await grant();
+			await confirmWithProvider(page, server, "robin");
+			// The page came back to People; the change is made again within the ten minutes.
+			await grant();
 			await teams.getByRole("status").filter({ hasText: "Team updated." }).waitFor();
 			await advanceClock(server, 10 * 60_000 + 1);
-			await teams.getByLabel("Person to add").selectOption("team-target");
-			await teams.getByRole("button", { name: "Add team member", exact: true }).click();
-			await confirm();
+			const add = async () => {
+				await chosen();
+				await teams.getByLabel("Person to add").selectOption("team-target");
+				await teams.getByRole("button", { name: "Add team member", exact: true }).click();
+			};
+			await add();
+			await confirmWithProvider(page, server, "robin");
+			await add();
 			await teams.getByRole("button", { name: "Remove team-target from Administrators", exact: true }).waitFor();
 			expect(browser.errors).toEqual(
 				Array(2).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),

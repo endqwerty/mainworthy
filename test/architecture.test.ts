@@ -250,7 +250,6 @@ describe("the module map", () => {
 			"identity_ceremony_epoch",
 			"identity_limits",
 			"identity_starts",
-			"mail_contacts",
 			"orgs",
 			"actors",
 			"grants",
@@ -262,7 +261,6 @@ describe("the module map", () => {
 			"sessions",
 			"credentials",
 			"invitations",
-			"passkey_users",
 		],
 		"server/policy": ["policies"],
 		"server/suite": [
@@ -380,20 +378,10 @@ describe("the module map", () => {
 
 	test("an archive holds who the actors are and what they may do, and no other table of identity", () => {
 		// What lets somebody in never travels in an archive, and an import empties it: a token and a session (the
-		// SHA-256 of a secret), a password's hash, a passkey's public key and the handle it is filed under, an
-		// invitation's code. The tables named here are all of identity that an archive holds. A table that
-		// is added later is unexported, or it is added to this list on purpose: until then this fails, before
-		// an export carries what signs somebody in.
-		const exported = [
-			"orgs",
-			"actors",
-			"grants",
-			"teams",
-			"team_members",
-			"team_grants",
-			"team_events",
-			"mail_contacts",
-		];
+		// SHA-256 of a secret), an identity linked at the provider, an invitation's code. The tables named here are
+		// all of identity that an archive holds. A table that is added later is unexported, or it is added to this
+		// list on purpose: until then this fails, before an export carries what signs somebody in.
+		const exported = ["orgs", "actors", "grants", "teams", "team_members", "team_grants", "team_events"];
 		const identity = owners["server/identity"] ?? [];
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0100). Tracker delivery and hand-offs must never replay after import. None of these tables holds credentials.

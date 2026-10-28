@@ -95,7 +95,6 @@ const fixtures: Record<string, Row[]> = {
 		{ id: 71, org: 17, kind: "human", name: "Zoë 雪", on_behalf_of: null, created_at: time, disabled_at: null },
 		{ id: 70, org: 17, kind: "agent", name: "Agent", on_behalf_of: 71, created_at: time, disabled_at: time + 1 },
 	],
-	mail_contacts: [{ actor: 71, email: "zoe@example.com", verified_at: time, revision: "contact-revision" }],
 	grants: [
 		{ actor: 71, project: 23, can: '[ "read", "admin" ]', roles: '["approver","auditor"]' },
 		{ actor: 71, project: 0, can: '["read"]' },
@@ -778,7 +777,6 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1, 'identity-other');
 			INSERT INTO folders VALUES (44, 24, NULL, 'Private folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (80, 24, '["admin"]');
-			INSERT INTO mail_contacts VALUES (80, 'unrelated@example.com', NULL, 'other-revision');
 			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
 			INSERT INTO grants (actor, project, can) VALUES (81, 24, '["read"]');
 		`),
@@ -791,8 +789,6 @@ describe("Mainworthy instance archives", () => {
 		const chunks: string[] = [];
 		await exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });
 		const text = chunks.join("");
-		expect(text).not.toContain("unrelated@example.com");
-		expect(text).toContain("zoe@example.com");
 		expect(text).not.toContain("Unrelated");
 		expect(text).not.toContain("Private folder");
 		expect(text).not.toContain("Other project only");
@@ -830,15 +826,6 @@ describe("Mainworthy instance archives", () => {
 		}
 		const other = await target();
 		await importArchive(other, linesOf(otherChunks.join("")));
-		expect(
-			await other.allDynamic<Record<string, unknown>>(
-				"SELECT email, verified_at FROM mail_contacts ORDER BY actor",
-				[],
-			),
-		).toEqual([
-			{ email: "zoe@example.com", verified_at: time },
-			{ email: "unrelated@example.com", verified_at: null },
-		]);
 		expect(await other.allDynamic<Record<string, unknown>>("SELECT key FROM projects", [])).toEqual([{ key: "other" }]);
 		expect(await other.allDynamic<Record<string, unknown>>("SELECT name FROM actors ORDER BY id", [])).toEqual([
 			{ name: "Zoë 雪" },
@@ -1002,7 +989,7 @@ describe("Mainworthy instance archives", () => {
 			await exportArchive(db, (chunk) => chunks.push(chunk), { now: time, project: "other" });
 			return chunks.join("");
 		};
-		const kept = ["meta", "orgs", "actors", "tokens", "mail_contacts", "teams", "team_members"];
+		const kept = ["meta", "orgs", "actors", "tokens", "teams", "team_members"];
 		const keptState = async () =>
 			Promise.all(
 				kept.map(async (table) => {
@@ -1041,7 +1028,7 @@ describe("Mainworthy instance archives", () => {
 			"demo_projects",
 			"search_docs",
 		]) {
-			if (["meta", "orgs", "actors", "mail_contacts", "teams", "team_members"].includes(table)) continue;
+			if (["meta", "orgs", "actors", "teams", "team_members"].includes(table)) continue;
 			expect({ table, removed: removed.tables[table] ?? 0 }).toEqual({
 				table,
 				removed: table === "grants" ? 1 : (fixtures[table]?.length ?? 1),
@@ -1937,26 +1924,17 @@ describe("Mainworthy instance archives", () => {
 		expect(await to.allDynamic<Record<string, unknown>>("SELECT * FROM tokens", [])).toEqual([]);
 	});
 
-	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", async () => {
+	test("an identity at the provider and an invitation never travel, and an import empties them in an order the foreign keys allow", async () => {
 		const people = async (db: WriteDb, actor: number, mark: string): Promise<void> => {
-			await insert(db, "credentials", {
-				id: 1,
-				actor,
-				kind: "password",
-				data: `$argon2id$${mark}`,
-				label: "password",
-				created_at: time,
-			});
 			await insert(db, "credentials", {
 				id: 2,
 				actor,
-				kind: "passkey",
-				handle: `credential-${mark}`,
-				data: `{"key":"key-${mark}"}`,
-				label: "laptop",
+				kind: "oidc",
+				handle: `issuer|subject-${mark}`,
+				data: `{"linked":${time}}`,
+				label: "Example ID",
 				created_at: time,
 			});
-			await insert(db, "passkey_users", { actor, handle: `handle-${mark}`, created_at: time });
 			await insert(db, "invitations", {
 				id: 1,
 				actor,
@@ -1966,7 +1944,7 @@ describe("Mainworthy instance archives", () => {
 				created_at: time,
 				expires_at: time,
 			});
-			// A session that rests on the passkey: it has to go before the credential it refers to.
+			// A session that rests on the identity: it has to go before the credential it refers to.
 			await insert(db, "sessions", {
 				id: 1,
 				actor,
@@ -1980,12 +1958,11 @@ describe("Mainworthy instance archives", () => {
 		const from = await source();
 		await people(from, 71, "e");
 		const text = await archive(from);
-		for (const table of ["credentials", "passkey_users", "invitations"]) {
+		for (const table of ["credentials", "invitations"]) {
 			expect(text).not.toContain(`"t":"${table}"`);
 			await refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
 		}
-		for (const held of ["$argon2id$e", "credential-e", "key-e", "handle-e", "e".repeat(63)])
-			expect(text).not.toContain(held);
+		for (const held of ["subject-e", "e".repeat(63)]) expect(text).not.toContain(held);
 		const to = await target();
 		await people(to, 1, "f");
 		await importArchive(to, linesOf(text));
@@ -2026,7 +2003,6 @@ describe("Mainworthy instance archives", () => {
 			"merge_receipt_payloads",
 			"merge_receipt_snapshots",
 			"merge_receipts",
-			"passkey_users",
 			"scope_moves",
 			"sessions",
 			"slot_leases",

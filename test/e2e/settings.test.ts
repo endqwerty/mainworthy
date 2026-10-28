@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { call } from "../../src/web/lib/api.ts";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, eventually, joinPerson, openPage, type Server, startServer } from "./support.ts";
 
 /** A server with the preset these tests ask for, on a port the helpers hand out. */
 function fixture({
@@ -397,18 +397,9 @@ import { PRESETS } from "../../src/core/presets.ts";
 					token: server.token,
 				},
 			);
+			// The owner signs in with the token, which gives this session the proof a policy change asks for.
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
-				).status(),
-			).toBe(200);
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
-				).status(),
-			).toBe(200);
 			// The policy in force is explained where it is read, and the comparison marks it.
 			const inForce = page.locator("#detail .settings-preset-summary");
 			expect(await inForce.innerText()).toBe(PRESET_SUMMARY.loose);
@@ -589,6 +580,8 @@ import { PRESETS } from "../../src/core/presets.ts";
 			if (!asked) throw new Error("The custom policy was not asked about");
 			await server.api("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "accept" } });
 			await page.goto(`${server.url}/p/scratch/settings`);
+			// A reload keeps the section Settings was on (Connect, above): the policy is a click away.
+			await page.getByRole("option", { name: "Policy", exact: true }).click();
 			await page.getByRole("heading", { name: "custom", exact: true }).waitFor();
 			expect(await inForce.innerText()).toBe(
 				"This project has a custom policy. Its clause table says who answers, and an instance admin can read it.",
@@ -1263,7 +1256,11 @@ for (const restricted of [true, false]) {
 			? "P5: entry uses the only granted project, including roots with a query and unknown paths"
 			: "P5: entry uses an instance whose first project is not scratch",
 		async () => {
-			const server = await startServer({ mode: "server", firstProject: restricted ? "scratch" : "other" });
+			const server = await startServer({
+				mode: "server",
+				firstProject: restricted ? "scratch" : "other",
+				provider: restricted,
+			});
 			let browser: Awaited<ReturnType<typeof openPage>> | null = null;
 			try {
 				if (restricted) await server.api("admin", { do: "project.create", key: "other", preset: "loose" });
@@ -1276,20 +1273,10 @@ for (const restricted of [true, false]) {
 						token: server.token,
 					},
 				);
-				const password = "a long enough password";
-				if (restricted) {
-					const made = await server.api("invitation", { do: "create", name: "pat", project: "other", can: ["read"] });
-					if (!("code" in made)) throw new Error("No invitation was made");
-					const accepted = await fetch(`${server.url}/api/login`, {
-						method: "POST",
-						headers: { "content-type": "application/json" },
-						body: JSON.stringify({ invitation: made.code, password }),
-					});
-					expect(accepted.status).toBe(200);
-				}
+				if (restricted) await joinPerson(server, "pat", { project: "other", can: ["read"] });
 				browser = await openPage(server, {
 					path: "/p/other/settings",
-					...(restricted ? { as: { name: "pat", password } } : {}),
+					...(restricted ? { as: { name: "pat" } } : {}),
 				});
 				const { page } = browser;
 				await page.getByRole("option", { name: "Your home", exact: true }).click();
@@ -1437,7 +1424,7 @@ for (const control of ["Policy preset", "Tests with no case"] as const)
 				["Tokens", "New token", "token-actor"],
 				["Projects", "New project", "project-key"],
 				["People", "New invitation", "invite-name"],
-				["Your sign-in", "New password", "password-next"],
+				["Your sign-in", null, null],
 			] as const) {
 				await sections.getByRole("option", { name: section, exact: true }).click();
 				await page.keyboard.press("ControlOrMeta+k");

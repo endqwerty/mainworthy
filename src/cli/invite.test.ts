@@ -1,69 +1,79 @@
 // `mainworthy invite` against a real server: the link is printed once, a list never shows it, and a revoked
 // invitation signs nobody in. The long test starts no process: its commands are run by `runCli` in the test's own
-// process (`run` in `test-support.ts`). The executable around `invite new` is held by the SMTP test, which starts it.
-import { expect, test } from "bun:test";
+// process (`run` in `test-support.ts`).
+import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { fakeSmtp } from "../../test/mail-support.ts";
-import { PersonalTokenCreated, TotpConfirmed, TotpEnrolment } from "../core/people.ts";
-import { waitMail } from "../server/identity/identity.ts";
-import { totpCode } from "../server/identity/totp.ts";
+import { type Provider, provider, stopProviders } from "../../test/oidc-support.ts";
+import type { Instance } from "../app/start.ts";
 import { outputWith, withInstance } from "./test-support.ts";
 
-test("serve does not start with a public address it cannot use for passkeys, and says why before it opens the data", async () => {
+afterEach(() => stopProviders());
+
+const PUBLIC = "https://mainworthy.example";
+/** What an instance is told of the provider people accept an invitation through. */
+const withProvider = (idp: Provider): Record<string, string> => {
+	const { issuer, clientId, clientSecret, name } = idp.config();
+	return {
+		MAINWORTHY_PUBLIC_URL: PUBLIC,
+		MAINWORTHY_OIDC_ISSUER: issuer,
+		MAINWORTHY_OIDC_CLIENT_ID: clientId,
+		MAINWORTHY_OIDC_CLIENT_SECRET: clientSecret,
+		MAINWORTHY_OIDC_NAME: name,
+	};
+};
+
+/**
+ * Accepts an invitation as the page at its link does: begins with the provider, signs in there as `subject` and
+ * hands the answer back. The status of the first reply that is not a success, or of the last.
+ */
+async function accept(instance: Instance, idp: Provider, invitation: string, subject: string): Promise<number> {
+	const post = (path: string, body: unknown, cookie = "") =>
+		fetch(`${instance.url}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+			body: JSON.stringify(body),
+		});
+	const begun = await post("/api/login/oidc", { invitation });
+	if (begun.status !== 200) return begun.status;
+	const ceremony = begun.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+	idp.next({ subject });
+	const answer = await fetch((await begun.json()).result.url, { redirect: "manual" });
+	const query = new URL(answer.headers.get("location") ?? "").search;
+	return (await post("/api/login", { oidc: query }, ceremony)).status;
+}
+
+test("serve does not start with a public address it cannot use, and says why before it opens the data", async () => {
 	await withInstance(async ({ cli, directory }) => {
 		const refused = await cli(["serve"], {
 			env: { MAINWORTHY_PUBLIC_URL: "http://192.168.1.20:7357", MAINWORTHY_PORT: "0" },
 		});
 		expect(refused.code).toBe(4);
 		expect(refused.stdout).toBe("");
-		expect(refused.stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
+		expect(refused.stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use");
 		// The line does not repeat the value, which may carry a password.
 		expect(refused.stderr).not.toContain("192.168.1.20");
 		expect(existsSync(join(directory, ".mainworthy"))).toBe(false);
 	});
 });
 
-const Invited = z.object({ id: z.number(), name: z.string(), purpose: z.string(), link: z.string(), code: z.string() });
+const Invited = z.object({
+	id: z.number(),
+	name: z.string(),
+	purpose: z.string(),
+	link: z.string(),
+	code: z.string(),
+	can: z.array(z.string()),
+	project: z.string(),
+});
 const Listed = z.array(z.object({ id: z.number(), name: z.string(), purpose: z.string(), state: z.string() }));
 const UNTIL = String.raw`until \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC`;
 
-test("invite new --email delivers the printed link through the configured SMTP server", async () => {
-	const smtp = await fakeSmtp();
-	try {
-		await withInstance(
-			async ({ cli, instance }) => {
-				const made = await cli(["invite", "new", "mailed-cli", "--email", "robin@example.com"]);
-				expect(made.code).toBe(0);
-				expect(made.stdout).toContain("Mail delivery requested.");
-				await waitMail(instance.app);
-				expect(smtp.messages).toHaveLength(1);
-				const link = made.stdout.split("\n")[1] ?? "";
-				expect(link).toMatch(/^https:\/\/mainworthy\.example\/invite#/);
-				expect(smtp.messages[0]?.text).toContain(link);
-			},
-			{
-				env: {
-					MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
-					MAINWORTHY_SMTP_HOST: "127.0.0.1",
-					MAINWORTHY_SMTP_PORT: String(smtp.port),
-					MAINWORTHY_SMTP_TLS: "none",
-					MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
-					MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
-				},
-			},
-		);
-	} finally {
-		await smtp.close();
-	}
-});
-
 test("invite new prints the link once, invite list never shows the code, and invite revoke withdraws it", async () => {
+	const idp = await provider();
 	await withInstance(
 		async ({ run, instance }) => {
-			// One sign-in below hashes a password; the default cost is most of this test's own time.
-			instance.app.config.passwordCost = { memoryCost: 8, timeCost: 1 };
 			const before = Date.now();
 			const made = await run([
 				"invite",
@@ -81,7 +91,9 @@ test("invite new prints the link once, invite list never shows the code, and inv
 			expect(lines[0]).toMatch(new RegExp(`^invitation 1 for "sam" \\(may read, answer on scratch\\), ${UNTIL}$`));
 			const code = /^https:\/\/mainworthy\.example\/invite#([A-Za-z0-9_-]{43})$/.exec(lines[1] ?? "")?.[1] ?? "";
 			expect(code).toHaveLength(43);
-			expect(lines[2]).toBe("This link is shown once. Hand it to sam: it works once.");
+			expect(lines[2]).toBe(
+				"This link is shown once. Hand it to sam: it works once, when they sign in at the identity provider.",
+			);
 			expect(lines).toHaveLength(3);
 			// Seven days from now, as the flag said.
 			const until = Date.parse(`${/until (.*) UTC/.exec(lines[0] ?? "")?.[1]?.replace(" ", "T")}:00Z`);
@@ -96,27 +108,24 @@ test("invite new prints the link once, invite list never shows the code, and inv
 				{ id: 1, name: "sam", purpose: "join", state: "open" },
 			]);
 
-			// The link works: the code in it accepts the invitation over HTTP.
-			const accept = (invitation: string) =>
-				fetch(`${instance.url}/api/login`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ invitation, password: "correct horse battery staple" }),
-				});
+			// The link works: the code in it accepts the invitation over HTTP, through the provider.
 			const second = outputWith(Invited, await run(["invite", "new", "pat", "--json"]));
+			// With no grant named, a new person may do everything, as a new person's token may.
 			expect(second).toMatchObject({
 				id: 2,
 				name: "pat",
 				purpose: "join",
 				link: `https://mainworthy.example/invite#${second.code}`,
+				can: ["read", "record", "produce", "answer", "plan", "admin"],
+				project: "*",
 			});
 			const revoked = await run(["invite", "revoke", "2"]);
 			expect(revoked.stdout).toBe("invitation 2 revoked\n");
 			expect((await run(["invite", "revoke", "2"])).stdout).toBe(
 				"invitation 2 was already used or revoked, or does not exist\n",
 			);
-			expect((await accept(second.code)).status).toBe(401);
-			expect((await accept(code)).status).toBe(200);
+			expect(await accept(instance, idp, second.code, "sub-pat")).toBe(404);
+			expect(await accept(instance, idp, code, "sub-sam")).toBe(200);
 			expect((await run(["invite", "list"])).stdout).toMatch(
 				/^1 {2}sam {2}join {2}used.*\n2 {2}pat {2}join {2}revoked/,
 			);
@@ -124,10 +133,10 @@ test("invite new prints the link once, invite list never shows the code, and inv
 			const recovery = await run(["invite", "new", "sam"]);
 			expect(recovery.stdout).toMatch(
 				new RegExp(
-					`^invitation 3 for "sam" \\(a recovery: accepting it replaces every way sam signs in\\), ${UNTIL}\n`,
+					`^invitation 3 for "sam" \\(a recovery: accepting it replaces the identities and tokens sam had\\), ${UNTIL}\n`,
 				),
 			);
-			expect(recovery.stdout).toContain("every password, passkey and token sam had stops working");
+			expect(recovery.stdout).toContain("every identity and token sam had stops working");
 
 			// What the command refuses, it refuses before it asks the server.
 			for (const argv of [
@@ -149,79 +158,22 @@ test("invite new prints the link once, invite list never shows the code, and inv
 				"pat",
 				"sam",
 			]);
+			// The operation is a command of its own too, as every operation is.
+			const generic = await run(["invitation", "--do", "list"]);
+			expect(generic.code).toBe(0);
+			expect(generic.stdout).toContain('"name": "pat"');
 		},
-		{ env: { MAINWORTHY_PUBLIC_URL: "https://mainworthy.example" } },
+		{ env: withProvider(idp) },
 	);
 });
 
-test("with no public address the link is relative and the command says what to put before it", async () => {
+test("an instance with no identity provider makes no invitation, and the command says what to set", async () => {
 	await withInstance(async ({ run }) => {
-		const made = await run(["invite", "new", "sam"]);
-		expect(made.code).toBe(0);
-		expect(made.stdout).toMatch(/^\/invite#[A-Za-z0-9_-]{43}$/m);
-		expect(made.stdout).toContain("MAINWORTHY_PUBLIC_URL");
-		// With no grant named, a new person may do everything, as a new person's token may.
-		expect(made.stdout).toContain("(may read, record, produce, answer, plan, admin on *)");
-		// The operation is a command of its own too, as every operation is.
-		const listed = await run(["invitation", "--do", "list"]);
-		expect(listed.code).toBe(0);
-		expect(listed.stdout).toContain('"name": "sam"');
+		const refused = await run(["invite", "new", "sam"]);
+		expect(refused.code).not.toBe(0);
+		expect(refused.stdout).toBe("");
+		expect(refused.stderr).toContain("this instance has no identity provider");
+		expect(refused.stderr).toContain("MAINWORTHY_OIDC_ISSUER");
+		expect((await run(["invite", "list"])).stdout).toBe("No invitations.\n");
 	});
-});
-
-test("login completes TOTP with a recovery code and prints a personal token once", async () => {
-	await withInstance(
-		async ({ instance, directory, client, cli, run }) => {
-			instance.app.config.passwordCost = { memoryCost: 8, timeCost: 1 };
-			const password = "a private CLI passphrase";
-			const made = Invited.parse(await client.call("invitation", { do: "create", name: "cli-totp" }));
-			const post = (path: string, body: unknown, cookie?: string) =>
-				fetch(`${instance.url}${path}`, {
-					method: "POST",
-					headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
-					body: JSON.stringify(body),
-				});
-			const accepted = await post("/api/login", { invitation: made.code, password });
-			const cookie = accepted.headers.getSetCookie()[0]?.split(";")[0];
-			const begun = TotpEnrolment.parse(
-				(await (await post("/api/credential", { do: "totp.begin" }, cookie)).json()).result,
-			);
-			const confirmed = TotpConfirmed.parse(
-				(
-					await (
-						await post(
-							"/api/credential",
-							{
-								do: "totp.confirm",
-								challenge: begun.challenge,
-								code: totpCode(begun.secret, Math.floor(Date.now() / 30_000)),
-							},
-							cookie,
-						)
-					).json()
-				).result,
-			);
-			const passwordFile = join(directory, "password");
-			const codeFile = join(directory, "recovery");
-			await Bun.write(passwordFile, `${password}\n`);
-			await Bun.write(codeFile, confirmed.recoveryCodes[0] ?? "");
-			const args = ["login", "--name", "cli-totp", "--password-file", passwordFile, "--code-file", codeFile, "--json"];
-			const signed = await cli(args);
-			expect(signed.code).toBe(0);
-			expect(signed.stderr).toBe("");
-			const token = outputWith(PersonalTokenCreated, signed);
-			expect(token.actor).toBe("cli-totp");
-			expect(signed.stdout).not.toContain(password);
-			expect(signed.stdout).not.toContain(begun.secret);
-			expect(signed.stdout).not.toContain(confirmed.recoveryCodes[0] ?? "no-code");
-			const me = await fetch(`${instance.url}/api/session`, { headers: { authorization: `Bearer ${token.token}` } });
-			expect(me.status).toBe(200);
-			expect((await me.json()).result.actor).toBe("cli-totp");
-			const reused = await run(args);
-			expect(reused.code).toBe(4);
-			expect(reused.stdout).toBe("");
-			expect(reused.stderr).toContain("that did not sign you in");
-		},
-		{ mode: "server" },
-	);
 });

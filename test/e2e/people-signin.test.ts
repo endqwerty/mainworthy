@@ -1,24 +1,25 @@
-// A person gets in and out through the pages: an invitation accepted with a password, sign-out from the shell,
-// and the sign-in page with a name and a password. The owner's token still signs a browser in from the same page.
+// A person gets in and out through the pages: an invitation accepted through the identity provider, sign-out
+// from the shell, and the sign-in page's provider button. The owner's token still signs a browser in from the same
+// page, and a person links and confirms identities at the provider from Settings.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { z } from "zod";
-import { totpCode } from "../../src/server/identity/totp.ts";
 import {
-	addAuthenticator,
 	advanceClock,
 	browserAvailable,
+	confirmWithProvider,
 	devicePrefix,
+	joinPerson,
 	openPage,
 	type PageHarness,
 	type Server,
 	startServer,
+	subjectOf,
 } from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
 	if (browserAvailable) {
-		server = await startServer({ mode: "server" });
+		server = await startServer({ mode: "server", provider: true });
 		// The tests below name the owner's storage keys by id: a new instance's owner has id 2.
 		expect(await devicePrefix(server, server.token)).toBe("mainworthy:#2:");
 	}
@@ -27,63 +28,64 @@ afterAll(async () => {
 	await server?.stop();
 });
 
-for (const [method, device] of [
-	["password", "phone"],
-	["passkey", "desktop"],
-] as const)
+/** The provider signs in `subject` at the next request; the page leaves for it with `press` and comes back. */
+async function throughProvider(page: PageHarness["page"], subject: string, press: () => Promise<void>) {
+	server.idp?.next({ subject });
+	const back = page.waitForEvent("load");
+	await press();
+	await back;
+}
+
+for (const device of ["phone", "desktop"] as const)
 	test.skipIf(!browserAvailable)(
-		`a token-only owner adds a first ${method} before enrolling an authenticator on ${device}`,
+		`a token-only owner links a first identity without confirming, and a second after confirming with the first, on ${device}`,
 		async () => {
-			const started = await startServer({ mode: "server", passkeys: method === "passkey" });
-			const server = { ...started, url: started.url.replace("127.0.0.1", "localhost") };
+			const started = await startServer({ mode: "server", provider: true });
 			let browser: PageHarness | null = null;
 			try {
-				browser = await openPage(server, { path: "/p/scratch/settings", device });
+				browser = await openPage(started, { path: "/p/scratch/settings", device });
 				const { page } = browser;
+				// A phone comes back from the provider to the list of sections, with this one chosen but not open
+				// (reported to the web UI's author); the person opens it again.
+				const back = async () => {
+					if (device === "phone") await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+					await page.getByRole("heading", { name: "Your sign-in", exact: true }).waitFor();
+				};
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-				await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
-				const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-				await prompt.getByText("Add your first password or passkey", { exact: false }).waitFor();
-				expect(await prompt.getByRole("textbox").count()).toBe(0);
-				expect(await prompt.locator('input[type="password"]').count()).toBe(0);
-				await prompt.getByRole("button", { name: "Cancel confirmation", exact: true }).click();
-				const password = "the first owner password";
-				if (method === "password") {
-					await page.getByLabel("New password", { exact: true }).fill(password);
-					await page.getByLabel("New password again", { exact: true }).fill(password);
-					await page.getByRole("button", { name: "Set password", exact: true }).click();
-					await page.getByText("Password set.", { exact: true }).waitFor();
-				} else {
-					await addAuthenticator(browser);
-					await page.getByLabel("Passkey name", { exact: true }).fill("This browser");
-					await page.getByRole("button", { name: "Add a passkey", exact: true }).click();
-					await page.getByText("This browser was added.", { exact: true }).waitFor();
-				}
-				await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
-				if (method === "password") {
-					await prompt.getByLabel("Password", { exact: true }).fill(password);
-					expect(await prompt.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
-					await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
-				} else {
-					const usePasskey = prompt.getByRole("button", { name: "Use a passkey", exact: true });
-					await usePasskey.waitFor();
-					expect(await prompt.locator("input").count()).toBe(0);
-					expect(await usePasskey.evaluate((button) => button === document.activeElement)).toBe(true);
-					await usePasskey.click();
-				}
-				await page.getByRole("img", { name: "Authenticator QR code", exact: true }).waitFor();
-				const secret = await page.getByTestId("totp-setup-key").innerText();
-				const reply = await browser.context.request.post(`${server.url}/test/clock`, {
-					headers: { authorization: `Bearer ${server.token}` },
-					data: { advanceMs: 0 },
-				});
-				const ahead = z.object({ result: z.object({ ahead: z.number() }) }).parse(await reply.json()).result.ahead;
-				await page
-					.getByLabel("Authenticator code", { exact: true })
-					.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
-				await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
-				await page.getByRole("list", { name: "Recovery codes", exact: true }).waitFor();
-				expect(await server.api("credential", { do: "list" })).toMatchObject([{ kind: method }, { kind: "totp" }]);
+				await page.getByText("No identity is linked yet. You sign in with a token.", { exact: true }).waitFor();
+				// Long after the token's sign-in proof ran out, the first identity is still linked without a question:
+				// there is nothing else to confirm with.
+				await advanceClock(started, 10 * 60_000 + 1);
+				started.idp?.next({ subject: subjectOf("robin"), email: "robin@example.com" });
+				const linked = page.waitForEvent("load");
+				await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
+				await linked;
+				await back();
+				await page.getByText("Example ID (robin@example.com)", { exact: false }).waitFor();
+				expect(await page.getByRole("button", { name: /^Remove / }).isDisabled()).toBe(true);
+				await page.getByText("Your only identity stays.", { exact: false }).waitFor();
+				// A second one asks first; the session was opened with the token, which the prompt says confirms too.
+				await page.getByRole("button", { name: "Link another Example ID identity", exact: true }).click();
+				const prompt = page.getByRole("region", { name: "Confirm it is you", exact: true });
+				await prompt
+					.getByText("You opened this session with a token: signing in with it again confirms too.", { exact: true })
+					.waitFor();
+				expect(
+					await prompt
+						.getByRole("button", { name: "Confirm with Example ID", exact: true })
+						.evaluate((button) => button === document.activeElement),
+				).toBe(true);
+				await confirmWithProvider(page, started, "robin");
+				await back();
+				started.idp?.next({ subject: "sub-robin-laptop" });
+				const again = page.waitForEvent("load");
+				await page.getByRole("button", { name: "Link another Example ID identity", exact: true }).click();
+				await again;
+				await back();
+				expect(await started.api("credential", { do: "list" })).toMatchObject([{ kind: "oidc" }, { kind: "oidc" }]);
+				expect(browser.errors).toEqual([
+					"Failed to load resource: the server responded with a status of 403 (Forbidden)",
+				]);
 			} finally {
 				await browser?.close();
 				await started.stop();
@@ -93,90 +95,49 @@ for (const [method, device] of [
 	);
 
 test.skipIf(!browserAvailable)(
-	"Settings asks for inline recent proof and retries the refused action",
+	"Settings asks a person to confirm with the provider, refuses another person's identity, and takes their own",
 	async () => {
-		const password = "a recent proof browser password";
-		const made = await server.api("invitation", { do: "create", name: "proof-browser", can: ["read"] });
-		if (!("code" in made)) throw new Error("no invitation was made");
-		await fetch(`${server.url}/api/login`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ invitation: made.code, password }),
-		});
-		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "proof-browser", password } });
+		await joinPerson(server, "proof-browser", { can: ["read"] });
+		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "proof-browser" } });
 		try {
 			const { page } = browser;
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 			await advanceClock(server, 10 * 60_000 + 1);
-			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
-			const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await prompt.waitFor();
-			await prompt.getByLabel("Password", { exact: true }).waitFor();
-			expect(await prompt.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
-			expect(await prompt.getByRole("button", { name: "Use a passkey", exact: true }).count()).toBe(0);
-			expect(
-				await prompt.getByLabel("Password", { exact: true }).evaluate((input) => input === document.activeElement),
-			).toBe(true);
-			await prompt.getByLabel("Password", { exact: true }).fill("wrong password");
-			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
-			await prompt.getByText("that credential proof was not accepted; nothing was changed", { exact: true }).waitFor();
-			expect(await page.getByTestId("totp-setup-key").count()).toBe(0);
-			const reading = Promise.withResolvers<void>();
-			const resume = Promise.withResolvers<void>();
-			await page.route("**/api/credential", async (route) => {
-				if (route.request().postDataJSON().do === "list") {
-					reading.resolve();
-					await resume.promise;
-				}
-				await route.continue();
-			});
-			const refreshed = page.waitForResponse(
-				(response) => response.url().endsWith("/api/credential") && response.request().postDataJSON().do === "list",
-			);
-			await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-			await reading.promise;
-			try {
-				expect(await prompt.getByLabel("Password", { exact: true }).count()).toBe(1);
-				expect(await prompt.getByLabel("Password", { exact: true }).inputValue()).toBe("wrong password");
-			} finally {
-				resume.resolve();
-			}
-			await refreshed;
-			await page.unroute("**/api/credential");
-			await prompt.getByLabel("Password", { exact: true }).fill(password);
-			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
-			await page.getByTestId("totp-setup-key").waitFor();
-			expect(await prompt.count()).toBe(0);
-			await page.getByRole("button", { name: "Cancel enrolment", exact: true }).click();
-			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
-			await page.getByTestId("totp-setup-key").waitFor();
-			expect(await prompt.count()).toBe(0);
-			const secret = await page.getByTestId("totp-setup-key").innerText();
-			const readClock = async () => {
-				const reply = await fetch(`${server.url}/test/clock`, {
-					method: "POST",
-					headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" },
-					body: JSON.stringify({ advanceMs: 0 }),
-				});
-				return z.object({ result: z.object({ ahead: z.number() }) }).parse(await reply.json()).result.ahead;
-			};
-			let ahead = await readClock();
+			const link = page.getByRole("button", { name: "Link another Example ID identity", exact: true });
+			await link.click();
+			const prompt = page.getByRole("region", { name: "Confirm it is you", exact: true });
+			const confirm = prompt.getByRole("button", { name: "Confirm with Example ID", exact: true });
+			await confirm.waitFor();
+			await prompt.getByText("Sign in with Example ID again to confirm it is you.", { exact: false }).waitFor();
+			// This session was opened through the provider: a token is not offered.
+			expect(await prompt.getByText("You opened this session with a token", { exact: false }).count()).toBe(0);
+			expect(await confirm.evaluate((button) => button === document.activeElement)).toBe(true);
+			// Cancelling refuses the change and changes nothing.
+			await prompt.getByRole("button", { name: "Cancel confirmation", exact: true }).click();
+			await prompt.waitFor({ state: "detached" });
+			await page.getByText("Confirmation cancelled. Nothing was changed.", { exact: true }).waitFor();
+			// Somebody else signing in at the provider confirms nothing.
+			await link.click();
+			await throughProvider(page, subjectOf("robin"), () => confirm.click());
 			await page
-				.getByLabel("Authenticator code", { exact: true })
-				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
-			await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
-			await page.getByRole("button", { name: "I saved the recovery codes", exact: true }).click();
-			await advanceClock(server, 10 * 60_000 + 1);
-			ahead = await readClock();
-			await page.getByRole("button", { name: "Remove Authenticator", exact: true }).click();
-			await prompt
-				.getByLabel("Or authenticator code", { exact: true })
-				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
-			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
-			expect(browser.errors).toEqual(
-				Array(3).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
-			);
+				.getByRole("alert")
+				.filter({ hasText: "the identity provider signed in somebody other than you" })
+				.waitFor();
+			await page.getByRole("link", { name: "Back to Mainworthy", exact: true }).click();
+			await page.locator("#app").waitFor();
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await link.click();
+			await confirmWithProvider(page, server, "proof-browser");
+			await throughProvider(page, "sub-proof-browser-laptop", () => link.click());
+			await page.getByRole("heading", { name: "Your sign-in", exact: true }).waitFor();
+			const removable = page.getByRole("button", { name: /^Remove / });
+			await removable.nth(1).waitFor();
+			// The laptop's identity, which the provider gave no email for; the session rests on the other one.
+			await page.getByRole("button", { name: "Remove Example ID", exact: true }).click();
+			await page.getByText("Example ID was removed.", { exact: true }).waitFor();
+			await removable.nth(1).waitFor({ state: "detached" });
+			expect(await removable.isDisabled()).toBe(true);
 		} finally {
 			await browser.close();
 		}
@@ -251,7 +212,7 @@ for (const device of ["desktop", "phone"] as const)
 				await page.keyboard.press("x");
 				await page.getByRole("dialog", { name: "Sign out" }).waitFor();
 				await page.keyboard.press("Enter");
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(posts).toBe(1);
 				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Keep this answer",
@@ -266,7 +227,7 @@ for (const device of ["desktop", "phone"] as const)
 	);
 
 test.skipIf(!browserAvailable)(
-	"an invited person accepts with a password, signs out from the shell and signs in with name and password",
+	"an invited person accepts through the provider, signs out from the shell and signs in through the provider",
 	async () => {
 		const made = await server.api("invitation", { do: "create", name: "sam", can: ["read", "answer"] });
 		if (!("code" in made)) throw new Error("no invitation was made");
@@ -276,72 +237,47 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			await page.getByRole("heading", { name: "You are invited as sam" }).waitFor();
 			await page.getByText("This link works once, until", { exact: false }).waitFor();
-
-			// The password is typed twice and counted as it is typed. Focus starts in the first field.
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-password");
-			// What a password manager is told about a password it makes up: the lengths the server takes.
-			for (const id of ["#invite-password", "#invite-password-again"])
-				expect(await page.locator(id).getAttribute("passwordrules")).toBe("minlength: 12; maxlength: 256;");
-			await page.keyboard.type("short");
-			await page.getByText("5 of 12 characters", { exact: true }).waitFor();
-			// A password that is too short is refused in the page, beside the field, and what was typed stays.
-			await page.keyboard.press("Enter");
-			await page.getByRole("status").filter({ hasText: "a password is 12 to 256 characters" }).waitFor();
-			expect(await page.locator("#invite-password").inputValue()).toBe("short");
-			await page.locator("#invite-password").fill("correct horse battery");
-			await page.getByText("21 characters", { exact: true }).waitFor();
-			await page.keyboard.press("Tab");
-			await page.keyboard.type("correct horse batter");
-			await page.keyboard.press("Enter");
-			await page.getByRole("status").filter({ hasText: "The two passwords differ." }).waitFor();
-			await page.keyboard.type("y");
-			await page.keyboard.press("Enter");
+			// The button is where the person starts.
+			const accept = page.getByRole("button", { name: "Accept with Example ID", exact: true });
+			await accept.waitFor();
+			await page.waitForFunction(() => document.activeElement?.textContent === "Accept with Example ID");
+			await throughProvider(page, subjectOf("sam"), () => page.keyboard.press("Enter"));
 
 			// Signed in, and in the app.
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("sam");
-			await page.waitForURL("**/p/scratch/suite");
 
 			// Out through the shell, by the key the keys sheet names.
 			await page.keyboard.press("g");
 			await page.keyboard.press("x");
 			await page.getByRole("dialog", { name: "Sign out" }).waitFor();
 			await page.keyboard.press("Enter");
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
 			// The session ended on the server, not only in the page: a reload is still the sign-in page.
 			await page.reload();
-			await page.locator("#signin-name").waitFor();
-
-			// A wrong password: one sentence, and the name stays. Focus started in the name field.
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("signin-name");
-			await page.keyboard.type("sam");
-			await page.keyboard.press("Tab");
-			await page.keyboard.type("not the password");
-			// Sent from the button, by the keyboard. The button keeps the keys while the request runs and after
-			// the refusal, so somebody who works without a mouse is not left on nothing.
-			await page.keyboard.press("Tab");
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
-			await page.keyboard.press("Enter");
-			await page
-				.getByRole("status")
-				.filter({ hasText: "That email or name and password did not sign you in." })
-				.waitFor();
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
-			expect(await page.locator("#signin-name").inputValue()).toBe("sam");
-			expect(await page.locator("#app").count()).toBe(0);
-			// Nobody is told where a lost password goes but to an admin.
+			await page.locator("#token").waitFor();
+			// Nobody is told where a lost identity goes but to an admin.
 			await page.getByText("an admin can send you a new link", { exact: false }).waitFor();
 
-			await page.locator("#signin-password").fill("correct horse battery");
-			await page.keyboard.press("Enter");
+			// An identity nobody linked signs nobody in: one sentence, and a way back to the sign-in page.
+			const signIn = page.getByRole("button", { name: "Sign in with Example ID", exact: true });
+			await throughProvider(page, "sub-somebody-unknown", () => signIn.click());
+			await page.getByRole("alert").filter({ hasText: "that did not sign you in" }).waitFor();
+			expect(await page.locator("#app").count()).toBe(0);
+			await page.getByRole("link", { name: "Back to Mainworthy", exact: true }).click();
+			await page.locator("#token").waitFor();
+
+			// sam's own identity, from the focused button by the keyboard.
+			await page.waitForFunction(() => document.activeElement?.textContent === "Sign in with Example ID");
+			await throughProvider(page, subjectOf("sam"), () => page.keyboard.press("Enter"));
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("sam");
 
 			// The button in the shell does what the key does.
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser?.close();
@@ -351,22 +287,20 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"the token form still signs the owner in, and Tab reaches the three ways in the order they are shown",
+	"the token form still signs the owner in, and Tab reaches the two ways in the order they are shown",
 	async () => {
 		let browser: PageHarness | null = null;
 		try {
 			browser = await openPage(server, { signedIn: false });
 			const { page } = browser;
 			const focused = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent);
-			expect(await focused()).toBe("signin-name");
+			await page.waitForFunction(() => document.activeElement?.textContent === "Sign in with Example ID");
 			const order: unknown[] = [];
-			for (let i = 0; i < 4; i++) {
+			for (let i = 0; i < 2; i++) {
 				await page.keyboard.press("Tab");
 				order.push(await focused());
 			}
-			// This instance was given no public address, so no passkey is offered.
-			expect(order).toEqual(["signin-password", "Sign in", "token", "Sign in with the token"]);
-			expect(await page.getByRole("button", { name: "Sign in with a passkey" }).count()).toBe(0);
+			expect(order).toEqual(["token", "Sign in with the token"]);
 
 			// A password manager is told to leave the token alone: it is not the person's password.
 			expect(await page.locator("#token").getAttribute("data-1p-ignore")).not.toBeNull();
@@ -387,7 +321,26 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"a limited password sign-in says how long to wait, with the name and the password kept",
+	"an instance with no provider offers the token alone, which takes the focus",
+	async () => {
+		const plain = await startServer({ mode: "server" });
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(plain, { signedIn: false });
+			const { page } = browser;
+			await page.waitForFunction(() => document.activeElement?.id === "token");
+			expect(await page.getByRole("button", { name: /^Sign in with (?!the token)/ }).count()).toBe(0);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+			await plain.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a limited token sign-in says how long to wait, with the token kept",
 	async () => {
 		let browser: PageHarness | null = null;
 		try {
@@ -395,7 +348,7 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			const refusal = page
 				.locator("form")
-				.filter({ has: page.locator("#signin-password") })
+				.filter({ has: page.locator("#token") })
 				.getByRole("status");
 			await page.route("**/api/login", (route) =>
 				route.fulfill({
@@ -404,14 +357,12 @@ test.skipIf(!browserAvailable)(
 					json: { ok: false, error: { code: "limited", message: "Too many attempts" } },
 				}),
 			);
-			await page.locator("#signin-name").fill("nobody-of-that-name");
-			await page.locator("#signin-password").fill("wrong password");
+			await page.locator("#token").fill("some token or other");
 			await page.keyboard.press("Enter");
 			await refusal.filter({ hasText: /^Too many attempts\. Try again in 23 seconds\.$/ }).waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
-			expect(await page.locator("#signin-name").inputValue()).toBe("nobody-of-that-name");
-			expect(await page.locator("#signin-password").inputValue()).toBe("wrong password");
-			expect(await page.getByRole("button", { name: "Sign in", exact: true }).isEnabled()).toBe(true);
+			expect(await page.locator("#token").inputValue()).toBe("some token or other");
+			expect(await page.getByRole("button", { name: "Sign in with the token", exact: true }).isEnabled()).toBe(true);
 			expect(browser.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
 			]);
@@ -429,36 +380,34 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false });
 			const { page } = browser;
-			// What the server answers a sign-in whose body took too long to arrive. A test answers in its place:
-			// no browser sends a body that slowly.
+			// What the server answers a request whose body took too long to arrive. A test answers in its place: no
+			// browser sends a body that slowly.
 			const slow = "the sign-in request took too long to arrive";
-			let reply: { status: number; code: string; message: string } = { status: 408, code: "invalid", message: slow };
+			await page.route("**/api/login/oidc", (route) =>
+				route.fulfill({ status: 408, json: { ok: false, error: { code: "invalid", message: slow } } }),
+			);
 			await page.route("**/api/login", (route) =>
 				route.fulfill({
-					status: reply.status,
-					json: { ok: false, error: { code: reply.code, message: reply.message } },
+					status: 429,
+					json: { ok: false, error: { code: "limited", message: "too many attempts; try again in 30 seconds" } },
 				}),
 			);
-			await page.locator("#signin-name").fill("sam");
-			await page.locator("#signin-password").fill("some password or other");
-			await page.keyboard.press("Enter");
-			const password = page.locator("form").filter({ has: page.locator("#signin-password") });
-			await password.getByRole("status").filter({ hasText: slow }).waitFor();
-			expect(await password.getByRole("status").innerText()).toBe(slow);
-			expect(await page.locator("#signin-name").inputValue()).toBe("sam");
-			expect(await page.locator("#signin-password").inputValue()).toBe("some password or other");
+			const provider = page.getByRole("button", { name: "Sign in with Example ID", exact: true });
+			await provider.click();
+			const providerStatus = page.locator(".signin-card > .signin-problem");
+			await providerStatus.filter({ hasText: slow }).waitFor();
+			expect(await providerStatus.innerText()).toBe(slow);
 			// The button is back for the next attempt.
-			expect(await page.getByRole("button", { name: "Sign in", exact: true }).isEnabled()).toBe(true);
+			expect(await provider.getAttribute("aria-disabled")).toBe("false");
 
 			// A wait whose length a proxy dropped on the way: the sentence has no number, and is not the page's
 			// sentence for a wrong token.
-			reply = { status: 429, code: "limited", message: "too many attempts; try again in 30 seconds" };
 			await page.locator("#token").fill("some token or other");
 			await page.keyboard.press("Enter");
 			const token = page.locator("form").filter({ has: page.locator("#token") });
 			await token.getByRole("status").filter({ hasText: "Too many attempts. Try again later." }).waitFor();
 			// One refusal is on the page at a time, under what caused it.
-			expect(await password.getByRole("status").innerText()).toBe("");
+			expect(await providerStatus.innerText()).toBe("");
 			expect(browser.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 408 (Request Timeout)",
 				"Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
@@ -515,7 +464,7 @@ for (const key of ["Enter", "Space"] as const)
 				await page.keyboard.press(key);
 				await page.getByRole("dialog", { name: "Sign out" }).waitFor();
 				await page.keyboard.press("Enter");
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(posts).toBe(1);
 				expect(browser.errors).toEqual([]);
 			} finally {
@@ -569,7 +518,7 @@ test.skipIf(!browserAvailable)(
 			});
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
 			expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBeNull();
 			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
@@ -609,7 +558,7 @@ for (const storage of ["available", "unavailable"] as const)
 				await page.route("**/api/session", (route) => (++checks === 1 ? route.abort() : route.continue()));
 				await page.getByRole("button", { name: "Sign out", exact: true }).click();
 				await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(checks).toBe(2);
 				expect(await page.locator("#app").count()).toBe(0);
 				if (storage === "available") {
@@ -621,9 +570,9 @@ for (const storage of ["available", "unavailable"] as const)
 						),
 					).toEqual([]);
 					for (const tab of [page, other]) {
-						await tab.locator("#signin-name").waitFor();
+						await tab.locator("#token").waitFor();
 						await tab.reload();
-						await tab.locator("#signin-name").waitFor();
+						await tab.locator("#token").waitFor();
 						expect(
 							await tab.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:#2:"))),
 						).toEqual([]);
@@ -695,7 +644,7 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				await step.evaluate((node) => (node as HTMLElement).blur());
 				await page.keyboard.press("g");
 				await page.keyboard.press("q");
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(await stored()).toContain("Draft after failed clear");
 				expect((await local.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 				expect(browser.dialogs).toEqual([]);
@@ -739,14 +688,14 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 				}
 				await keeping.getByRole("button", { name: "Sign out", exact: true }).click();
 				await keeping.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-				await keeping.locator("#signin-name").waitFor();
+				await keeping.locator("#token").waitFor();
 				if (keeping !== page) {
 					await page.keyboard.press("g");
 					await page.keyboard.press("q");
-					await page.locator("#signin-name").waitFor();
+					await page.locator("#token").waitFor();
 				}
 				await page.reload();
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Kept after failed clear",
 				);
@@ -756,7 +705,7 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 				await page.locator("#app").waitFor();
 				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
 				await page.reload();
-				await page.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
 				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Kept after failed clear",
 				);
@@ -788,7 +737,7 @@ test.skipIf(!browserAvailable)(
 			await page.unroute("**/api/logout");
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await browser?.close();
@@ -829,7 +778,7 @@ for (const source of ["sidebar", "sessions"] as const)
 				else await other.getByRole("button", { name: /End the session of .*this browser/ }).click();
 				const warning = await signingOut.getByRole("dialog", { name: "Sign out" }).textContent();
 				await signingOut.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
-				await signingOut.locator("#signin-name").waitFor();
+				await signingOut.locator("#token").waitFor();
 				expect(
 					await signingOut.evaluate(() =>
 						Object.keys(localStorage).filter(
@@ -839,8 +788,8 @@ for (const source of ["sidebar", "sessions"] as const)
 				).toEqual([]);
 				expect(warning).toContain("unsaved");
 				expect(warning).toContain("robin");
-				await page.locator("#signin-name").waitFor();
-				await other.locator("#signin-name").waitFor();
+				await page.locator("#token").waitFor();
+				await other.locator("#token").waitFor();
 				// A new session in this same document must work after clearing, with none of the discarded draft.
 				await signingOut.locator("#token").fill(local.token);
 				await signingOut.keyboard.press("Enter");
@@ -855,9 +804,9 @@ for (const source of ["sidebar", "sessions"] as const)
 				await signingOut.getByRole("button", { name: "Sign out", exact: true }).click();
 				await signingOut.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 				for (const tab of [page, other]) {
-					await tab.locator("#signin-name").waitFor();
+					await tab.locator("#token").waitFor();
 					await tab.reload();
-					await tab.locator("#signin-name").waitFor();
+					await tab.locator("#token").waitFor();
 					expect(
 						await tab.evaluate(() =>
 							Object.entries(localStorage).filter(
@@ -901,7 +850,7 @@ test.skipIf(!browserAvailable)(
 			await step.fill("Keep my unsaved text");
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-			await page.locator("#signin-name").waitFor();
+			await page.locator("#token").waitFor();
 			expect(browser.dialogs).toEqual([]);
 			const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:#2:draft:scratch:C-1"));
 			expect(await stored()).toContain("Keep my unsaved text");
@@ -909,7 +858,7 @@ test.skipIf(!browserAvailable)(
 				if (expired) {
 					await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
 					await page.reload();
-					await page.locator("#signin-name").waitFor();
+					await page.locator("#token").waitFor();
 					expect(await stored()).toContain("Keep my unsaved text");
 				}
 				await page.locator("#token").fill(local.token);
@@ -952,7 +901,7 @@ test.skipIf(!browserAvailable)(
 			await other.locator("#app").waitFor();
 			await other.getByRole("button", { name: "Sign out", exact: true }).click();
 			await other.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
-			await other.locator("#signin-name").waitFor();
+			await other.locator("#token").waitFor();
 			await other.locator("#token").fill(local.token);
 			await other.keyboard.press("Enter");
 			await other.locator("#app").waitFor();
@@ -970,101 +919,6 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await browser?.close();
 			await local.stop();
-		}
-	},
-	30_000,
-);
-
-test.skipIf(!browserAvailable)(
-	"Settings enrols TOTP and password sign-in waits for an authenticator or recovery code",
-	async () => {
-		const password = "the browser TOTP password";
-		const made = await server.api("invitation", { do: "create", name: "totp-browser", can: ["read"] });
-		if (!("code" in made)) throw new Error("no invitation");
-		await fetch(`${server.url}/api/login`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ invitation: made.code, password }),
-		});
-		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "totp-browser", password } });
-		try {
-			const { page, context } = browser;
-			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
-			await page.getByRole("img", { name: "Authenticator QR code", exact: true }).waitFor();
-			const secret = await page.getByTestId("totp-setup-key").innerText();
-			const clockReply = await fetch(`${server.url}/test/clock`, {
-				method: "POST",
-				headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" },
-				body: JSON.stringify({ advanceMs: 0 }),
-			});
-			const ahead = z.object({ result: z.object({ ahead: z.number() }) }).parse(await clockReply.json()).result.ahead;
-			await page
-				.getByLabel("Authenticator code", { exact: true })
-				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
-			await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
-			const recoveryCodes = page.getByRole("list", { name: "Recovery codes", exact: true });
-			await recoveryCodes.waitFor();
-			const recovery = await recoveryCodes.locator("li").first().innerText();
-			expect(await recoveryCodes.locator("li").count()).toBe(10);
-			await page.getByRole("button", { name: "I saved the recovery codes", exact: true }).click();
-			await recoveryCodes.waitFor({ state: "detached" });
-			expect(await page.getByRole("button", { name: "Remove the password", exact: true }).isDisabled()).toBe(true);
-			await page.getByRole("button", { name: "Sign out", exact: true }).click();
-			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-			await page.locator("#signin-name").fill("totp-browser");
-			await page.locator("#signin-password").fill(password);
-			await page.getByRole("button", { name: "Sign in", exact: true }).click();
-			await page.getByRole("heading", { name: "One more step", exact: true }).waitFor();
-			expect((await context.cookies()).some((cookie) => cookie.name === "mainworthy_sid")).toBe(false);
-			await page.getByLabel("Authenticator or recovery code", { exact: true }).fill("bad-code");
-			await page.getByRole("button", { name: "Verify code", exact: true }).click();
-			await page.getByRole("status").filter({ hasText: "That code did not sign you in." }).waitFor();
-			expect(await page.getByLabel("Authenticator or recovery code", { exact: true }).inputValue()).toBe("bad-code");
-			await page.getByLabel("Authenticator or recovery code", { exact: true }).fill(recovery);
-			await page.getByRole("button", { name: "Verify code", exact: true }).click();
-			await page.locator("#app").waitFor();
-			expect(browser.errors).toEqual([]);
-		} finally {
-			await browser.close();
-		}
-	},
-	30_000,
-);
-
-test.skipIf(!browserAvailable)(
-	"on an instance that sends no mail, a person saves an email address in Settings and signs in with it",
-	async () => {
-		const password = "an email sign-in browser password";
-		const made = await server.api("invitation", { do: "create", name: "email-browser", can: ["read"] });
-		if (!("code" in made)) throw new Error("no invitation was made");
-		await fetch(`${server.url}/api/login`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ invitation: made.code, password }),
-		});
-		const browser = await openPage(server, {
-			path: "/p/scratch/settings?section=signin",
-			as: { name: "email-browser", password },
-		});
-		const fresh = await openPage(server, { path: "/p/scratch/suite", signedIn: false, ready: "#signin-name" });
-		try {
-			const email = browser.page.getByRole("region", { name: "Email", exact: true });
-			await email.getByText("This instance sends no mail", { exact: false }).waitFor();
-			await email.getByLabel("Email address", { exact: true }).fill("Email.Browser@Example.org");
-			await email.getByRole("button", { name: "Save email address", exact: true }).click();
-			await email.getByText("Email address saved. Sign in with it or with the name.", { exact: true }).waitFor();
-			await email.getByText("email.browser@example.org", { exact: true }).waitFor();
-
-			const { page } = fresh;
-			await page.getByLabel("Email or name", { exact: true }).fill("email.browser@example.org");
-			await page.locator("#signin-password").fill(password);
-			await page.keyboard.press("Enter");
-			await page.locator("#app").waitFor();
-			expect(browser.errors).toEqual([]);
-		} finally {
-			await browser.close();
-			await fresh.close();
 		}
 	},
 	30_000,

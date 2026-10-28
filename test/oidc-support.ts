@@ -14,6 +14,8 @@ export type Next = {
 	subject: string;
 	email?: string;
 	name?: string;
+	/** When the person last signed in at the provider, in seconds since 1970: the ID token's `auth_time`. */
+	authTime?: number;
 	/** What to change in the ID token, or in the reply, for this one sign-in. */
 	twist?: {
 		key?: "other";
@@ -123,6 +125,7 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 				const claims: Record<string, unknown> = { nonce: twist.nonce ?? nonce };
 				if (next.email !== undefined) Object.assign(claims, { email: next.email, email_verified: true });
 				if (next.name !== undefined) claims.name = next.name;
+				if (next.authTime !== undefined) claims.auth_time = next.authTime;
 				const idToken = await new SignJWT(claims)
 					.setProtectedHeader({ alg: "ES256", kid: "k1" })
 					.setIssuer(twist.issuer ?? issuer)
@@ -144,7 +147,6 @@ export async function provider(defaultIdentity?: Next): Promise<Provider> {
 			clientId: CLIENT_ID,
 			clientSecret: CLIENT_SECRET,
 			name: "Example ID",
-			mfa: false,
 			...more,
 		}),
 		next: (next) => {
