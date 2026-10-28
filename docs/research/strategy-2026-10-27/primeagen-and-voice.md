@@ -48,7 +48,7 @@ Name: **Oligarchy** ("Playing around with automation via custom agent harness to
   "a claim to check, not a fact", decides from evidence, and files one diagnosis with an existing error type (minting a new type
   "should be rare"). Agents run via Cursor (`@cursor/sdk`, `.cursor/skills/*`, opencode.ts in automation-client). Dashboard
   retention: rows older than 30 days deleted by cron.
-- Maturity: about 7 weeks old at the copy's snapshot, 289 commits, 13 migrations, 1334 unit tests per its own `NEED_FIXING.md`,
+- Maturity: 22 days from first to last commit at the copy's snapshot (corrected 2026-10-27 from "about 7 weeks"), 289 commits, 13 migrations, 1334 unit tests per its own `NEED_FIXING.md`,
   CI migrations workflow. Self-described by the news post as an experiment becoming routine. Heavily agent-written (Cursor
   Agent commits, large AGENTS.md/development.md). No licence, "private": true in package.json.
 
