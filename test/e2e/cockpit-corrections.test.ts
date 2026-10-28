@@ -1396,10 +1396,23 @@ check(
 			);
 			view = await openPage({ ...server, token }, { path });
 			const { page } = view;
+			await page.setViewportSize({ width: 1280, height: 800 });
+			await page.getByText("Nothing left for you to run.", { exact: false }).waitFor();
+			expect(await page.locator('[data-run-document][data-active="true"]').count()).toBe(0);
+			expect(await page.getByRole("complementary", { name: "Up next" }).count()).toBe(0);
+			await page.keyboard.press("j");
 			await ready(page);
 			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
 			await page.keyboard.press("j");
 			expect(await active(page)).toBe("C-2");
+			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
+			await page.keyboard.press("j");
+			expect(await active(page)).toBe("C-3");
+			await page.keyboard.press("k");
+			expect(await active(page)).toBe("C-2");
+			await page.keyboard.press("k");
+			expect(await active(page)).toBe("C-1");
+			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
 		} finally {
 			await view?.close();
 			await server.stop();
