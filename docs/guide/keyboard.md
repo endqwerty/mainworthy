@@ -141,6 +141,8 @@ be read, the action changes nothing. Try again when the case is available.
 | <kbd>u</kbd> | Undo answer |
 | <kbd>y</kbd> | Copy for an agent. On a failure: copies a brief with the failure, its tests, where it ran and a request to fix the cause |
 | <kbd>h</kbd> | Hand to the agent. On a failure: has the server send that brief to the agent the instance is configured to start. Shown only when one is configured |
+| <kbd>Alt</kbd>+<kbd>G</kbd> | Create GitHub issue. On a failure, also on its case: shows the issue the tracker will receive, and sends it when you choose Send. Shown only when a tracker is set up and you may read and produce |
+| <kbd>Alt</kbd>+<kbd>G</kbd> | Create tracker issue. The same, when the project's tracker is Jira |
 
 The answer keys depend on the kind of question. The queue shows the ones that apply to the question you are on, each with what it does.
 
