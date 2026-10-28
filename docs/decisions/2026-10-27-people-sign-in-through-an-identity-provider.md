@@ -33,9 +33,10 @@ agents and pipelines.
   accepted it), and so does a sign-in from before the ceremony, which a provider ignoring `max_age=0` would send (its second audit). Google gives `auth_time` only when a request asks for it and the client's settings enable it
   (read 2026-10-27), so the hosted instance's client must have it enabled. A browser session opened by typing a token has proof
   for ten minutes, unlike under 0145: a token already speaks for its person over the API, so the browser gains
-  nothing the token lacked. Proof still guards linking a second identity and unlinking one, creating a token or
-  an invitation from a browser, granting admin, team admin changes and archive import. A person linking their
-  first identity needs no proof, as first enrollment did.
+  nothing the token lacked. Proof still guards linking any identity, the first included, and unlinking one, creating a token or
+  an invitation from a browser, granting admin, team admin changes and archive import. Unlike first enrollment before, a first identity needs proof too (the security audit of #1048:
+  it is a lasting way in, so an unattended token session must not be able to add one; signing in with the token
+  gives that proof).
 - **The hosted instance** uses Google accounts (`https://accounts.google.com`) until a customer needs its own
   provider. More than one provider per instance waits for a need, as in 0093.
 

@@ -122,7 +122,7 @@ has no proof within ten minutes. The proof is the session's own: a session opene
 minutes from sign-in, and a session opened through the provider gets it with `POST /api/login/oidc` and
 `{"proof": true}`. Retry the refused action after proving. The refusal leaves the session signed in and writes no
 command. When changing another person's details, the admin proves it is them. Bearer tokens do not carry session
-proof. A first identity and invitation or recovery acceptance need no prior proof.
+proof. Linking an identity needs proof, the first one included; invitation or recovery acceptance needs none.
 Creating a token through `credential` or `admin`, issuing any invitation,
 setting a direct or team grant containing `admin`, and adding a member to an
 admin team from a browser also need the caller's recent proof. These operations remain

@@ -14,7 +14,6 @@ import { Busy, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { fenceJob, type JobClaim } from "../kernel/jobs.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
-import { liveCredentials } from "./credentials.ts";
 import { lockActors, lockIdentity, lockSessionHash, lockTokenHash } from "./locks.ts";
 
 /**
@@ -187,14 +186,13 @@ export async function proofSession(
 }
 
 /** Called inside each sign-in-changing writer, before it changes a credential or contact. */
-export async function requireRecentProof(app: App, db: ReadDb, input: ProofContext, initial = false): Promise<void> {
+export async function requireRecentProof(app: App, db: ReadDb, input: ProofContext): Promise<void> {
 	if (app.config.mode === "local" && input.context === CONTEXT.local) return;
 	const session = await proofSession(app, input, db);
 	if (session) {
 		const at = (await db.get(Q.proof, { hash: session.hash }))?.reauthenticated_at;
 		const now = app.now();
 		if (at != null && at <= now && now - at <= PROOF_MS) return;
-		if (initial && (await liveCredentials(db, input.actor)).length === 0) return;
 	}
 	throw new OpError("recent_proof_required", RECENT_PROOF_MESSAGE);
 }
