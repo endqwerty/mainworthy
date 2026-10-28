@@ -46,7 +46,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_OIDC_CLIENT_ID` | none | The client id the provider gave this instance. |
 | `MAINWORTHY_OIDC_CLIENT_SECRET` | none | The client secret the provider gave this instance. |
 | `MAINWORTHY_OIDC_NAME` | none | What the sign-in button calls the provider, such as `Okta`: "Sign in with Okta". |
-| `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. The identity provider sends people back to it, and an invitation link starts with it. Required with an identity provider. Without it `mainworthy invite` prints a link with no host. |
+| `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. The identity provider sends people back to it, and an invitation link starts with it. Required with an identity provider, and so for any invitation: without a provider the instance makes none. |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Cannot be set with `MAINWORTHY_PROXY_SECRET`. |
 | `MAINWORTHY_PROXY_SECRET` | none | A secret of at least 32 characters that the proxy overwrites `x-mainworthy-proxy` with on every request. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Requests without matching proof receive 403, except `GET /health`. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which the proxy reports one visitor address. Requires either the trusted proxy addresses or the proxy secret. |

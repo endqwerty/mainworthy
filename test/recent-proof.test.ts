@@ -127,6 +127,31 @@ test("an answer that does not say when the person signed in, or says a time to c
 	expect((await personalToken(w, cookie)).status).toBe(200);
 });
 
+test("a proof that goes stale while it waits for the writer proves nothing", async () => {
+	const w = await world();
+	const cookie = await joined(w, "robin");
+	const begun = await begin(w, { proof: true }, jar(cookie));
+	const query = await authorize(w, begun, {
+		subject: subjectOf("robin"),
+		authTime: seconds(w.clock.now() - PROOF_MS) + 1,
+	});
+	// The answer is judged fresh before the write gate, and two seconds pass while it waits there.
+	const database = w.instance.app.database;
+	const write = database.write.bind(database);
+	let writes = 0;
+	database.write = ((fn: Parameters<typeof write>[0]) => {
+		writes++;
+		if (writes === 1) w.clock.advance(2000);
+		return write(fn);
+	}) as typeof database.write;
+	try {
+		expect(said(await finish(w, query, jar(cookie, begun.ceremony)))).toBe("403 forbidden");
+	} finally {
+		database.write = write;
+	}
+	refused(await personalToken(w, cookie));
+});
+
 test("proof is of the person's own identity: another person's, or one nobody linked, proves nothing", async () => {
 	const w = await world();
 	const robin = await joined(w, "robin");
