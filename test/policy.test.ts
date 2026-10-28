@@ -3250,6 +3250,7 @@ for (const notProducer of [false, true])
 		]);
 
 		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
+		expect(first((await queue({ kind: "signoff" })).items).approvals).toEqual([]);
 		expect(await h.call("decide", { ...approve, reason: "Release reviewed" }, other)).toMatchObject([
 			{ status: "pending" },
 		]);
