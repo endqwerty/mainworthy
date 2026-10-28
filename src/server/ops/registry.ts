@@ -61,7 +61,10 @@ type ProjectBase<I, O> = Base<I, O> & { scope: "project" };
 export type ProjectOp<I, O> = ProjectBase<I, O> &
 	(
 		| { effect: "read"; run: (ctx: Ctx<ReadDb>, input: I) => O | Promise<O> }
-		| ({ effect: "write" } & (
+		| ({
+				effect: "write";
+				read?: { when: (input: I) => boolean; run: (ctx: Ctx<ReadDb>, input: I) => O | Promise<O> };
+		  } & (
 				| { run: (ctx: Ctx, input: I) => O | Promise<O> }
 				| { steps: (ctx: Ctx, input: I) => Generator<Pause<O>, O, void> | AsyncGenerator<Pause<O>, O, void> }
 		  ))
@@ -565,6 +568,12 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, 
 
 /** Runs writes with actor and project transaction locks, and reads in repeatable snapshots. */
 export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	const operation = ops[call.op];
+	if (operation?.scope === "project" && operation.effect === "write" && operation.read) {
+		const parsed = operation.input.safeParse(call.input ?? {});
+		if (parsed.success && operation.read.when(parsed.data))
+			return await invoke(app, { ...ops, [call.op]: { ...operation, effect: "read", run: operation.read.run } }, call);
+	}
 	if (ops[call.op]?.effect === "service")
 		return fail("forbidden", "this operation is only available to the job service");
 	const misplaced = misplacedTime(ops[call.op], call);

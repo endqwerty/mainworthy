@@ -2,18 +2,19 @@ import { REPLIES } from "../../core/replies.ts";
 import { TrackerInput, TrackerStatusInput } from "../../core/tracker.ts";
 import type { Config } from "../kernel/app.ts";
 import { configuredTrackers } from "../trackers/config.ts";
-import { queueDefect, trackerStatus } from "../trackers/requests.ts";
+import { previewDefect, queueDefect, trackerStatus } from "../trackers/requests.ts";
 import { defineOp } from "./registry.ts";
 
 export const trackerOp = defineOp({
 	name: "tracker",
-	summary: "Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking.",
+	summary: "Preview or queue a defect from a failed result, or validate an existing issue for linking.",
 	input: TrackerInput,
 	output: REPLIES.tracker,
 	needs: "produce",
 	scope: "project",
 	effect: "write",
 	mcp: null,
+	read: { when: (input) => input.do === "preview", run: previewDefect },
 	run: queueDefect,
 });
 

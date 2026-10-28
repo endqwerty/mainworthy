@@ -1,14 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { mayRun } from "../../core/kinds.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody } from "../../core/model.ts";
-import { type TrackerInput, TrackerItem, type TrackerReceipt } from "../../core/tracker.ts";
+import { type TrackerInput, TrackerItem, type TrackerPreview, type TrackerReceipt } from "../../core/tracker.ts";
 import { batchById, mustTarget, resultById, testById, testRef } from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
 import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
-import { forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runKindJobs, stopKindJobs, waitKindJobs } from "../kernel/jobs.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
@@ -63,9 +63,13 @@ export async function trackerStatus(db: ReadDb, project: number, id: string): Pr
 	return receipt(row);
 }
 
-export async function queueDefect(ctx: Ctx, input: TrackerInput): Promise<TrackerReceipt> {
+export async function previewDefect(ctx: Ctx<ReadDb>, input: TrackerInput): Promise<TrackerPreview> {
 	const config = configuredTrackers(ctx.app.config, ctx.project.key)[0];
-	if (!config) throw invalid("A tracker is not configured for this project.");
+	if (!config) {
+		if (input.do === "create" && input.confirm !== undefined)
+			throw conflict("The tracker destination changed. Request a fresh review before sending.");
+		throw invalid("A tracker is not configured for this project.");
+	}
 	if (input.do === "link" && !config.validKey(input.key))
 		throw invalid("The issue key must name an issue in the configured tracker project.");
 	const result = await resultById(ctx.db, input.result);
@@ -98,16 +102,32 @@ export async function queueDefect(ctx: Ctx, input: TrackerInput): Promise<Tracke
 			? ["", "## Recorded case", printCase({ ref: row ? caseRef(row) : null, body, tags: [], covers: [] })]
 			: []),
 	].join("\n");
+	const preview = {
+		destination: config.destination,
+		title: `Failure: ${body?.title ?? test.name}`.slice(0, 240),
+		body: draft,
+	};
+	const confirm = createHash("sha256")
+		.update(JSON.stringify([preview.destination, preview.title, preview.body, ctx.project.id, result.id]))
+		.digest("hex");
+	return { ...preview, confirm };
+}
+
+export async function queueDefect(ctx: Ctx, input: TrackerInput): Promise<TrackerReceipt> {
+	if (input.do === "preview") throw invalid("Use the preview read action.");
+	const preview = await previewDefect(ctx, input);
+	if (input.do === "create" && input.confirm !== undefined && input.confirm !== preview.confirm)
+		throw conflict("The tracker destination or issue content changed. Request a fresh review before sending.");
 	const request: RequestRow = {
 		id: input.cmd,
 		nonce: randomUUID(),
 		project: ctx.project.id,
-		result: result.id,
-		repository: config.destination,
+		result: input.result,
+		repository: preview.destination,
 		action: input.do,
 		item_key: input.do === "link" ? input.key : null,
-		title: `Failure: ${body?.title ?? test.name}`.slice(0, 240),
-		body: draft,
+		title: preview.title,
+		body: preview.body,
 		state: "queued",
 		issue: null,
 		error: null,

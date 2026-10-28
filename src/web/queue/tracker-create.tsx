@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import type { QuestionItem } from "../../core/ops.ts";
-import type { TrackerReceipt } from "../../core/tracker.ts";
+import { TrackerPreview, TrackerReceipt } from "../../core/tracker.ts";
 import { call } from "../lib/api.ts";
 import { queryKey } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
@@ -35,39 +34,9 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 	const preview = useQuery({
 		queryKey: [project, "tracker-preview", sample],
 		enabled: offered && review,
-		queryFn: async () => {
-			const rows = await call("get", { refs: [`result:${sample}`] }, { project });
-			const result = z
-				.object({
-					message: z.string().nullable(),
-					detail: z.string().nullable(),
-					version: z.number().nullable(),
-					case: z.string().nullable(),
-					location: z.object({ label: z.string() }),
-					build: z.string().nullable(),
-				})
-				.parse(rows[0]);
-			const caseRef = result.case;
-			const recorded =
-				caseRef && result.version !== null
-					? await call("get", { refs: [caseRef], version: result.version, as: "md" }, { project })
-					: [];
-			const content = recorded.length
-				? z.object({ md: z.string() }).parse(recorded[0]).md
-				: "No recorded case content.";
-			return [
-				`Destination: ${destination}`,
-				`Result: ${sample}`,
-				`Target: ${result.location.label}`,
-				`Build: ${result.build ?? "not provided"}`,
-				"",
-				"Failure",
-				result.message ?? "No failure message was reported.",
-				result.detail ?? "",
-				"",
-				content,
-			].join("\n");
-		},
+		queryFn: async ({ signal }) =>
+			TrackerPreview.parse(await call("tracker", { do: "preview", result: sample ?? 0, cmd }, { project, signal })),
+		staleTime: Infinity,
 	});
 	const last = status.data ?? receipt;
 	const busy = sending || last?.state === "queued" || last?.state === "sending";
@@ -76,16 +45,23 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 		{
 			key: "alt+g",
 			label: `${label} for ${question.q}`,
-			handler: () => setReview(true),
+			handler: () => {
+				void preview.refetch();
+				setReview(true);
+			},
 			applies: () => offered && active() && !busy && !last?.issue,
 		},
 	]);
 	async function send() {
-		if (!sample || busy) return;
+		if (!sample || busy || !preview.data || preview.isFetching || preview.error) return;
 		setSending(true);
 		setError(null);
 		try {
-			setReceipt(await call("tracker", { do: "create", result: sample, cmd }, { project }));
+			setReceipt(
+				TrackerReceipt.parse(
+					await call("tracker", { do: "create", result: sample, cmd, confirm: preview.data.confirm }, { project }),
+				),
+			);
 			setReview(false);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : "The issue could not be created.");
@@ -97,7 +73,15 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 	return (
 		<div className="tracker-create">
 			{!last && (
-				<button className="out" type="button" disabled={busy} onClick={() => setReview(true)}>
+				<button
+					className="out"
+					type="button"
+					disabled={busy}
+					onClick={() => {
+						void preview.refetch();
+						setReview(true);
+					}}
+				>
 					{label}
 				</button>
 			)}
@@ -107,9 +91,17 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 						The issue includes the failure, target, build URL and recorded case content. The repository may be public.
 					</p>
 					<pre className="log">
-						{preview.data ?? (preview.error ? preview.error.message : "Reading the recorded evidence…")}
+						{preview.data
+							? `Destination: ${preview.data.destination}\nTitle: ${preview.data.title}\n\n${preview.data.body}`
+							: preview.error
+								? preview.error.message
+								: "Reading the recorded evidence…"}
 					</pre>
-					<button type="button" disabled={!preview.data || busy} onClick={() => void send()}>
+					<button
+						type="button"
+						disabled={!preview.data || preview.isFetching || Boolean(preview.error) || busy}
+						onClick={() => void send()}
+					>
 						Send to tracker
 					</button>
 					<button type="button" onClick={() => setReview(false)}>

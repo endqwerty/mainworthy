@@ -275,7 +275,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
 | `mainworthy change` | Say that a change ended or is open again. A merge records the head gate when reported. An ended change is not asked about. |
 | `mainworthy announce` | Announce a deployment and bind its build label to an attested artifact. Pipelines and human admins only. |
-| `mainworthy tracker` | Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking. |
+| `mainworthy tracker` | Preview or queue a defect from a failed result, or validate an existing issue for linking. |
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |
 | `mainworthy work` | Take a named slot or the next free unfinished slot for a lease, renew it, or give it back. |
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |

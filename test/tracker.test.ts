@@ -1527,3 +1527,57 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 		instance = undefined;
 	}
 });
+
+test("tracker preview is exactly the delivered draft and confirmed retries send once", async () => {
+	const result = await failure();
+	const preview = await h.call<{ destination: string; title: string; body: string; confirm: string }>("tracker", {
+		do: "preview",
+		result,
+		cmd: "confirmed-test-001",
+	});
+	expect(preview.destination).toBe("example/shop");
+	expect(preview.body).toContain("Project: scratch");
+	expect(preview.body).toContain("Case: C-1@v1");
+	expect(preview.body).toContain("abcdef123");
+	const input = { do: "create", result, cmd: "confirmed-test-001", confirm: preview.confirm };
+	await h.call("tracker", input);
+	const drafts: DefectDraft[] = [];
+	const receiving = {
+		...port,
+		createDefect: async (draft: DefectDraft) => {
+			drafts.push(draft);
+			return item;
+		},
+	};
+	await deliverTrackerRequests(h.app, receiving);
+	await h.call("tracker", input);
+	await deliverTrackerRequests(h.app, receiving);
+	expect(drafts).toEqual([{ title: preview.title, body: preview.body }]);
+});
+
+test("tracker refuses a stale destination confirmation without sending; CLI needs no digest", async () => {
+	const result = await failure();
+	const preview = await h.call<{ confirm: string }>("tracker", { do: "preview", result, cmd: "preview-test-002" });
+	h.app.config.github = { ...github, repository: "example/public" };
+	expect(
+		await h.raw("tracker", { do: "create", result, cmd: "confirmed-test-002", confirm: preview.confirm }),
+	).toMatchObject({ ok: false, error: { code: "conflict", message: expect.stringContaining("review") } });
+	h.app.config.github = undefined;
+	expect(
+		await h.raw("tracker", { do: "create", result, cmd: "removed-config-001", confirm: preview.confirm }),
+	).toMatchObject({ ok: false, error: { code: "conflict" } });
+	h.app.config.github = { ...github, repository: "example/public" };
+	let sent = 0;
+	const receiving = {
+		...port,
+		createDefect: async () => {
+			sent++;
+			return item;
+		},
+	};
+	expect(await deliverTrackerRequests(h.app, receiving)).toBe(0);
+	expect(sent).toBe(0);
+	await h.call("tracker", { do: "create", result, cmd: "cli-no-digest-001" });
+	await deliverTrackerRequests(h.app, receiving);
+	expect(sent).toBe(1);
+});
