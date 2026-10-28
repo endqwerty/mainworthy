@@ -199,11 +199,14 @@ export async function requireRecentProof(app: App, db: ReadDb, input: ProofConte
 	throw new OpError("recent_proof_required", RECENT_PROOF_MESSAGE);
 }
 
-/** A verified credential and this exact session were checked in the writer's transaction. */
-export async function dateSessionProof(app: App, db: WriteDb, input: ProofContext): Promise<boolean> {
+/**
+ * A verified credential and this exact session were checked in the writer's transaction: the session's proof is
+ * dated `at`, the sign-in it rests on.
+ */
+export async function dateSessionProof(app: App, db: WriteDb, input: ProofContext, at = app.now()): Promise<boolean> {
 	await lockIdentity(db);
 	const session = await proofSession(app, input, db);
-	return session !== null && (await db.run(Q.prove, { hash: session.hash, at: app.now() })).changes === 1;
+	return session !== null && (await db.run(Q.prove, { hash: session.hash, at })).changes === 1;
 }
 
 /**
