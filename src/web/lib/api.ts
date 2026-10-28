@@ -60,6 +60,7 @@ const Session = z.object({
 			demo: schemaFlag,
 			can: schemaTexts,
 			handoff: schemaFlag,
+			tracker: schemaText.nullable().optional(),
 		}),
 	),
 });

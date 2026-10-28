@@ -1523,3 +1523,132 @@ check(
 	},
 	20_000,
 );
+
+check(
+	"failure tracker creation is offered by permission and shows links and errors in both panes",
+	async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-create-ui-"));
+		const database = await testDatabase();
+		const token = "create-browser-owner-token-1234";
+		let fail = false;
+		const issue = {
+			ref: "github:example/shop#42",
+			url: "https://github.com/example/shop/issues/42",
+			state: "open" as const,
+		};
+		const instance = await start(
+			{
+				...defaultConfig({}),
+				databaseUrl: database.url,
+				owner: "robin",
+				dataDir,
+				port: 0,
+				ownerToken: token,
+				github: { project: "scratch", repository: "example/shop", token: "private-test-token" },
+			},
+			() => ({ ui }),
+			{
+				trackerPort: {
+					createDefect: async () => {
+						if (fail) throw new Error("Tracker unavailable");
+						return issue;
+					},
+					getItem: async () => issue,
+				},
+			},
+		);
+		const server: Server = {
+			url: instance.url,
+			project: "scratch",
+			token,
+			seeded: null,
+			stop: instance.stop,
+			api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+				call(op, input, { url: instance.url, project: "scratch", token }),
+		};
+		let h: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Tracker create case" }] });
+			await server.api("report", {
+				target: { session: "create-ui" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Expected ready" } }],
+			});
+			for (const path of ["/p/scratch/queue", "/p/scratch/suite/c/1"]) {
+				h = await openPage(server, { path });
+				await h.page.getByRole("button", { name: "Create GitHub issue", exact: true }).waitFor();
+				await h.page.keyboard.press("Alt+g");
+				await h.page
+					.getByText(
+						"The issue includes the failure, target, build URL and recorded case content. The repository may be public.",
+					)
+					.waitFor();
+				await h.page.locator(".tracker-create pre").filter({ hasText: "Tracker create case" }).waitFor();
+				await Promise.all([
+					h.page.waitForResponse((response) => response.url().endsWith("/tracker")),
+					h.page.getByRole("button", { name: "Send to tracker", exact: true }).click(),
+				]);
+				await instance.minute();
+				await h.page.getByRole("link", { name: issue.ref, exact: true }).waitFor();
+				expect(await h.page.getByRole("link", { name: issue.ref, exact: true }).getAttribute("href")).toBe(issue.url);
+				await h.close();
+				h = null;
+				fail = true;
+				h = await openPage(server, { path });
+				await h.page.getByRole("button", { name: "Create GitHub issue", exact: true }).click();
+				await h.page.locator(".tracker-create pre").filter({ hasText: "Tracker create case" }).waitFor();
+				await Promise.all([
+					h.page.waitForResponse((response) => response.url().endsWith("/tracker")),
+					h.page.getByRole("button", { name: "Send to tracker", exact: true }).click(),
+				]);
+				await instance.minute();
+				await h.page
+					.getByText("The tracker request failed; check the tracker before creating another issue.", { exact: true })
+					.waitFor();
+				expect(h.errors).toEqual([]);
+				await h.close();
+				h = null;
+				fail = false;
+			}
+			const reader = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "reader",
+					kind: "human",
+					can: ["read"],
+					project: "scratch",
+				}),
+			).token;
+			h = await openPage({ ...server, token: reader }, { path: "/p/scratch/queue" });
+			await h.page.locator("[data-current-question]").waitFor();
+			expect(await h.page.getByRole("button", { name: "Create GitHub issue", exact: true }).count()).toBe(0);
+		} finally {
+			await h?.close();
+			await instance.stop();
+			await database.close();
+			await rm(dataDir, { recursive: true, force: true });
+		}
+	},
+	60_000,
+);
+
+check("failure tracker creation is absent without a configured tracker", async () => {
+	const server = await startServer();
+	let h: Awaited<ReturnType<typeof openPage>> | null = null;
+	try {
+		await server.api("propose", { edits: [{ op: "create", outline: "No tracker case" }] });
+		await server.api("report", {
+			target: { session: "no-tracker" },
+			results: [{ test: { case: "C-1" }, outcome: "fail" }],
+		});
+		for (const path of ["/p/scratch/queue", "/p/scratch/suite/c/1"]) {
+			h = await openPage(server, { path });
+			await h.page.locator(path.includes("queue") ? "[data-current-question]" : ".question-card").waitFor();
+			expect(await h.page.getByRole("button", { name: "Create GitHub issue", exact: true }).count()).toBe(0);
+			await h.close();
+			h = null;
+		}
+	} finally {
+		await h?.close();
+		await server.stop();
+	}
+});

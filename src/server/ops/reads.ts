@@ -606,7 +606,13 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 			const id = /^result:([1-9]\d*)$/.exec(text)?.[1];
 			const row = id && Number.isSafeInteger(Number(id)) ? await resultById(ctx.db, Number(id)) : null;
 			if (!row || row.project !== ctx.project.id) throw notFound(text);
-			return { ref: text, ...(await resultView(ctx, row)), detail: row.detail };
+			const recordedCase = row.basis_case === null ? null : await caseById(ctx.db, row.basis_case);
+			return {
+				ref: text,
+				...(await resultView(ctx, row)),
+				detail: row.detail,
+				case: recordedCase ? caseRef(recordedCase) : null,
+			};
 		}
 		if (text.startsWith("commit:"))
 			return {

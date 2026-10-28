@@ -45,6 +45,7 @@ import {
 	takes,
 	whyNotSelectable,
 } from "./selection.ts";
+import { TrackerCreate } from "./tracker-create.tsx";
 import "./queue.css";
 
 type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> };
@@ -1055,7 +1056,12 @@ function QueueWorkbench() {
 								</button>
 							</div>
 							<QuestionEvidence question={current} full={full} />
-							{current.kind === "failure" && <Handoff question={current} active={active} />}
+							{current.kind === "failure" && (
+								<>
+									<Handoff question={current} active={active} />
+									<TrackerCreate key={current.q} question={current} active={active} />
+								</>
+							)}
 							{current.state === "open" && current.seen.carried > 0 && (
 								<p className="hintbox">
 									An earlier answer carried to {current.seen.carried} occurrences. This evidence is awaiting a fresh

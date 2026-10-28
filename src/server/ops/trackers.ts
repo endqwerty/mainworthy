@@ -1,5 +1,7 @@
 import { REPLIES } from "../../core/replies.ts";
 import { TrackerInput, TrackerStatusInput } from "../../core/tracker.ts";
+import type { Config } from "../kernel/app.ts";
+import { configuredTrackers } from "../trackers/config.ts";
 import { queueDefect, trackerStatus } from "../trackers/requests.ts";
 import { defineOp } from "./registry.ts";
 
@@ -26,3 +28,9 @@ export const trackerStatusOp = defineOp({
 	mcp: null,
 	run: async (ctx, input) => await trackerStatus(ctx.db, ctx.project.id, input.id),
 });
+
+export function trackerForCaller(config: Config, project: string, can: readonly string[]): string | null {
+	return can.includes("read") && can.includes("produce")
+		? (configuredTrackers(config, project)[0]?.destination ?? null)
+		: null;
+}

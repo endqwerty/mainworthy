@@ -3,6 +3,8 @@
 This page lists the web app's keys by screen. <kbd>?</kbd> lists the keys for the current screen.
 The bar at the bottom shows common actions. Its editor hints follow the focused field.
 
+On a failure question with a configured tracker, <kbd>Alt</kbd>+<kbd>g</kbd> opens the issue review. The palette also lists **Create GitHub issue** (or **Create tracker issue** for Jira) with the question reference.
+
 Tab shows a focus indicator on controls. Except for run progress dots, buttons and form controls have targets of at least 24 CSS pixels.
 Run progress dots select the same slots as their full-size list rows.
 Links within sentences use their text as the target. Links to the docs are underlined in both themes.

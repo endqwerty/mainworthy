@@ -488,6 +488,13 @@ An operator can [configure GitHub Issues or Jira Cloud](./configuration.md#varia
 If both trackers name the same Mainworthy project, Mainworthy uses Jira for new defects and links.
 A link then takes a Jira key. Mainworthy still checks existing holds from either tracker.
 
+On a failure question in the queue or the case's history, choose **Create GitHub issue** (or **Create tracker issue** for Jira).
+The action appears only when the server reports a configured tracker and your project grant includes `read` and `produce`.
+Use <kbd>Alt</kbd>+<kbd>g</kbd>, or find the action for the question in the palette. In a case with several failures, choose the question in the palette.
+Review the destination, failure, target, build URL and recorded case content, then choose **Send to tracker**.
+The request uses the question's latest sample failed result. The screen shows the created issue's link or the error returned by the server.
+Creating an issue does not answer the question or excuse the failure; use the issue reference in a defect answer when appropriate.
+
 Use `mainworthy tracker` or the API to create an issue from a failed or errored result.
 The request sends the failure message and detail, the tested target, and the reported build URL to that destination.
 It also sends the recorded case version and its content when known.

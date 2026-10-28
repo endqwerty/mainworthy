@@ -28,6 +28,7 @@ import { answerShown, proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { ProposalEdits } from "../queue/evidence.tsx";
 import { takes } from "../queue/selection.ts";
+import { TrackerCreate } from "../queue/tracker-create.tsx";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { AnswerExtra } from "../ui/answer-extra.tsx";
 import { ResultAttachments } from "../ui/attachments.tsx";
@@ -492,33 +493,34 @@ export function CasePane({
 								const decision = q.decision?.supersedes ?? q.decision;
 								const url = refUrl({ project, ref: q.q });
 								return (
-									<a
-										className="question-card"
-										key={q.q}
-										href={url}
-										onClick={(event) => {
-											event.preventDefault();
-											navigate(url);
-										}}
-									>
-										<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
-										<span className="dim">
-											{decision
-												? `· ${String(decision.answer.is)} by ${decision.rule ? `rule ${decision.rule}` : decision.by.join(", ")}`
-												: `· ${q.state}`}
-										</span>
-										{q.decision?.supersedes && (
-											<p>
-												{endingText(q.decision)}
-												{q.decision.reason && ` · ${q.decision.reason}`}
-											</p>
-										)}
-										{q.decision?.trackerError && (
-											<p role="status" className="hintbox">
-												{q.decision.trackerError}
-											</p>
-										)}
-									</a>
+									<div className="question-card" key={q.q}>
+										<a
+											href={url}
+											onClick={(event) => {
+												event.preventDefault();
+												navigate(url);
+											}}
+										>
+											<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
+											<span className="dim">
+												{decision
+													? `· ${String(decision.answer.is)} by ${decision.rule ? `rule ${decision.rule}` : decision.by.join(", ")}`
+													: `· ${q.state}`}
+											</span>
+											{q.decision?.supersedes && (
+												<p>
+													{endingText(q.decision)}
+													{q.decision.reason && ` · ${q.decision.reason}`}
+												</p>
+											)}
+											{q.decision?.trackerError && (
+												<p role="status" className="hintbox">
+													{q.decision.trackerError}
+												</p>
+											)}
+										</a>
+										<TrackerCreate question={q} active={() => true} />
+									</div>
 								);
 							})}
 						{entries.length === 0 && (
