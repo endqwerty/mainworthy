@@ -31,22 +31,24 @@ const resultOf = <T = unknown>(reply: Reply): T => {
 
 /**
  * Goes to the provider at `url` as a browser does, signed in there as `subject`, and comes back to the page the
- * provider sends it to. That page is answered here with an empty document, so the web UI does not finish the
+ * provider sends it to. Its scripts are answered with empty modules so the web UI does not finish the
  * ceremony itself: the query it was sent back with, which the test hands the server.
  */
 async function roundTrip(page: Page, server: Server, url: string, subject: string): Promise<string> {
 	server.idp?.next({ subject, email: `${subject}@example.com` });
-	let query = "";
 	const back = (address: URL) => address.origin === server.url && address.pathname === "/signin/oidc";
-	await page.route(back, async (route) => {
-		query = new URL(route.request().url()).search;
-		await route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Back from the provider</title>" });
-	});
-	await page.goto(url);
-	await page.waitForURL(back);
-	await page.unroute(back);
-	if (!query) throw new Error(`the provider did not send the browser back here: ${page.url()}`);
-	return query;
+	// Playwright routes only the first URL of a redirect chain, so the callback document cannot be intercepted.
+	const scripts = (address: URL) => address.origin === server.url && address.pathname.endsWith(".js");
+	await page.route(scripts, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
+	try {
+		await page.goto(url);
+		await page.waitForURL(back);
+		const query = new URL(page.url()).search;
+		if (!query) throw new Error(`the provider did not send the browser back here: ${page.url()}`);
+		return query;
+	} finally {
+		await page.unroute(scripts);
+	}
 }
 
 test.skipIf(!browserAvailable)(
