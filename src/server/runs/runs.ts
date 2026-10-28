@@ -168,15 +168,15 @@ const Q = {
 	nextWork: sql<{ run: number; now: number }, SlotRow>(
 		"SELECT s.* FROM slots s LEFT JOIN slot_leases l ON l.slot = s.id AND l.until > $now WHERE s.run = $run AND s.state IN ('missing', 'skipped') AND l.slot IS NULL ORDER BY s.rank",
 	),
-	emptyChangeRuns: sql<{ project: number; open: readonly number[] }, { id: number }>(
+	emptyChangeRuns: sql<{ project: number; open: readonly number[]; heads: readonly string[] }, { id: number }>(
 		`SELECT r.id FROM runs r WHERE project = $project AND origin = 'change'
-		 AND (r.scope IS NULL OR r.scope NOT LIKE 'change:%' OR r.change = ANY($open::bigint[])
+		 AND (r.scope IS NULL OR r.scope NOT LIKE 'change:%' OR r.change = ANY($open::bigint[]) OR r.accepts_what = ANY($heads::text[])
 		 OR EXISTS (SELECT 1 FROM runs p WHERE p.project = r.project AND p.origin = 'planned'
 		 AND (p.accepts::jsonb)->>'commit' = (r.accepts::jsonb)->>'commit'))
 		 AND NOT EXISTS (SELECT 1 FROM jsonb_each_text(tally::jsonb) WHERE value::bigint <> 0)`,
 	),
 	inheritanceRuns: sql<
-		{ project: number; open: readonly number[] },
+		{ project: number; open: readonly number[]; heads: readonly string[] },
 		Pick<RunRow, "id" | "no" | "change" | "accepts_what"> & { planned: boolean }
 	>(
 		`WITH planned AS (SELECT DISTINCT (accepts::jsonb)->>'commit' AS commit FROM runs
@@ -184,15 +184,15 @@ const Q = {
 		 SELECT r.id, r.no, r.change, r.accepts_what, p.commit IS NOT NULL AS planned
 		 FROM runs r LEFT JOIN planned p ON p.commit = (r.accepts::jsonb)->>'commit'
 		 WHERE r.project = $project AND r.origin = 'change' AND r.scope LIKE 'change:%'
-		 AND (r.change = ANY($open::bigint[]) OR p.commit IS NOT NULL)`,
+		 AND (r.change = ANY($open::bigint[]) OR r.accepts_what = ANY($heads::text[]) OR p.commit IS NOT NULL)`,
 	),
 	policyPlannedRuns: sql<{ project: number; ids: readonly number[] }, { id: number }>(
 		`SELECT p.id FROM runs p WHERE p.project = $project AND p.origin = 'planned'
 		 AND (p.accepts::jsonb)->>'commit' IN
 		 (SELECT (accepts::jsonb)->>'commit' FROM runs WHERE id = ANY($ids::bigint[]))`,
 	),
-	changeRuns: sql<{ change: number }, { id: number }>(
-		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
+	changeRuns: sql<{ project: number; open: readonly number[]; heads: readonly string[] }, { id: number }>(
+		"SELECT id FROM runs WHERE project = $project AND origin = 'change' AND (change = ANY($open::bigint[]) OR accepts_what = ANY($heads::text[]))",
 	),
 	allRunTests: sql<
 		{ run: number },
@@ -1382,7 +1382,10 @@ export async function failsOnBase(db: ReadDb, id: number): Promise<boolean> {
 }
 /** Potential base comparisons, prior inheritance and commits accepted by planned runs need reconciliation. */
 export async function inheritanceRuns(db: ReadDb, project: number, prior: ReadonlySet<string>): Promise<number[]> {
-	const runs = await db.all(Q.inheritanceRuns, { project, open: await openChangeIds(db, project) });
+	const runs = await db.all(Q.inheritanceRuns, {
+		project,
+		...(await changeSelection(db, await openChangeIds(db, project))),
+	});
 	const changes = new Map(
 		(await changesByIds(db, [...new Set(runs.flatMap((run) => (run.change === null ? [] : [run.change])))])).map(
 			(change) => [change.id, change],
@@ -1407,8 +1410,21 @@ export async function inheritanceRuns(db: ReadDb, project: number, prior: Readon
 	const planned = await db.all(Q.policyPlannedRuns, { project, ids: selected });
 	return [...selected, ...planned.map((run) => run.id)];
 }
-export const changeRunsOf = async (db: ReadDb, change: number): Promise<number[]> =>
-	(await db.all(Q.changeRuns, { change })).map((row) => row.id);
+async function changeSelection(db: ReadDb, ids: readonly number[]) {
+	const changes = await changesByIds(db, ids);
+	return {
+		open: ids,
+		heads: changes.flatMap((change) => (change.head_sha === null ? [] : [codeWhat(change.repo, change.head_sha)])),
+	};
+}
+
+export async function changeRunsOf(db: ReadDb, change: number): Promise<number[]> {
+	const row = await changeById(db, change);
+	if (!row) return [];
+	return (await db.all(Q.changeRuns, { project: row.project, ...(await changeSelection(db, [change])) })).map(
+		(run) => run.id,
+	);
+}
 export const countedTestsOf = async (db: ReadDb, run: number) => await db.all(Q.allRunTests, { run });
 
 /** Whether a run counts a test failing with this cause, whether an answer explains it or not. */
@@ -1512,7 +1528,7 @@ export async function inheritanceAffected(db: ReadDb, run: RunRow): Promise<numb
 	);
 	if (run.change !== null) changes.add(run.change);
 	const runs = new Set<number>([run.id]);
-	for (const change of changes) for (const row of await db.all(Q.changeRuns, { change })) runs.add(row.id);
+	for (const change of changes) for (const id of await changeRunsOf(db, change)) runs.add(id);
 	for (const id of [...runs]) {
 		const row = await runById(db, id);
 		if (!row) continue;
@@ -2329,7 +2345,7 @@ async function permitsEmpty(
 export async function reconsiderEmptyReports(ctx: Ctx): Promise<void> {
 	for (const run of await ctx.db.all(Q.emptyChangeRuns, {
 		project: ctx.project.id,
-		open: await openChangeIds(ctx.db, ctx.project.id),
+		...(await changeSelection(ctx.db, await openChangeIds(ctx.db, ctx.project.id))),
 	}))
 		ctx.recompute.add(run.id);
 }
