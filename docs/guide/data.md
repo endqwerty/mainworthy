@@ -227,10 +227,11 @@ inside the file.
 
 A signer's numeric `policy` resolves to `policy:<version>`. A full-history file
 must include that policy. In a partial history, an omitted signing policy counts
-once per signer in `beforeRangeReferences`. Its version must be positive and older
-than every included policy version, if any. The offline verifier cannot confirm
-an omitted policy's existence or date. An included signing policy cannot have a
-later project sequence than its decision.
+once per signer in `beforeRangeReferences`. Its version must be positive. Policy
+version order need not match timestamp order, as demo seeds write past history
+after project creation. The offline verifier cannot confirm an omitted policy's
+existence or date. An included signing policy cannot have a later project sequence
+than its decision.
 
 Recorded evidence is `{ state: "recorded", hash, ref }`. A decision made before
 migration 16 has `{ state: "not-recorded" }` because its exact seen-evidence hash was
