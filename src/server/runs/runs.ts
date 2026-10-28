@@ -43,6 +43,7 @@ import {
 	laneHistory,
 	mustTarget,
 	nothingRequiredOn,
+	openChangeIds,
 	processedJobs,
 	type ResultRow,
 	resolveCommit,
@@ -167,18 +168,28 @@ const Q = {
 	nextWork: sql<{ run: number; now: number }, SlotRow>(
 		"SELECT s.* FROM slots s LEFT JOIN slot_leases l ON l.slot = s.id AND l.until > $now WHERE s.run = $run AND s.state IN ('missing', 'skipped') AND l.slot IS NULL ORDER BY s.rank",
 	),
-	emptyChangeRuns: sql<{ project: number }, { id: number }>(
-		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
+	emptyChangeRuns: sql<{ project: number; open: readonly number[] }, { id: number }>(
+		`SELECT r.id FROM runs r WHERE project = $project AND origin = 'change'
+		 AND (r.scope IS NULL OR r.scope NOT LIKE 'change:%' OR r.change = ANY($open::bigint[])
+		 OR EXISTS (SELECT 1 FROM runs p WHERE p.project = r.project AND p.origin = 'planned'
+		 AND (p.accepts::jsonb)->>'commit' = (r.accepts::jsonb)->>'commit'))
 		 AND NOT EXISTS (SELECT 1 FROM jsonb_each_text(tally::jsonb) WHERE value::bigint <> 0)`,
 	),
 	inheritanceRuns: sql<
-		{ project: number },
+		{ project: number; open: readonly number[] },
 		Pick<RunRow, "id" | "no" | "change" | "accepts_what"> & { planned: boolean }
 	>(
-		`SELECT r.id, r.no, r.change, r.accepts_what,
-		 EXISTS (SELECT 1 FROM runs p WHERE p.project = r.project AND p.origin = 'planned'
-		 AND (p.accepts::jsonb)->>'commit' = (r.accepts::jsonb)->>'commit') AS planned
-		 FROM runs r WHERE r.project = $project AND r.origin = 'change' AND r.scope LIKE 'change:%'`,
+		`WITH planned AS (SELECT DISTINCT (accepts::jsonb)->>'commit' AS commit FROM runs
+		 WHERE project = $project AND origin = 'planned')
+		 SELECT r.id, r.no, r.change, r.accepts_what, p.commit IS NOT NULL AS planned
+		 FROM runs r LEFT JOIN planned p ON p.commit = (r.accepts::jsonb)->>'commit'
+		 WHERE r.project = $project AND r.origin = 'change' AND r.scope LIKE 'change:%'
+		 AND (r.change = ANY($open::bigint[]) OR p.commit IS NOT NULL)`,
+	),
+	policyPlannedRuns: sql<{ project: number; ids: readonly number[] }, { id: number }>(
+		`SELECT p.id FROM runs p WHERE p.project = $project AND p.origin = 'planned'
+		 AND (p.accepts::jsonb)->>'commit' IN
+		 (SELECT (accepts::jsonb)->>'commit' FROM runs WHERE id = ANY($ids::bigint[]))`,
 	),
 	changeRuns: sql<{ change: number }, { id: number }>(
 		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
@@ -1371,7 +1382,7 @@ export async function failsOnBase(db: ReadDb, id: number): Promise<boolean> {
 }
 /** Potential base comparisons, prior inheritance and commits accepted by planned runs need reconciliation. */
 export async function inheritanceRuns(db: ReadDb, project: number, prior: ReadonlySet<string>): Promise<number[]> {
-	const runs = await db.all(Q.inheritanceRuns, { project });
+	const runs = await db.all(Q.inheritanceRuns, { project, open: await openChangeIds(db, project) });
 	const changes = new Map(
 		(await changesByIds(db, [...new Set(runs.flatMap((run) => (run.change === null ? [] : [run.change])))])).map(
 			(change) => [change.id, change],
@@ -1385,7 +1396,7 @@ export async function inheritanceRuns(db: ReadDb, project: number, prior: Readon
 	const recorded = new Set(
 		(await db.all(Q.changeRunsByWhat, { project, whats: [...new Set(bases.values())] })).map((run) => run.accepts_what),
 	);
-	return runs
+	const selected = runs
 		.filter((run) => {
 			const base = run.change === null ? undefined : bases.get(run.change);
 			return (
@@ -1393,6 +1404,8 @@ export async function inheritanceRuns(db: ReadDb, project: number, prior: Readon
 			);
 		})
 		.map((run) => run.id);
+	const planned = await db.all(Q.policyPlannedRuns, { project, ids: selected });
+	return [...selected, ...planned.map((run) => run.id)];
 }
 export const changeRunsOf = async (db: ReadDb, change: number): Promise<number[]> =>
 	(await db.all(Q.changeRuns, { change })).map((row) => row.id);
@@ -2291,7 +2304,11 @@ async function permitsEmpty(
 
 /** A policy choice changes existing empty commit gates as well as future reports. */
 export async function reconsiderEmptyReports(ctx: Ctx): Promise<void> {
-	for (const run of await ctx.db.all(Q.emptyChangeRuns, { project: ctx.project.id })) ctx.recompute.add(run.id);
+	for (const run of await ctx.db.all(Q.emptyChangeRuns, {
+		project: ctx.project.id,
+		open: await openChangeIds(ctx.db, ctx.project.id),
+	}))
+		ctx.recompute.add(run.id);
 }
 
 async function findAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {

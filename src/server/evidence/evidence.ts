@@ -340,6 +340,9 @@ const Q = {
 	targetsOfCommits: sql<{ project: number; whats: readonly string[] }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = ANY($whats::text[]) ORDER BY id",
 	),
+	openChangeIds: sql<{ project: number }, { id: number }>(
+		"SELECT c.id FROM changes c WHERE c.project = $project AND NOT EXISTS (SELECT 1 FROM change_ends e WHERE e.change = c.id)",
+	),
 	changesByIds: sql<{ ids: readonly number[] }, ChangeRow>("SELECT * FROM changes WHERE id = ANY($ids::bigint[])"),
 	shardsForTargets: sql<{ ids: readonly number[] }, { target: number; job: string; shards: number; reported: string }>(
 		"SELECT target, job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches WHERE target = ANY($ids::bigint[]) AND shards IS NOT NULL AND method != 'agent' AND state <> 'cancelled' GROUP BY target, job, shards ORDER BY target, job",
@@ -1401,6 +1404,10 @@ export async function waitingShards(db: ReadDb, targets: readonly TargetRow[]): 
 }
 export const targetsOfCommits = async (db: ReadDb, project: number, whats: readonly string[]): Promise<TargetRow[]> =>
 	await db.all(Q.targetsOfCommits, { project, whats });
+
+export const openChangeIds = async (db: ReadDb, project: number): Promise<number[]> =>
+	(await db.all(Q.openChangeIds, { project })).map((row) => row.id);
+
 export const changesByIds = async (db: ReadDb, ids: readonly number[]): Promise<ChangeRow[]> =>
 	await db.all(Q.changesByIds, { ids });
 

@@ -1141,3 +1141,113 @@ test("retargeting reaches the changed pull request when the report's commit alre
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
 	expect(await gate("change02")).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
 });
+
+for (const ended of ["closed", "merged"] as const) {
+	for (const initial of ["loose", "standard"] as const) {
+		test(`policy adoption leaves unused ${ended} history from ${initial} until reopening`, async () => {
+			await h.close();
+			h = await harness({ preset: initial });
+			await base();
+			await change({ 0: "same cause" });
+			await h.call(
+				"report",
+				ciReport({ commit: "child001", pr: 70, base: "change01", n: 2, fail: { 0: "same cause" } }),
+			);
+			await h.call("change", { change: "pr:70", state: ended });
+			const before = await gate("child001");
+			const next = initial === "loose" ? "standard" : "loose";
+			await h.call("propose", { edits: [{ op: "policy", preset: next }] });
+			const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+			if (!q) throw new Error("no adoption");
+			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			expect((await gate("child001")).tally).toEqual(before.tally);
+			expect((await gate("change01")).tally.excused).toBe(next === "loose" ? 1 : 0);
+			await h.call("change", { change: "pr:70", state: "open" });
+			expect((await gate("child001")).tally.excused).toBe(next === "loose" ? 1 : 0);
+		});
+	}
+}
+
+for (const closed of [false, true]) {
+	test(`policy adoption updates ended evidence consumed by a ${closed ? "closed" : "open"} planned run`, async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Case\n Do it > It works" }] });
+		const send = async (commit: string, pr?: number) => {
+			const report = ciReport({ commit, ...(pr ? { pr, base: "base0001" } : {}), n: 1, fail: { 0: "same cause" } });
+			await h.call("report", {
+				...report,
+				results: report.results.map((r) => ({ ...r, annotation: { case: "C-1", version: 1 } })),
+			});
+		};
+		await send("base0001");
+		await send("change01", 69);
+		const plan = await h.call<{ run: string }>("plan", {
+			name: "Retained evidence",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "change01" },
+			...(closed
+				? {}
+				: {
+						require: [
+							{ kind: "exercise", id: "manual", methods: ["human"], basis: "exact", minActors: 1 },
+							{ kind: "exercise", id: "pipeline", methods: ["auto"], basis: "exact", minActors: 1 },
+						],
+					}),
+		});
+		expect(await h.call("get", { refs: [plan.run] })).toMatchObject([{ state: closed ? "closed" : "open" }]);
+		await h.call("change", { change: "pr:69", state: "closed" });
+		for (const preset of ["standard", "loose"]) {
+			await h.call("propose", { edits: [{ op: "policy", preset }] });
+			const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+			if (!q) throw new Error("no adoption");
+			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			expect((await gate("change01")).tally.excused).toBe(preset === "loose" ? 1 : 0);
+			expect((await h.call<GateStatus>("gate", { run: plan.run })).tally.excused).toBe(preset === "loose" ? 1 : 0);
+		}
+	});
+}
+
+test("policy adoption work stays bounded beside ended children and base corrections still reach them", async () => {
+	await base();
+	await change({ 0: "same cause" });
+	const counts: number[] = [];
+	for (const size of [1, 3, 6]) {
+		for (let n = counts.length === 2 ? 4 : counts.length ? 2 : 1; n <= size; n++) {
+			await h.call(
+				"report",
+				ciReport({ commit: `ended-${n}`, pr: 100 + n, base: "change01", n: 2, fail: { 0: "same cause" } }),
+			);
+			await h.call("change", { change: `pr:${100 + n}`, state: "closed" });
+		}
+		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+		if (!q) throw new Error("no adoption");
+		const writes = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "run");
+		await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+		counts.push(writes.mock.calls.filter(([statement]) => statement.text.startsWith("UPDATE runs SET tally")).length);
+		writes.mockRestore();
+		expect((await gate("ended-1")).tally.excused).toBe(1);
+		await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
+		const loose = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+		if (!loose) throw new Error("no adoption");
+		await h.call("decide", { q: loose.q, onEvidence: loose.evidenceHash, answer: { is: "accept" } });
+	}
+	expect(counts).toEqual([2, 2, 2]);
+	await change({}, "change01", 2);
+	expect((await gate("ended-1")).tally.excused).toBe(0);
+});
+
+test("policy adoption also skips an unused ended empty declaration", async () => {
+	const ci = await h.actor("declarer", "ci", ["read", "record"]);
+	for (const pr of [69, 70])
+		await h.call("report", { ...ciReport({ commit: `empty-${pr}`, pr, n: 0 }), nothingRequired: true }, ci);
+	await h.call("change", { change: "pr:69", state: "closed" });
+	const before = await gate("empty-69");
+	await h.call("propose", { edits: [{ op: "policy", emptyReports: "nothing-required" }] });
+	const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+	if (!q) throw new Error("no adoption");
+	await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+	expect((await gate("empty-69")).verdict).toBe(before.verdict);
+	expect((await gate("empty-70")).verdict).toBe("passed");
+	await h.call("change", { change: "pr:69", state: "open" });
+	expect((await gate("empty-69")).verdict).toBe("passed");
+});
