@@ -291,7 +291,14 @@ const OneDecision = z.object({
 export const DecideInput = z.union([
 	OneDecision.extend(projectCommand),
 	z.object({
-		all: z.array(OneDecision).min(1).max(DECIDE_MAX),
+		all: z
+			.array(OneDecision)
+			.min(1)
+			.max(DECIDE_MAX)
+			.refine(
+				(all) => new Set(all.map(({ q }) => q.trim().replace(/^(?:Q-)?0*(\d+)$/i, "$1"))).size === all.length,
+				"Each question may appear only once in a decide request.",
+			),
 		reason: z.string().max(1000).optional(),
 		...projectCommand,
 	}),

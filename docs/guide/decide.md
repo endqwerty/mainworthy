@@ -615,7 +615,8 @@ produce the evidence. Read [policy](./policy.md) before changing those rules.
 
 When policy requires multiple sign-off approvals, your first approval returns `pending`
 and leaves the run and question open. The queue shows the recorded approvals. Repeating
-your answer cannot fill another person's place. Once enough distinct eligible people
+your approval on the same evidence and policy reuses the recorded answer, including its original reason.
+A batch `decide` request must name each question only once. Once enough distinct eligible people
 approve the current evidence, the run closes and the decision records all signers.
 
 `mainworthy get Q-12`, the API and MCP return pending approvals in `approvals` and the
