@@ -428,7 +428,10 @@ runs that use change evidence. This includes closed planned runs with pinned res
 An ended change with no planned consumer keeps its last recalculated gate answer
 when policy changes. Its historical gate may therefore disagree with today's policy.
 Reopening the change recalculates its standing under the current policy before the
-request returns.
+request returns. Starting a plan that counts its evidence also reconciles the ended
+source under the current policy before importing results. Reporting a previously
+closed change as merged reconciles it before recording the merge receipt. These
+steps remove inherited excuses that the current policy no longer allows.
 
 This is not a frozen snapshot. Reports, base corrections and other evidence changes
 can still recalculate an ended change. Ending a change stops its ordinary questions

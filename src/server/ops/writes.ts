@@ -79,6 +79,7 @@ import {
 	changeRunsOf,
 	defaultObligations,
 	describeAccepts,
+	endedRunsAccepting,
 	ensureChangeRun,
 	failuresShown,
 	gateOf,
@@ -637,6 +638,9 @@ export async function planRun(ctx: Ctx, input: PlanInput): Promise<PlanReply> {
 		const actor = await actorByName(ctx.db, name, ctx.project.id);
 		if (!actor) throw notFound(`actor ${name}`);
 		return actor.id;
+	});
+	await refold(ctx, await endedRunsAccepting(ctx.db, ctx.project.id, input.accepts ?? { self: true }), {
+		dissolveStale: true,
 	});
 	const planned = await plan(ctx, {
 		name: input.name,

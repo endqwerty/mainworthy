@@ -1834,6 +1834,29 @@ export function defaultObligations(policy: Policy): Obligation[] {
 	return [{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 1, basis: policy.settings.basis }];
 }
 
+/** Ended evidence must be reconsidered before a new plan can count it. */
+export async function endedRunsAccepting(db: ReadDb, project: number, accepts: TargetMatch): Promise<number[]> {
+	if ("self" in accepts) return [];
+	const whats =
+		"build" in accepts
+			? [await buildWhat(db, project, accepts.build, accepts.env)]
+			: (await targetsWithCommit(db, project, await resolveCommit(db, project, accepts.commit)))
+					.filter((target) => accepts.repo === undefined || target.repo === accepts.repo)
+					.map((target) => target.what);
+	const runs = await db.all(Q.changeRunsByWhat, { project, whats: [...new Set(whats)] });
+	const ended = new Set(
+		(
+			await changesByIds(
+				db,
+				runs.flatMap((run) => (run.change === null ? [] : [run.change])),
+			)
+		)
+			.filter((change) => change.ended !== null)
+			.map((change) => change.id),
+	);
+	return runs.filter((run) => run.change !== null && ended.has(run.change)).map((run) => run.id);
+}
+
 /**
  * Creates a planned run with one slot per selected case and exercise obligation, pinned to the case's current
  * version. Evidence already recorded on a target the run accepts fills its slots at once, so nobody repeats by hand

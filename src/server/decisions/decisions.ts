@@ -2572,6 +2572,7 @@ async function standingFor(ctx: Ctx<ReadDb>, row: QuestionRow, ask: Ask): Promis
 export async function recordMergeReceipt(ctx: Ctx, change: ChangeRow): Promise<ChangeRow> {
 	const kept = await mergeReceiptById(ctx.db, ctx.project.id, change.receipt);
 	if (change.ended === "merged" && kept && kept.head === change.head_sha) return change;
+	if (change.ended !== null) await refold(ctx, await changeRunsOf(ctx.db, change.id), { dissolveStale: true });
 	const run = await gateRun(ctx, { change: change.key });
 	const empty = nothingCounted();
 	const { open: _open, waiting: _waiting, ...emptyGate } = empty;

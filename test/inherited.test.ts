@@ -1251,3 +1251,43 @@ test("policy adoption also skips an unused ended empty declaration", async () =>
 	await h.call("change", { change: "pr:69", state: "open" });
 	expect((await gate("empty-69")).verdict).toBe("passed");
 });
+
+for (const use of ["plan", "merge"] as const) {
+	test(`ended evidence reconciles before later ${use} after policy adoption`, async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Case\n Do it > It works" }] });
+		for (const [commit, pr] of [
+			["base0001", undefined],
+			["change01", 69],
+		] as const) {
+			const report = ciReport({ commit, ...(pr ? { pr, base: "base0001" } : {}), n: 1, fail: { 0: "same cause" } });
+			await h.call("report", {
+				...report,
+				results: report.results.map((r) => ({ ...r, annotation: { case: "C-1", version: 1 } })),
+			});
+		}
+		await h.call("change", { change: "pr:69", state: "closed" });
+		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+		if (!q) throw new Error("no adoption");
+		await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+		expect((await gate("change01")).tally.excused).toBe(1);
+		if (use === "plan") {
+			const planned = await h.call<{ run: string }>("plan", {
+				name: "Historical evidence",
+				select: { cases: ["C-1"] },
+				accepts: { commit: "change01" },
+			});
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "blocked",
+				tally: { excused: 0 },
+			});
+			expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "open" }]);
+		} else {
+			await h.call("change", { change: "pr:69", state: "merged" });
+			expect(await h.call("impact", { change: "pr:69" })).toMatchObject({
+				change: { mergeReceipt: { gate: { verdict: "blocked", tally: { excused: 0 } } } },
+			});
+		}
+		expect((await gate("change01")).tally.excused).toBe(0);
+	});
+}
