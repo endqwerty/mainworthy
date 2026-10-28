@@ -72,7 +72,7 @@ export function QueueScreen() {
 const READING = "Reading this question before answering. Your note is kept.";
 
 function QueueWorkbench() {
-	const { project, route, openPalette, setStatus } = useApp();
+	const { project, route, openPalette, setStatus, session } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const writes = useRef(new Map<string, Promise<unknown>>());
 	const refActions = useRef(new Map<string, number>());
@@ -559,6 +559,11 @@ function QueueWorkbench() {
 		const questions = bulk ? selection : current ? [current] : [];
 		const first = questions[0];
 		if (!first) return;
+		if (
+			is === "approve" &&
+			questions.some((q) => q.kind === "signoff" && q.approvals?.some((a) => a.by === session.actor))
+		)
+			return;
 		if (!bulk && first.you === "forbidden") return;
 		for (const question of questions) {
 			const message = question.kind === "adopt" ? answerShown(question.q, is, via) : questionReadMessage(question);
@@ -810,18 +815,22 @@ function QueueWorkbench() {
 	const active = () => !inline;
 	/** The answers on offer: to the selection when there is one, else to the question shown. */
 	const offered = bulk
-		? sharedAnswers(selection)
+		? sharedAnswers(selection).filter(
+				({ is }) => !(is === "approve" && selection.some((q) => q.approvals?.some((a) => a.by === session.actor))),
+			)
 		: current
-			? Object.entries(ANSWER_KEYS[current.kind]).map(([key, is]) => ({
-					key,
-					is,
-					why:
-						current.you === "forbidden"
-							? `You cannot settle this. Needs ${current.needs}.`
-							: takes(current, is)
-								? null
-								: "This answer does not apply to the current evidence.",
-				}))
+			? Object.entries(ANSWER_KEYS[current.kind])
+					.filter(([, is]) => !(is === "approve" && current.approvals?.some((a) => a.by === session.actor)))
+					.map(([key, is]) => ({
+						key,
+						is,
+						why:
+							current.you === "forbidden"
+								? `You cannot settle this. Needs ${current.needs}.`
+								: takes(current, is)
+									? null
+									: "This answer does not apply to the current evidence.",
+					}))
 			: [];
 	const keys: Binding[] = [
 		{ key: "j", label: "Next question", handler: () => move(1), applies: active },
@@ -1070,9 +1079,16 @@ function QueueWorkbench() {
 									decision.
 								</p>
 							)}
+							{current.state === "open" && current.approvals?.some((a) => a.by === session.actor) && (
+								<p className="hintbox">
+									You approved. Waiting for {Math.max(0, (current.approvalNeeded ?? 1) - current.approvals.length)} more
+									approval{(current.approvalNeeded ?? 1) - current.approvals.length === 1 ? "" : "s"}.
+								</p>
+							)}
 							{current.approvals?.map((approval) => (
 								<div className="hintbox" key={approval.by}>
-									{approval.by} approved: {approval.reason}. Policy {approval.policy}, clause {approval.clause}.
+									{approval.by} approved{approval.reason ? `: ${approval.reason}` : ""}. Policy {approval.policy},
+									clause {approval.clause}.
 								</div>
 							))}
 							{current.advice.map((advice) => (
@@ -1091,7 +1107,8 @@ function QueueWorkbench() {
 									{answered.signers && answered.signers.length > 1
 										? answered.signers.map((signer) => (
 												<p key={signer.by}>
-													{signer.by}: {signer.reason}. Policy {signer.policy}, clause {signer.clause}.
+													{signer.by}
+													{signer.reason ? `: ${signer.reason}` : ""}. Policy {signer.policy}, clause {signer.clause}.
 												</p>
 											))
 										: answered.reason && <p>{answered.reason}</p>}
@@ -1146,7 +1163,15 @@ function QueueWorkbench() {
 									>
 										<KeyCap>{key}</KeyCap>
 										<b>{ANSWER_LABELS[is]}</b>
-										<span>{help[is]}</span>
+										<span>
+											{is === "approve" && current.kind === "signoff"
+												? bulk
+													? "Records an approval for each selected run; closes each run when its required approvals are complete."
+													: (current.approvals?.length ?? 0) + 1 >= (current.approvalNeeded ?? 1)
+														? "Closes the run with the verdict it has now."
+														: `Records ${(current.approvals?.length ?? 0) + 1} of ${current.approvalNeeded} required approvals.`
+												: help[is]}
+										</span>
 									</button>
 								))}
 							</div>
