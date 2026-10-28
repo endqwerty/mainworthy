@@ -594,9 +594,9 @@ export async function changeEnds(ctx: Ctx, input: ChangeInput): Promise<ChangeRe
 			: same
 				? headed
 				: await setChangeEnded(ctx, headed, ended);
-	// An open change whose head moved is asked about as a report that moved it would be: the old head's questions
-	// dissolve, and the new head's unexplained failures are asked about.
-	if (ended === null && moved) await refold(ctx, await changeRunsOf(ctx.db, now.id), { dissolveStale: true });
+	// Reopening reconciles standing under the current policy before asking about the head again.
+	if (ended === null && (moved || !same))
+		await refold(ctx, await changeRunsOf(ctx.db, now.id), { dissolveStale: true });
 	const questions =
 		ended === null
 			? same && !moved

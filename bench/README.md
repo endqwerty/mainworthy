@@ -256,3 +256,31 @@ latency retries. Fixed health waits ranged from 2.8 to 197.5 ms; old waits range
 552.5 ms below the bound; the fastest old sample exceeds it by 176.4 ms.
 The log also retains the rejected smaller fixtures and bounds, so falling host load
 is visible rather than hidden by selecting favorable samples.
+
+## Policy adoption with ended history
+
+`bun bench/policy-history.ts /path/to/baseline/export` prepares 100 and 300
+ended changes and one open change sharing a reported failing base. It alternates
+five samples of each revision and both directions of policy adoption on the same
+fixture, always returning to loose. The complete registry acceptance and apply path
+is timed; setup and gate assertions are outside the timer. JSON lines record machine
+load, elapsed milliseconds and SQL statement counts. Separate profiles include SQL
+plans. Run on PostgreSQL with the same connection settings for both revisions.
+
+`bun bench/policy-contention.ts` starts its HTTP server in a separate process with
+100 ended changes and one open change. Five rounds alternate standard and loose.
+A gate read and a same-project case save start five milliseconds after adoption is
+sent. Output includes response times and adoption/save receipts; the final gate is
+checked against the adopted policy. This offset measures overlap opportunities,
+not proof that the writer had acquired its lock before the other requests arrived.
+Both scripts use disposable test databases and ephemeral ports. On a shared machine,
+report the spread and statement counts alongside elapsed times, without a time limit.
+
+The [2026-10-27 samples](results-policy-history.log) compare base `6c5438f0`
+with the adoption filter on a loaded 16-core shared host. With 100 and 300 ended
+changes, standard-adoption medians changed from 765/3,086 ms to 62/59 ms;
+loose-adoption medians changed from 1,273/4,707 ms to 80/59 ms. Each cell has
+five samples. Fixed-side ranges overlap between sizes; SQL counts remain
+138–157 instead of growing from thousands to tens of thousands. The log includes
+all ranges through individual samples and separate SQL plans. These are shared-host
+observations, not a production latency promise.

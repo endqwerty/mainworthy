@@ -493,7 +493,7 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 	yield* refoldSteps(
 		ctx,
 		await inheritanceRuns(ctx.db, ctx.project.id, await inheritedRunRefs(ctx.db, ctx.project.id)),
-		{ dissolveStale: true },
+		{ dissolveStale: true, inheritance: "policy" },
 	);
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const kinds = new Set(policy.clauses.filter((clause) => clause.ask.who === "rule").map((clause) => clause.kind));
@@ -1814,7 +1814,7 @@ export async function refold(
 async function* refoldSteps(
 	ctx: Ctx,
 	runIds: Iterable<number>,
-	options: { dissolveStale?: boolean } = {},
+	options: { dissolveStale?: boolean; inheritance?: "policy" } = {},
 ): AsyncGenerator<undefined, void, void> {
 	for (const id of runIds) ctx.recompute.add(id);
 	ctx.dissolveStale ||= options.dissolveStale === true;
@@ -1827,11 +1827,13 @@ async function* refoldSteps(
 			for (const change of ctx.changedBases) for (const id of await changeRunsOf(ctx.db, change)) ids.add(id);
 			ctx.changedBases.clear();
 			ctx.recompute.clear();
-			// Base results and retargeting reach every affected commit and planned run in this transaction.
+			// Adoption already selected every eligible commit and planned consumer. Reports and base
+			// corrections still expand through ended changes.
 			for (const id of ids) {
 				yield;
 				const run = await runById(ctx.db, id);
-				if (run) for (const affected of await inheritanceAffected(ctx.db, run)) ids.add(affected);
+				if (run && options.inheritance !== "policy")
+					for (const affected of await inheritanceAffected(ctx.db, run)) ids.add(affected);
 			}
 			for (const id of ids) {
 				yield;

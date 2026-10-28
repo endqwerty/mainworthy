@@ -420,3 +420,18 @@ It makes no certification claim.
 - [People, agents and pipelines](./access.md) for who holds `answer` and `admin`.
 - [Let an agent in](./agents.md#what-agent-work-is-worth) for what an agent's work is worth under each preset.
 - [Decide in the queue](./decide.md) for answering a question.
+
+## Historical change gates
+
+Adopting a policy updates open changes, including their older commits, and planned
+runs that use change evidence. This includes closed planned runs with pinned results.
+An ended change with no planned consumer keeps its last recalculated gate answer
+when policy changes. Its historical gate may therefore disagree with today's policy.
+Reopening the change recalculates its standing under the current policy before the
+request returns.
+
+This is not a frozen snapshot. Reports, base corrections and other evidence changes
+can still recalculate an ended change. Ending a change stops its ordinary questions
+as described in decision 0022; inherited excuses still depend on their base evidence
+as described in decision 0042. This narrows decision 0098's immediate policy
+reconsideration to open changes and evidence retained by planned runs.
