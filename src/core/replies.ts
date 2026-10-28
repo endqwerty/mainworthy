@@ -145,11 +145,12 @@ export type ClaimReply = z.infer<typeof ClaimReply>;
 export const DecideReply = z.object({
 	q: schemaText,
 	/**
-	 * `decided`: your answer settled it. `advised`: recorded as advice; someone else decides. `conflict`: the
+	 * `decided`: your answer settled it. `pending`: approval recorded; more people must approve.
+	 * `advised`: recorded as advice; someone else decides. `conflict`: the
 	 * evidence changed, it was already decided differently, or the decision to undo changed. `forbidden`: policy
 	 * does not let you answer.
 	 */
-	status: z.enum(["decided", "advised", "conflict", "forbidden", "invalid", "already", "reopened"]),
+	status: z.enum(["decided", "pending", "advised", "conflict", "forbidden", "invalid", "already", "reopened"]),
 	needs: schemaNullableText,
 	decision: schemaNullableNumber,
 	effects: z.union([schemaData, z.null()]),
@@ -194,7 +195,15 @@ export const WorkReply = z.object({
 });
 export type WorkReply = z.infer<typeof WorkReply>;
 
+const ApprovalSigner = z.object({
+	by: schemaText,
+	clause: schemaText,
+	policy: schemaNumber,
+	reason: schemaNullableText,
+});
+
 const DecisionItem = z.object({
+	signers: z.array(ApprovalSigner).optional(),
 	id: schemaNumber,
 	answer: schemaData,
 	by: schemaTexts,
@@ -205,6 +214,7 @@ const DecisionItem = z.object({
 });
 
 export const QuestionItem = z.object({
+	approvals: z.array(ApprovalSigner).optional(),
 	q: schemaText,
 	kind: Kind,
 	title: schemaText,

@@ -395,7 +395,7 @@ function QueueWorkbench() {
 						),
 				);
 				if (rejected.length) {
-					const conflicts = replies.filter((reply) => reply.status === "conflict");
+					const conflicts = replies.filter((reply) => reply.status === "conflict" || reply.status === "pending");
 					const freshQuestions = conflicts.length
 						? z
 								.array(QuestionItem)
@@ -414,9 +414,11 @@ function QueueWorkbench() {
 							? reply.needs === "the question is no longer open; read it again before answering"
 								? `${reply.q} was settled meanwhile. Read its current decision before answering.`
 								: `The evidence changed. ${reply.needs ?? "Read the new evidence before answering."}`
-							: reply?.status === "advised"
-								? `Advice recorded. Needs ${reply.needs ?? rejected[0]?.question.needs}.`
-								: `Answer not recorded. Needs ${reply?.needs ?? rejected[0]?.question.needs}.`;
+							: reply?.status === "pending"
+								? `Approval recorded. ${reply.needs ?? "Waiting for more approvers."}`
+								: reply?.status === "advised"
+									? `Advice recorded. Needs ${reply.needs ?? rejected[0]?.question.needs}.`
+									: `Answer not recorded. Needs ${reply?.needs ?? rejected[0]?.question.needs}.`;
 					if (action === actionNo.current) {
 						// Show the decision that settled a question meanwhile; it is no longer open, so a key sent to it
 						// records nothing. A question whose evidence changed stays where the person left it.
@@ -1068,6 +1070,11 @@ function QueueWorkbench() {
 									decision.
 								</p>
 							)}
+							{current.approvals?.map((approval) => (
+								<div className="hintbox" key={approval.by}>
+									{approval.by} approved: {approval.reason}. Policy {approval.policy}, clause {approval.clause}.
+								</div>
+							))}
 							{current.advice.map((advice) => (
 								<div className="hintbox" key={`${advice.by}:${JSON.stringify(advice.answer)}:${advice.reason}`}>
 									<ProducerGlyph kind={advice.kind} /> {advice.by} suggests {String(advice.answer.is)}
@@ -1081,7 +1088,13 @@ function QueueWorkbench() {
 										{answered.rule ? `Decided by rule ${answered.rule}` : `Decided by ${answered.by.join(", ")}`} ·{" "}
 										{age(answered.at)}
 									</p>
-									{answered.reason && <p>{answered.reason}</p>}
+									{answered.signers && answered.signers.length > 1
+										? answered.signers.map((signer) => (
+												<p key={signer.by}>
+													{signer.by}: {signer.reason}. Policy {signer.policy}, clause {signer.clause}.
+												</p>
+											))
+										: answered.reason && <p>{answered.reason}</p>}
 									{current.decision.supersedes && (
 										<>
 											<p className="dim">

@@ -421,6 +421,25 @@ It makes no certification claim.
 - [Let an agent in](./agents.md#what-agent-work-is-worth) for what an agent's work is worth under each preset.
 - [Decide in the queue](./decide.md) for answering a question.
 
+### Require independent release approvals
+
+A sign-off clause can set `ask.approvals` to `2` (or another positive integer).
+Omitting it keeps the one-person default. Multiple approvals require `agents: "none"`
+and `who: "member"`, `"admin"`, or `"role:<name>"`. Set `notProducer: true` to
+exclude people whose results were admitted to the run, and `reason: "required"`
+to require each person's reason. Put the clause before any automatic sign-off rule.
+
+For example, the clause's `ask` can be:
+
+```json
+{"who":"role:approver","agents":"none","notProducer":true,"reason":"required","approvals":2}
+```
+
+Each distinct eligible person contributes at most one approval. The server rechecks
+eligibility when collecting the quorum. Approvals must name the same current evidence
+and policy version. A changed tally, applied-result sequence, or policy requires fresh
+approvals. This uses the existing planned-run evidence identity, not a frozen release snapshot.
+
 ## Historical change gates
 
 Adopting a policy updates open changes, including their older commits, and planned

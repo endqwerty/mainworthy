@@ -457,6 +457,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
 | `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "inherited" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
+| `edits[][policy].clauses[].ask.approvals` | `integer` | no |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author" \| string` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |
 | `edits[][policy].clauses[].ask.notProducer` | `boolean` | yes |  |
@@ -1398,7 +1399,7 @@ guidance for commit reuse, question answers, and review filtering.
 | `report` | Report to target or run; tests by key or case. |
 | `claim` | Review cases C-311@hash at about/patch; known reads prior findings. |
 | `work` | Take next slot with run; renew with slot. Report or give-back releases. |
-| `decide` | onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision. |
+| `decide` | onEvidence=evidenceHash. decided, pending=more approvals needed, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision. |
 | `inbox` | Open questions with evidenceHash; on filters. |
 | `get` | Read refs including result:id; verdicts: commit:hash, change:key, R-n. unless=etag; cursor pages proposals. |
 | `find` | Find cases/tests/runs/slots; cursor pages. |

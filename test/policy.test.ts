@@ -3184,3 +3184,96 @@ test("a statement refusal in one answer leaves both neighboring batch answers co
 		refused.q,
 	]);
 });
+
+for (const notProducer of [false, true])
+	test(`sign-off quorum keeps two distinct approvals on current evidence (producer exclusion: ${notProducer})`, async () => {
+		let producer = await h.actor("run-producer", "human", ["read", "produce", "answer"]);
+		let other = await h.actor("release-approver", "human", ["read", "produce", "answer"]);
+		let reviewer = await h.actor("qa-approver", "human", ["read", "produce", "answer"]);
+		for (const name of [reviewer.name, producer.name, other.name])
+			await h.call("admin", {
+				do: "grant.set",
+				actor: name,
+				can: ["read", "produce", "answer"],
+				roles: ["approver"],
+			});
+		producer = await h.app.database.read(async (db) => (await actorByName(db, producer.name, 1)) ?? producer);
+		other = await h.app.database.read(async (db) => (await actorByName(db, other.name, 1)) ?? other);
+		reviewer = await h.app.database.read(async (db) => (await actorByName(db, reviewer.name, 1)) ?? reviewer);
+		const clauses = PRESETS.loose.clauses
+			.filter((c) => c.id !== "signoff-passed")
+			.map((c) =>
+				c.kind === "signoff"
+					? { ...c, ask: { ...c.ask, approvals: 2, notProducer, who: "role:approver", reason: "required" } }
+					: c,
+			);
+		await h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const policyQuestion = first((await queue({ kind: "adopt" })).items);
+		await h.call("decide", { q: policyQuestion.q, onEvidence: policyQuestion.evidenceHash, answer: { is: "accept" } });
+		await h.call("propose", { edits: [{ op: "create", outline: "Release works" }] });
+		const planned = await h.call<PlanReply>("plan", {
+			name: "release",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "release1" },
+		});
+		await h.call(
+			"report",
+			{
+				run: planned.run,
+				target: { commit: "release1", branch: "main" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			},
+			producer,
+		);
+		const q = first((await queue({ kind: "signoff" })).items);
+		let approve = { q: q.q, onEvidence: q.evidenceHash, answer: { is: "approve" }, reason: "QA reviewed" };
+		if (notProducer) expect(await h.call("decide", approve, producer)).toMatchObject([{ status: "forbidden" }]);
+		expect(await h.call("decide", { ...approve, reason: "" }, reviewer)).toMatchObject([{ status: "invalid" }]);
+		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "open" }]);
+
+		const agent = await h.actor("quorum-agent", "agent", ["read", "produce", "answer"]);
+		expect(await h.call("decide", approve, agent)).toMatchObject([{ status: "forbidden" }]);
+		await h.call("report", {
+			run: planned.run,
+			target: { commit: "release1", branch: "main" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		expect(await h.call("decide", approve, other)).toMatchObject([{ status: "conflict" }]);
+		const fresh = first((await queue({ kind: "signoff" })).items);
+		expect(fresh.approvals).toEqual([]);
+		approve = { ...approve, q: fresh.q, onEvidence: fresh.evidenceHash };
+		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		expect(first((await queue({ kind: "signoff" })).items).approvals).toMatchObject([
+			{ by: "qa-approver", reason: "QA reviewed", clause: "signoff-any", policy: 2 },
+		]);
+
+		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
+		expect(await h.call("decide", { ...approve, reason: "Release reviewed" }, other)).toMatchObject([
+			{ status: "pending" },
+		]);
+		await h.call("admin", {
+			do: "grant.set",
+			actor: reviewer.name,
+			can: ["read", "produce", "answer"],
+			roles: ["approver"],
+		});
+		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "decided" }]);
+
+		expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "closed" }]);
+		const settled = first((await queue({ kind: "signoff", state: "decided" })).items);
+		expect(settled.decision?.by).toEqual(["qa-approver", "release-approver"]);
+		expect(settled.decision?.signers).toMatchObject([
+			{ by: "qa-approver", reason: "QA reviewed", policy: 2 },
+			{ by: "release-approver", reason: "Release reviewed", policy: 2 },
+		]);
+		expect(
+			await h.call("decide", { undo: settled.q, ifDecision: settled.decision?.id, reason: "Review again" }, reviewer),
+		).toMatchObject([{ status: "reopened" }]);
+		const reopened = first((await queue({ kind: "signoff" })).items);
+		expect(
+			await h.call("decide", { ...approve, q: reopened.q, onEvidence: reopened.evidenceHash }, reviewer),
+		).toMatchObject([{ status: "pending" }]);
+		expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "open" }]);
+	});

@@ -100,14 +100,16 @@ The project holds fourteen days of history before today:
 - One automated test was quarantined, failed while covered, and left quarantine after a person checked its repair.
 - Each pull request merged after its last report. The pipeline reported that the change ended, so Mainworthy no longer asks about that change. Today's pull request 482 is the only one open.
 
-Today `main` fails one test. Pull request 482 starts from that commit and fails the same test. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding, a proposed edit, and a bulk proposal for up to 201 catalog cases (one for each case, at most 201). The queue holds six questions that need judgment: the failing test on `main` and on the pull request, the finding, both proposals, and a test that has no case. The sixty unit-test questions make 66 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
+Today `main` fails one test. Pull request 482 starts from that commit and fails the same test. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding, a proposed edit, and a bulk proposal for up to 201 catalog cases (one for each case, at most 201). The queue holds seven questions that need judgment: the failing test on `main` and on the pull request, the finding, both proposals, a test that has no case, and sign-off for the passed agent checkout run. The sixty unit-test questions make 67 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
+
+Before today's reports, the demo adds a custom sign-off clause requiring two independent people with reasons. Earlier runs keep their recorded closures; today's passed run waits for approval.
 
 Four flags change what is written:
 
 - `--cases` sets how many cases, from 1 to 100000.
 - `--seed` is the number the demo is made from. The same seed gives the same cases, pull requests and failures on any instance. Another seed gives another demo of the same shop. The default is 1.
 - `--days` sets how many days of history, from 0 to 90. With 0 the demo holds today and nothing before it.
-- `--unlinked-files` sets how many files of unit tests have no case, from 0 to 500. The default is 60. Use 0 to leave only the six questions above. Demos with at most twenty cases omit the bulk proposal.
+- `--unlinked-files` sets how many files of unit tests have no case, from 0 to 500. The default is 60. Use 0 to leave only the seven questions above. Demos with at most twenty cases omit the bulk proposal.
 
 The history ends on the day you run the command. It does not move forward afterwards. A demo seeded a month ago shows the history ending on that day.
 

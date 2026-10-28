@@ -111,6 +111,7 @@ Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve,
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
 | `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "inherited" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
+| `edits[][policy].clauses[].ask.approvals` | `integer` | no |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author" \| string` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |
 | `edits[][policy].clauses[].ask.notProducer` | `boolean` | yes |  |
@@ -247,7 +248,7 @@ Take next slot with run; renew with slot. Report or give-back releases.
 
 ## decide
 
-onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision.
+onEvidence=evidenceHash. decided, pending=more approvals needed, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
