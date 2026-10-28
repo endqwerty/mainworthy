@@ -396,6 +396,31 @@ export function CasePane({
 								});
 						}}
 					/>
+					{view && view.kind === "case" && (
+						<section className="proof-block automation-block" aria-label="Linked automation">
+							<SectionHeading>Linked automation</SectionHeading>
+							{view.tests.length === 0 ? (
+								<p className="dim">No linked automated tests.</p>
+							) : (
+								view.tests.map((test) => (
+									<div className="prow" key={test.t}>
+										<ProducerGlyph kind="auto" />
+										<span className="m" aria-hidden="true">
+											·
+										</span>
+										<span className="pt">
+											<a href={refUrl({ project, ref: test.t })}>{test.name}</a>
+											{test.file ? ` · ${test.file}` : ""}
+											{test.last
+												? ` · ${test.last.outcome} on ${test.last.version === null ? "unknown version" : `v${test.last.version}`} · ${test.last.current ? "current version" : "does not prove the current version"}`
+												: " · linked, no result for this case yet"}
+										</span>
+										<span className="age">{test.last ? age(test.last.at) : ""}</span>
+									</div>
+								))
+							)}
+						</section>
+					)}
 					<section className="proof-block">
 						<SectionHeading>Proof</SectionHeading>
 						{(["human", "auto", "agent"] satisfies (keyof CaseView["proof"])[]).map((method) => {

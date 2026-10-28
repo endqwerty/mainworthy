@@ -199,3 +199,8 @@
 	display: block;
 	width: 100%;
 }
+
+.automation-block .prow .pt {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}

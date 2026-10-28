@@ -62,3 +62,64 @@ test("get reads an exact old result with diagnostics only in its project and wit
 		await h.close();
 	}
 });
+
+test("case automation inventory separates links from current and historical evidence", async () => {
+	const h = await harness({ unlinked: "ask" });
+	try {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Manual checkout" } }] });
+		const read = async () => GetReply.parse(await h.call("get", { refs: ["C-1"] }))[0];
+		expect(await read()).toMatchObject({ tests: [], proof: { auto: null } });
+		await h.call("report", {
+			target: { session: "discovery" },
+			results: [
+				{ test: { key: "checkout", file: "checkout.test.ts" }, outcome: "pass" },
+				{ test: { key: "payment", file: "checkout.test.ts" }, outcome: "pass" },
+			],
+		});
+		const inbox = await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "map" });
+		const question = inbox.items[0];
+		if (!question) throw new Error("Expected mapping question");
+		await h.call("decide", {
+			q: question.q,
+			onEvidence: question.evidenceHash,
+			answer: {
+				is: "link",
+				pairs: [
+					["T-1", "C-1"],
+					["T-2", "C-1"],
+				],
+			},
+		});
+		expect(await read()).toMatchObject({
+			tests: [
+				{ t: "T-1", last: null },
+				{ t: "T-2", last: null },
+			],
+			proof: { auto: null },
+		});
+		await h.call("report", {
+			target: { session: "linked" },
+			results: [
+				{ test: { key: "checkout" }, outcome: "pass" },
+				{ test: { key: "payment" }, outcome: "fail", failure: { message: "declined" } },
+			],
+		});
+		expect(await read()).toMatchObject({
+			tests: [
+				{ t: "T-1", last: { outcome: "pass", version: 1, current: true } },
+				{ t: "T-2", last: { outcome: "fail", version: 1, current: true } },
+			],
+		});
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated checkout" } }] });
+		expect(await read()).toMatchObject({
+			tests: [
+				{ last: { outcome: "pass", version: 1, current: false } },
+				{ last: { outcome: "fail", version: 1, current: false } },
+			],
+		});
+		await h.call("decide", { undo: question.q });
+		expect(await read()).toMatchObject({ tests: [], proof: { auto: { outcome: "fail", version: 1, current: false } } });
+	} finally {
+		await h.close();
+	}
+});

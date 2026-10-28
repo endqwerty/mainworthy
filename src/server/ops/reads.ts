@@ -308,9 +308,27 @@ export async function caseView(
 		out.open = await openCountOn(ctx.db, row.project, caseRef(row));
 	}
 	if (want.has("tests"))
-		out.tests = (await testsOfCase(ctx.db, row.project, row.id))
-			.filter((test) => test.kind === "auto")
-			.map((test) => ({ t: testRef(test), name: test.name, file: test.file }));
+		out.tests = await Array.fromAsync(
+			(await testsOfCase(ctx.db, row.project, row.id)).filter((test) => test.kind === "auto"),
+			async (test) => {
+				const [result] = await lastResultsOfTest(ctx.db, row.project, test.id, 1);
+				return {
+					t: testRef(test),
+					name: test.name,
+					file: test.file,
+					last:
+						result?.basis_case === row.id
+							? {
+									id: result.id,
+									outcome: result.outcome,
+									version: result.basis_version,
+									at: result.at,
+									current: result.basis_version === row.head,
+								}
+							: null,
+				};
+			},
+		);
 	return out;
 }
 
