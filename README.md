@@ -173,7 +173,6 @@ The rules for contributors, people and agents, are in [AGENTS.md](AGENTS.md).
 | [docs/decisions/](docs/decisions/) | selected design decisions; new records use dated filenames |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
-| [ios/](ios/README.md) | the iPhone app: how to install it on your phone, and how to work on it |
 | [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |
 | [docs/competitive-analysis.md](docs/competitive-analysis.md) | 13 existing tools compared |
 | [docs/roadmap.md](docs/roadmap.md) | phases and where the project stands |

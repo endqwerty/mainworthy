@@ -126,7 +126,6 @@ Each of these has a test or a script behind it, except where the table says othe
 | a design choice that is hard to reverse, would surprise a later reader and came from a real trade-off | a decision record in `docs/decisions/YYYY-MM-DD-<slug>.md` (review judgment) |
 | a feature | the demo in `src/cli/demo/`, unless that is truly unreasonable (the owner's review, nothing runs) |
 | a dependency | the licence notices: run `bun scripts/licences.ts` |
-| a reply field the iPhone app reads | `scripts/ios/contract.ts`, then `bun scripts/ios.ts gen` |
 | the schema | `src/server/kernel/schema.sql`, its catalog snapshot and a behaviour test; state stored-data and archive compatibility |
 
 [Write a changelog fragment or decision](change-the-code.md#record-a-visible-change) describes the metadata and assembly commands.

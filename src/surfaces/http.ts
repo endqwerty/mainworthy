@@ -35,8 +35,8 @@ export { VERSION } from "../core/version.ts";
 
 function incompatibleRequest(req: Request): Response | null {
 	const version = req.headers.get(API_VERSION_HEADER);
-	// Browser POSTs carry Origin, including on plain HTTP where fetch metadata may be absent. Native cookie
-	// clients (the iPhone app) send neither. Old bundles cannot opt out of these browser-controlled headers.
+	// Browser POSTs carry Origin, including on plain HTTP where fetch metadata may be absent. Clients that
+	// are not browsers (the command line, scripts) send neither. Old bundles cannot opt out of these browser-controlled headers.
 	const browser = req.headers.has("origin") || req.headers.has("sec-fetch-site");
 	const required = browser && req.method !== "GET" && req.method !== "HEAD" && sameOrigin(req);
 	return (version !== null || required) && version !== String(API_VERSION)
@@ -853,8 +853,6 @@ export function upgradingListener(config: Config, patience: Patience = PATIENCE)
 /**
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
  * `/health` (is the process up, and which version and commit: the container's health check),
- * `/.well-known/apple-app-site-association` (the iPhone apps that may be offered this site's saved logins, which
- * Apple reads without a sign-in; not found when the instance lists none),
  * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
  * `/api/logout` (which open and end a browser's session and set or clear its cookie, same-origin only),
  * `/api/login/methods` and `/api/login/challenge` (what a sign-in page is told before anybody is signed in, in
@@ -931,10 +929,6 @@ export function serve(
 	});
 	const health = () => jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit });
 	const routes: Record<string, unknown> = {
-		"/.well-known/apple-app-site-association": () =>
-			app.config.appleApps?.length
-				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
-				: jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
 		"/api/openapi.json": () => jsonText(openApiJson()),
 		"/api/session": { GET: guarded(async (_req, session) => await sessionInfo(app, session)) },
 		"/api/login": {

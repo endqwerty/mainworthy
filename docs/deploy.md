@@ -77,10 +77,6 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
 - Background work: Cloud Scheduler posts `{"do":"tick"}` to the service's `/api/job` every minute, signed with a
   Google token as the `jobs` account. The app checks that token's audience and account and runs the due jobs inside
   the request; it runs no timer of its own (`MAINWORTHY_JOB_RUNNER=0`).
-- The iPhone app: `MAINWORTHY_APPLE_APPS` comes from the repository variable of that name (Settings, Secrets and
-  variables, Actions, Variables), the name `bun scripts/ios.ts install` prints; the repository holds no team id. An
-  apply without it fails: the site would serve no `/.well-known/apple-app-site-association`, and the app could use
-  no passkey or saved login for it.
 - The owner: `MAINWORTHY_OWNER` comes from the repository variable of that name, so the repository does not hold
   the owner's name. An apply without it fails: the server would name the owner `owner` and, on every start, give a
   person of that name every capability, making them if nobody has the name. Set it to the owner's name exactly as it
@@ -113,9 +109,7 @@ for latency); the load balancer in #945 replaces it once outside users arrive.
    or Cloudflare would redirect the renewal's plain-HTTP check. So that setting is off, and a redirect rule sends every
    other `http://mainworthy.com` request to `https://`, leaving paths under `/.well-known/acme-challenge/` alone.
 4. Check that `https://mainworthy.com/health` names the commit, that direct requests to the `run.app` address and to
-   Google's addresses for `mainworthy.com` without the proof are refused, that
-   `https://mainworthy.com/.well-known/apple-app-site-association` names the app, and that the iPhone app's
-   TestFlight job still uploads. Then the Coolify instance and its autodeploy go.
+   Google's addresses for `mainworthy.com` without the proof are refused. Then the Coolify instance and its autodeploy go.
 
 Rollback, before anything is written to the new instance, is restoring the previous DNS records.
 
@@ -245,7 +239,6 @@ sending the token itself.
 | `MAINWORTHY_PROXY_SECRET` | not set | The secret the proxy overwrites `x-mainworthy-proxy` with on every request, at least 32 characters. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. All requests without matching proof receive JSON 403 except `GET /health`. See the Cloud Run cutover section above. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only after the proxy is proved by its configured connecting address or secret, and must hold exactly one address. |
 | `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
-| `MAINWORTHY_APPLE_APPS` | not set | The iPhone apps the site vouches for, so a phone offers the logins it keeps for this site (its own passwords, or a password manager's such as 1Password) on the app's sign-in screen: each a team id and a bundle identifier, `ABCDE12345.com.mainworthy.app.ABCDE12345`, separated by commas. `bun scripts/ios.ts install` prints the one it built when it signs the app with that site (a paid Apple developer team only: `docs/guide/iphone.md`). The server lists them at `/.well-known/apple-app-site-association`, where Apple reads them; the app names the site in its entitlements (`ios/App/Mainworthy.entitlements`, `mainworthy.com`). Not set: that address is not found, and the app's sign-in screen is offered no login. An entry that is not an app's name stops the start with a line that names the variable. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_DEMO` | not set | A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds it in the server's own process. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/health` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
@@ -893,7 +886,7 @@ the steps are kept below for an instance that has none.
   three jobs would run again (decision 0128). Its run's summary says which jobs it ran again and why.
   A test that fails now and then is still a defect to fix, not to retry (`AGENTS.md`).
 - **A change that touches no code reports fewer tests.** The `scope` job runs only what a change needs
-  (decision 0090). For a change to prose, another workflow or the iPhone app, one shard named `tests` reports the
+  (decision 0090). For a change to prose or another workflow, one shard named `tests` reports the
   test files it chose, and the gate on the instance judges those. The job's summary page lists them.
 
   Which attempt the gate reads is decided by the attempt's number (issue #124). Each shard uploads its report as

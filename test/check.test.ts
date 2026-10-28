@@ -746,9 +746,7 @@ test("the workflow runs the shards the scope names and its gate reads every one 
 		{ name: "performance", phase: "--only=performance", files: "" },
 	]);
 	const all = Object.fromEntries(
-		outputs({ why: "", jobs: { static: true, image: true, ios: true }, tests: "all" }).map((line) =>
-			line.split(/=(.*)/s),
-		),
+		outputs({ why: "", jobs: { static: true, image: true }, tests: "all" }).map((line) => line.split(/=(.*)/s)),
 	);
 	expect(all.shards).toBe(`${shards.join(" ")} performance`);
 	expect(all.files).toBe("");
@@ -789,10 +787,10 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 	// the lint and the image.
 	expect(upload?.["if-no-files-found"]).toBe("error");
 	const last = jobs.gate.steps.at(-1)?.run ?? "";
-	for (const job of ["scope", "static", "image", "ios", "tests"])
+	for (const job of ["scope", "static", "image", "tests"])
 		expect(last).toContain(`test "${expression(`needs.${job}.result`)}" = success`);
 	// A job the scope skipped passes only when the scope said it was not needed.
-	for (const job of ["static", "image", "ios"]) {
+	for (const job of ["static", "image"]) {
 		expect(last).toContain(
 			`test "${expression(`needs.${job}.result`)}" = success || test "${expression(`needs.scope.outputs.${job}`)}:${expression(`needs.${job}.result`)}" = false:skipped\n`,
 		);
@@ -852,19 +850,10 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// The gate is the job to require on the branch, so every job reaches it and a failed description blocks a merge.
 	expect(readFileSync(".github/workflows/check.yml", "utf8")).toContain(
-		"needs: [scope, static, tests, image, ios, description]",
+		"needs: [scope, static, tests, image, description]",
 	);
 	// No secret in an environment every step of a job or of the workflow would share.
-	expect(Object.keys(workflow.jobs)).toEqual([
-		"scope",
-		"static",
-		"image",
-		"ios",
-		"description",
-		"tests",
-		"gate",
-		"publish",
-	]);
+	expect(Object.keys(workflow.jobs)).toEqual(["scope", "static", "image", "description", "tests", "gate", "publish"]);
 	expect(
 		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]
 			.filter((env) => env !== undefined)

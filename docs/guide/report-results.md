@@ -66,7 +66,7 @@ batch and says `pending: report accepted; waiting for application`. Its result i
 and basis are zero because application rolled back. The CLI exits with code 0 for this successful acceptance.
 Read `mainworthy gate` for the current verdict. Startup recovery or a same-id retry applies the batch.
 The pending reply is not the final stored receipt. A same-id retry after recovery returns the applied receipt.
-The browser cockpit and iPhone app keep the original command and note while the result is unconfirmed.
+The browser cockpit keeps the original command and note while the result is unconfirmed.
 Retrying checks that command before recording another result.
 
 The CLI and MCP generate a command id per report when none was supplied. Transport retries keep that id,
@@ -530,10 +530,10 @@ Until the last shard reports, the gate reads `pending` and names the missing sha
 for example `pending: waiting for shards 3 and 5 of 6 of job tests`.
 A failure in a shard that already reported shows at once, and the reason says which shards are still due.
 `mainworthy gate --json` lists them in `waiting`.
-The web app and the iPhone app draw the shards under the gate's reason, one strip for each job and one cell for each
+The web app draws the shards under the gate's reason, one strip for each job and one cell for each
 shard. A missing shard is outlined in amber. The reason then counts the shards, for example
 `pending: waiting for 3 shards`. To read which shards reported and which are still due, hover over a strip in the
-web app or tap it on the iPhone. In a phone's browser, the page of a change or a run writes it under each strip. A row
+web app. In a phone's browser, the page of a change or a run writes it under each strip. A row
 in a list draws the cells alone, before its reason; open the row to read them.
 Each shard can run `mainworthy gate` after its own report. The last shard's gate gives the commit's verdict.
 
@@ -862,14 +862,14 @@ sent, and it does not change the result's overall outcome.
 A step's optional `attachment` is a zero-based index into that result's own
 `attachments` array in the same report. Send an image there as
 `{"name":"cart.png","data":"<canonical base64>"}`. Only image attachments can be
-step screenshots. A step's screenshot opens from its row on web and iPhone.
+step screenshots. A step's screenshot opens from its row on the web.
 Later `attach` calls append files and do not change those indexes. MCP accepts
 inline attachments, though its compact tool list omits their schema; the HTTP
 operation reference describes the attachment fields.
 
 `get` and HTTP replies return the trail with the recorded result, including the
 original action order and omitted fields. Test latest results, counted change
-results, and planned-run slots show it on web and iPhone. Each step and any
+results, and planned-run slots show it on the web. Each step and any
 recorded action outcome appears in words. Longer steps have a stronger background
 tint relative to the longest step in that result. Missing and zero times have no
 tint. The first `fail` or `error` in a present trail supplies `atStep` and takes

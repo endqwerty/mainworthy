@@ -5,8 +5,8 @@
 //   bun scripts/ci-scope.ts                  the same against where HEAD left origin/main
 //
 // Each job names the files it reads, and runs when one of them changed. The tests run whole, except when every
-// changed file is one that no code of the product, the tests or the scripts reads (prose, the iPhone app, another
-// workflow): then the tests that read every file of the tree run, with each test file that names the changed file.
+// changed file is one that no code of the product, the tests or the scripts reads (prose, another workflow): then
+// the tests that read every file of the tree run, with each test file that names the changed file.
 // A change this cannot read, or one to what decides what runs, runs everything.
 //
 // Bun's own `bun test --changed` follows imports, and finds no test for a change to `src/web`: the browser tests
@@ -76,38 +76,12 @@ export const IMAGE: Paths = {
 };
 
 /**
- * What the iPhone app's job runs: the app, the scripts that write its Swift and start its server, and the server
- * with what Bun reads to load them (the packages, `tsconfig.json`'s paths, `bunfig.toml`). Not the web UI, which
- * the server serves to a browser and the app never reads.
- */
-export const IOS: Paths = {
-	include: [
-		"ios/**",
-		"scripts/ios.ts",
-		"scripts/ios/**",
-		"test/oidc-support.ts",
-		"test/db.ts",
-		"scripts/pg.ts",
-		"scripts/work/scratch.ts",
-		"scripts/work/processes.ts",
-		"scripts/work/run.ts",
-		"scripts/work/test-databases.ts",
-		"src/**",
-		"package.json",
-		"bun.lock",
-		"tsconfig.json",
-		"bunfig.toml",
-	],
-	exclude: ["src/web/**"],
-};
-
-/**
  * Files that no code of the product, of the tests or of the scripts reads, so a test that reads one names it in
  * its text. What `/docs` serves is not among them: the server imports it. Neither are the repository's diagrams,
  * which `scripts/diagrams.ts` stamps and `test/docs.test.ts` checks through it.
  */
 export const NAMED: Paths = {
-	include: [".changes/**", "docs/**", "*.md", ".github/**", "ios/**", "infra/**"],
+	include: [".changes/**", "docs/**", "*.md", ".github/**", "infra/**"],
 	exclude: [
 		"docs/guide/**",
 		"docs/diagrams/**",
@@ -124,7 +98,7 @@ export const NAMED: Paths = {
  */
 export const TREE = ["test/architecture.test.ts", "test/ci-scope.test.ts", "test/licences.test.ts"];
 
-export type Job = "static" | "image" | "ios";
+export type Job = "static" | "image";
 export type Plan = {
 	/** Why, in one line, for the run's summary. */
 	why: string;
@@ -143,8 +117,8 @@ export function testFiles(root = "."): TestFile[] {
 }
 
 /**
- * The test files that name `changed`, or a directory it is in (`docs/`, `ios/App/`), from the repository's root:
- * `ios/README.md` and the address `/docs/guide` do not name `README.md` and `docs/`; `../../ios/` names `ios/`.
+ * The test files that name `changed`, or a directory it is in (`docs/`, `docs/guide/`), from the repository's root:
+ * `skill/README.md` and the address `/docs/guide` do not name `README.md` and `docs/`; `../../docs/` names `docs/`.
  */
 export function readers(changed: string, tests: readonly TestFile[]): string[] {
 	const parts = changed.split("/");
@@ -155,7 +129,7 @@ export function readers(changed: string, tests: readonly TestFile[]): string[] {
 	return tests.filter((test) => named.test(test.text)).map((test) => test.file);
 }
 
-const everything = (why: string): Plan => ({ why, jobs: { static: true, image: true, ios: true }, tests: "all" });
+const everything = (why: string): Plan => ({ why, jobs: { static: true, image: true }, tests: "all" });
 
 /** What runs for a change: the files it adds, changes or deletes, or null when they could not be read. */
 export function plan(changed: readonly string[] | null, tests: readonly TestFile[]): Plan {
@@ -166,7 +140,6 @@ export function plan(changed: readonly string[] | null, tests: readonly TestFile
 	const jobs = {
 		static: changed.some((file) => matches(STATIC, file)),
 		image: changed.some((file) => matches(IMAGE, file)),
-		ios: changed.some((file) => matches(IOS, file)),
 	};
 	const code = changed.find((file) => !matches(NAMED, file));
 	if (code !== undefined) return { why: `${code} is read by code, so every test runs`, jobs, tests: "all" };
@@ -224,7 +197,7 @@ export function outputs(chosen: Plan): string[] {
 	const final = safe ? chosen : { ...chosen, tests: "all" as const };
 	const entries = matrix(final.tests);
 	return [
-		...(["static", "image", "ios"] as const).map((job) => `${job}=${final.jobs[job]}`),
+		...(["static", "image"] as const).map((job) => `${job}=${final.jobs[job]}`),
 		`matrix=${JSON.stringify({ include: entries })}`,
 		`shards=${entries.map((entry) => entry.name).join(" ")}`,
 		`files=${final.tests === "all" ? "" : final.tests.join(",")}`,
@@ -233,7 +206,7 @@ export function outputs(chosen: Plan): string[] {
 
 /** The plan in words, for the terminal and the run's summary page. */
 export function describe(chosen: Plan): string[] {
-	const jobs = (["static", "image", "ios"] as const).map((job) => `${job} ${chosen.jobs[job] ? "runs" : "skipped"}`);
+	const jobs = (["static", "image"] as const).map((job) => `${job} ${chosen.jobs[job] ? "runs" : "skipped"}`);
 	const tests = chosen.tests === "all" ? "every test file" : chosen.tests.join(", ");
 	return [`CI scope: ${chosen.why}.`, `Jobs: ${jobs.join(", ")}.`, `Tests: ${tests}.`];
 }

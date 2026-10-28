@@ -2,7 +2,7 @@
 
 This is the automated portion of [issue #47](https://github.com/endqwerty/mainworthy/issues/47), dated 2026-10-15.
 The target is [WCAG 2.2 level AA](https://www.w3.org/TR/WCAG22/). This is not a claim of conformance.
-Nobody has completed the VoiceOver or NVDA assessment. The native iPhone app, documentation site, operating
+Nobody has completed the VoiceOver or NVDA assessment. The documentation site, operating
 system dialogs, and files supplied by users are outside this web UI assessment.
 
 ## Evidence and limits

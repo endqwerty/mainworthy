@@ -352,11 +352,11 @@ Open the run in the web app to record manual results against its pinned cases.
 Recording by run alone uses that run's build and environment.
 MCP's report schema omits the build target. To report through MCP, supply a planned run in `run`.
 A gate with missing evidence stays pending. Failures and sign-off use the same rules as other
-planned runs. The web and iPhone planners do not yet offer a build picker.
+planned runs. The web planner does not yet offer a build picker.
 
 ## Take a slot while working
 
-The cockpit and iPhone run screen show each live lease's holder and when work began.
+The cockpit shows each live lease's holder and when work began.
 The header counts in-progress slots. Evidence counts and the verdict stay separate.
 Updates from other producers arrive through the existing live connection.
 The web cockpit skips other holders' slots during automatic navigation and includes them again when their leases expire.

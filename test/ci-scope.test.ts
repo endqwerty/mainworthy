@@ -18,7 +18,6 @@ import { fixtureBuildArgs, PERFORMANCE, parseCheckArgs, testArgs } from "../scri
 import {
 	changedFiles,
 	IMAGE,
-	IOS,
 	matrix,
 	NAMED,
 	outputs,
@@ -38,11 +37,11 @@ const covers = (paths: { include: readonly string[]; exclude?: readonly string[]
 
 test("a change to prose runs no job but the tests, and of them only the ones that read it", () => {
 	const chosen = plan(["AGENTS.md", "docs/decisions/0015-the-project-is-called-mainworthy.md"], tests);
-	expect(chosen.jobs).toEqual({ static: false, image: false, ios: false });
+	expect(chosen.jobs).toEqual({ static: false, image: false });
 	expect(chosen.tests).not.toBe("all");
 	for (const file of TREE) expect(chosen.tests).toContain(file);
 	expect(chosen.tests).not.toContain("test/e2e/queue-and-runs.test.ts");
-	// README.md is read by no test but the ones that read every file; `ios/README.md` does not name it.
+	// README.md is read by no test but the ones that read every file; `skill/README.md` does not name it.
 	expect(plan(["README.md"], tests).tests).toEqual(TREE);
 	// A new file at the top is one the list of top-level entries below does not have yet (the verifier's finding of
 	// 2026-10-16): that test runs for it.
@@ -51,49 +50,31 @@ test("a change to prose runs no job but the tests, and of them only the ones tha
 
 test("a fragment-only change runs the record validators and tree checks", () => {
 	const chosen = plan([".changes/123-example.md"], tests);
-	expect(chosen.jobs).toEqual({ static: false, image: false, ios: false });
+	expect(chosen.jobs).toEqual({ static: false, image: false });
 	expect(chosen.tests).not.toBe("all");
 	for (const file of [...TREE, "test/changelog.test.ts", "test/docs.test.ts"]) expect(chosen.tests).toContain(file);
 });
 
-test("a change to the iPhone app runs its job and the tests that read the app, and not the image", () => {
-	const chosen = plan(["ios/App/Info.plist"], tests);
-	expect(chosen.jobs).toEqual({ static: false, image: false, ios: true });
-	// The licences test reads Info.plist; the conflict test imports a fixture of the app's tests as `../../ios/`.
-	expect(chosen.tests).toEqual([
-		"test/architecture.test.ts",
-		"test/ci-scope.test.ts",
-		"test/e2e/conflict.test.ts",
-		"test/ios-contract.test.ts",
-		"test/licences.test.ts",
-	]);
-});
-
-test("a change to the web UI runs every test, the type-check and the image, and not the iPhone app", () => {
+test("a change to the web UI runs every test, the type-check and the image", () => {
 	expect(plan(["src/web/app.tsx", "src/web/phone.css"], tests)).toMatchObject({
-		jobs: { static: true, image: true, ios: false },
+		jobs: { static: true, image: true },
 		tests: "all",
 	});
-	expect(plan(["src/server/runs/runs.ts"], tests)).toMatchObject({
-		jobs: { static: true, image: true, ios: true },
-		tests: "all",
-	});
-	// The scripts are not in the image; the ones that start the iPhone app's server are the app's job.
-	expect(plan(["scripts/ios/contract.ts"], tests).jobs).toEqual({ static: true, image: false, ios: true });
-	expect(plan(["scripts/gen-docs.ts"], tests).jobs).toEqual({ static: true, image: false, ios: false });
+	// The scripts are not in the image.
+	expect(plan(["scripts/gen-docs.ts"], tests).jobs).toEqual({ static: true, image: false });
 });
 
 test("the pages /docs serves are read by the server: a change to one runs every test and the image", () => {
 	for (const file of ["docs/guide/keyboard.md", "docs/diagrams/overview.html", "THIRD-PARTY-NOTICES.md"])
-		expect(plan([file], tests), file).toMatchObject({ jobs: { image: true, ios: false }, tests: "all" });
+		expect(plan([file], tests), file).toMatchObject({ jobs: { image: true }, tests: "all" });
 });
 
 test("prose beside code runs what the code needs", () => {
-	expect(plan(["CHANGELOG.md", "src/core/runs.ts"], tests)).toMatchObject({ tests: "all", jobs: { ios: true } });
+	expect(plan(["CHANGELOG.md", "src/core/runs.ts"], tests)).toMatchObject({ tests: "all", jobs: { static: true } });
 });
 
 test("everything runs when the change cannot be read, is empty, or changes what decides what runs", () => {
-	const everything = { jobs: { static: true, image: true, ios: true }, tests: "all" };
+	const everything = { jobs: { static: true, image: true }, tests: "all" };
 	expect(plan(null, tests)).toMatchObject(everything);
 	expect(plan([], tests)).toMatchObject(everything);
 	for (const file of [".github/workflows/check.yml", "scripts/ci-scope.ts", "scripts/check-plan.ts"])
@@ -102,14 +83,14 @@ test("everything runs when the change cannot be read, is empty, or changes what 
 
 test("a test names what it reads from the repository's root, or through ../", () => {
 	const files: TestFile[] = [
-		{ file: "test/a.test.ts", text: 'readFileSync("ios/README.md")' },
+		{ file: "test/a.test.ts", text: 'readFileSync("skill/README.md")' },
 		{ file: "test/b.test.ts", text: 'fetch(url + "/docs/guide")' },
-		{ file: "test/c.test.ts", text: 'import table from "../../ios/Kit/Tests/x.json";' },
+		{ file: "test/c.test.ts", text: 'import table from "../../skill/x.json";' },
 		{ file: "test/d.test.ts", text: 'new Glob("docs/**/*.md")' },
 		{ file: "test/e.test.ts", text: 'readFileSync("README.md")' },
 	];
 	expect(readers("README.md", files)).toEqual(["test/e.test.ts"]);
-	expect(readers("ios/Kit/Tests/x.json", files)).toEqual(["test/a.test.ts", "test/c.test.ts"]);
+	expect(readers("skill/x.json", files)).toEqual(["test/a.test.ts", "test/c.test.ts"]);
 	expect(readers("docs/roadmap.md", files)).toEqual(["test/d.test.ts"]);
 });
 
@@ -167,7 +148,7 @@ test("every TypeScript change selects the static job that runs the async port gu
 
 test("the static job runs for every file the type-check and the lint read", () => {
 	for (const file of ["infra/data.tf", "infra/ci.sh"])
-		expect(plan([file], tests), file).toMatchObject({ jobs: { static: true, image: false, ios: false } });
+		expect(plan([file], tests), file).toMatchObject({ jobs: { static: true, image: false } });
 	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
 	expect(workflow).toMatchObject({
 		jobs: {
@@ -277,7 +258,7 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 	const jobs = (entry: string): string => {
 		const file = existsSync(entry) && statSync(entry).isDirectory() ? `${entry}/a-file.ts` : entry;
 		const chosen = plan([file], tests);
-		const names = (["static", "image", "ios"] as const).filter((job) => chosen.jobs[job]);
+		const names = (["static", "image"] as const).filter((job) => chosen.jobs[job]);
 		return [...names, chosen.tests === "all" ? "tests" : "named tests"].join(" ");
 	};
 	expect(Object.fromEntries(entries.sort().map((entry) => [entry, jobs(entry)]))).toEqual({
@@ -294,39 +275,21 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 		"THIRD-PARTY-NOTICES.md": "image tests",
 		bench: "static tests",
 		"biome.json": "static image tests",
-		"bun.lock": "static image ios tests",
-		"bunfig.toml": "static ios tests",
+		"bun.lock": "static image tests",
+		"bunfig.toml": "static tests",
 		"compose.coolify.yaml": "tests",
 		"compose.yaml": "tests",
 		docs: "static named tests",
 		infra: "static named tests",
-		ios: "static ios named tests",
 		licences: "static tests",
-		"package.json": "static image ios tests",
+		"package.json": "static image tests",
 		scripts: "static tests",
 		skill: "static image tests",
-		src: "static image ios tests",
+		src: "static image tests",
 		"t3.json": "static tests",
 		test: "static tests",
-		"tsconfig.json": "static image ios tests",
+		"tsconfig.json": "static image tests",
 	});
-});
-
-test("the iPhone app's job runs for every module its script loads, and none of them is the web UI's", () => {
-	const transpiler = new Bun.Transpiler({ loader: "ts" });
-	const seen = new Set<string>();
-	const visit = (file: string): void => {
-		if (seen.has(file)) return;
-		seen.add(file);
-		for (const { path } of transpiler.scanImports(readFileSync(file, "utf8"))) {
-			if (!path.startsWith(".")) continue;
-			const next = join(file, "..", path);
-			if (/\.tsx?$/.test(next) && existsSync(next)) visit(next);
-		}
-	};
-	visit("scripts/ios.ts");
-	expect(seen.size).toBeGreaterThan(20);
-	expect([...seen].filter((file) => !covers(IOS, file))).toEqual([]);
 });
 
 // The narrowed tests rest on this: a file of NAMED is read by no code but a test, and a test that reads one names
@@ -337,7 +300,6 @@ test("no module outside the tests reads a file that only the tests naming it are
 			"validates .changes/ and assembles CHANGELOG.md; test/changelog.test.ts and test/docs.test.ts name their inputs",
 		"scripts/decisions.ts": "validates and indexes docs/decisions/; test/docs.test.ts names the directory",
 		"scripts/work/pull-request.ts": "judges docs/decisions/ and .changes/ paths from GitHub; reads no local file",
-		"scripts/ios/swift.ts": "writes the app's generated Swift; test/ios-contract.test.ts compares it and names ios/",
 		"scripts/security-audit.ts": "names the audit's own files to call out a change to them, and reads none of them",
 		"scripts/pg.ts": "a cleanup diagnostic that points to docs/development/tests.md",
 		"src/server/identity/identity.ts": "a message that points to docs/deploy.md",
@@ -348,7 +310,7 @@ test("no module outside the tests reads a file that only the tests naming it are
 		const code = readFileSync(file, "utf8")
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/^\s*\/\/.*$/gm, "");
-		const named = [...code.matchAll(/(?:^|[^\w./-]|\.\.\/)((?:\.changes|\.github|docs|ios)\/[\w./-]*\w|[\w-]+\.md)\b/g)]
+		const named = [...code.matchAll(/(?:^|[^\w./-]|\.\.\/)((?:\.changes|\.github|docs)\/[\w./-]*\w|[\w-]+\.md)\b/g)]
 			.map((match) => match[1] ?? "")
 			.filter((path) => existsSync(path))
 			.filter((path) => (/\.\w+$/.test(path) ? covers(NAMED, path) : covers(NAMED, `${path}/a-file`)));
@@ -364,11 +326,10 @@ test("the chosen files go to one runner for each phase, and a file name that is 
 		{ name: "performance", phase: "--only=performance", files: performance },
 	]);
 	const read = (lines: string[]) => Object.fromEntries(lines.map((line) => line.split(/=(.*)/s)));
-	const jobs = { static: false, image: false, ios: true };
+	const jobs = { static: false, image: true };
 	expect(read(outputs({ why: "", jobs, tests: ["test/a.test.ts", "test/b.test.ts"] }))).toEqual({
 		static: "false",
-		image: "false",
-		ios: "true",
+		image: "true",
 		matrix: JSON.stringify({ include: matrix(["test/a.test.ts", "test/b.test.ts"]) }),
 		shards: "tests",
 		files: "test/a.test.ts,test/b.test.ts",

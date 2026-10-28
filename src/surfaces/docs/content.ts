@@ -25,7 +25,6 @@ import decide from "../../../docs/guide/decide.md" with { type: "text" };
 import glossary from "../../../docs/guide/glossary.md" with { type: "text" };
 import importCases from "../../../docs/guide/import-cases.md" with { type: "text" };
 import index from "../../../docs/guide/index.md" with { type: "text" };
-import iphone from "../../../docs/guide/iphone.md" with { type: "text" };
 import keyboard from "../../../docs/guide/keyboard.md" with { type: "text" };
 import licence from "../../../docs/guide/licence.md" with { type: "text" };
 import policy from "../../../docs/guide/policy.md" with { type: "text" };
@@ -83,7 +82,6 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	runs,
 	changes,
 	agents,
-	iphone,
 	customize,
 	policy,
 	privacy,

@@ -48,19 +48,12 @@ describe("Mainworthy's licence", () => {
 				return entry.isFile() ? [path] : [];
 			});
 		const naming = files(".").filter((file) => read(file).includes(name));
-		expect(naming.sort()).toEqual([
-			"NOTICE",
-			"ios/App/Info.plist",
-			"ios/UITests/QueueUITests.swift",
-			"test/licences.test.ts",
-		]);
+		expect(naming.sort()).toEqual(["NOTICE", "test/licences.test.ts"]);
 	});
 
-	test("the package, the NOTICE file and the iPhone app name the same licence and copyright holder", () => {
+	test("the package and the NOTICE file name the same licence and copyright holder", () => {
 		expect(JSON.parse(read("package.json")).license).toBe("Apache-2.0");
 		expect(read("NOTICE").split("\n").slice(0, 2)).toEqual(["Mainworthy", HOLDER]);
-		expect(read("ios/App/Info.plist")).toContain(`<key>NSHumanReadableCopyright</key>\n\t<string>${HOLDER}</string>`);
-		expect(read("ios/UITests/QueueUITests.swift")).toContain(`"${HOLDER}"`);
 	});
 });
 

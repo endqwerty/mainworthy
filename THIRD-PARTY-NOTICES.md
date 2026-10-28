@@ -2,8 +2,7 @@
 
 Mainworthy is licensed under the Apache License 2.0 ([LICENSE](LICENSE)); its copyright notice is in
 [NOTICE](NOTICE). It contains software that others wrote, under their own licences, and those licences ask
-that their text travels with it. This file is that text, for everything Mainworthy ships. The iPhone app
-contains none of it: only its own code and Apple's frameworks.
+that their text travels with it. This file is that text, for everything Mainworthy ships.
 
 `bun scripts/licences.ts` writes this file from the packages the build bundles and from `licences/`. Do not
 edit it by hand.

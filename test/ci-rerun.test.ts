@@ -7,16 +7,16 @@ import { z } from "zod";
 import { chooseRerun, type Gh, type Job, MOST, rerunFailed } from "../scripts/ci-rerun.ts";
 
 const job = (name: string, conclusion = "success", id = name.length): Job => ({ id, name, conclusion });
-const passing = ["scope", "static", "image", "ios", "tests-1", "tests-2", "tests-3", "performance"].map((name) =>
-	job(name),
+const passing = ["scope", "static", "image", "description", "tests-1", "tests-2", "tests-3", "performance"].map(
+	(name) => job(name),
 );
 const shard = (name: string, failed = 0) => ({ name, failed });
 
 test("a shard whose test failed runs again, and so does another job that can fail by chance", () => {
-	const jobs = [...passing.filter((j) => j.name !== "ios"), job("ios", "failure"), job("gate", "failure")];
+	const jobs = [...passing.filter((j) => j.name !== "image"), job("image", "failure"), job("gate", "failure")];
 	expect(chooseRerun([shard("tests-1"), shard("tests-3", 1), shard("performance")], jobs)).toEqual({
-		rerun: ["tests-3", "ios"],
-		why: "running again once, one after the other: tests-3, ios",
+		rerun: ["tests-3", "image"],
+		why: "running again once, one after the other: tests-3, image",
 	});
 });
 

@@ -962,7 +962,6 @@ A case body, its explicit tag delta and requirement-link delta share a proposal.
 | Merge changes or keeps the current body under strict policy | `e2e/conflict-merge.test.ts` one-review cases | Body and tags wait together; one acceptance applies both; no duplicate metadata proposal |
 | Recorded merge loses reply; reload, refusal or later draft inverse | `e2e/conflict-merge.test.ts`, `merges.test.ts` | Retire only accepted metadata; retain later changes and avoid overwriting later server reversals |
 | Concurrent tag/link additions and removals, adopted or unchanged body | `e2e/conflict-merge.test.ts`, `integrity.test.ts` | Preserve explicit deltas and unrelated current changes |
-| Combined proposal on iPhone | `ios-contract.test.ts`, native `ProposalPagingTests` | Decode mixed entries and give an explicit web-resolution instruction; body-only native resolution still works |
 
 ### Conflict-card inline metadata (issue #568, audit round 3)
 
@@ -970,8 +969,7 @@ A case body, its explicit tag delta and requirement-link delta share a proposal.
 | --- | --- | --- |
 | Agent types `#critical @REQ-101` in a merged title under member review for `tag:critical` | `integrity.test.ts` | Body, tags and links stay unchanged until review; acceptance applies all, rejection none |
 | Inline card additions survive lost reply, reload, refusal, moved question and later token reversals | `e2e/conflict-merge.test.ts`, `merges.test.ts` | Winning command's additions retire once; later intent remains explicit even after a placement refresh |
-| Direct merge sends raw inline tokens or cleaned body plus additions | `integrity.test.ts`, `ios-contract.test.ts` | New raw tokens are refused without replacement; current/base literal fields are preserved; explicit additions enter original-author protected scope atomically |
-| Native resolver chooses literal inline tokens | `NativeConflictTests.literalMergeNeedsWeb`, `keepLiteralCurrent` | New raw tokens are refused with the draft kept; keeping a current literal title records no version |
+| Direct merge sends raw inline tokens or cleaned body plus additions | `integrity.test.ts` | New raw tokens are refused without replacement; current/base literal fields are preserved; explicit additions enter original-author protected scope atomically |
 
 | Keep a current literal title, or restore base/current literal title/action/expected text | `e2e/conflict-merge.test.ts`, `integrity.test.ts`, `outline.test.ts` | Equal fields remain literal, no new tags/links; keep-current returns unchanged; a new step with the same text still requires capture |
 

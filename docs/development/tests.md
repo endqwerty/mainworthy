@@ -132,7 +132,7 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 | `test/budgets.test.ts` | operation counts on hot paths, reported as budgets |
 | `PERFORMANCE` in `scripts/check-plan.ts` | elapsed-time budgets for the paths people wait on |
 | `test/docs.test.ts` | the guide against the code: the generated tables, links, the operation table in `docs/architecture.md`, the diagrams and the docs site |
-| `test/ios-contract.test.ts`, `test/licences.test.ts`, `test/demo-time.test.ts`, `test/work.test.ts` | the iPhone contract, the licence notices, the server's clock, and `scripts/work.ts` |
+| `test/licences.test.ts`, `test/demo-time.test.ts`, `test/work.test.ts` | the licence notices, the server's clock, and `scripts/work.ts` |
 | `test/e2e/` | journeys in a real Chromium against a real server |
 
 ### Put a test at the cheapest layer that reaches it

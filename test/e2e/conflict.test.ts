@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import choicesTable from "../../ios/Kit/Tests/MainworthyScreensTests/Fixtures/conflict-choices.json";
 import { mergeBodies } from "../../src/core/merge3.ts";
 import { CaseBody, ConflictAddress, conflictLabel } from "../../src/core/model.ts";
+import choicesTable from "../fixtures/conflict-choices.json";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(

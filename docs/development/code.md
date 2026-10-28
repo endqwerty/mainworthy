@@ -25,7 +25,6 @@ design. Read it before you change identity, sessions, runs or policy.
 | `src/app/start.ts` | starts and stops the instance: database, HTTP, recovery and periodic jobs |
 | `src/cli/` | the `mainworthy` command. Most commands are generated from the registry. `commands/` holds the adapters, and `demo/` the pure demo catalog that `seed.ts` writes. |
 | `src/web/` | the React web UI. One directory per screen, with `lib/` and `ui/` shared. `SHELL.md` is the contract a screen follows. |
-| `ios/` | the SwiftUI iPhone app ([ios/README.md](../../ios/README.md)) |
 | `skill/mainworthy/` | the skill that teaches an agent the case model. The server serves it as an archive. |
 | `test/` | tests that cross modules, the architecture rules, the budgets and, in `test/e2e/`, the browser tests. Pure unit tests sit beside their code in `src/`. |
 | `scripts/` | the check, the CI helpers, code generation, licences, diagrams, the iPhone tooling and `work.ts` |
