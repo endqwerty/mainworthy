@@ -1004,6 +1004,12 @@ export async function actorById(db: ReadDb, id: number, project: number): Promis
 	return await toActor(db, row, project);
 }
 
+/** The actor as it stands now, or null for one that was forgotten: its history keeps it, a quorum does not. */
+export async function activeActorById(db: ReadDb, id: number, project: number): Promise<Actor | null> {
+	const row = await db.get(Q.actorById, { id });
+	return row && row.disabled_at === null ? await toActor(db, row, project) : null;
+}
+
 export async function ruleActor(db: ReadDb): Promise<Actor> {
 	const actor = await actorByName(db, RULE_ACTOR, 0);
 	if (!actor) throw new Error("the rule actor is missing; the instance was not bootstrapped");
