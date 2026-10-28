@@ -18,9 +18,12 @@ const Q = {
 	clear: sql("DELETE FROM identity_ceremonies"),
 	lockKind: sql<{ kind: string }>("SELECT pg_advisory_xact_lock(hashtextextended($kind, 602384))"),
 	expire: sql<{ kind: string; now: number }>("DELETE FROM identity_ceremonies WHERE kind = $kind AND deadline <= $now"),
+	// The newest an owner began stay: equal deadlines (one millisecond) fall back to the inserting transaction, since
+	// each ceremony is written in its own.
 	trimOwner: sql<{ kind: string; owner: string; keep: number }>(
 		`DELETE FROM identity_ceremonies WHERE kind = $kind AND owner = $owner AND key NOT IN
-		 (SELECT key FROM identity_ceremonies WHERE kind = $kind AND owner = $owner ORDER BY deadline DESC, key LIMIT $keep)`,
+		 (SELECT key FROM identity_ceremonies WHERE kind = $kind AND owner = $owner
+		  ORDER BY deadline DESC, xmin::text::bigint DESC LIMIT $keep)`,
 	),
 	count: sql<{ kind: string }, { count: number }>(
 		"SELECT count(*)::integer AS count FROM identity_ceremonies WHERE kind = $kind",
