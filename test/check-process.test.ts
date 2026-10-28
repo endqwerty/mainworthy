@@ -66,7 +66,7 @@ for (const managed of [false, true])
 		}
 	});
 
-test("gate databases are dropped even when direct fixture cleanup exceeds the default hook timeout", async () => {
+test("gate databases are dropped even when direct fixture cleanup exceeds the default hook limit", async () => {
 	const root = make("gate-slow-database-cleanup");
 	symlinkSync(join(process.cwd(), "scripts"), join(root, "scripts"), "dir");
 	const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
@@ -84,7 +84,7 @@ test("gate databases are dropped even when direct fixture cleanup exceeds the de
   const database=await testDatabase({schema:"empty"});
   await Bun.write(${JSON.stringify(join(root, "database.url"))},database.url);
   const close=database.close;
-  database.close=async()=>{await Bun.sleep(21_000);await close();};
+  database.close=async()=>{await Bun.sleep(1_500);await close();};
  });
  `,
 	);
@@ -94,6 +94,9 @@ test("gate databases are dropped even when direct fixture cleanup exceeds the de
 				process.execPath,
 				"test",
 				"probe.test.ts",
+				// A one-second default hook limit stands in for Bun's twenty: the slow cleanup outlasts it in 1.5 s.
+				"--timeout",
+				"1000",
 				"--test-name-pattern",
 				"slow direct fixture cleanup|a shard that left no report",
 			],
