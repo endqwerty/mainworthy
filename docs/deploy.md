@@ -870,9 +870,10 @@ the steps are kept below for an instance that has none.
   tracks a future timing gate. Job timeouts still stop hung jobs.
 - **Reporting waits out a deploy after choosing the instance.** The gate's CLI health checks, shard reports
   and verdict requests make up to twelve attempts through connection failures and HTTP 502, 503 or 504. Each attempt
-  has ten seconds, with ten seconds between attempts. All commands share a 230-second retry window within
-  the nine-minute job, so each shard cannot start another full wait. A 4xx or other definite refusal returns
-  immediately. A lasting outage still fails the job. A retry sends the same report body, whose batch key
+  has ten seconds, with ten seconds between attempts. A 230-second retry window starts with the first failing
+  request, including that attempt. Commands waiting through the same outage share what remains; a successful
+  response resets the window so a later outage gets its full budget within the nine-minute job. A 4xx or other
+  definite refusal returns immediately. A lasting outage still fails the job. A retry sends the same report body, whose batch key
   recovers the original receipt without recording results twice, including after a lost reply. Interactive
   CLI commands keep their existing behavior. Initial instance selection keeps its short probe and fallback
   to the job's own Mainworthy when the deployed instance cannot be used.

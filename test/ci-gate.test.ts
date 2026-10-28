@@ -470,6 +470,48 @@ test("CI recovers a connection failure and a lost report reply without recording
 	});
 });
 
+test("CI gives a late outage a full shared budget and resets it after recovery", async () => {
+	let now = 0;
+	const clock = spyOn(Date, "now").mockImplementation(() => now);
+	let failing = false;
+	let failures = 0;
+	const pauses: number[] = [];
+	const request = deploymentFetch(
+		{
+			attempts: 3,
+			pauseMs: 10,
+			timeoutMs: 10,
+			fetch: async () => {
+				if (failing) {
+					failures++;
+					throw new Error("connection lost during deploy");
+				}
+				return Response.json({ ok: true });
+			},
+		},
+		async (ms) => {
+			pauses.push(ms);
+			now += ms;
+			failing = false;
+		},
+	);
+	try {
+		for (const time of [0, 1000, 2000]) {
+			now = time;
+			expect((await request("https://mainworthy.example/health")).ok).toBe(true);
+		}
+		for (const time of [3000, 6000]) {
+			now = time;
+			failing = true;
+			expect((await request("https://mainworthy.example/api/p/scratch/gate")).ok).toBe(true);
+		}
+		expect(failures).toBe(2);
+		expect(pauses).toEqual([10, 10]);
+	} finally {
+		clock.mockRestore();
+	}
+});
+
 test("CI stops retrying unreachable requests and shares its deadline across commands", async () => {
 	let unreachableCalls = 0;
 	const unreachable = deploymentFetch({

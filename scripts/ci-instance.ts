@@ -34,17 +34,25 @@ export type Probe = {
 export const PROBE: Probe = { fetch, attempts: 3, pauseMs: 1000, timeoutMs: 5000 };
 
 /**
- * CI's JSON requests can meet a deploy after the instance was chosen. Every command shares one deadline,
- * rather than waiting another four minutes for each shard. Ordinary CLI commands never use this transport.
+ * CI's JSON requests can meet a deploy after the instance was chosen. Commands share one deadline per outage,
+ * rather than waiting another four minutes for each shard. Recovery clears the deadline.
+ * Ordinary CLI commands never use this transport.
  */
 export function deploymentFetch(
 	probe: Probe = { fetch, attempts: 12, pauseMs: 10_000, timeoutMs: 10_000 },
 	pause: (ms: number) => Promise<unknown> = Bun.sleep,
 ): Probe["fetch"] {
-	const deadline = Date.now() + probe.attempts * probe.timeoutMs + (probe.attempts - 1) * probe.pauseMs;
+	const budgetMs = probe.attempts * probe.timeoutMs + (probe.attempts - 1) * probe.pauseMs;
+	let deadline: number | undefined;
+	const canRetry = (attempt: number, started: number): boolean => {
+		// Charge the failed attempt to the outage, but spend no budget while requests succeed.
+		deadline ??= started + budgetMs;
+		return attempt < probe.attempts && Date.now() + probe.pauseMs < deadline;
+	};
 	return async (url, init = {}) => {
 		for (let attempt = 1; ; attempt++) {
-			const left = deadline - Date.now();
+			const started = Date.now();
+			const left = deadline === undefined ? probe.timeoutMs : deadline - started;
 			const timeout = AbortSignal.timeout(left > 0 ? Math.min(probe.timeoutMs, left) : probe.timeoutMs);
 			try {
 				const response = await probe.fetch(url, {
@@ -65,15 +73,17 @@ export function deploymentFetch(
 								.json()
 								.catch(() => null),
 						).success
-					)
+					) {
+						if (buffered.ok) deadline = undefined;
 						return buffered;
-					if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return buffered;
+					}
+					if (!canRetry(attempt, started)) return buffered;
 				} else {
-					if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return response;
+					if (!canRetry(attempt, started)) return response;
 					await response.body?.cancel();
 				}
 			} catch (error) {
-				if (init.signal?.aborted || attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) throw error;
+				if (init.signal?.aborted || !canRetry(attempt, started)) throw error;
 			}
 			await pause(probe.pauseMs);
 		}
