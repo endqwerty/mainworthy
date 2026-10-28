@@ -11,6 +11,7 @@ import {
 
 export const MethodKind = z.enum(["human", "auto", "agent"]);
 export type MethodKind = z.infer<typeof MethodKind>;
+export const Methods = z.array(MethodKind).min(1);
 /** What each way of running a case is called, in every client. */
 export const METHOD_LABELS: Record<MethodKind, string> = { human: "Person", auto: "Pipeline", agent: "Agent" };
 
@@ -65,7 +66,7 @@ export const CaseBody = z.object({
 	pre: schemaText,
 	steps: z.array(Step),
 	/** Who may produce evidence for this case. Never empty. */
-	methods: z.array(MethodKind).min(1),
+	methods: Methods,
 	automate: Automate,
 	/** Custom field values, including keys without a project definition. */
 	fields: z.record(schemaText, schemaText),

@@ -189,3 +189,95 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const method of ["human", "agent"] as const)
+	test.skipIf(!browserAvailable)(
+		`cockpit selects only work admitted by pinned case and run for ${method} (987)`,
+		async () => {
+			const server = await startServer({ seed: false });
+			const opposite = method === "human" ? "agent" : "human";
+			await server.api("propose", {
+				edits: ([opposite, method, opposite, method] as const).map((kind, index) => ({
+					op: "create",
+					body: { title: `Method case ${index + 1}`, methods: [kind] },
+				})),
+			});
+			const planned = await server.api("plan", {
+				name: "Mixed methods",
+				select: {},
+				require: [{ id: "exercise", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
+			});
+			const restricted = await server.api("plan", {
+				name: "Other method only",
+				select: {},
+				require: [{ id: "exercise", kind: "exercise", methods: [opposite], minActors: 1, basis: "exact" }],
+			});
+			const excludedCases = await server.api("plan", {
+				name: "Other cases only",
+				select: { cases: ["C-1", "C-3"] },
+				require: [{ id: "exercise", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
+			});
+			const token = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: `method-${method}`,
+					kind: method,
+					can: ["read", "record"],
+					project: "scratch",
+				}),
+			).token;
+			const h = await openPage({ ...server, token }, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
+			try {
+				await h.page.locator('[data-run-document][data-active="true"]').waitFor();
+				expect(await h.page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-2",
+				);
+				const next = h.page.getByRole("complementary", { name: "Up next" });
+				expect(await next.innerText()).toContain("C-4");
+				expect(await next.innerText()).not.toContain("C-1");
+				expect(await next.innerText()).not.toContain("C-3");
+				await h.page.keyboard.press("p");
+				await h.page.locator('[data-run-document="C-4"][data-active="true"]').waitFor();
+				await h.page.keyboard.press("p");
+				await h.page.getByText("Nothing left for you to run.", { exact: false }).waitFor();
+				expect(await next.count()).toBe(0);
+				await h.page.goto(`${server.url}/p/scratch/runs/${excludedCases.run.slice(2)}`);
+				await h.page.getByText("Nothing left for you to run.", { exact: false }).waitFor();
+				expect(await next.count()).toBe(0);
+				expect(await h.page.locator('[data-run-document][data-active="true"]').count()).toBe(0);
+				await h.page.goto(`${server.url}/p/scratch/runs/${restricted.run.slice(2)}`);
+				await h.page.getByText("Nothing left for you to run.", { exact: false }).waitFor();
+				expect(await next.count()).toBe(0);
+				expect(await h.page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
+				await server.api("propose", {
+					edits: [{ op: "create", body: { title: "Both methods", methods: ["human", "agent"] } }],
+				});
+				for (const order of [
+					[opposite, method],
+					[method, opposite],
+				] as const) {
+					const separate = await server.api("plan", {
+						name: `Separate ${order.join(",")}`,
+						select: { cases: ["C-5"] },
+						require: order.map((kind) => ({
+							id: kind,
+							kind: "exercise",
+							methods: [kind],
+							minActors: 1,
+							basis: "exact",
+						})),
+					});
+					await h.page.goto(`${server.url}/p/scratch/runs/${separate.run.slice(2)}`);
+					await h.page.locator('[data-run-document="C-5"][data-active="true"]').waitFor();
+					expect(await h.page.locator(".run-dot.on").getAttribute("aria-label")).toStartWith(
+						`Slot ${order.indexOf(method) + 1}: C-5,`,
+					);
+					await h.page.keyboard.press("p");
+					await h.page.getByText("Nothing left for you to run.", { exact: false }).waitFor();
+				}
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+	);

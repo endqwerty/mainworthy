@@ -160,7 +160,7 @@ Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots, including your earlier 
 Recording a result moves on to the next slot waiting for your first report and passes over the others.
 You can also click a slot to reopen it and correct your result.
 The header's "N left in run" counts unfinished slots across all people. Skipped and blocked slots stay in that count.
-"Nothing left for you to run" means no unfinished slot is waiting for your first report.
+"Nothing left for you to run" means no unfinished slot that admits your method is waiting for your first report.
 The run can still be pending because a result was skipped or blocked, or another required person has yet to report.
 If browser storage is available, the run keeps unfinished notes on this device until the server records the result.
 If a report's reply is lost, unreadable, interrupted by an internal server error, or arrives after
@@ -367,6 +367,11 @@ The cockpit shows each live lease's holder and when work began.
 The header counts in-progress slots. Evidence counts and the verdict stay separate.
 Updates from other producers arrive through the existing live connection.
 The web cockpit skips other holders' slots during automatic navigation and includes them again when their leases expire.
+Initial selection, **Up next**, and advancing after a result include only slots whose pinned case and own exercise
+requirement admit your method (human or agent). When no unreported slots admit your method, the cockpit says
+**Nothing left for you to run**, even if the run still needs evidence from other methods.
+New plans and case proposals store each method once, accepting repeated method names.
+Slot admission also deduplicates methods in older stored records.
 You can still click a held slot or select it with <kbd>j</kbd> or <kbd>k</kbd> and record a result.
 Recording a qualifying result releases that slot's lease, including when someone else holds it.
 Unassigned slots without a lease say **Available**, and **yours** means the slot is assigned to you. A slot someone holds, you included, shows **In progress** with who holds it.
@@ -384,7 +389,8 @@ $ mainworthy work --do take --run R-2
 
 Include `--slot 123` to take a named slot or renew your lease. `--seconds 900` requests
 a length between 30 and 86400 seconds, with 900 as the default. The server sets the
-start and end. You must have a method admitted by both the run and its pinned case.
+start and end. You must have a method admitted by both that slot’s own exercise requirement and its pinned case.
+Case and exercise method lists may contain duplicates; slot replies and admission use each method once.
 Another holder's lease refuses the take and names the holder and deadline.
 A null slot means no eligible unfinished slot is free. Two simultaneous next-slot
 requests get different slots.
@@ -393,3 +399,5 @@ Give the slot back with `mainworthy work --do give-back --run R-2 --slot 123`.
 A qualifying result from any producer ends the lease. Expiry frees it without a
 background cleanup job. Closing a run also ends its leases. A lease changes neither
 the evidence a run counts nor its verdict.
+
+A plan accepts at most 1,024 obligations, with at most 1,024 jobs in each jobs obligation. Archive imports apply the same limits.

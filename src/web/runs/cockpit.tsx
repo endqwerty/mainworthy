@@ -309,8 +309,10 @@ function ProjectRunCockpit({
 		(slot.state === "missing" || slot.state === "skipped") && local.get(slot.id)?.state !== "pending";
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
 	const held = (slot: Slot) => slot.work.kind === "held" && workHeldByOther(slot.work, session.actor, now);
-	const available = (slot: Slot) => unreported(slot) && !held(slot);
-	const first = slots.find(available) ?? (hasNextPage ? undefined : slots.find((slot) => !held(slot)));
+	const admitsMethod = (slot: Slot) => slot.admittedMethods.includes(method);
+	const available = (slot: Slot) => admitsMethod(slot) && unreported(slot) && !held(slot);
+	const first =
+		slots.find(available) ?? (hasNextPage ? undefined : slots.find((slot) => admitsMethod(slot) && !held(slot)));
 	if (cursor === null && first) setCursor(first.id);
 	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -346,17 +348,14 @@ function ProjectRunCockpit({
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const { body: currentBody } = usePinnedCase(current);
-	const admittedMethod = !!(
-		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
-		(!currentBody || currentBody.methods.includes(method))
-	);
+	const admittedMethod = !!current && admitsMethod(current);
 	const canRecord = !!(
 		current &&
 		canReport &&
 		(uncertain.has(current.id) || (!external(current) && isOpen && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
-	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
+	const allReported = slots.length > 0 && !slots.some((slot) => admitsMethod(slot) && unreported(slot)) && !hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [current?.id]);

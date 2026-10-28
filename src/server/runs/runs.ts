@@ -1893,6 +1893,12 @@ export async function plan(
 	},
 ): Promise<{ run: RunRow; slots: number; already: number }> {
 	if (input.cases.length === 0) throw invalid("the selection matches no active case");
+	input = {
+		...input,
+		require: input.require.map((obligation) =>
+			obligation.kind === "exercise" ? { ...obligation, methods: [...new Set(obligation.methods)] } : obligation,
+		),
+	};
 	const ids = new Set(input.require.map((o) => o.id));
 	if (ids.size !== input.require.length) throw invalid("obligation ids must be unique within a run");
 	const exercises = input.require.filter((o): o is ExerciseObligation => o.kind === "exercise");

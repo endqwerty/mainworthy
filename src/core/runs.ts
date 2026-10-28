@@ -1,7 +1,7 @@
 // Runs as requests for evidence: what a run accepts, what it requires, and the pure rules that turn evidence
 // into a slot state and a verdict (decision 0008, items 3 and 4). No I/O here: the server folds, this decides.
 import { z } from "zod";
-import { MethodKind } from "./model.ts";
+import { type MethodKind, Methods } from "./model.ts";
 import {
 	counts as schemaCounts,
 	flag as schemaFlag,
@@ -38,13 +38,16 @@ export type TargetMatch = z.infer<typeof TargetMatch>;
 export const BasisRule = z.enum(["exact", "exact-or-assumed", "same-claim"]);
 export type BasisRule = z.infer<typeof BasisRule>;
 
+export const MAX_OBLIGATIONS = 1024;
+export const MAX_JOBS = 1024;
+
 /** What a run needs before it is complete. Not a requirement in the tracker sense. */
 export const Obligation = z.discriminatedUnion("kind", [
 	z.object({
 		id: schemaText,
 		kind: z.literal("exercise"),
 		/** Which producers may fill the slot. An agent is admitted only when named here. */
-		methods: z.array(MethodKind).min(1),
+		methods: Methods,
 		minActors: z.union([z.literal(1), z.literal(2)]),
 		basis: BasisRule,
 	}),
@@ -52,10 +55,29 @@ export const Obligation = z.discriminatedUnion("kind", [
 	 * Named CI jobs must each have an applied report on the run's target: a pipeline's report that ran something,
 	 * not an agent's and not one of skips only. A `self` run cannot require a job.
 	 */
-	z.object({ id: schemaText, kind: z.literal("jobs"), jobs: schemaTexts.min(1) }),
+	z.object({ id: schemaText, kind: z.literal("jobs"), jobs: schemaTexts.min(1).max(MAX_JOBS) }),
 ]);
 export type Obligation = z.infer<typeof Obligation>;
 export type ExerciseObligation = Extract<Obligation, { kind: "exercise" }>;
+
+/**
+ * Index exercise methods once before reading a page of slots, including legacy duplicate lists. Only exercise
+ * obligations have slots, so only the ones the page's slots name are indexed; any other id admits nothing.
+ */
+export function obligationMethods(
+	obligations: readonly Obligation[],
+	slots: ReadonlySet<string>,
+): ReadonlyMap<string, ReadonlySet<MethodKind>> {
+	const methods = new Map<string, ReadonlySet<MethodKind>>();
+	const unresolved = new Set(slots);
+	if (!unresolved.size) return methods;
+	for (const obligation of obligations) {
+		if (!unresolved.delete(obligation.id)) continue;
+		if (obligation.kind === "exercise") methods.set(obligation.id, new Set(obligation.methods));
+		if (!unresolved.size) break;
+	}
+	return methods;
+}
 
 export const Verdict = z.enum(["passed", "failed", "blocked", "pending"]);
 export type Verdict = z.infer<typeof Verdict>;

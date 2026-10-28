@@ -3,7 +3,7 @@ import { jobOp } from "../src/server/ops/jobs.ts";
 import { invokeService } from "../src/server/ops/registry.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
 import { ciReport, harness } from "./helpers.ts";
-import { BEFORE_EIGHT } from "./migration-undo.ts";
+import { BEFORE_EIGHT, BEFORE_NINE } from "./migration-undo.ts";
 
 test("wide reports commit before mapping all files, then durable pages finish them", async () => {
 	const h = await harness({ unlinked: "create" });
@@ -212,6 +212,7 @@ test("migration 7 preserves unfinished mapping jobs from schema 6", async () => 
 		await h.call("report", input);
 		await h.app.database.write((db) =>
 			db.transaction(async () => {
+				await db.exec(BEFORE_NINE);
 				await db.exec(BEFORE_EIGHT);
 				await db.exec(`UPDATE background_jobs j SET input=jsonb_build_object('project',p.project,'producer',p.producer,'files',p.files::jsonb)::text FROM report_map_pages p WHERE j.input::jsonb->>'page'=p.id;
     DROP TABLE report_map_pages;

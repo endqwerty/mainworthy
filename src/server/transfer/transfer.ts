@@ -6,6 +6,7 @@ import { Policy } from "../../core/kinds.ts";
 import { CaseBody } from "../../core/model.ts";
 import { ResultIn, resultDuration } from "../../core/ops.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
+import { MAX_OBLIGATIONS, Obligation } from "../../core/runs.ts";
 import { readSubject } from "../decisions/questions.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { restoreReportMapJobs } from "../evidence/report-maps.ts";
@@ -577,6 +578,7 @@ export async function importArchive(
 					let body: CaseBody;
 					try {
 						body = CaseBody.parse(JSON.parse(z.string().parse(entry.r.get("body"))));
+						entry.r.set("methods", JSON.stringify([...new Set(body.methods)]));
 					} catch {
 						throw invalid(
 							`invalid archive versions.body for row (case_id ${entry.r.get("case_id")}, no ${entry.r.get("no")}) on line ${position}: expected a valid CaseBody`,
@@ -587,6 +589,17 @@ export async function importArchive(
 							throw invalid(
 								`invalid archive versions.${column} for row (case_id ${entry.r.get("case_id")}, no ${entry.r.get("no")}) on line ${position}: case body hash mismatch`,
 							);
+					}
+				}
+				if (entry.t === "runs") {
+					try {
+						z.array(Obligation)
+							.max(MAX_OBLIGATIONS)
+							.parse(JSON.parse(z.string().parse(entry.r.get("require"))));
+					} catch {
+						throw invalid(
+							`invalid archive runs.require on line ${position}: obligation or job limit exceeded, or invalid obligation`,
+						);
 					}
 				}
 				const duration = entry.r.get("duration_ms");
