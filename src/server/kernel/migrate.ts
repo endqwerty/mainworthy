@@ -7,14 +7,16 @@ import reportSpans from "./migrations/0005-report-spans.sql" with { type: "text"
 import projectRemovalIndexes from "./migrations/0006-project-removal-indexes.sql" with { type: "text" };
 import reportMapPages from "./migrations/0007-report-map-pages.sql" with { type: "text" };
 import identityProviderOnly from "./migrations/0008-identity-provider-only.sql" with { type: "text" };
+import versionMethods from "./migrations/0009-version-methods.sql" with { type: "text" };
 import baseline from "./schema.sql" with { type: "text" };
 
 // PostgreSQL starts a new schema lineage; archive 43 followed the final SQLite archive format (42), migration 7
-// moved it to 44 and migration 8 to 45.
-export const SCHEMA_VERSION = 8;
-export const ARCHIVE_VERSION = 45;
+// moved it to 44, migration 8 to 45 and migration 9 to 46.
+export const SCHEMA_VERSION = 9;
+export const ARCHIVE_VERSION = 46;
 /** The archive format each schema version records in its ledger. */
-const archiveOf = (version: number): number => (version < 7 ? 43 : version < 8 ? 44 : ARCHIVE_VERSION);
+const archiveOf = (version: number): number =>
+	version < 7 ? 43 : version < 8 ? 44 : version < 9 ? 45 : ARCHIVE_VERSION;
 export const migrationHash = createHash("sha256")
 	.update(projectLocks)
 	.update(sharedIdentity)
@@ -23,6 +25,7 @@ export const migrationHash = createHash("sha256")
 	.update(projectRemovalIndexes)
 	.update(reportMapPages)
 	.update(identityProviderOnly)
+	.update(versionMethods)
 	.digest("hex");
 const hash = createHash("sha256").update(baseline).digest("hex");
 
@@ -130,6 +133,7 @@ export async function migrate(database: Database): Promise<void> {
 			await db.exec(projectRemovalIndexes);
 			await db.exec(reportMapPages);
 			await db.exec(identityProviderOnly);
+			await db.exec(versionMethods);
 			for (const [key, value] of Object.entries({
 				schema_version: String(SCHEMA_VERSION),
 				baseline_hash: hash,
@@ -149,6 +153,12 @@ export async function migrate(database: Database): Promise<void> {
 			if ((await schemaVersion(db)) < 8) {
 				await db.exec(identityProviderOnly);
 				await db.exec("UPDATE meta SET value = '8' WHERE key = 'schema_version'");
+			}
+			if ((await schemaVersion(db)) < 9) {
+				await db.exec(versionMethods);
+				await db.exec(
+					"UPDATE meta SET value = '9' WHERE key = 'schema_version'; UPDATE meta SET value = '46' WHERE key = 'archive_version'",
+				);
 			}
 		});
 	});

@@ -1,7 +1,12 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { verifyAudit } from "../src/core/audit.ts";
+import { versionHash } from "../src/core/hash.ts";
+import { emptyBody, type MethodKind } from "../src/core/model.ts";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import { REPLIES } from "../src/core/replies.ts";
 import type { ResultStep } from "../src/core/results.ts";
+import { type Obligation, obligationMethods } from "../src/core/runs.ts";
 import {
 	batchById,
 	excuseForResult,
@@ -209,6 +214,263 @@ for (const invalidObligation of ["missing", "jobs"] as const) {
 		});
 	});
 }
+test("slot replies carry pinned case methods across pages after the case head changes (987)", async () => {
+	h = await harness();
+	await h.call("propose", {
+		edits: [
+			{ op: "create", body: { title: "Human case", methods: ["human"] } },
+			{ op: "create", body: { title: "Agent case", methods: ["agent"] } },
+		],
+	});
+	await h.call("plan", { name: "Pinned methods", select: {} });
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { methods: ["agent"] } }] });
+	const firstPage = await h.call<{ items: unknown[]; cursor: string }>("find", { in: "slots", run: "R-1", limit: 1 });
+	expect(firstPage.items).toMatchObject([{ case: "C-1", version: 1, head: 2, methods: ["human"] }]);
+	const secondPage = await h.call<{ items: unknown[] }>("find", {
+		in: "slots",
+		run: "R-1",
+		limit: 1,
+		cursor: firstPage.cursor,
+	});
+	expect(secondPage.items).toMatchObject([{ case: "C-2", methods: ["agent"] }]);
+});
+
+test("stored duplicate case and obligation methods still read and round-trip", async () => {
+	h = await harness();
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Legacy", methods: ["human"] } }] });
+	await h.call("plan", { name: "Legacy", select: {} });
+	const methods = ["human", "human", "agent", "human"];
+	const body = { ...emptyBody("Legacy"), methods: ["human", "human", "agent", "human"] as const };
+	const hash = versionHash({ ...body, methods: [...body.methods] });
+	await h.app.database.write((db) =>
+		db.transaction(async () => {
+			await db.run(
+				sql<readonly SqlValue[]>('UPDATE versions SET body = $1, methods = \'["human","agent"]\', hash = $2'),
+				[JSON.stringify(body), hash],
+			);
+			await db.run(sql<readonly SqlValue[]>("UPDATE cases SET methods = $1, head_hash = $2"), [
+				JSON.stringify(methods),
+				hash,
+			]);
+			await db.run(
+				sql<readonly SqlValue[]>(
+					"UPDATE runs SET require = jsonb_set(require::jsonb, '{0,methods}', $1::text::jsonb)::text",
+				),
+				[JSON.stringify(methods)],
+			);
+		}),
+	);
+	await h.call("get", { refs: ["C-1"] });
+	REPLIES.get.parse(await h.call("get", { refs: ["R-1"] }));
+	REPLIES.find.parse(await h.call("find", { in: "runs" }));
+	const audit = await h.call<{ ndjson: string }>("audit", {});
+	expect(verifyAudit(audit.ndjson).project).toBe("scratch");
+	const expected = [{ methods: ["human", "agent"], admittedMethods: ["human", "agent"] }];
+	expect((await h.call<{ items: unknown[] }>("find", { in: "slots", run: "R-1" })).items).toMatchObject(expected);
+	expect(await h.call("work", { do: "take", run: "R-1" })).toMatchObject({ slot: 1, work: { kind: "held" } });
+	const chunks: string[] = [];
+	await h.app.database.write((db) => db.transaction(() => exportArchive(db, (chunk) => chunks.push(chunk))));
+	const fixture = await testDatabase();
+	const restored = await Database.open({ url: fixture.url });
+	try {
+		await restored.write((db) => importArchive(db, linesOf(chunks.join(""))));
+		const rows = await restored.read((db) => db.all(sql<readonly [], { body: string }>("SELECT body FROM versions")));
+		expect(JSON.parse(rows[0]?.body ?? "{}").methods).toEqual(methods);
+		const runs = await restored.read((db) => db.all(sql<readonly [], { require: string }>("SELECT require FROM runs")));
+		expect(JSON.parse(runs[0]?.require ?? "[]")[0].methods).toEqual(methods);
+	} finally {
+		await restored.close();
+		await fixture.close();
+	}
+	REPLIES.get.parse(await h.call("get", { refs: ["R-1"] }));
+	expect((await h.call<{ items: unknown[] }>("find", { in: "slots", run: "R-1" })).items).toMatchObject(expected);
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Duplicates accepted", methods } }] });
+	await h.call("plan", {
+		name: "Duplicates accepted",
+		select: {},
+		require: [{ id: "exercise", kind: "exercise", methods, minActors: 1, basis: "exact" }],
+	});
+});
+
+test("exercise method index visits a legacy duplicate list only once for a page", () => {
+	const methods: MethodKind[] = Array.from({ length: 250_000 }, () => "auto");
+	methods.push("human");
+	let visited = 0;
+	methods[Symbol.iterator] = function* (): Generator<MethodKind, undefined> {
+		for (let i = 0; i < this.length; i++) {
+			visited++;
+			const method = this[i];
+			if (method !== undefined) yield method;
+		}
+		return undefined;
+	};
+	const index = obligationMethods(
+		[
+			{ id: "exercise", kind: "exercise", methods, minActors: 1, basis: "exact" },
+			{ id: "agent", kind: "exercise", methods: ["agent"], minActors: 1, basis: "exact" },
+			{ id: "jobs", kind: "jobs", jobs: ["tests"] },
+		],
+		new Set(["exercise", "jobs"]),
+	);
+	for (let slot = 0; slot < 500; slot++) {
+		expect(index.get("exercise")?.has("human")).toBe(true);
+		expect(index.get("exercise")?.has("agent")).toBe(false);
+	}
+	expect([...(index.get("exercise") ?? [])]).toEqual(["auto", "human"]);
+	// Only an exercise obligation a slot on the page names is indexed: not jobs, and not one no slot asks for.
+	expect(index.has("jobs")).toBe(false);
+	expect(index.has("agent")).toBe(false);
+	expect(visited).toBe(methods.length);
+	// Stored data with a repeated id: the first obligation with it decides, so a jobs one admits nothing.
+	const repeated = obligationMethods(
+		[
+			{ id: "x", kind: "jobs", jobs: ["tests"] },
+			{ id: "x", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" },
+		],
+		new Set(["x"]),
+	);
+	expect(repeated.has("x")).toBe(false);
+});
+
+test("a full slot page reads a stored large duplicate obligation", async () => {
+	h = await harness();
+	await h.call("propose", {
+		edits: Array.from({ length: 500 }, (_, i) => ({
+			op: "create",
+			body: { title: `Legacy ${i}`, methods: ["human"] },
+		})),
+	});
+	await h.call("plan", { name: "Legacy page", select: {} });
+	const methods = [...Array.from({ length: 250_000 }, () => "auto"), "human"];
+	await h.app.database.write((db) =>
+		db.transaction(() =>
+			db.run(
+				sql<readonly SqlValue[]>(
+					"UPDATE runs SET require = jsonb_set(require::jsonb, '{0,methods}', $1::text::jsonb)::text",
+				),
+				[JSON.stringify(methods)],
+			),
+		),
+	);
+	const page = await h.call<{ items: { methods: string[]; admittedMethods: string[] }[] }>("find", {
+		in: "slots",
+		run: "R-1",
+		limit: 500,
+	});
+	expect(page.items).toHaveLength(500);
+	expect(
+		page.items.every(
+			(slot) => JSON.stringify(slot.methods) === '["human"]' && JSON.stringify(slot.admittedMethods) === '["human"]',
+		),
+	).toBe(true);
+});
+
+test("new plans and case proposals store each method once", async () => {
+	h = await harness();
+	const methods = ["auto", "auto", "human", "auto", "agent", "human"];
+	await h.call("propose", { edits: [{ op: "create", body: { title: "Compact", methods } }] });
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated", methods } }] });
+	await h.call("plan", {
+		name: "Compact",
+		select: {},
+		require: [{ id: "exercise", kind: "exercise", methods, minActors: 1, basis: "exact" }],
+	});
+	const stored = await h.app.database.read(async (db) => ({
+		runs: await db.all(sql<readonly [], { require: string }>("SELECT require FROM runs")),
+		proposals: await db.all(sql<readonly [], { edits: string }>("SELECT edits FROM proposals")),
+		versions: await db.all(sql<readonly [], { body: string }>("SELECT body FROM versions")),
+	}));
+	expect(JSON.parse(stored.runs[0]?.require ?? "[]")[0].methods).toEqual(["auto", "human", "agent"]);
+	for (const proposal of stored.proposals)
+		expect(JSON.parse(proposal.edits)[0].body.methods).toEqual(["auto", "human", "agent"]);
+	for (const version of stored.versions) expect(JSON.parse(version.body).methods).toEqual(["auto", "human", "agent"]);
+});
+
+for (const order of [
+	["human", "agent"],
+	["agent", "human"],
+])
+	test(`slot admitted methods follow their own obligation: ${order.join(",")}`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Both", methods: ["human", "agent"] } }] });
+		await h.call("plan", {
+			name: "Separate obligations",
+			select: {},
+			require: order.map((method) => ({
+				id: method,
+				kind: "exercise",
+				methods: [method],
+				minActors: 1,
+				basis: "exact",
+			})),
+		});
+		expect((await h.call<{ items: unknown[] }>("find", { in: "slots", run: "R-1" })).items).toMatchObject(
+			order.map((method) => ({ case: "C-1", methods: ["human", "agent"], admittedMethods: [method] })),
+		);
+	});
+
+test("large pinned bodies stay out of a 500-slot page", async () => {
+	h = await harness();
+	await h.call("propose", {
+		edits: Array.from({ length: 500 }, (_, i) => ({ op: "create", body: { title: `Large ${i}`, methods: ["human"] } })),
+	});
+	await h.call("plan", {
+		name: "Many obligations",
+		select: {},
+		require: Array.from({ length: 1 }, (_, i) => ({
+			id: `exercise-${i}`,
+			kind: "exercise",
+			methods: ["human"],
+			minActors: 1,
+			basis: "exact",
+		})),
+	});
+	await h.app.database.write((db) =>
+		db.transaction(() =>
+			db.run(
+				sql<readonly SqlValue[]>(
+					"UPDATE versions SET body = jsonb_set(jsonb_set(body::jsonb, '{methods}', $1::text::jsonb), '{pre}', to_jsonb(repeat('x', 4000000)))::text",
+				),
+				[JSON.stringify(Array.from({ length: 10000 }, () => "human"))],
+			),
+		),
+	);
+	const reply = await h.call<{ items: { methods: string[]; admittedMethods: string[] }[] }>("find", {
+		in: "slots",
+		run: "R-1",
+		limit: 500,
+	});
+	const projection = declaredSql().find((q) => /AS pinned_(body|methods)/.test(q.text));
+	expect(projection).toBeDefined();
+	expect(projection?.text).not.toMatch(/SELECT c\.\*|\bbody\b/);
+	expect(projection?.text).toContain("unnest");
+	expect(reply.items).toHaveLength(500);
+	expect(reply.items[0]).toMatchObject({ methods: ["human"], admittedMethods: ["human"] });
+	expect(
+		reply.items.every(
+			(slot) => JSON.stringify(slot.methods) === '["human"]' && JSON.stringify(slot.admittedMethods) === '["human"]',
+		),
+	).toBe(true);
+});
+
+for (const corruption of ["missing", "json", "shape"])
+	test(`slot metadata survives a ${corruption} pinned version`, async () => {
+		h = await harness();
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Keep title", methods: ["human"] } }] });
+		await h.call("plan", { name: "Damaged history", select: {} });
+		await h.app.database.write((db) =>
+			db.transaction(() =>
+				corruption === "missing"
+					? db.run(sql("UPDATE slots SET version = 999"))
+					: db.run(sql<readonly SqlValue[]>("UPDATE versions SET body = $1, methods = '[]'"), [
+							corruption === "json" ? "{" : JSON.stringify({ title: "Wrong shape", methods: "human" }),
+						]),
+			),
+		);
+		expect((await h.call<{ items: unknown[] }>("find", { in: "slots", run: "R-1" })).items).toMatchObject([
+			{ case: "C-1", title: "Keep title", methods: [], admittedMethods: [] },
+		]);
+	});
 
 test("counting sibling failures reads their standing in batches", async () => {
 	h = await harness();
@@ -1592,4 +1854,35 @@ test("batched run lanes leave the same rows as ordered scalar upserts", async ()
 				expect(await db.all(snapshot)).toEqual(expected);
 			}),
 	);
+});
+
+test("obligation index stops once page ids resolve, including a jobs first match", () => {
+	const obligations: Obligation[] = [
+		{ id: "slot", kind: "jobs", jobs: ["ci"] },
+		{ id: "slot", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" },
+		...Array.from({ length: 100000 }, (_, i): Obligation => ({ id: `job-${i}`, kind: "jobs", jobs: ["ci"] })),
+	];
+	let visits = 0;
+	obligations[Symbol.iterator] = function* (): Generator<Obligation, undefined> {
+		for (let i = 0; i < this.length; i++) {
+			visits++;
+			const obligation = this[i];
+			if (obligation) yield obligation;
+		}
+		return undefined;
+	};
+	expect(obligationMethods(obligations, new Set(["slot"])).size).toBe(0);
+	expect(visits).toBe(1);
+	visits = 0;
+	expect(obligationMethods(obligations, new Set()).size).toBe(0);
+	expect(visits).toBe(0);
+});
+
+test("new plans bound obligation and job counts", async () => {
+	const { PlanInput } = await import("../src/core/selection.ts");
+	const job = { id: "ci", kind: "jobs", jobs: ["test"] };
+	expect(PlanInput.safeParse({ name: "bounded", select: {}, require: Array(1025).fill(job) }).success).toBe(false);
+	expect(
+		PlanInput.safeParse({ name: "bounded", select: {}, require: [{ ...job, jobs: Array(1025).fill("test") }] }).success,
+	).toBe(false);
 });

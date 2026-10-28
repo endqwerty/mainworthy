@@ -536,6 +536,8 @@ const Proposal = z.looseObject({
 	edits: z.array(ProposalEdit),
 });
 const Slot = z.looseObject({
+	admittedMethods: z.array(MethodKind),
+	methods: z.array(MethodKind),
 	id: whole,
 	case: nullableText,
 	title: nullableText,

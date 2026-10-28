@@ -628,6 +628,7 @@ column versions.case_id: bigint NOT NULL
 column versions.claim_hash: text NOT NULL
 column versions.decision: bigint NOT NULL
 column versions.hash: text NOT NULL
+column versions.methods: text NOT NULL DEFAULT '[]'::text
 column versions.no: bigint NOT NULL
 column versions.parent: bigint NULL
 column versions.proposal: bigint NOT NULL
@@ -1452,6 +1453,8 @@ constraint versions.versions_claim_hash_not_null: NOT NULL claim_hash
 constraint versions.versions_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
 constraint versions.versions_decision_not_null: NOT NULL decision
 constraint versions.versions_hash_not_null: NOT NULL hash
+constraint versions.versions_methods_check: CHECK (((octet_length(methods) <= 64) AND ((methods)::jsonb = ANY (ARRAY['[]'::jsonb, '["human"]'::jsonb, '["auto"]'::jsonb, '["agent"]'::jsonb, '["human", "auto"]'::jsonb, '["human", "agent"]'::jsonb, '["auto", "human"]'::jsonb, '["auto", "agent"]'::jsonb, '["agent", "human"]'::jsonb, '["agent", "auto"]'::jsonb, '["human", "auto", "agent"]'::jsonb, '["human", "agent", "auto"]'::jsonb, '["auto", "human", "agent"]'::jsonb, '["auto", "agent", "human"]'::jsonb, '["agent", "human", "auto"]'::jsonb, '["agent", "auto", "human"]'::jsonb]))))
+constraint versions.versions_methods_not_null: NOT NULL methods
 constraint versions.versions_no_not_null: NOT NULL no
 constraint versions.versions_pkey: PRIMARY KEY (case_id, no)
 constraint versions.versions_proposal_not_null: NOT NULL proposal

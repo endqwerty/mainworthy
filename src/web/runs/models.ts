@@ -49,6 +49,8 @@ export const Fill = z.object({
 });
 export type Fill = z.infer<typeof Fill>;
 export const Slot = z.object({
+	admittedMethods: z.array(MethodKind),
+	methods: z.array(MethodKind),
 	id: schemaNumber,
 	case: schemaText,
 	title: schemaText,

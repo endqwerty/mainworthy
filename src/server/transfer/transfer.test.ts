@@ -178,6 +178,7 @@ const fixtures: Record<string, Row[]> = {
 			no: 2,
 			parent: 1,
 			body,
+			methods: '["human","auto"]',
 			hash: versionHash(parsedBody),
 			claim_hash: claimHash(parsedBody),
 			proposal: 301,
@@ -192,6 +193,7 @@ const fixtures: Record<string, Row[]> = {
 			no: 1,
 			parent: null,
 			body: oldBody,
+			methods: '["human"]',
 			hash: versionHash(parsedOldBody),
 			claim_hash: claimHash(parsedOldBody),
 			proposal: 301,
@@ -1372,7 +1374,9 @@ describe("Mainworthy instance archives", () => {
 		);
 		const to = await target();
 		await importArchive(to, linesOf(await archive(from)));
-		expect(await dump(to)).toEqual(await dump(from));
+		expect(await to.allDynamic("SELECT body,methods FROM versions WHERE case_id=101 AND no=1")).toEqual([
+			{ body: body.replace('["human", "auto"]', '["human", "human", "auto"]'), methods: '["human","auto"]' },
+		]);
 	});
 
 	test("missing slot version pins name the row and preserve the target", async () => {
@@ -1592,7 +1596,7 @@ describe("Mainworthy instance archives", () => {
 		const parsed = CaseBody.parse(JSON.parse(validBody));
 		await from.transaction(async () => {
 			await from.runDynamic(
-				"UPDATE versions SET body = $1, hash = $2, claim_hash = $3 WHERE case_id = 101 AND no = 2",
+				"UPDATE versions SET body = $1, methods = '[\"human\"]', hash = $2, claim_hash = $3 WHERE case_id = 101 AND no = 2",
 				[validBody, versionHash(parsed), claimHash(parsed)],
 			);
 			await from.runDynamic("UPDATE cases SET head_hash = $1, claim_hash = $2 WHERE id = 101", [
@@ -1900,7 +1904,7 @@ describe("Mainworthy instance archives", () => {
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
 		expect(text).toContain(`"schema":${ARCHIVE_VERSION},`);
-		expect(ARCHIVE_VERSION).toBe(45);
+		expect(ARCHIVE_VERSION).toBe(46);
 		await refuse(
 			text.replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
@@ -2174,5 +2178,25 @@ test("archive import leaves a landed change open without naming its landing on t
 	} finally {
 		await from.close();
 		await to.close();
+	}
+});
+
+test("archive refuses excessive obligation and job counts", async () => {
+	const original = await archive(await source());
+	for (const require of [
+		Array.from({ length: 1025 }, (_, i) => ({ id: `ci-${i}`, kind: "jobs", jobs: ["test"] })),
+		[{ id: "ci", kind: "jobs", jobs: Array(1025).fill("test") }],
+	]) {
+		const changed = original
+			.split("\n")
+			.map((line) => {
+				if (!line) return line;
+				if (!line.includes('"t":"runs"')) return line;
+				const entry = JSON.parse(line);
+				if (entry.t === "runs") entry.r.require = JSON.stringify(require);
+				return JSON.stringify(entry);
+			})
+			.join("\n");
+		await refuse(rehash(changed), /runs.require/);
 	}
 });
