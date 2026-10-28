@@ -29,6 +29,7 @@ import type { TrackerPort } from "../trackers/port.ts";
 import { executeTrackerRequest } from "../trackers/requests.ts";
 import { pruneBlobs } from "./blob-prune.ts";
 import { defineServiceOp } from "./registry.ts";
+import { executeReportMaps } from "./report-maps.ts";
 import { executeTrackerPolls } from "./tracker-holds.ts";
 import { applyAccepted } from "./writes.ts";
 
@@ -221,6 +222,9 @@ export function jobOperation(ports: { trackerPort?: TrackerPort; statusPort?: St
 								break;
 							case "assertion-indexes":
 								await rebuildIndexes(app, claim);
+								break;
+							case "report-maps":
+								await executeReportMaps(app, claim, payload);
 								break;
 							case "recover-report":
 								await recoverAccepted(app, claim, z.object({ batch: z.number().int() }).parse(payload).batch);
