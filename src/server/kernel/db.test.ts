@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import { cluster } from "../../../scripts/pg.ts";
 import { drainDatabaseDrops, type TestDatabase, testDatabase } from "../../../test/db.ts";
 import { defaultConfig, openApp } from "./app.ts";
@@ -620,6 +620,40 @@ test("a queued write returns Busy when acquiring a connection exceeds its bound"
 		await first;
 		await second;
 		await queued.close();
+	}
+});
+
+test("a slow write logs its name, the time it waited for a connection and the time it held one (#1084)", async () => {
+	const slow = await Database.open({ url: fixture.url, writePool: 1, slowWriteMs: 50 });
+	const warn = spyOn(console, "warn").mockImplementation(() => {});
+	const entered = barrier();
+	const finish = barrier();
+	try {
+		const first = slow.write(
+			async () => {
+				entered.release();
+				await finish.promise;
+			},
+			{ name: "report in first" },
+		);
+		await entered.promise;
+		const second = slow.write(async (db) => await db.one(Q.count), { name: "report in second" });
+		await Bun.sleep(100);
+		finish.release();
+		await Promise.all([first, second]);
+		const lines = warn.mock.calls.map((call) => String(call[0]));
+		expect(lines).toContainEqual(
+			expect.stringMatching(
+				/^\[mainworthy\] slow write: report in first took \d+ ms: \d+ ms waiting for a connection, \d+ ms holding it$/,
+			),
+		);
+		const waited = lines.find((line) => line.includes("report in second"));
+		expect(waited, lines.join("\n")).toBeDefined();
+		expect(Number(waited?.match(/(\d+) ms waiting/)?.[1])).toBeGreaterThanOrEqual(50);
+	} finally {
+		finish.release();
+		warn.mockRestore();
+		await slow.close();
 	}
 });
 
