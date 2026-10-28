@@ -1,6 +1,40 @@
 import { expect, test } from "bun:test";
+import type { Page } from "playwright-core";
 import { z } from "zod";
 import { advanceClock, browserAvailable, eventually, openPage, startServer, subjectOf } from "./support.ts";
+
+// Hold the body after it has arrived: unmounting a query may abort its fetch, but a parsed reply can still
+// reach the API's authentication check late. A network completion event cannot prove that check has run.
+async function holdLate401(page: Page, path: string): Promise<void> {
+	await page.evaluate((path) => {
+		const fetch = window.fetch;
+		const held = Promise.withResolvers<void>();
+		Reflect.set(window, "releaseLate401", () => {
+			held.resolve();
+			// The API continuation and its callers drain as microtasks before this next task.
+			return new Promise<void>((resolve) => setTimeout(resolve, 0));
+		});
+		Reflect.set(window, "fetch", async (...args: Parameters<typeof fetch>) => {
+			const response = await fetch(...args);
+			if (!response.url.endsWith(path) || response.status !== 401) return response;
+			const json = response.json.bind(response);
+			response.json = async () => {
+				const body: unknown = await json();
+				Reflect.set(window, "late401Arrived", true);
+				await held.promise;
+				return body;
+			};
+			return response;
+		});
+	}, path);
+}
+
+async function releaseLate401(page: Page): Promise<void> {
+	await page.evaluate(async () => {
+		const release: unknown = Reflect.get(window, "releaseLate401");
+		if (typeof release === "function") await release();
+	});
+}
 
 for (const surface of ["case draft", "run note"]) {
 	test.skipIf(!browserAvailable)(
@@ -167,11 +201,11 @@ for (const request of ["session", "link"])
 			);
 			const browser = await openPage(server, { path: "/p/scratch/settings" });
 			const arrived = Promise.withResolvers<number>();
-			const held = Promise.withResolvers<void>();
 			try {
 				const { page } = browser;
 				// A list of sessions is asked for as the person signed in; linking an identity begins as them.
 				const path = request === "session" ? "/api/session" : "/api/login/oidc";
+				await holdLate401(page, path);
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 				await page.getByRole("button", { name: "Link Example ID", exact: true }).waitFor();
 				let intercepted = false;
@@ -181,16 +215,16 @@ for (const request of ["session", "link"])
 					// Get a real expired-session refusal, then hold its reply while this tab signs in again.
 					const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
 					arrived.resolve(response.status());
-					await held.promise;
 					await route.fulfill({ response });
 				});
 				if (request === "session") await page.getByRole("option", { name: "Your sessions", exact: true }).click();
 				else await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
 				expect(await arrived.promise).toBe(401);
+				await page.waitForFunction(() => Reflect.get(window, "late401Arrived") === true);
 				await page.getByRole("button", { name: "Sign out", exact: true }).click();
 				await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 				await page.locator("#token").fill(request === "session" ? next.token : server.token);
-				await page.keyboard.press("Enter");
+				await page.locator("#token").press("Enter");
 				await page.locator("#app").waitFor();
 				const actor = request === "session" ? "sam" : "robin";
 				expect(await page.locator(".sfoot .me").textContent()).toContain(actor);
@@ -201,11 +235,7 @@ for (const request of ["session", "link"])
 						Reflect.set(window, "late401SignOuts", Number(Reflect.get(window, "late401SignOuts")) + 1);
 					});
 				});
-				const completed = page.waitForEvent("requestfinished", {
-					predicate: (sent) => sent.url().endsWith(path),
-				});
-				held.resolve();
-				await completed;
+				await releaseLate401(page);
 				expect(await page.evaluate((): unknown => Reflect.get(window, "late401SignOuts"))).toBe(0);
 				await page.getByRole("link", { name: "Suite", exact: true }).click();
 				await page.keyboard.press("c");
@@ -222,7 +252,7 @@ for (const request of ["session", "link"])
 				expect(await page.locator("#app").count()).toBe(1);
 				expect(browser.errors).toEqual([]);
 			} finally {
-				held.resolve();
+				await releaseLate401(browser.page);
 				await browser.close();
 				await server.stop();
 			}
@@ -237,7 +267,6 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 			const server = await startServer({ mode: "server", provider: true });
 			const browser = await openPage(server, { path: "/p/scratch/settings" });
 			const arrived = Promise.withResolvers<number>();
-			const held = Promise.withResolvers<void>();
 			const otherChecks = Promise.withResolvers<void>();
 			try {
 				const { page, context } = browser;
@@ -258,6 +287,7 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 						: request === "link" || request === "round-trip"
 							? "/api/login/oidc"
 							: "/api/session";
+				await holdLate401(page, path);
 				let intercepted = false;
 				let released = false;
 				await page.route(`**${path}`, async (route) => {
@@ -268,7 +298,6 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 					intercepted = true;
 					const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
 					arrived.resolve(response.status());
-					await held.promise;
 					await route.fulfill({ response });
 				});
 				if (request === "operation") await page.getByRole("link", { name: "Suite", exact: true }).click();
@@ -276,6 +305,7 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 					await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
 				else await page.getByRole("option", { name: "Your sessions", exact: true }).click();
 				expect(await arrived.promise).toBe(401);
+				await page.waitForFunction(() => Reflect.get(window, "late401Arrived") === true);
 				const generation = await page.evaluate(() => localStorage.getItem("mainworthy:auth-generation"));
 				const other = await context.newPage();
 				await other.goto(`${server.url}/p/scratch/settings`);
@@ -305,13 +335,13 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 				await other.getByRole("button", { name: "Sign out", exact: true }).click();
 				await other.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 				await other.locator("#token").fill(next);
-				await other.keyboard.press("Enter");
+				await other.locator("#token").press("Enter");
 				await other.locator("#app").waitFor();
 				if (request === "round-trip") {
 					await other.getByRole("button", { name: "Sign out", exact: true }).click();
 					await other.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 					await other.locator("#token").fill(server.token);
-					await other.keyboard.press("Enter");
+					await other.locator("#token").press("Enter");
 					await other.locator("#app").waitFor();
 				}
 				if (request === "round-trip") otherChecks.resolve();
@@ -328,10 +358,8 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 						Reflect.set(window, "crossTabSignOuts", Number(Reflect.get(window, "crossTabSignOuts")) + 1),
 					);
 				});
-				const completed = page.waitForEvent("requestfinished", { predicate: (sent) => sent.url().endsWith(path) });
 				released = true;
-				held.resolve();
-				await completed;
+				await releaseLate401(page);
 				if (request === "different actor") {
 					await page.locator("#token").waitFor();
 					expect(await page.locator("#app").count()).toBe(0);
@@ -366,7 +394,7 @@ for (const request of ["session", "link", "operation", "round-trip", "different 
 				expect(browser.errors).toEqual([]);
 			} finally {
 				otherChecks.resolve();
-				held.resolve();
+				await releaseLate401(browser.page);
 				await browser.close();
 				await server.stop();
 			}
