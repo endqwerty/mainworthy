@@ -406,6 +406,14 @@ const Q = {
 		 VALUES ($question, $actor, $answer, $reason, $hash, $counts, $at, $seq)`,
 	),
 	answersOf: sql<{ question: number }, AnswerRow>("SELECT * FROM answers WHERE question = $question ORDER BY id"),
+	pendingAnswersOf: sql<{ question: number; hash: string }, AnswerRow>(
+		`SELECT * FROM (
+			SELECT DISTINCT ON (actor) * FROM answers
+			WHERE question = $question AND on_evidence = $hash
+			AND seq > COALESCE((SELECT MAX(seq) FROM decisions WHERE question = $question), 0)
+			ORDER BY actor, seq DESC, id DESC
+		) latest ORDER BY seq, id`,
+	),
 	insertDecision: sql<
 		{
 			hash: string;
@@ -801,6 +809,9 @@ export async function itemReads(
 }
 export const answersOf = async (db: ReadDb, question: number): Promise<AnswerRow[]> =>
 	await db.all(Q.answersOf, { question });
+
+export const pendingAnswersOf = async (db: ReadDb, question: number, hash: string): Promise<AnswerRow[]> =>
+	await db.all(Q.pendingAnswersOf, { question, hash });
 
 export async function insertDecision(
 	ctx: Ctx,

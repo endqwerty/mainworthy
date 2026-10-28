@@ -128,6 +128,7 @@ import {
 	noteCarried,
 	openQuestionIds,
 	openQuestionsOn,
+	pendingAnswersOf,
 	type QuestionRow,
 	type QuestionSubjectInput,
 	questionById,
@@ -696,19 +697,33 @@ export async function* answerSteps(
 	try {
 		if (standing === "counts" && question.kind === "failure" && question.subject.kind === "inherited")
 			return yield* replaceInheritedSteps(ctx, { ...question, subject: question.subject }, input);
-		await insertAnswer(ctx, {
-			question: question.id,
-			answer:
-				question.kind === "signoff" && (ask.approvals ?? 1) > 1
-					? {
-							...given,
-							approval: { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null },
-						}
-					: given,
-			reason: input.reason ?? null,
-			hash: question.evidence_hash,
-			counts: standing === "counts",
-		});
+		const priorApproval =
+			question.kind === "signoff" && given.is === "approve" && (ask.approvals ?? 1) > 1
+				? (await pendingAnswersOf(ctx.db, question.id, question.evidence_hash)).some((row) => {
+						const stored = json<{ is: string; approval?: Signer }>(row.answer);
+						return (
+							row.actor === ctx.actor.id &&
+							row.counts === 1 &&
+							stored.is === "approve" &&
+							stored.approval?.clause === clause.id &&
+							stored.approval.policy === policy.version
+						);
+					})
+				: false;
+		if (!priorApproval)
+			await insertAnswer(ctx, {
+				question: question.id,
+				answer:
+					question.kind === "signoff" && (ask.approvals ?? 1) > 1
+						? {
+								...given,
+								approval: { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null },
+							}
+						: given,
+				reason: input.reason ?? null,
+				hash: question.evidence_hash,
+				counts: standing === "counts",
+			});
 		if (standing === "advice") {
 			ctx.touched.add(questionRef(question));
 			return reply(question, "advised", { needs: describeAsk({ ...ask, agents: "none" }) });
@@ -759,13 +774,8 @@ async function approvalSigners(
 	policy: number,
 ): Promise<Signer[]> {
 	if (question.kind !== "signoff") return [];
-	const after = (await decisionsOf(db, question.id)).at(-1)?.seq ?? 0;
-	const latest = new Map<number, Awaited<ReturnType<typeof answersOf>>[number]>();
-	for (const answer of await answersOf(db, question.id)) {
-		if (answer.seq > after && answer.on_evidence === question.evidence_hash) latest.set(answer.actor, answer);
-	}
 	const signers: Signer[] = [];
-	for (const answer of latest.values()) {
+	for (const answer of await pendingAnswersOf(db, question.id, question.evidence_hash)) {
 		const stored = json<{ is: string; approval?: Signer }>(answer.answer);
 		if (
 			!answer.counts ||

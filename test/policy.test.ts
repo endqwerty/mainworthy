@@ -7,6 +7,7 @@ import { emptyBody } from "../src/core/model.ts";
 import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
 import { folderFor, HANDLERS } from "../src/server/decisions/kinds.ts";
+import { pendingAnswersOf } from "../src/server/decisions/questions.ts";
 import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
 import { Database, isForeignKeyViolation, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { invalid } from "../src/server/kernel/errors.ts";
@@ -3230,7 +3231,65 @@ for (const notProducer of [false, true])
 		if (notProducer) expect(await h.call("decide", approve, producer)).toMatchObject([{ status: "forbidden" }]);
 		expect(await h.call("decide", { ...approve, reason: "" }, reviewer)).toMatchObject([{ status: "invalid" }]);
 		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		const storedApprovals = async () =>
+			await h.app.database.read(
+				async (db) =>
+					await db.allDynamic<{ id: number; question: number }>("SELECT * FROM answers WHERE actor = $1 ORDER BY id", [
+						reviewer.id,
+					]),
+			);
+		const originalApprovals = await storedApprovals();
+		expect(originalApprovals).toHaveLength(1);
+		const beforeRetry = h.app.database.statementCount;
 		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		const retryQueries = h.app.database.statementCount - beforeRetry;
+		for (let i = 0; i < 10; i++)
+			expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		const beforeLastRetry = h.app.database.statementCount;
+		expect(await h.call("decide", approve, reviewer)).toMatchObject([{ status: "pending" }]);
+		expect(h.app.database.statementCount - beforeLastRetry).toBe(retryQueries);
+		expect(await storedApprovals()).toEqual(originalApprovals);
+		expect(await Promise.all([h.call("decide", approve, reviewer), h.call("decide", approve, reviewer)])).toMatchObject(
+			[[{ status: "pending" }], [{ status: "pending" }]],
+		);
+		expect(await storedApprovals()).toEqual(originalApprovals);
+		for (const duplicate of [approve.q, ` q-00${approve.q.slice(2)} `]) {
+			expect(await h.raw("decide", { all: [approve, { ...approve, q: duplicate }] }, reviewer)).toMatchObject({
+				ok: false,
+				error: { code: "invalid" },
+			});
+		}
+		expect(await storedApprovals()).toEqual(originalApprovals);
+		expect(await h.raw("decide", { all: Array.from({ length: 500 }, () => approve) }, reviewer)).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		expect(await storedApprovals()).toEqual(originalApprovals);
+		// Reproduce historical rows written before retry deduplication existed.
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					await db.runDynamic(
+						`INSERT INTO answers (question, actor, answer, reason, on_evidence, counts, at, seq)
+				 SELECT question, actor, answer, reason, on_evidence, counts, at, seq
+				 FROM answers CROSS JOIN generate_series(1, 500) WHERE actor = $1`,
+						[reviewer.id],
+					);
+				}),
+		);
+		const history = await storedApprovals();
+		expect(history).toHaveLength(501);
+		await h.app.database.read(async (db) => {
+			const rows = await pendingAnswersOf(db, first(history).question, q.evidenceHash);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.id).toBe(Math.max(...history.map((row) => Number(row.id))));
+		});
+		const beforeHistoryRetry = h.app.database.statementCount;
+		expect(await h.call("decide", { ...approve, reason: "Retry with a changed reason" }, reviewer)).toMatchObject([
+			{ status: "pending" },
+		]);
+		expect(h.app.database.statementCount - beforeHistoryRetry).toBe(retryQueries);
+		expect(await storedApprovals()).toEqual(history);
 		expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "open" }]);
 
 		const agent = await h.actor("quorum-agent", "agent", ["read", "produce", "answer"]);
