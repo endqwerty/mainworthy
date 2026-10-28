@@ -832,7 +832,8 @@ test.skipIf(!browserAvailable)(
 				.evaluateAll((nodes) =>
 					nodes.map((node) => [getComputedStyle(node).fontSize, node.getBoundingClientRect().right <= innerWidth]),
 				);
-			expect(fields.length).toBeGreaterThan(1);
+			// Without a provider the page asks only for a token: one field, which must fit and not zoom.
+			expect(fields.length).toBeGreaterThan(0);
 			expect(fields.filter(([size, inside]) => size !== "16px" || !inside)).toEqual([]);
 			await page.locator("#token").fill(server.token);
 			await page.getByRole("button", { name: "Sign in with the token" }).tap();
