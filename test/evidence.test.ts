@@ -22,6 +22,7 @@ import {
 	noteCarried,
 	refsOf,
 } from "../src/server/decisions/questions.ts";
+import { isWithdrawn, resultsByIds } from "../src/server/evidence/evidence.ts";
 import { sameCodeEvidence } from "../src/server/evidence/flaky.ts";
 import { ruleActor } from "../src/server/identity/identity.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
@@ -3573,4 +3574,81 @@ describe("a change that ends", () => {
 		expect((await end("pr:12", "merged", pipeline)).questions).toHaveLength(1);
 		expect((await queue()).counts.open).toBe(0);
 	});
+});
+
+describe("imported invalid correction edges", () => {
+	const mismatches = ["project", "test", "actor", "target", "run"] as const;
+	async function importedCorrection(field: (typeof mismatches)[number]) {
+		await h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "Original", methods: ["human"] } },
+				{ op: "create", body: { title: "Other", methods: ["human"] } },
+			],
+		});
+		const { run } = await h.call<{ run: string }>("plan", { name: "Original run", select: { cases: ["C-1"] } });
+		const original = await h.call<ReportReceipt>("report", {
+			run,
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		const id = first(original.results);
+		const other = await h.actor("other-producer", "human", ["read", "produce"]);
+		await h.call(
+			"report",
+			{ target: { session: "other" }, results: [{ test: { case: "C-2" }, outcome: "skip" }] },
+			other,
+		);
+		await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+		const value = {
+			project: "(SELECT id FROM projects WHERE key = 'other')",
+			test: "b.test",
+			actor: "b.actor",
+			target: "b.target",
+			run: "NULL",
+		};
+		const columns = ["project", "test", "actor", "target", "run"];
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.exec(`
+			INSERT INTO results (project,test,actor,target,run,seq,ord,batch,method,basis,basis_case,basis_version,basis_claim,outcome,attempt,at,corrects)
+			SELECT ${columns.map((c) => (c === field ? value[field] : `a.${c}`)).join(",")},a.seq,a.ord+1,a.batch,a.method,a.basis,a.basis_case,a.basis_version,a.basis_claim,'skip',a.attempt,a.at,a.id
+			FROM (SELECT * FROM results WHERE id = ${id}) a, (SELECT * FROM results ORDER BY id DESC LIMIT 1) b
+		`),
+				),
+		);
+		return { id, run };
+	}
+
+	for (const field of mismatches) {
+		test(`${field} mismatch leaves the original evidence standing`, async () => {
+			const { id } = await importedCorrection(field);
+			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing)).toBe(true);
+		});
+		test(`${field} mismatch does not withdraw a held result`, async () => {
+			const { id } = await importedCorrection(field);
+			expect(await h.app.database.read((db) => isWithdrawn(db, id))).toBe(false);
+		});
+		test(`${field} mismatch preserves evidence when reopening a run`, async () => {
+			const { run } = await importedCorrection(field);
+			const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+			await h.call("decide", { undo: signoff.q });
+			expect(await h.call<GateStatus>("gate", { run })).toMatchObject({
+				verdict: "passed",
+				tally: { pass: 1, missing: 0 },
+			});
+		});
+		test(`${field} mismatch permits the producer's legitimate correction`, async () => {
+			const { id, run } = await importedCorrection(field);
+			const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+			await h.call("decide", { undo: signoff.q });
+			const corrected = await h.call<ReportReceipt>("report", {
+				run,
+				results: [{ test: { case: "C-1" }, outcome: "pass", corrects: id }],
+			});
+			expect(corrected.results).toHaveLength(1);
+			expect(await h.app.database.read((db) => isWithdrawn(db, id))).toBe(true);
+			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing)).toBe(false);
+		});
+	}
 });
