@@ -1,6 +1,7 @@
 // Real worker exits, signals and PostgreSQL drops belong to the serial process checks.
 import { expect, onTestFinished, test } from "bun:test";
 import {
+	chmodSync,
 	cpSync,
 	existsSync,
 	lstatSync,
@@ -8,6 +9,7 @@ import {
 	readdirSync,
 	readFileSync,
 	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -357,6 +359,83 @@ test("scratch recovery removes only marked directories with dead owners", async 
 		}
 	} finally {
 		remove(root);
+	}
+});
+
+for (const kind of ["fifo", "symlink", "unreadable", "oversized", "foreign"] as const)
+	test(`scratch recovery skips ${kind} markers`, async () => {
+		const root = make("scratch-invalid");
+		const owner = Bun.spawn([process.execPath, "-e", ""], { stdout: "ignore", stderr: "ignore" });
+		await owner.exited;
+		const directory = join(root, "mainworthy-check-invalid");
+		mkdirSync(directory);
+		markOwned(directory, [owner.pid]);
+		const marker = join(directory, ".mw-scratch");
+		const ownerFile = `${marker}-owner`;
+		try {
+			if (kind === "fifo") {
+				unlinkSync(marker);
+				expect(Bun.spawnSync(["mkfifo", marker]).exitCode).toBe(0);
+			} else if (kind === "symlink") {
+				const target = join(root, "target");
+				writeFileSync(target, readFileSync(marker));
+				unlinkSync(marker);
+				symlinkSync(target, marker);
+			} else if (kind === "unreadable") chmodSync(ownerFile, 0);
+			else if (kind === "oversized") writeFileSync(marker, `${directory}\n${" ".repeat(8192)}`);
+			else {
+				const metadata = readFileSync(ownerFile, "utf8");
+				writeFileSync(ownerFile, ["foreign", ...metadata.split("\n").slice(1)].join("\n"));
+			}
+			const child = Bun.spawn(
+				[
+					process.execPath,
+					"-e",
+					`import {sweepOwned} from ${JSON.stringify(join(process.cwd(), "scripts/work/scratch.ts"))}; sweepOwned(${JSON.stringify(root)}, "mainworthy-check-");`,
+				],
+				{ stdout: "pipe", stderr: "pipe", timeout: 1500 },
+			);
+			const rc = await child.exited;
+			expect(rc, await new Response(child.stderr).text()).toBe(0);
+			expect(existsSync(directory)).toBe(true);
+		} finally {
+			if (existsSync(ownerFile)) chmodSync(ownerFile, 0o600);
+			remove(root);
+		}
+	});
+
+test("the fixture parent does not signal a recycled leader identity", async () => {
+	const { startServer } = await import("./e2e/support.ts");
+	const { processTable } = await import("../scripts/work/processes.ts");
+	const server = await startServer({ source: true });
+	const victim = Bun.spawn([process.execPath, "-e", 'process.stdin.on("data",()=>process.stdout.write("alive"))'], {
+		detached: true,
+		stdin: "pipe",
+		stdout: "pipe",
+		stderr: "ignore",
+	});
+	const supervisor = (await processTable()).find(
+		(proc) =>
+			proc.command.startsWith(process.execPath) &&
+			proc.command.includes("test/e2e/supervise.ts") &&
+			proc.command.includes(`mainworthy-e2e-${process.pid}-`),
+	);
+	const data = /"data":"([^"\n]+)"/.exec(supervisor?.command ?? "")?.[1];
+	if (!supervisor || !data) throw new Error("missing own fixture supervisor");
+	try {
+		const fixture = Number(readFileSync(join(data, "fixture-pid"), "utf8"));
+		process.kill(-fixture, "SIGKILL");
+		writeFileSync(join(data, "fixture-pid"), String(victim.pid));
+		writeFileSync(join(data, "fixture-stamp"), "a different process start");
+		process.kill(supervisor.pid, "SIGKILL");
+		await expect(server.stop()).rejects.toThrow();
+		victim.stdin.write("ping");
+		const reply = await victim.stdout.getReader().read();
+		expect(new TextDecoder().decode(reply.value)).toBe("alive");
+	} finally {
+		victim.kill();
+		await victim.exited;
+		await server.stop().catch(() => {});
 	}
 });
 
