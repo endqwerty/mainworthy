@@ -2099,10 +2099,11 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 		expect(result.code).toBe(0);
 		// The failing test on `main` and on the pull request, the agent's finding and its edit, a test with no case,
 		// and the shop's unit tests: sixty files that no case names, one question each.
-		expect(result.stdout).toMatch(/^seeded demo: 12 cases, run R-\d+, 65 questions\n/);
+		expect(result.stdout).toMatch(/^seeded demo: 12 cases, run R-\d+, 66 questions\n/);
 		expect(result.stdout).toEndWith(`${instance.url}/p/demo/suite\n`);
 		expect(await casesIn(client, "demo")).toBe(12);
-		expect((await projects(client)).find((project) => project.key === "demo")?.policy).toBe("standard");
+		// Standard with a release sign-off that waits for two approvers (src/cli/demo/work.ts): no preset, so custom.
+		expect((await projects(client)).find((project) => project.key === "demo")?.policy).toBe("custom");
 		// The project the instance started with is not the one that was named.
 		expect(await casesIn(client, "scratch")).toBe(0);
 		expect(await grantsOf(client, "pipeline")).toEqual([{ project: "demo", can: ["read", "record"] }]);
@@ -2129,7 +2130,8 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 			answer: { is: "accept" },
 		});
 		expect(tracked[0]?.effects).toMatchObject({ ruled: 61 });
-		expect((await demo.call("inbox", {})).counts).toMatchObject({ open: 4, failure: 2 });
+		// The release sign-off waits for its second approver.
+		expect((await demo.call("inbox", {})).counts).toMatchObject({ open: 5, failure: 2, signoff: 1 });
 	});
 });
 
@@ -2164,11 +2166,12 @@ test("seed sent again preserves evidence, renews one lease, and permits a second
 		expect(other.stderr).toContain("was seeded with another number of cases");
 		expect(await casesIn(client, "demo")).toBe(12);
 		// The command ids and the two actors of the first seed do not stand in the way of a second project.
-		// It takes two files of unit tests where the first took sixty: the five questions and two more.
+		// It takes two files of unit tests where the first took sixty: the five questions, two more, and the release
+		// sign-off that waits for two approvers.
 		const beside = await run(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--days", "0", "--json"]);
 		expect(beside.stderr).toBe("");
 		expect(outputWith(Seeded, beside)).toMatchObject({ project: "demo-2", cases: 3 });
-		expect(outputWith(Seeded, beside).questions).toHaveLength(7);
+		expect(outputWith(Seeded, beside).questions).toHaveLength(8);
 		expect((await grantsOf(client, "pipeline"))?.map((grant) => grant.project)).toEqual(["demo", "demo-2"]);
 		expect(await casesIn(client, "demo")).toBe(12);
 	});
