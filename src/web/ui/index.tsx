@@ -2,7 +2,6 @@ import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
 import { type CaseBody, stepAction } from "../../core/model.ts";
-import { PASSWORD_LENGTH } from "../../core/people-replies.ts";
 import { Proofs } from "../../core/replies.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {
@@ -91,30 +90,6 @@ export function EmptyState({ children, doc }: { children: ReactNode; doc?: { pag
 }
 export function SectionHeading({ children }: { children: ReactNode }) {
 	return <div className="sech">{children}</div>;
-}
-/**
- * How long a new password is, as it is typed, against the shortest and the longest the server takes. A field
- * names it with `aria-describedby`.
- */
-/**
- * What a password manager is told about a new password, so that one it makes up is one the server takes. The
- * attribute is Safari's and 1Password reads it; React's types do not know it, so it is spread onto the field.
- */
-export const PASSWORD_RULES = {
-	passwordrules: `minlength: ${PASSWORD_LENGTH.min}; maxlength: ${PASSWORD_LENGTH.max};`,
-};
-export function PasswordCount({ id, text, className }: { id: string; text: string; className: string }) {
-	// Characters as a person counts them, and as the server does: an emoji is one.
-	const length = [...text].length;
-	return (
-		<div id={id} className={className}>
-			{length < PASSWORD_LENGTH.min
-				? `${length} of ${PASSWORD_LENGTH.min} characters`
-				: length > PASSWORD_LENGTH.max
-					? `${length} characters, and ${PASSWORD_LENGTH.max} is the most`
-					: `${length} characters`}
-		</div>
-	);
 }
 /** The keys that change a closed native select by a step or a jump. */
 const STEPS = new Set(["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp"]);

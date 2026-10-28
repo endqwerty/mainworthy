@@ -142,7 +142,7 @@ the signed-in person is allowed to answer.
 | R4A-1 | A saved request and conflict card described earlier text. `suite/index.tsx` rebuilds the conflict from the live draft, refreshes it as typing continues and retains later edits when a merge completes; `case/pane.tsx` resets the card's merge choices when its text changes and returns the exact card state that was resolved. | `conflict keeps later…` checks title and step changes, with and without another seal; `a conflict after a missing reply…` checks failed send, further typing, another producer's edit and resolution. |
 | R4A-2 | Definitive refusals and rejected questions retained their saved request/card, and copied session storage reused a tab identity. `suite/index.tsx` releases refused requests and rejected conflict cards; `lib/ids.ts` assigns new documents their own id and checks live identities by BroadcastChannel. | `duplicated tabs…`, `a refused command…`, and `a conflict rejected through API/UI…`; `drafts.test.ts` now requires a fresh command after a definitive refusal. |
 | R4A-3 | A pending reply consulted only the active editor and cleared newer stored text after navigation. `suite/index.tsx` retains each live draft independently, reconciles its reply and seals its newer text without moving the current cursor. | Existing and new cases, with a held applied reply, leaving by click, j, another screen, Shift+Enter and the idle seal. |
-| R4A-4 / R4C-1 | A session read could precede a cookie change. `lib/api.ts` sends the canonical actor id in `X-Mainworthy-As` on operation reads, writes and signed-in account exchanges and removes the read before a write. | Case, run and queue requests replace the shared cookie with a different actor reusing the forgotten actor's name immediately before reaching the server. The header carries the original actor id, no session read precedes the write, no record is attributed to the replacement, and private text remains under the original actor's keys. A password set through the passkey browser test also carries the actor id. |
+| R4A-4 / R4C-1 | A session read could precede a cookie change. `lib/api.ts` sends the canonical actor id in `X-Mainworthy-As` on operation reads, writes and signed-in account exchanges and removes the read before a write. | Case, run and queue requests replace the shared cookie with a different actor reusing the forgotten actor's name immediately before reaching the server. The header carries the original actor id, no session read precedes the write, no record is attributed to the replacement, and private text remains under the original actor's keys. |
 | R4A-5 | A new window automatically restored another live window's capture. `lib/ids.ts`, `main.tsx` and `suite/index.tsx` exchange live owner identities before restoration and keep a capture with its live owner. | `a live window's unfinished capture…` checks no editor in the second window and one complete case on the server. |
 | R4B-1 | Null failure values failed parsing, and unread non-proposal evidence still accepted answers. `queue/evidence.tsx` accepts null message/sample, displays the fallback title and dispute hints, validates all evidence kinds and marks a suggested edit's read state; `queue/index.tsx` guards both keys and buttons. | Malformed failure/finding/map/signoff/adopt evidence; nullable failure values; a later pipeline pass disputes a failing slot, with fresh permissions; held and failed suggested-edit reads refuse all answers. |
 | R4B-2 | Marks appended forever and remained attached to later results. `runs/cockpit.tsx` clears a mark with Escape/Backspace, replaces digits after 600 ms or another key, consumes it for its result, and clears it after any recorded outcome or a nonexistent-step refusal. | Escape, Backspace, a pause, another key, pass and an invalid step; rapid `1 2` still marks step twelve. The earlier `R3B-4` test still proves a failed valid mark survives reload and retry. |
@@ -833,109 +833,94 @@ The checks that decide this change, written before it. `test/docs.test.ts` and `
 ## People sign in as themselves: the pages (issue #30, decision 0017)
 
 The pages for what the server and the command line already did: the sign-in page, the page of an invitation,
-"Your sign-in", "Your sessions" and "People" in Settings, and sign-out. Each row is something a screen must do
-and the browser test that holds it. The tests run Chromium against the real server; a passkey is made and used
-on Chromium's virtual authenticator, with the page at `localhost`.
+"Your sign-in", "Your sessions" and "People" in Settings, and sign-out. People sign in only through the
+instance's identity provider, or with a token (decision 2026-10-27, people sign in through an identity
+provider). Each row is something a screen must do and the browser test that holds it. The tests run Chromium
+against the real server and the fake identity provider (`test/oidc-support.ts`).
 
 | Screen | What it must do | Test |
 | --- | --- | --- |
-| Sign-in | Focus starts in the name. Tab goes name, password, "Sign in", the passkey button where there is one, token, "Sign in with the token". Enter submits the form the caret is in. | `people-signin.test.ts`: the token form still signs the owner in |
-| Sign-in | A wrong name or password shows one sentence under the form and keeps the name and the password. The page says that an admin can send a new link. | `people-signin.test.ts`: an invited person accepts with a password |
-| Sign-in | A button pressed by the keyboard keeps the focus while its request runs and after the refusal. Busy, it is marked `aria-disabled` and takes no second press. The same holds for "Accept and sign in", "Change password" and "Make invitation link". | `people-signin.test.ts`: an invited person accepts with a password; `people-invite.test.ts`: the invitation page says how long to wait; `people-settings.test.ts`, the first two tests |
-| Sign-in | The fifth wrong password for one name is answered as the four before it, and starts the block. The next attempt while the block lasts shows "Too many attempts. Try again in N seconds.", with N from the reply's `Retry-After`, and keeps the name and the password. Nothing is sent again by itself. | `people-signin.test.ts`: five wrong passwords for a name; `limit.test.ts` for a token |
+| Sign-in | With a provider, focus starts on "Sign in with" and the provider's name; Tab goes on to the token and "Sign in with the token". With none, the page has the token form only and focus starts in the token. Enter submits the token. | `people-signin.test.ts`: the token form still signs the owner in |
+| Sign-in | "Sign in with" the provider goes to the provider, and back at `/signin/oidc` the person is signed in and the app opens. The page says that an admin can send a new link to somebody who cannot sign in with the provider any more. | `people-signin.test.ts` |
+| Sign-in | A button pressed by the keyboard keeps the focus while its request runs and after the refusal. Busy, it is marked `aria-disabled` and takes no second press. The same holds for "Accept with" the provider and "Make invitation link". | `people-signin.test.ts`; `people-invite.test.ts`: the invitation page says how long to wait; `people-settings.test.ts` |
 | Sign-in | A refusal that is neither a wrong proof (401) nor a wait (429) is shown as the server wrote it, under the way that was tried. A wait whose length a proxy dropped says "Try again later." One refusal is on the page at a time. | `people-signin.test.ts`: a refusal that is neither a wrong proof nor a wait |
 | Sign-in | "Read the docs" opens `/docs`, which needs no account. | `docs.test.ts`, D2 |
-| Sign-in | "Sign in with a passkey" is there only when the instance says it has passkeys and the browser has them. At another name of the instance the browser refuses, and the page says "This browser could not use a passkey here." | `people-passkey.test.ts`, both tests |
-| Sign-in | The token form signs in whoever holds a token, and a wrong token says "That token was not accepted." | `people-signin.test.ts`, `signin.test.ts` |
+| Sign-in | The token form signs in whoever holds a token, and a wrong token says "That token was not accepted." A wait shows "Too many attempts. Try again in N seconds.", with N from the reply's `Retry-After`, and keeps the token. | `people-signin.test.ts`, `signin.test.ts`; `limit.test.ts` |
 | Invitation | It renders with nobody signed in, says who the invitation is for and until when, and takes the code out of the address bar as soon as it has read it. A second link opened in the same tab is read too. | `people-invite.test.ts`: a wrong, a used and an expired link |
 | Invitation | A wrong, a used and an expired link each show "This invitation does not work any more. Ask whoever sent it for a new one." and no form. The address with no code says to open the link again. | the same test |
-| Invitation | The password is typed twice and counted as it is typed. One that is too short, and two that differ, are refused in the page beside the field, with what was typed kept. Accepting signs the person in and opens the app. | `people-signin.test.ts`: an invited person accepts with a password |
-| Invitation | With a passkey: by keys alone, Tab to the box, Space, Tab to the name (it starts as the browser's own), Enter. | `people-passkey.test.ts`: a person accepts an invitation with a passkey |
-| Invitation | A browser signed in as somebody else is told who and asked. The fields are disabled until the answer. "Continue" ends that person's session with the acceptance, which carries their name (`replace`) and no other. | `people-invite.test.ts`: a browser signed in as somebody else |
-| Invitation | Until the page knows who is signed in, the fields and the button are disabled and it says that it is checking. Then it asks, or puts the caret in the password. | `people-invite.test.ts`: the fields of an invitation wait |
-| Invitation | When the page cannot find out who is signed in, because the request failed or no answer came in twenty seconds, it says so, the fields stay disabled, and "Try again" asks once more with the code it holds. An answer that fails is not taken for "nobody". | `people-invite.test.ts`: when the answer to who is signed in is refused by the network; never arrives |
-| Invitation | Somebody who signs in elsewhere after the page opened is asked when they accept. What they typed stays, and "Continue" sends it again with the name the question was about. | `people-invite.test.ts`: somebody who signs in elsewhere |
+| Invitation | "Accept with" the provider goes to the provider; back at `/signin/oidc` the identity is linked to the invited person, who is signed in, and the app opens. On an instance with no provider the page says an invitation cannot be accepted there and to ask whoever runs it, and has no button. | `people-signin.test.ts`; `people-invite.test.ts` |
+| Invitation | A browser signed in as somebody else is told who and asked. The button is disabled until the answer. "Continue" begins the acceptance with that person's name (`replace`) and no other; the server ends their session when the acceptance is finished. | `people-invite.test.ts`: a browser signed in as somebody else |
+| Invitation | Until the page knows who is signed in, the button is disabled and it says that it is checking. Then it asks, or puts the focus on the button. | `people-invite.test.ts`: the fields of an invitation wait |
+| Invitation | When the page cannot find out who is signed in, because the request failed or no answer came in twenty seconds, it says so, the button stays disabled, and "Try again" asks once more with the code it holds. An answer that fails is not taken for "nobody". | `people-invite.test.ts`: when the answer to who is signed in is refused by the network; never arrives |
+| Invitation | Somebody who signs in elsewhere after the page opened is asked when they accept: the server refuses to begin (409, `details.signedInAs`), and "Continue" begins again with the name the question was about. | `people-invite.test.ts`: somebody who signs in elsewhere |
 | Invitation | An answer about one person signs nobody else out. After "Continue" for robin, tom signs in from another tab: the acceptance names robin, the server refuses it, tom is still signed in, and the page asks about tom. "Continue" then names tom. | `people-invite.test.ts`: an answer about one person signs nobody else out |
-| Invitation | A passkey that was made before the question is kept. After "Continue" the same answer is sent again with the name, the authenticator is not asked twice, and one passkey is stored. Past the five minutes its challenge lasts the page says so and the passkey is made again; that last part has no test here. | `people-passkey.test.ts`: a passkey made before the question |
-| Invitation | A recovery link says "Accepting replaces every password and passkey, revokes all your tokens, and signs you out everywhere else." | `people-invite.test.ts`: a recovery link |
-| Invitation | When looking at the invitation is answered with a wait, the page says it and "Try again" asks once more, with the code still in memory. When accepting is, the wait is under the form and the passwords stay. | `people-invite.test.ts`: the invitation page says how long to wait |
+| Invitation | A recovery link says "Accepting replaces the identities you sign in with, revokes all your tokens, and signs you out everywhere else." | `people-invite.test.ts`: a recovery link |
+| Invitation | When looking at the invitation is answered with a wait, the page says it and "Try again" asks once more, with the code still in memory. When accepting is, the wait is under the button. | `people-invite.test.ts`: the invitation page says how long to wait |
 | Shell | Enter and Space press a button that was reached with the keyboard, on every screen: a screen's own binding on those keys does not take them from it. On the Suite, either key on "Sign out" opens the dialog; Enter on its default choice sends one sign-out. A button the pointer gave the focus to (until the focus moves on), and the rows of a screen's list, leave the keys to the screen: after a click on "Toggle theme", Enter does not press it again; reached with Tab, it does. | `people-signin.test.ts`: on the Suite screen, Enter; Space; Enter after a button was clicked |
 | Shell | A sign-out that gets no reply is looked up: the page asks who is signed in, and shows the sign-in page, or says that the browser is still signed in and takes another press. When that question gets no reply either, it says it cannot tell and to try again. | `people-signin.test.ts`: a sign-out whose reply is lost; a sign-out that never reached the server |
 | Shell | The navigation has Suite, Queue, Runs and Changes and nothing else. The footer has, in this order: who is signed in, the link to Settings (marked as the current page while Settings is open), "Sign out", then Docs, Keys and Theme. Collapsed, the footer's links stay inside the sidebar as icons. | `shell.test.ts`: shell routes, palette, help and theme |
 | Shell | The sidebar collapses to 64 px with `[` or the button beside the name, whose tooltip names the key. On every screen, at 1440, 1000, 900 and 700 px, the list keeps its width and the pane on its right takes what the sidebar gave up (under 760 px both take it), and the key caps outside the sidebar stay. A case pane widened with `z` stays widened, and under 760 px `z` leaves no empty column. A reload keeps the sidebar as it was; a browser whose store refuses still collapses and opens it. A phone has no such button. | `shell.test.ts`: collapsing the sidebar; `phone.test.ts`; `architecture.test.ts`: the columns of the app |
 | Shell | "Sign out" is in the sidebar's footer and on `g x` when the session is a browser's. It ends the session on the server: a reload is still the sign-in page. In local mode there is no button, no key and no line in the keys sheet. | `people-signin.test.ts`: invited person signs out; local mode |
 | Shell | The sidebar, `g x` and this browser's row in Your sessions open the same dialog on desktop and phone. Keep drafts is focused by default. Tab stays among the three choices; screen keys and the palette do not run. Stay signed in or Esc leaves the session and data alone. The clear choice warns about unsaved text in every open tab. Clearing removes the name, case drafts, queue answers, run notes and step state, closes other tabs' workbenches and survives a reload. Other people's data and browser preferences remain. Keeping the data, session expiry and same-person reauthentication preserve drafts. | `people-signin.test.ts`: the sign-out dialog on desktop/phone; signing out from sidebar/sessions can clear; keeping browser data; lost sign-out reply |
-| Your sign-in | `n` goes to the new password. "Change password" asks for the current one; a wrong one says so beside its field and keeps the rest. A change says how many other sessions ended, and the fields are emptied and made again, so a mark a password manager put on a field it filled goes with it; a caret that was in a field is on the button. "Set password" asks for no current one. A wait is said beside the current password, with the rest kept. | `people-settings.test.ts`: changing the password; `people-passkey.test.ts` |
-| Your sign-in | Each passkey has its name and when it was last used. A new one is named from the browser. The authenticator that holds one already is told "This passkey is already registered.", and the name typed stays. | `people-passkey.test.ts` |
-| Your sign-in | The last way of signing in has a disabled "Remove" and the reason under the list. Removing the passkey this browser signed in with returns to the sign-in page. | `people-passkey.test.ts` |
-| Your sessions | Each session says what opened it and from which address, the browser as the server recorded it, and when and from where it was last used; this browser's is marked. The list is read again each time the section opens. "End" on another session signs that browser out; on this one it opens the sign-out dialog. | `people-settings.test.ts`: changing the password |
+| Your sign-in | Each identity has its label and when it was last used. The last one has a disabled "Remove" and the reason under the list; the server refuses it too. With a provider there is "Link" the provider (no identity yet) or "Link another" identity; with none the section says the instance has no identity provider. | `people-settings.test.ts` |
+| Your sign-in | A change the server guards with a recent proof (linking a second identity, removing one, making a token, an invitation, granting admin, a team admin change, an archive import) waits while a prompt says how to confirm: "Confirm with" the provider, which comes back to the same section of Settings and says "Confirmed it is you. Repeat the change within ten minutes."; or, for a person with no identity, signing in with the token again. A session opened with a token is told the token confirms too. "Cancel confirmation" refuses the change with nothing changed. | `people-settings.test.ts` |
+| Your sessions | Each session says what opened it and from which address, the browser as the server recorded it, and when and from where it was last used; this browser's is marked. The list is read again each time the section opens. "End" on another session signs that browser out; on this one it opens the sign-out dialog. | `people-settings.test.ts` |
 | People | An admin who is a person names somebody, chooses what they may do, the project and how long the link works, and gets the link once, masked, with "Copy link". After "Dismiss link" the page does not hold it. `n` goes to the name. | `people-settings.test.ts`: an admin invites somebody |
 | People | By the keyboard: the two selects keep the focus from one arrow key to the next. When a link is made the focus is on its "Copy link"; when it is dismissed, on the name. | the same test |
 | People | A reply that is lost after the invitation was made: the page says that it cannot tell whether the person was invited, reads its lists again, shows the person in them, and sends no second invitation for that name. | the same test |
 | People | A new invitation starts with read, record, produce, answer and plan ticked and `admin` not, with a line under the boxes saying what `admin` gives. After an invitation that had it ticked, it is unticked again. | the same test |
 | People | Open invitations show what each person may do, who made each and when it runs out; "Revoke" removes one and the link accepts nothing. A name that signs in already is not invited as new. | the same test |
-| People | "Recovery link" asks first and says that it replaces every way the person signs in. The owner has it beside every person. Anybody else has it beside their own name only, with a sentence saying the owner makes the others, so no button is answered 403. | the same test; `people-settings.test.ts`: a person who is not an admin |
-| People | Sign-in details reads each person's own sessions and credentials, keeps the current browser marked only for its person, ends sessions and removes credentials while keeping the last one. A lost removal reply rereads both lists and keeps the uncertainty visible. Actions on another person ask for confirmation; Cancel keeps their sessions and credentials. Password removal ends sessions that used it. Phone rows fit the screen. | `people-access.test.ts` |
+| People | "Recovery link" asks first and says that it replaces the person's identities and tokens. The owner has it beside every person. Anybody else has it beside their own name only, with a sentence saying the owner makes the others, so no button is answered 403. | the same test; `people-settings.test.ts`: a person who is not an admin |
+| People | Sign-in details reads each person's own sessions and identities, keeps the current browser marked only for its person, ends sessions and removes identities while keeping the last one. A lost removal reply rereads both lists and keeps the uncertainty visible. Actions on another person ask for confirmation; Cancel keeps their sessions and identities. Removing an identity ends the sessions opened with it. Phone rows fit the screen. | `people-access.test.ts` |
 | People | Issued tokens shows each token's number, label, actor, creation and last-use address, without its secret. Revoke stops it. The same list is shown under Tokens, with `token N` and `never used` before its first use. Tokens keeps "Press n to create one." when empty. Forgetting rereads the list after success or a lost reply, showing the forgotten name and Revoked without Revoke. | `people-access.test.ts`; `tokens.test.ts`; `people-settings.test.ts`; `settings.test.ts` |
 | People | A person who does not administer the instance has no "People" section. | `people-settings.test.ts`: a person who is not an admin |
 
 Every test asserts what the browser logged. For most that is nothing, which under the page's
 `Content-Security-Policy` includes any inline script or style the pages might have added. The tests that ask
 for a refusal assert exactly what they asked for: the 404s of links that accept nothing, the 409s of a browser
-signed in as somebody else, the 403 of a wrong current password, the 429 of a name with five wrong passwords,
-the 408 and the 429s that a test answers in the server's place, and the one reply a test drops. (A 401 is not
-in the list: `test/e2e/support.ts` leaves it out for every browser test.)
+signed in as somebody else, the 408 and the 429s that a test answers in the server's place, and the one reply a
+test drops. (A 401 is not in the list: `test/e2e/support.ts` leaves it out for every browser test.)
 
 **When no reply comes back.** A request that changes something may have arrived though its reply did not, or
 may never have left, and the page cannot know which. Where a second press would act a second time it does not
 say "try again", and says only what it knows:
 
-- Accepting an invitation: it cannot tell whether the invitation was accepted; try signing in with what was
-  chosen.
-- Changing a password: it cannot tell whether the password was changed; it may or may not have been, and
-  signing in with the new one finds out. The list of credentials and the session are read again. A refusal of
-  the current password on the next try proves nothing, since it may be mistyped.
 - Making a link: it reads its lists again and says that a person found in them was invited and that link is
   lost.
+- Making a token: it says that a token made with no reply has a lost secret, to check the list, revoke it and
+  make another.
 - Signing out: it asks `/api/session`, and shows the sign-in page or says that the browser is still signed in.
   When that gets no reply either it says it cannot tell and to try again: a second sign-out ends nothing more.
 
-Ending a session, removing a way of signing in and revoking an invitation are safe to press again. With no
-reply they say "Mainworthy did not answer. Check the connection and try again." and read their list again,
-which shows what became of them. A sign-in that gets no reply says the same: nothing is lost by trying it
-again.
+Beginning with the provider (to sign in, accept, link or confirm) changes nothing until the provider's answer
+comes back, so with no reply it says "Mainworthy did not answer. Check the connection and try again." Ending a
+session, removing an identity and revoking an invitation are safe to press again too: with no reply they say
+the same and read their list again, which shows what became of them. A sign-in with a token that gets no reply
+says the same: nothing is lost by trying it again.
 
 The page sends a proof or a change once for each press and never again by itself. What it asks again by itself
-only reads: these lists, and `/api/session`. Three of the cases have a browser test: the lost reply to a new
-invitation, to a password change and to a sign-out.
+only reads: these lists, and `/api/session`. Two of the cases have a browser test: the lost reply to a new
+invitation and to a sign-out.
 
-The waits on the invitation page and in "Your sign-in" are answered by the test, not the server. The browser
-reaches the test's server from the loopback address, which the server does not count, and a real block on a
-name would refuse the right password a few lines later in the same test. The server's own counting is held by
-`test/people.test.ts` and `test/limit.test.ts`.
+The waits on the sign-in page and the invitation page are answered by the test, not the server: the browser
+reaches the test's server from the loopback address, which the server does not count. The server's own
+counting is held by `test/people.test.ts` and `test/limit.test.ts`.
 
 Three checks were broken on purpose to see their tests fail, and restored: with the sign-out button shown to
 any session, "local mode has no sign-in page and nothing to sign out of" fails with `Expected: 0`,
 `Received: 1`; with the code left in the address, the invitation test fails with the address still ending in
-`#not-a-code-anybody-made`; with the wait shown in the server's words and not read from `Retry-After`, the two
+`#not-a-code-anybody-made`; with the wait shown in the server's words and not read from `Retry-After`, the
 tests of a wait on the sign-in page time out waiting for "Too many attempts".
 
 What no browser test holds:
 
-- A passkey in a browser other than Chromium, and on a real authenticator. The conversions between the
-  server's text and a browser's bytes are unit-tested (`src/web/lib/passkey.test.ts`), and the message for a
-  browser without `getPublicKey()` is written and never shown by a test: Chromium has it.
+- A real identity provider. The tests use the fake one, which answers at once and reports `auth_time` when a
+  test sets it; a provider that does not report it (Google) gives a proof by the fresh round trip alone.
 - The copy button over plain http at a name that is not this machine's, where a browser has no
   `navigator.clipboard`. The token's copy button has that test (R2-5); the link's uses the same steps
   (`src/web/lib/clipboard.ts`) and is tested with the clipboard only.
-- A person cancelling the browser's passkey dialog: the virtual authenticator answers by itself. The sentence
-  for it is unit-tested by the refusal's name.
-- A passkey challenge older than four minutes, which the invitation page asks for again before it makes the
-  passkey. The page has no clock a test can move.
-- What a password manager does with the forms. They carry `autocomplete` values, a hidden field with the
-  person's name, the lengths a new password may have (`passwordrules`) and, on the token, `data-1p-ignore`;
-  nothing checks that a manager reads them. The mark 1Password leaves on a field it filled
-  (`data-com-onepassword-filled`) is put there by the test, not by 1Password: no test runs the extension.
+- What a password manager does with the token field. It carries `data-1p-ignore`; nothing checks that a manager
+  reads it.
 
 ## Issue #217: taking over while the first save is on its way
 

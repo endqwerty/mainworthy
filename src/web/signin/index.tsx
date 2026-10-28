@@ -1,44 +1,28 @@
-import { useEffect, useState } from "react";
-import { PasswordEntry } from "../../core/people-replies.ts";
-import { PasskeyError, passkeysAvailable, presentPasskey } from "../lib/passkey.ts";
-import {
-	type Methods,
-	passkeySignInOptions,
-	refusalOf,
-	signInMethods,
-	signInWithPasskey,
-	signInWithPassword,
-	signInWithToken,
-	signInWithTotp,
-	startOidc,
-} from "../lib/signin.ts";
+import { useEffect, useRef, useState } from "react";
+import { type Methods, refusalOf, signInMethods, signInWithToken, startOidc } from "../lib/signin.ts";
 import { DocLink } from "../ui/index.tsx";
 import "./signin.css";
 
 /** The ways in, in the order the page shows them. */
-type Way = "password" | "oidc" | "passkey" | "token" | "code";
+type Way = "oidc" | "token";
 
 /**
- * The sign-in page of an instance in server mode. A person signs in with their name and password, through the
- * instance's identity provider where it has one, or with a passkey where the instance and the browser have them. A token is the third way: it is how the owner gets in
- * before anybody has a password, and how a token handed to somebody is tried in a browser.
+ * The sign-in page of an instance in server mode. A person signs in through the instance's identity provider
+ * where it has one. A token is the other way: it is how the owner gets in on an instance with no provider, and
+ * how a token handed to somebody is tried in a browser.
  *
- * All three are on the page at once, so each is reached with Tab and none is behind a click. One request runs
- * at a time, and a refusal is shown under the way that was tried, with everything that was typed left as it is.
+ * Both are on the page at once, so each is reached with Tab and neither is behind a click. One request runs at
+ * a time, and a refusal is shown under the way that was tried, with what was typed left as it is.
  */
 export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 	const [methods, setMethods] = useState<Methods | null>(null);
-	const [name, setName] = useState("");
-	const [password, setPassword] = useState("");
-	const [second, setSecond] = useState<{ challenge: string; expiresAt: number } | null>(null);
-	const [code, setCode] = useState("");
 	const [token, setToken] = useState("");
 	const [busy, setBusy] = useState<Way | null>(null);
 	const [refused, setRefused] = useState<{ way: Way; message: string } | null>(null);
 	useEffect(() => {
 		let shown = true;
-		// Until the instance has said that it has passkeys, none is offered. If it cannot be asked, the two
-		// forms still work.
+		// Until the instance has said that it has a provider, none is offered. If it cannot be asked, the token
+		// still works.
 		void signInMethods().then(
 			(offered) => {
 				if (shown) setMethods(offered);
@@ -50,163 +34,52 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 		};
 	}, []);
 
-	const attempt = (way: Way, notSignedIn: string, prove: () => Promise<unknown>): void => {
+	const attempt = (way: Way, notSignedIn: string, prove: () => Promise<void>): void => {
 		// The buttons stay focusable while a request runs (`aria-disabled`), so this is what stops a second one.
 		if (busy) return;
 		setBusy(way);
 		setRefused(null);
 		void prove()
-			.then((entry) => {
-				const passwordEntry = PasswordEntry.safeParse(entry);
-				if (passwordEntry.success && !passwordEntry.data.signedIn) {
-					setSecond(passwordEntry.data.secondFactor);
-					setPassword("");
-					return;
-				}
-				return onSignedIn();
-			})
-			.catch((error: unknown) =>
-				setRefused({ way, message: error instanceof PasskeyError ? error.message : refusalOf(error, notSignedIn) }),
-			)
+			.then(onSignedIn)
+			.catch((error: unknown) => setRefused({ way, message: refusalOf(error, notSignedIn) }))
 			.finally(() => setBusy(null));
 	};
 	const said = (way: Way): string => (refused?.way === way ? refused.message : "");
+	const provider = methods?.oidc?.name ?? null;
+	const tokenRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		// With no provider the token is the way in, and typing starts there. The provider's button takes the
+		// focus itself when it comes.
+		if (methods && !methods.oidc) tokenRef.current?.focus();
+	}, [methods]);
 
 	return (
 		<div className="signin">
 			<main className="signin-card">
 				<h1>Mainworthy</h1>
-				{!second && (
-					<form
-						onSubmit={(event) => {
-							event.preventDefault();
-							attempt("password", "That email or name and password did not sign you in.", () =>
-								signInWithPassword({ name: name.trim(), password }),
-							);
-						}}
-					>
-						<label htmlFor="signin-name">Email or name</label>
-						<input
-							id="signin-name"
-							name="username"
-							autoComplete="username"
-							autoCapitalize="none"
-							spellCheck={false}
-							// biome-ignore lint/a11y/noAutofocus: the page is this form; the first field is where typing starts.
-							autoFocus
-							required
-							value={name}
-							onChange={(event) => setName(event.target.value)}
-						/>
-						<label htmlFor="signin-password">Password</label>
-						<input
-							id="signin-password"
-							name="password"
-							type="password"
-							autoComplete="current-password"
-							required
-							value={password}
-							onChange={(event) => setPassword(event.target.value)}
-						/>
-						<div className="signin-problem kept" role="status">
-							{said("password")}
-						</div>
-						<button type="submit" aria-disabled={busy !== null}>
-							{busy === "password" ? "Signing in…" : "Sign in"}
-						</button>
-					</form>
-				)}
-				{second && (
-					<form
-						onSubmit={(event) => {
-							event.preventDefault();
-							attempt(
-								"code",
-								"That code did not sign you in. Use a new authenticator code or an unused recovery code.",
-								() => signInWithTotp(second.challenge, code.trim()),
-							);
-						}}
-					>
-						<h2>One more step</h2>
-						<p>Enter your authenticator code or an unused recovery code. This step lasts five minutes.</p>
-						<label htmlFor="signin-code">Authenticator or recovery code</label>
-						<input
-							id="signin-code"
-							name="code"
-							autoComplete="one-time-code"
-							required
-							value={code}
-							onChange={(event) => setCode(event.target.value)}
-							// biome-ignore lint/a11y/noAutofocus: the second step replaces the password form.
-							autoFocus
-						/>
-						<div className="signin-problem kept" role="status">
-							{said("code")}
-						</div>
-						<button type="submit" aria-disabled={busy !== null}>
-							{busy === "code" ? "Checking…" : "Verify code"}
-						</button>
+				{provider && (
+					<>
 						<button
 							type="button"
-							aria-disabled={busy !== null}
-							onClick={() => {
-								if (!busy) {
-									setSecond(null);
-									setCode("");
-									setRefused(null);
-								}
-							}}
-						>
-							Start again
-						</button>
-					</form>
-				)}
-				{methods?.oidc && !second && (
-					<div className="signin-way">
-						<button
-							type="button"
-							className="plain"
+							// biome-ignore lint/a11y/noAutofocus: the page is this button; it is where a person starts.
+							autoFocus
 							aria-disabled={busy !== null}
 							onClick={() =>
 								attempt("oidc", "The identity provider could not be reached. Try again.", () => startOidc({}))
 							}
 						>
-							{busy === "oidc" ? `Opening ${methods.oidc.name}…` : `Sign in with ${methods.oidc.name}`}
+							{busy === "oidc" ? `Opening ${provider}…` : `Sign in with ${provider}`}
 						</button>
 						<div className="signin-problem" role="status">
 							{said("oidc")}
 						</div>
-					</div>
+						<p className="dim signin-note">
+							If you cannot sign in with {provider} any more, an admin can send you a new link.
+						</p>
+					</>
 				)}
-				{methods?.passkey && methods.passkeyHost === window.location.hostname && passkeysAvailable() && (
-					<div className="signin-way">
-						<button
-							type="button"
-							className="plain"
-							aria-disabled={busy !== null}
-							onClick={() =>
-								attempt("passkey", "That passkey did not sign you in. Try again.", async () =>
-									// The challenge is asked for now and not when the page loaded: it lives five minutes.
-									signInWithPasskey(await presentPasskey(await passkeySignInOptions())),
-								)
-							}
-						>
-							{busy === "passkey" ? "Waiting for the passkey…" : "Sign in with a passkey"}
-						</button>
-						<div className="signin-problem" role="status">
-							{said("passkey")}
-						</div>
-					</div>
-				)}
-				<p className="dim signin-note">
-					{methods?.mail ? (
-						<a href="/reset">Forgot your password?</a>
-					) : (
-						"If you lost your password or passkey, an admin can send you a new link."
-					)}
-				</p>
 				<form
-					className="signin-way"
+					className={provider ? "signin-way" : undefined}
 					onSubmit={(event) => {
 						event.preventDefault();
 						attempt("token", "That token was not accepted. Try again.", () => signInWithToken(token));
@@ -216,6 +89,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 					<label htmlFor="token">Sign in with your token</label>
 					<input
 						id="token"
+						ref={tokenRef}
 						name="token"
 						type="password"
 						autoComplete="off"
