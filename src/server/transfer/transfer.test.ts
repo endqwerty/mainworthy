@@ -8,6 +8,8 @@ async function harness(...args: Parameters<typeof import("../../../test/helpers.
 	return (await import("../../../test/helpers.ts")).harness(...args);
 }
 
+import { claimHash, versionHash } from "../../core/hash.ts";
+import { CaseBody } from "../../core/model.ts";
 import { PRESETS } from "../../core/presets.ts";
 import { signatureHash } from "../../core/signature.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
@@ -55,6 +57,10 @@ const body = `{
     {"id": "stwo", "action": "Leave empty", "expected": null}
   ], "fields": {}
 }`;
+
+const parsedBody = CaseBody.parse(JSON.parse(body));
+const oldBody = '{"title":"Old title","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{}}';
+const parsedOldBody = CaseBody.parse(JSON.parse(oldBody));
 
 const fixtures: Record<string, Row[]> = {
 	quarantines: [
@@ -144,8 +150,8 @@ const fixtures: Record<string, Row[]> = {
 			project: 23,
 			no: 1,
 			head: 2,
-			head_hash: "head-hash",
-			claim_hash: "claim-hash",
+			head_hash: versionHash(parsedBody),
+			claim_hash: claimHash(parsedBody),
 			title: "雪だるま ☃ café",
 			methods: '[ "human", "auto" ]',
 			automate: "wanted",
@@ -170,8 +176,8 @@ const fixtures: Record<string, Row[]> = {
 			no: 2,
 			parent: 1,
 			body,
-			hash: "head-hash",
-			claim_hash: "claim-hash",
+			hash: versionHash(parsedBody),
+			claim_hash: claimHash(parsedBody),
 			proposal: 301,
 			decision: 401,
 			author: 70,
@@ -183,9 +189,9 @@ const fixtures: Record<string, Row[]> = {
 			case_id: 101,
 			no: 1,
 			parent: null,
-			body: '{"title":"Old title","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{}}',
-			hash: "old-hash",
-			claim_hash: "old-claim",
+			body: oldBody,
+			hash: versionHash(parsedOldBody),
+			claim_hash: claimHash(parsedOldBody),
 			proposal: 301,
 			decision: 401,
 			author: 71,
@@ -316,7 +322,7 @@ const fixtures: Record<string, Row[]> = {
 			basis: "exact",
 			basis_case: 101,
 			basis_version: 2,
-			basis_claim: "claim-hash",
+			basis_claim: claimHash(parsedBody),
 			outcome: "fail",
 			attempt: 1,
 			duration_ms: 2_592_000_000,
@@ -343,7 +349,7 @@ const fixtures: Record<string, Row[]> = {
 			basis: "assumed",
 			basis_case: 101,
 			basis_version: 2,
-			basis_claim: "claim-hash",
+			basis_claim: claimHash(parsedBody),
 			outcome: "pass",
 			attempt: 2,
 			duration_ms: null,
@@ -536,7 +542,7 @@ const fixtures: Record<string, Row[]> = {
 			run: 601,
 			case_id: 101,
 			version: 2,
-			claim: "claim-hash",
+			claim: claimHash(parsedBody),
 			obligation: "exercise",
 			assignee: null,
 			rank: 0,
@@ -722,6 +728,21 @@ test("archives wait for retired demo cleanup instead of restoring retired data w
 }, 30_000);
 
 describe("Mainworthy instance archives", () => {
+	test("a demo-seeded export round-trips over HTTP", async () => {
+		await withInstance(async (source) => {
+			await seed(source.client, { project: "demo", cases: 30, days: 1 });
+			const exported = await source.client.request("/api/export");
+			expect(exported.status).toBe(200);
+			if (!exported.body) throw new Error("export is missing its stream");
+			await withInstance(async (target) => {
+				const imported = await target.client.request("/api/import", { method: "POST", body: exported.body });
+				expect(imported.status).toBe(200);
+				expect(await imported.text()).toContain("previous session may no longer exist");
+				expect(await target.instance.app.database.read(dump)).toEqual(await source.instance.app.database.read(dump));
+			});
+		});
+	});
+
 	test("an archive preserves legacy corrections that branch from the same result", async () => {
 		const from = await source();
 		await insert(from, "results", { ...fixtures.results?.[1], id: 202, outcome: "blocked" });
@@ -1311,11 +1332,41 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
-	test("historical duplicate methods import without changing stored bodies", async () => {
+	test("edited historical version bodies with unchanged hashes name the row and preserve the target", async () => {
 		const from = await source();
 		await from.transaction(() =>
 			from.runDynamic("UPDATE versions SET body = $1 WHERE case_id = 101 AND no = 1", [
+				body.replace("A luminousreply appears", "An edited expectation"),
+			]),
+		);
+		await refuse(await archive(from), /invalid archive versions\.hash.*case_id 101.*no 1.*line \d+/);
+	});
+
+	test("changed historical claims with a matching body hash name the row and preserve the target", async () => {
+		const from = await source();
+		const changed = { ...parsedOldBody, pre: "A changed claim" };
+		await from.transaction(() =>
+			from.runDynamic("UPDATE versions SET body = $1, hash = $2 WHERE case_id = 101 AND no = 1", [
+				JSON.stringify(changed),
+				versionHash(changed),
+			]),
+		);
+		await refuse(await archive(from), /invalid archive versions\.claim_hash.*case_id 101.*no 1.*line \d+/);
+	});
+
+	test("stale case head hashes name the row and preserve the target", async () => {
+		const from = await source();
+		await from.transaction(() => from.runDynamic("UPDATE cases SET head_hash = 'stale' WHERE id = 101", []));
+		await refuse(await archive(from), /invalid archive cases\.head_hash.*row 101.*head.*2/);
+	});
+
+	test("historical duplicate methods import without changing stored bodies", async () => {
+		const from = await source();
+		await from.transaction(() =>
+			from.runDynamic("UPDATE versions SET body = $1, hash = $2, claim_hash = $3 WHERE case_id = 101 AND no = 1", [
 				body.replace('["human", "auto"]', '["human", "human", "auto"]'),
+				versionHash({ ...parsedBody, methods: ["human", "human", "auto"] }),
+				claimHash(parsedBody),
 			]),
 		);
 		const to = await target();
@@ -1537,9 +1588,17 @@ describe("Mainworthy instance archives", () => {
 			automate: "none",
 			fields: {},
 		});
-		await from.transaction(() =>
-			from.runDynamic("UPDATE versions SET body = $1 WHERE case_id = 101 AND no = 2", [validBody]),
-		);
+		const parsed = CaseBody.parse(JSON.parse(validBody));
+		await from.transaction(async () => {
+			await from.runDynamic(
+				"UPDATE versions SET body = $1, hash = $2, claim_hash = $3 WHERE case_id = 101 AND no = 2",
+				[validBody, versionHash(parsed), claimHash(parsed)],
+			);
+			await from.runDynamic("UPDATE cases SET head_hash = $1, claim_hash = $2 WHERE id = 101", [
+				versionHash(parsed),
+				claimHash(parsed),
+			]);
+		});
 		await importArchive(to, linesOf(await archive(from)));
 		expect(await dump(to)).toEqual(await dump(from));
 		expect(
