@@ -159,6 +159,8 @@ export async function beginOidc(
 			{ purpose: input.purpose, browser: input.browser, nonce, verifier, deadline },
 			owner,
 			now,
+			// A signed-in session's link or proof replaces the one it began before, so a session holds one place.
+			purpose.purpose === "link" || purpose.purpose === "proof",
 		),
 	);
 	return client.buildAuthorizationUrl(configuration, {
