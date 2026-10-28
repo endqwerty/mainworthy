@@ -88,6 +88,52 @@ test("deferred creation keeps the producer's adoption policy", async () => {
 	}
 }, 60_000);
 
+test("a deferred CI page cannot adopt a later agent test in its file", async () => {
+	const h = await harness({ preset: "standard", unlinked: "create" });
+	try {
+		const ci = await h.actor("pipeline", "ci", ["record"]);
+		const agent = await h.actor("later-agent", "agent", ["record"]);
+		const input = ciReport({ commit: "ci-provenance", n: 601 });
+		input.results = input.results.map((r, i) => ({
+			...r,
+			test: { ...r.test, file: `provenance-${Math.min(i, 100)}.ts` },
+		}));
+		await h.call("report", input, ci);
+		await h.call("report", ciReport({ commit: "agent-provenance", n: 1, file: "provenance-100.ts" }), agent);
+		const tests = () =>
+			h.app.database.read((db) =>
+				db.allDynamic<{ name: string; case_id: number | null }>(
+					"SELECT name,case_id FROM tests WHERE file='provenance-100.ts' ORDER BY id",
+				),
+			);
+		expect(await tests()).toHaveLength(502);
+		expect((await tests()).every((t) => t.case_id === null)).toBe(true);
+		await invokeService(h.app, jobOp, { do: "drain" });
+		const after = await tests();
+		expect(after.at(-1)?.case_id).toBeNull();
+		expect(after.slice(0, -1).every((t) => typeof t.case_id === "number")).toBe(true);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT q.state,q.producer FROM questions q WHERE q.kind='map' AND q.producer='agent'"),
+			),
+		).toEqual([{ state: "open", producer: "agent" }]);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic(
+					"SELECT DISTINCT a.name FROM tests t JOIN decisions d ON d.id=t.linked_by JOIN actors a ON a.id=(d.signers::jsonb->0->>'by')::bigint WHERE t.file='provenance-100.ts' AND t.case_id IS NOT NULL",
+				),
+			),
+		).toEqual([{ name: "policy" }]);
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT a.name FROM proposals p JOIN actors a ON a.id=p.author ORDER BY p.id DESC LIMIT 1"),
+			),
+		).toEqual([{ name: "pipeline" }]);
+	} finally {
+		await h.close();
+	}
+}, 60_000);
+
 test("a later report may finish a deferred file before its page arrives", async () => {
 	const h = await harness({ unlinked: "create" });
 	try {

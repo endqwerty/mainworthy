@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { raiseSteps, refold } from "../decisions/decisions.ts";
 import { raiseMapSteps } from "../decisions/kinds.ts";
-import { unlinkedInFile } from "../evidence/evidence.ts";
+import { batchById, unlinkedInFile } from "../evidence/evidence.ts";
 import { finishReportMapPage, reportMapPage } from "../evidence/report-maps.ts";
 import { actorById, lockActors } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
@@ -18,16 +18,18 @@ export async function executeReportMaps(app: App, claim: JobClaim, input: JobInp
 				await completeJob(db, claim, app.now());
 				return;
 			}
-			const actor = pending.actor;
+			const batch = await batchById(db, pending.batch);
+			if (!batch) throw new Error("report map page has no originating batch");
+			const actor = batch.actor;
 			await lockActors(db, [actor]);
-			const project = await lockProject(db, pending.project);
+			const project = await lockProject(db, batch.project);
 			const page = await reportMapPage(db, id);
 			await fenceJob(db, claim, app.now());
 			if (page && project && (await demoDeployment(db, project.id))?.kind !== "retired") {
 				const ctx = makeCtx(app, db, project, await actorById(db, actor, project.id), true);
 				for (const file of page.files) {
-					if ((await unlinkedInFile(db, project.id, file)).length === 0) continue;
-					await complete(raiseMapSteps(ctx, raiseSteps, file, page.producer));
+					if ((await unlinkedInFile(db, project.id, file, 0, batch.id)).length === 0) continue;
+					await complete(raiseMapSteps(ctx, raiseSteps, file, ctx.actor.kind, batch.id));
 				}
 				await refold(ctx, []);
 				await stampSeq(ctx);
