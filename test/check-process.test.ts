@@ -474,4 +474,6 @@ test("a fixture is told from a recycled pid by its start in kernel ticks, read p
 	const own = processIdentity(process.pid);
 	if (process.platform === "linux") expect(own).toMatch(/^ticks:\d+$/);
 	expect(processIdentity(process.pid)).toBe(own);
+	// No process, or no `/proc` to say when it started: no identity, so nothing is signalled by a pid alone.
+	expect(processIdentity(2 ** 30)).toBeNull();
 });

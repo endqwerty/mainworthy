@@ -155,6 +155,7 @@ export async function startServer({
 	const killFixture = () => {
 		try {
 			const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
+			// An empty stamp (no `/proc` to tell the fixture from a process that took its pid) signals nothing.
 			const stamp = readFileSync(join(dataDir, "fixture-stamp"), "utf8");
 			if (Number.isSafeInteger(pid) && pid > 0 && stamp && processIdentity(pid) === stamp)
 				process.kill(-pid, "SIGKILL");
