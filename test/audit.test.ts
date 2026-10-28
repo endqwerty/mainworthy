@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { type AuditRecord, auditChecksum, verifyAudit } from "../src/core/audit.ts";
 import { canonicalJson } from "../src/core/hash.ts";
 import type { PolicySettings } from "../src/core/kinds.ts";
+import { PRESETS } from "../src/core/presets.ts";
 import { AuditReply } from "../src/core/replies.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { findProject } from "../src/server/kernel/ctx.ts";
@@ -39,6 +40,95 @@ async function fixture() {
 	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "A changed case" } }] });
 	return { h, first, cutoff };
 }
+
+test("audit resolves signer policies and counts each signing reference before the range", () => {
+	const by = { id: 1, name: "robin", kind: "human" };
+	const header = {
+		mainworthy: "audit",
+		format: 1,
+		project: "scratch",
+		from: 0,
+		to: 100,
+		exportedAt: 100,
+		seq: 10,
+		grantChanges: "team-history-only",
+		teamState: "at-export",
+		evidencePayloads: "not-retained",
+		actorNames: "at-export",
+	};
+	const policy = {
+		type: "policy",
+		id: "policy:1",
+		version: 1,
+		at: 1,
+		seq: 1,
+		by,
+		prior: null,
+		decision: null,
+		...PRESETS.loose,
+	};
+	const question = {
+		type: "question",
+		id: "question:1",
+		openedAt: 2,
+		openedSeq: 2,
+		ref: "Q-1",
+		kind: "adopt",
+		fingerprint: "123456789abc",
+		prior: null,
+	};
+	const decision = {
+		type: "decision",
+		id: "decision:1",
+		at: 3,
+		seq: 3,
+		question: { scope: "included", id: "question:1" },
+		prior: null,
+		kind: "adopt",
+		answer: { is: "accept" },
+		basis: "123456789abc",
+		evidence: { state: "not-recorded" },
+		holds: {},
+		effects: {},
+		inherited: [],
+		expiresAt: null,
+		signers: [{ by, clause: "adopt", policy: 1, reason: null }],
+	};
+	const file = rehash(`${canonicalJson(header)}\n{}\n`, (rows) => rows.push(question, policy, decision));
+	expect(verifyAudit(file).beforeRangeReferences).toBe(0);
+	const signingPolicy = (version: number) =>
+		rehash(file, (rows) => {
+			const row = rows.find((r) => r.type === "decision");
+			if (row) row.signers = [{ by, clause: "adopt", policy: version, reason: null }];
+		});
+	for (const version of [999999, 0])
+		expect(() => verifyAudit(signingPolicy(version))).toThrow(/record decision:1: .*policy/);
+	const partial = rehash(file, (rows) => {
+		if (rows[0]) rows[0].from = 2;
+		rows.splice(
+			rows.findIndex((r) => r.type === "policy"),
+			1,
+		);
+		const row = rows.find((r) => r.type === "decision");
+		if (row) row.signers = [...decision.signers, ...decision.signers];
+	});
+	expect(verifyAudit(partial).beforeRangeReferences).toBe(2);
+	expect(() =>
+		verifyAudit(
+			rehash(file, (rows) => {
+				const row = rows.find((r) => r.type === "policy");
+				if (row) row.seq = 4;
+			}),
+		),
+	).toThrow(/record decision:1: .*policy/);
+	expect(() =>
+		verifyAudit(
+			rehash(signingPolicy(999999), (rows) => {
+				if (rows[0]) rows[0].from = 1;
+			}),
+		),
+	).toThrow(/record decision:1: .*policy/);
+});
 
 test("audit refuses reordered context and event records even after rehashing", async () => {
 	const { h } = await fixture();
@@ -238,7 +328,7 @@ test("range exports mark actual old version predecessors and decisions, and excl
 		const partial = AuditReply.parse(await h.call("audit", { from: cutoff }));
 		const version = entries(partial.ndjson).find((record) => record.type === "case-version");
 		expect(version).toMatchObject({ version: 2, parent: { scope: "before-range", id: "version:1:1" } });
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(1);
+		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
 		const earlier = AuditReply.parse(await h.call("audit", { to: cutoff }));
 		expect(entries(earlier.ndjson)).toEqual(entries(first.ndjson));
 	} finally {
@@ -389,7 +479,7 @@ test("answers, advice and withdrawals retain their actors, reasons and exact evi
 		expect(entries(partial.ndjson).find((record) => record.type === "decision")).toMatchObject({
 			prior: { scope: "before-range" },
 		});
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(1);
+		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
 	} finally {
 		await h.close();
 	}
@@ -411,7 +501,7 @@ test("policy changes include their adopting decision and a verifiable previous p
 			prior: { scope: "before-range", id: "policy:1" },
 			decision: { scope: "included" },
 		});
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(1);
+		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
 	} finally {
 		await h.close();
 	}
@@ -503,7 +593,8 @@ test("verification rejects missing middle case and policy versions even after re
 				if (row) row.prior = null;
 			},
 		];
-		for (const change of changes) expect(() => verifyAudit(rehash(file, change))).toThrow(/parent|prior/);
+		for (const change of changes)
+			expect(() => verifyAudit(rehash(file, change))).toThrow(/parent|prior|unresolved signing policy/);
 	} finally {
 		await h.close();
 	}

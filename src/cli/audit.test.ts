@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ciReport } from "../../test/helpers.ts";
-import { verifyAudit } from "../core/audit.ts";
+import { auditChecksum, verifyAudit } from "../core/audit.ts";
+import { canonicalJson } from "../core/hash.ts";
 import { withInstance } from "./test-support.ts";
 
 test("audit exports through the real CLI and verifies offline without reading credentials", async () => {
@@ -49,6 +50,22 @@ test("audit exports through the real CLI and verifies offline without reading cr
 		});
 		expect(checked.code).toBe(0);
 		expect(JSON.parse(checked.stdout)).toMatchObject({ project: "scratch", unavailableDecisionEvidence: 0 });
+		const rows = original
+			.trimEnd()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		rows.pop();
+		const decision = rows.find((row) => row.type === "decision");
+		decision.signers[0].policy = 999999;
+		const body = `${rows.map((row) => canonicalJson(row)).join("\n")}\n`;
+		await writeFile(
+			file,
+			`${body}${canonicalJson({ end: true, records: rows.length - 1, sha256: auditChecksum(body) })}\n`,
+		);
+		const missingPolicy = await run(["audit", "verify", file]);
+		expect(missingPolicy.code).toBe(4);
+		expect(missingPolicy.stdout).toBe("");
+		expect(missingPolicy.stderr).toContain(`record ${decision.id}: unresolved signing policy policy:999999`);
 		await writeFile(file, `\uFEFF${original}`);
 		const bom = await run(["audit", "verify", file]);
 		expect(bom.code).toBe(4);

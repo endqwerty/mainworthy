@@ -335,6 +335,10 @@ export function verifyAudit(text: string) {
 		if (record.type === "policy" && record.id !== `policy:${record.version}`) fail("policy id mismatch");
 		byId.set(record.id, record);
 	}
+	const firstPolicyVersion = records.reduce(
+		(first, record) => (record.type === "policy" ? Math.min(first, record.version) : first),
+		Number.POSITIVE_INFINITY,
+	);
 	let beforeRangeReferences = 0;
 	let unavailableDecisionEvidence = 0;
 	for (const [index, record] of records.entries()) {
@@ -415,6 +419,15 @@ export function verifyAudit(text: string) {
 				fail("invalid team event action fields");
 		}
 		if (record.type === "decision") {
+			for (const signer of record.signers) {
+				const id = `policy:${signer.policy}`;
+				const policy = byId.get(id);
+				if (policy?.type === "policy") {
+					if (policy.seq > record.seq) fail(`future signing policy ${id}`);
+				} else if (header.from > 0 && signer.policy >= 1 && signer.policy < firstPolicyVersion) {
+					beforeRangeReferences++;
+				} else fail(`unresolved signing policy ${id}`);
+			}
 			const effects = z
 				.object({ inherited: z.array(z.object({ result: integer, base: z.array(integer).min(1) })).default([]) })
 				.safeParse(record.effects);
