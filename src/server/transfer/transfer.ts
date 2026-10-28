@@ -592,8 +592,10 @@ export async function importArchive(
 					}
 				}
 				if (entry.t === "runs") {
+					let require: Obligation[];
 					try {
-						z.array(Obligation)
+						require = z
+							.array(Obligation)
 							.max(MAX_OBLIGATIONS)
 							.parse(JSON.parse(z.string().parse(entry.r.get("require"))));
 					} catch {
@@ -601,6 +603,11 @@ export async function importArchive(
 							`invalid archive runs.require on line ${position}: obligation or job limit exceeded, or invalid obligation`,
 						);
 					}
+					// As plan refuses: with two obligations of one id, a slot would be judged by whichever is found first.
+					if (new Set(require.map((o) => o.id)).size !== require.length)
+						throw invalid(
+							`invalid archive runs.require on line ${position}: obligation ids must be unique within a run`,
+						);
 				}
 				const duration = entry.r.get("duration_ms");
 				if (

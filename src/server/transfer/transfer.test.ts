@@ -2181,11 +2181,16 @@ test("archive import leaves a landed change open without naming its landing on t
 	}
 });
 
-test("archive refuses excessive obligation and job counts", async () => {
+test("archive refuses excessive obligation and job counts, and repeated obligation ids", async () => {
 	const original = await archive(await source());
 	for (const require of [
 		Array.from({ length: 1025 }, (_, i) => ({ id: `ci-${i}`, kind: "jobs", jobs: ["test"] })),
 		[{ id: "ci", kind: "jobs", jobs: Array(1025).fill("test") }],
+		// Two obligations of one id: a slot named by it would be judged by the weaker, first one.
+		[
+			{ id: "exercise", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" },
+			{ id: "exercise", kind: "exercise", methods: ["human"], minActors: 2, basis: "exact" },
+		],
 	]) {
 		const changed = original
 			.split("\n")
