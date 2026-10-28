@@ -692,7 +692,7 @@ Announce a deployment and bind its build label to an attested artifact. Pipeline
 
 ### tracker
 
-Preview or queue a defect from a failed result, or validate an existing issue for linking.
+Preview or queue a defect from a failed result, or validate an existing issue for linking; requires read and produce.
 
 |  |  |
 | --- | --- |
