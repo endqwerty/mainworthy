@@ -1,7 +1,7 @@
 # 0005: Mainworthy is for teams in general; the owner's career is evidence, not the customer
 
 - Date: 2026-10-10
-- Status: accepted (the owner)
+- Status: accepted (the owner). Narrowed 2026-10-27 by [the customer is release-gated teams moving to CI/CD](2026-10-27-the-customer-is-release-gated-teams-moving-to-ci-cd.md)
 
 Answers the open part of question 1 and corrects an assumption in the first
 draft of `docs/ux/flows.md`, which treated the owner's current team as the

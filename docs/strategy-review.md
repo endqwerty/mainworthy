@@ -23,8 +23,9 @@ that a team does not need a test case manager at all.
 
 The owner's three biggest decisions, each open:
 
-1. **Who is it for?** Decision 0005 says "teams in general". Section 5 proposes three narrower customers and recommends
-   one. Every other choice below depends on this one.
+1. **Who is it for?** Decision 0005 said "teams in general". Section 5 proposes three narrower customers. Answered
+   2026-10-27: customer A, teams moving to CI/CD that still gate releases
+   ([decision](decisions/2026-10-27-the-customer-is-release-gated-teams-moving-to-ci-cd.md)).
 2. **Is the headline "tests a person or an agent runs, with the evidence"?** ThePrimeagen's Oligarchy (section 3.3)
    shows a team building its own record of exactly that within a month. That is both the best opening found and proof
    that the data model alone is no moat.
