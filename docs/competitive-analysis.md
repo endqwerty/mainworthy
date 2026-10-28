@@ -2,6 +2,8 @@
 
 Researched 2026-10-10 from vendors' own pricing and feature pages. Prices are
 USD list prices on that date and change often; re-check before relying on one.
+Re-checked 2026-10-27: [strategy-review.md](strategy-review.md) section 3.4
+lists what changed, and covers CI vendors and AI testing platforms too.
 
 **Evidence labels**
 
