@@ -15,7 +15,7 @@ import {
 import { z } from "zod";
 import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint } from "../../scripts/check-plan.ts";
 import { markOwned, sweepOwned } from "../../scripts/work/scratch.ts";
-import { processStamp } from "../../scripts/work/test-databases.ts";
+import { processIdentity } from "../../scripts/work/test-databases.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
@@ -156,7 +156,8 @@ export async function startServer({
 		try {
 			const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
 			const stamp = readFileSync(join(dataDir, "fixture-stamp"), "utf8");
-			if (Number.isSafeInteger(pid) && pid > 0 && stamp && processStamp(pid) === stamp) process.kill(-pid, "SIGKILL");
+			if (Number.isSafeInteger(pid) && pid > 0 && stamp && processIdentity(pid) === stamp)
+				process.kill(-pid, "SIGKILL");
 		} catch {}
 	};
 	const exited = child.exited.then(async (code) => {

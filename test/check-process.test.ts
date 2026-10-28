@@ -15,6 +15,7 @@ import {
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { make, markOwned, remove, sweepOwned } from "../scripts/work/scratch.ts";
+import { processIdentity, startTicks } from "../scripts/work/test-databases.ts";
 
 for (const managed of [false, true])
 	test(`database cleanup preserves ${managed ? "runner ownership" : "direct-file behavior"}`, async () => {
@@ -462,4 +463,15 @@ test("the fixture parent removes data after a killed supervisor exits", async ()
 		await server.stop().catch(() => {});
 		await import("node:fs/promises").then((fs) => fs.rm(data, { recursive: true, force: true }));
 	}
+});
+
+test("a fixture is told from a recycled pid by its start in kernel ticks, read past any name", () => {
+	const fields = (name: string) =>
+		`4242 (${name}) S 1 4242 4242 0 -1 4194560 120 0 0 0 1 0 0 0 20 0 1 0 98765432 1 2 3`;
+	for (const name of ["bun", "a b", "x) S 1 (y", "))", "("]) expect(startTicks(fields(name))).toBe("98765432");
+	expect(startTicks("4242 (bun) S")).toBeNull();
+	// On Linux the identity has the kernel's tick resolution, not `ps`'s second, and it is stable for one process.
+	const own = processIdentity(process.pid);
+	if (process.platform === "linux") expect(own).toMatch(/^ticks:\d+$/);
+	expect(processIdentity(process.pid)).toBe(own);
 });
