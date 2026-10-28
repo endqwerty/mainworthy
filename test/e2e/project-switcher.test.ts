@@ -33,7 +33,7 @@ check(
 			// Every project the session names, in its order, with the one that is open marked. The choice starts
 			// on the first other project, so the button and Enter go there.
 			expect(await projects()).toEqual([
-				expect.stringMatching(/scratch[\s\S]*Current · scratch · standard/),
+				expect.stringMatching(/scratch[\s\S]*Current · scratch · custom/),
 				expect.stringMatching(/Checkout[\s\S]*checkout · standard/),
 				expect.stringMatching(/Payments platform[\s\S]*payments · loose/),
 				expect.stringMatching(/Checkout[\s\S]*checkout-eu · loose/),
@@ -242,7 +242,7 @@ check(
 				.locator("[data-overlay=palette]")
 				.getByRole("option", { name: /Switch project/ })
 				.tap();
-			await picker.getByRole("option", { name: /scratch[\s\S]*scratch · standard/ }).tap();
+			await picker.getByRole("option", { name: /scratch[\s\S]*scratch · custom/ }).tap();
 			await page.waitForURL("**/p/scratch/queue");
 			expect(h.loads()).toBe(1);
 			expect(h.errors).toEqual([]);
