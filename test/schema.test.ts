@@ -459,11 +459,15 @@ test("the migration chain upgrades the immutable baseline without replacing its 
 	}
 });
 
-/** A database migrated to 6 and set back to 5, with migration 6's indexes as `undo` leaves them. */
+/** A database set back to 5, with migration 6's indexes as `undo` leaves them. */
 async function atSchemaFive(undo: string): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
 	const fixture = await testDatabase();
 	const raw = new SQL(fixture.url, { max: 3, bigint: true });
-	await raw.unsafe(`UPDATE meta SET value = '5' WHERE key = 'schema_version'; ${undo}`).simple();
+	await raw
+		.unsafe(
+			`DROP TABLE report_map_pages; UPDATE meta SET value = '43' WHERE key = 'archive_version'; UPDATE meta SET value = '5' WHERE key = 'schema_version'; ${undo}`,
+		)
+		.simple();
 	return {
 		url: fixture.url,
 		raw,
@@ -499,7 +503,7 @@ test("the next start finishes an interrupted build of migration 6 and leaves no 
 	const database = await Database.open({ url: target.url });
 	try {
 		await migrate(database);
-		expect(await database.read(schemaVersion)).toBe(6);
+		expect(await database.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		const indexes = await target.raw.unsafe(
 			"SELECT i.relname AS name, x.indisvalid AS valid FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid WHERE i.relname = ANY($1::text[]) ORDER BY 1",
 			[`{${removalIndexes.join(",")}}`],
@@ -551,7 +555,7 @@ test("writes to a table go on while migration 6 builds the indexes after it", as
 		await holder.unsafe("COMMIT");
 		await migrating;
 		expect(write).toBe("written");
-		expect(await database.read(schemaVersion)).toBe(6);
+		expect(await database.read(schemaVersion)).toBe(SCHEMA_VERSION);
 	} finally {
 		holder.release();
 		writer.release();
@@ -567,7 +571,7 @@ test("two instances upgrading to migration 6 at once both start, and build each 
 	const [first, second] = await Promise.all([Database.open({ url: target.url }), Database.open({ url: target.url })]);
 	try {
 		await Promise.all([migrate(first), migrate(second)]);
-		expect(await first.read(schemaVersion)).toBe(6);
+		expect(await first.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		const valid: { n: number }[] = await target.raw.unsafe(
 			"SELECT count(*)::int AS n FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid WHERE i.relname = ANY($1::text[]) AND x.indisvalid",
 			[`{${removalIndexes.join(",")}}`],

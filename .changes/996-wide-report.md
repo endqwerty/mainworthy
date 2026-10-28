@@ -7,3 +7,5 @@ pr: https://github.com/endqwerty/mainworthy/pull/1035
 ---
 
 Reports with new tests across many files now finish their file questions in durable background pages, instead of holding one transaction open for every file. The first 100 files are handled with the report; the remaining questions and automatic case creation follow after the results commit, using the current policy.
+
+Pending file-mapping pages now survive project and instance export/import. This changes the archive version to 44; older archives must be exported again using the updated server.

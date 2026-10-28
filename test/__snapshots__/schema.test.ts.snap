@@ -403,6 +403,13 @@ column questions.seen_last: bigint NOT NULL
 column questions.state: text NOT NULL
 column questions.subject: text NOT NULL
 column questions.title: text NOT NULL
+column report_map_pages.actor: bigint NOT NULL
+column report_map_pages.at: bigint NOT NULL
+column report_map_pages.batch: bigint NOT NULL
+column report_map_pages.files: text NOT NULL
+column report_map_pages.id: text NOT NULL
+column report_map_pages.producer: text NOT NULL
+column report_map_pages.project: bigint NOT NULL
 column requirements.id: bigint NOT NULL IDENTITY d
 column requirements.key: text NOT NULL
 column requirements.project: bigint NOT NULL
@@ -1179,6 +1186,19 @@ constraint questions.questions_state_check: CHECK ((state = ANY (ARRAY['open'::t
 constraint questions.questions_state_not_null: NOT NULL state
 constraint questions.questions_subject_not_null: NOT NULL subject
 constraint questions.questions_title_not_null: NOT NULL title
+constraint report_map_pages.report_map_pages_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint report_map_pages.report_map_pages_actor_not_null: NOT NULL actor
+constraint report_map_pages.report_map_pages_at_not_null: NOT NULL at
+constraint report_map_pages.report_map_pages_batch_fkey: FOREIGN KEY (batch) REFERENCES batches(id) DEFERRABLE
+constraint report_map_pages.report_map_pages_batch_not_null: NOT NULL batch
+constraint report_map_pages.report_map_pages_files_check: CHECK (((jsonb_typeof((files)::jsonb) = 'array'::text) AND ((jsonb_array_length((files)::jsonb) >= 1) AND (jsonb_array_length((files)::jsonb) <= 100))))
+constraint report_map_pages.report_map_pages_files_not_null: NOT NULL files
+constraint report_map_pages.report_map_pages_id_not_null: NOT NULL id
+constraint report_map_pages.report_map_pages_pkey: PRIMARY KEY (id)
+constraint report_map_pages.report_map_pages_producer_check: CHECK ((producer = ANY (ARRAY['human'::text, 'agent'::text, 'ci'::text, 'rule'::text])))
+constraint report_map_pages.report_map_pages_producer_not_null: NOT NULL producer
+constraint report_map_pages.report_map_pages_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint report_map_pages.report_map_pages_project_not_null: NOT NULL project
 constraint requirements.requirements_id_not_null: NOT NULL id
 constraint requirements.requirements_key_not_null: NOT NULL key
 constraint requirements.requirements_pkey: PRIMARY KEY (id)
@@ -1996,6 +2016,10 @@ index questions_project_id: CREATE INDEX questions_project_id ON public.question
 index questions_project_no_key: CREATE UNIQUE INDEX questions_project_no_key ON public.questions USING btree (project, no)
 index questions_queue: CREATE INDEX questions_queue ON public.questions USING btree (project, state, owner, rank)
 index questions_rev: CREATE INDEX questions_rev ON public.questions USING btree (project, rev)
+index report_map_pages_actor: CREATE INDEX report_map_pages_actor ON public.report_map_pages USING btree (actor)
+index report_map_pages_batch: CREATE INDEX report_map_pages_batch ON public.report_map_pages USING btree (batch)
+index report_map_pages_pkey: CREATE UNIQUE INDEX report_map_pages_pkey ON public.report_map_pages USING btree (id)
+index report_map_pages_project: CREATE INDEX report_map_pages_project ON public.report_map_pages USING btree (project)
 index requirements_pkey: CREATE UNIQUE INDEX requirements_pkey ON public.requirements USING btree (id)
 index requirements_project_id: CREATE INDEX requirements_project_id ON public.requirements USING btree (project, id)
 index requirements_project_key_key: CREATE UNIQUE INDEX requirements_project_key_key ON public.requirements USING btree (project, key)
@@ -2152,6 +2176,7 @@ table proposals:
 table quarantines:
 table question_refs:
 table questions:
+table report_map_pages:
 table requirements:
 table result_excuses:
 table result_tries:

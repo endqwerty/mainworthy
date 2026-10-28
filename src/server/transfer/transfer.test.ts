@@ -63,6 +63,9 @@ const oldBody = '{"title":"Old title","pre":"","steps":[],"methods":["human"],"a
 const parsedOldBody = CaseBody.parse(JSON.parse(oldBody));
 
 const fixtures: Record<string, Row[]> = {
+	report_map_pages: [
+		{ id: "504:100", project: 23, batch: 504, actor: 71, producer: "ci", files: '["pending.ts"]', at: time },
+	],
 	quarantines: [
 		{
 			project: 23,
@@ -1910,7 +1913,7 @@ describe("Mainworthy instance archives", () => {
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
 		expect(text).toContain(`"schema":${ARCHIVE_VERSION},`);
-		expect(ARCHIVE_VERSION).toBe(43);
+		expect(ARCHIVE_VERSION).toBe(44);
 		await refuse(
 			text.replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
@@ -1987,9 +1990,15 @@ describe("Mainworthy instance archives", () => {
 		await people(to, 1, "f");
 		await importArchive(to, linesOf(text));
 		for (const table of UNEXPORTED.filter(
-			(table) => !["assertion_index", "assertion_roots", "assertion_seen", "assertion_spreads"].includes(table),
+			(table) =>
+				!["background_jobs", "assertion_index", "assertion_roots", "assertion_seen", "assertion_spreads"].includes(
+					table,
+				),
 		))
 			expect(await to.allDynamic<Record<string, unknown>>(`SELECT * FROM ${table}`, [])).toEqual([]);
+		expect(await to.allDynamic("SELECT kind,input FROM background_jobs")).toEqual([
+			{ kind: "report-maps", input: '{"page":"504:100"}' },
+		]);
 		expect([...UNEXPORTED].sort()).toEqual([
 			"assertion_index",
 			"assertion_roots",

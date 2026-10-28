@@ -5,17 +5,19 @@ import sharedIdentity from "./migrations/0003-shared-identity.sql" with { type: 
 import jobs from "./migrations/0004-jobs.sql" with { type: "text" };
 import reportSpans from "./migrations/0005-report-spans.sql" with { type: "text" };
 import projectRemovalIndexes from "./migrations/0006-project-removal-indexes.sql" with { type: "text" };
+import reportMapPages from "./migrations/0007-report-map-pages.sql" with { type: "text" };
 import baseline from "./schema.sql" with { type: "text" };
 
 // PostgreSQL starts a new schema lineage; archive 43 follows the final SQLite archive format (42).
-export const SCHEMA_VERSION = 6;
-export const ARCHIVE_VERSION = 43;
+export const SCHEMA_VERSION = 7;
+export const ARCHIVE_VERSION = 44;
 export const migrationHash = createHash("sha256")
 	.update(projectLocks)
 	.update(sharedIdentity)
 	.update(jobs)
 	.update(reportSpans)
 	.update(projectRemovalIndexes)
+	.update(reportMapPages)
 	.digest("hex");
 const hash = createHash("sha256").update(baseline).digest("hex");
 
@@ -94,7 +96,10 @@ export async function migrate(database: Database): Promise<void> {
 			}
 			if (version !== 0) {
 				const ledger = new Map((await db.all(Q.ledger)).map((row) => [row.key, row.value]));
-				if (ledger.get("baseline_hash") !== hash || ledger.get("archive_version") !== String(ARCHIVE_VERSION)) {
+				if (
+					ledger.get("baseline_hash") !== hash ||
+					ledger.get("archive_version") !== String(version < 7 ? 43 : ARCHIVE_VERSION)
+				) {
 					throw new Error("Database baseline does not match this build");
 				}
 				if (version < 2) {
@@ -121,6 +126,7 @@ export async function migrate(database: Database): Promise<void> {
 			await db.exec(jobs);
 			await db.exec(reportSpans);
 			await db.exec(projectRemovalIndexes);
+			await db.exec(reportMapPages);
 			for (const [key, value] of Object.entries({
 				schema_version: String(SCHEMA_VERSION),
 				baseline_hash: hash,
@@ -131,5 +137,12 @@ export async function migrate(database: Database): Promise<void> {
 			return false;
 		});
 		if (concurrent) await buildConcurrently(db, outside);
+		await db.transaction(async () => {
+			if ((await schemaVersion(db)) < 7) {
+				await db.exec(reportMapPages);
+				await db.exec("UPDATE meta SET value = '7' WHERE key = 'schema_version'");
+				await db.exec("UPDATE meta SET value = '44' WHERE key = 'archive_version'");
+			}
+		});
 	});
 }
