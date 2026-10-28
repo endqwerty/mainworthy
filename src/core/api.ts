@@ -166,5 +166,7 @@ export type SessionInfo = {
 		can?: string[];
 		/** Whether a failure question can be handed to a coding agent (`MAINWORTHY_HANDOFF_*`). */
 		handoff: boolean;
+		/** Configured destination, only when this caller may create and read tracker requests. */
+		tracker?: string | null | undefined;
 	}[];
 };

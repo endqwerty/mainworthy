@@ -25,6 +25,7 @@ import { authenticateJob } from "../server/kernel/job-auth.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invoke, invokeService, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
+import { trackerForCaller } from "../server/ops/trackers.ts";
 import { changeStream } from "./events.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
@@ -527,6 +528,7 @@ export async function grantedProjects(app: App, session: Session) {
 						fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
 						can,
 						handoff: app.config.handoff?.project === project.key,
+						tracker: trackerForCaller(app.config, project.key, can),
 					});
 			}
 			return granted;
