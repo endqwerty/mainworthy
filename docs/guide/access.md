@@ -298,7 +298,7 @@ scripts.
 ### Invite a person
 
 Making any invitation from a browser requires your [recent proof](#confirm-it-is-you), even for a read-only
-invite. Settings prompts inline and retries after proof. Bearer-token and local CLI invitations keep their
+invite. Settings offers the confirmation inline; repeat the change after it. Bearer-token and local CLI invitations keep their
 existing authority.
 
 In Settings, open People. This section is visible to a person who holds `admin` on every project. To invite a person, follow these steps:
@@ -398,7 +398,7 @@ changes that give `admin`, and importing an archive. Proof lasts ten minutes.
 - A session opened by typing a token has proof for ten minutes from sign-in. After that, sign out and sign in with
   the token again.
 - A session opened through the provider gets proof with **Confirm with** and the provider's name. Settings offers
-  it inline when a change needs it, then retries the change. The browser goes to the provider, which asks you to
+  it inline when a change needs it; you come back to the same screen and repeat the change. The browser goes to the provider, which asks you to
   sign in again rather than reuse its own session. The provider must sign in the same person: another identity is
   refused.
 
