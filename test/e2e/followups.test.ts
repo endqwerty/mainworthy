@@ -377,14 +377,14 @@ test.skipIf(!browserAvailable)(
 			});
 			browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			const { page } = browser;
-			const card = page.locator("a.question-card");
+			const card = page.locator(".question-card:has(> a)");
 			await card.waitFor();
 			// A link that wraps as inline text is one box for each line, and its padding lies over the row above.
 			const boxes = await card.evaluate((node) => {
 				const above = node.previousElementSibling?.getBoundingClientRect();
 				const own = node.getBoundingClientRect();
 				// The title is the longest piece of text in the card, and a piece of text has one box for each line.
-				const title = Array.from(node.childNodes)
+				const title = Array.from((node.querySelector("a") ?? node).childNodes)
 					.filter((child) => child.nodeType === Node.TEXT_NODE)
 					.sort((a, b) => (b.textContent?.length ?? 0) - (a.textContent?.length ?? 0))[0];
 				const text = document.createRange();
@@ -401,11 +401,11 @@ test.skipIf(!browserAvailable)(
 			const first = "Version 1 of C-1 is the first. There is no earlier version to compare it with.";
 			await page.keyboard.press("v");
 			await page.locator("#stat").getByText(first, { exact: true }).waitFor();
-			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(await page.locator(".question-card:has(.history-title)").count()).toBe(0);
 			await page.keyboard.press("Escape");
 			await page.locator('[data-version="1"]').click();
 			await page.locator("#stat").getByText(first, { exact: true }).waitFor();
-			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(await page.locator(".question-card:has(.history-title)").count()).toBe(0);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser?.close();

@@ -374,10 +374,10 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("region", { name: "Case diff" }).last().waitFor();
 			await page.keyboard.press("j");
 			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-2");
-			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(await page.locator(".question-card:has(.history-title)").count()).toBe(0);
 			await page.keyboard.press("k");
 			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-1");
-			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(await page.locator(".question-card:has(.history-title)").count()).toBe(0);
 			expect(browser.errors).toEqual([]);
 			await page.keyboard.press("t");
 			await page.getByLabel("Tag selected cases").fill("keyboard");

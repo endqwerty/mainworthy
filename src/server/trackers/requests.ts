@@ -64,6 +64,7 @@ export async function trackerStatus(db: ReadDb, project: number, id: string): Pr
 }
 
 export async function previewDefect(ctx: Ctx<ReadDb>, input: TrackerInput): Promise<TrackerPreview> {
+	if (!mayRun(ctx.actor, "read")) throw forbidden("tracker needs the read capability");
 	const config = configuredTrackers(ctx.app.config, ctx.project.key)[0];
 	if (!config) {
 		if (input.do === "create" && input.confirm !== undefined)
@@ -73,16 +74,22 @@ export async function previewDefect(ctx: Ctx<ReadDb>, input: TrackerInput): Prom
 	if (input.do === "link" && !config.validKey(input.key))
 		throw invalid("The issue key must name an issue in the configured tracker project.");
 	const result = await resultById(ctx.db, input.result);
-	if (!mayRun(ctx.actor, "read") && result?.actor !== ctx.actor.id)
-		throw forbidden("tracker needs the read capability to queue a result this actor did not record");
 	if (!result || result.project !== ctx.project.id) throw notFound("result");
 	if (result.outcome !== "fail" && result.outcome !== "error")
 		throw invalid("A defect needs a failed or errored result.");
 	const test = await testById(ctx.db, result.test);
 	const target = await mustTarget(ctx.db, result.target);
 	const batch = await batchById(ctx.db, result.batch);
-	if (!test || !batch) throw notFound("result evidence");
+	if (
+		!test ||
+		test.project !== ctx.project.id ||
+		target.project !== ctx.project.id ||
+		!batch ||
+		batch.project !== ctx.project.id
+	)
+		throw notFound("result evidence");
 	const row = result.basis_case === null ? null : await caseById(ctx.db, result.basis_case);
+	if (result.basis_case !== null && (!row || row.project !== ctx.project.id)) throw notFound("result evidence");
 	const version = row && result.basis_version !== null ? await versionOf(ctx.db, row.id, result.basis_version) : null;
 	const body = version ? json<CaseBody>(version.body) : null;
 	const basis = row && version ? `${caseRef(row)}@v${version.no} (${result.basis})` : "unresolved";

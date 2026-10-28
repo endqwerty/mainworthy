@@ -1034,7 +1034,7 @@ test("request validation, project permissions and result ownership are checked b
 	).toEqual({ n: 0 });
 });
 
-test("a producer exports only its own result unless it can read the project", async () => {
+test("tracker requires read even for a producer’s own recorded case result", async () => {
 	const ownerResult = await failure();
 	const producer = await h.actor("producer", "agent", ["produce"]);
 	const foreign = await h.raw(
@@ -1066,7 +1066,7 @@ test("a producer exports only its own result unless it can read the project", as
 		"report",
 		{
 			target: { session: "producer-result" },
-			results: [{ test: { key: "producer-result" }, outcome: "fail", failure: { message: "Producer failure" } }],
+			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Producer failure" } }],
 		},
 		producer,
 	);
@@ -1079,10 +1079,12 @@ test("a producer exports only its own result unless it can read the project", as
 		)
 	)?.id;
 	if (!ownResult) throw new Error("expected the producer's result");
-	expect(
-		(await h.call<TrackerReceipt>("tracker", { do: "create", result: ownResult, cmd: "tracker-own-result" }, producer))
-			.state,
-	).toBe("queued");
+	for (const action of [{ do: "preview" }, { do: "create" }, { do: "link", key: "42" }] as const) {
+		expect(
+			await h.raw("tracker", { ...action, result: ownResult, cmd: `tracker-own-${action.do}` }, producer),
+		).toMatchObject({ ok: false, error: { code: "forbidden" } });
+	}
+	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
 
 	const readerProducer = await h.actor("reader-producer", "agent", ["read", "produce"]);
 	expect(
@@ -1562,7 +1564,7 @@ test("tracker refuses a stale destination confirmation without sending; CLI need
 	expect(
 		await h.raw("tracker", { do: "create", result, cmd: "confirmed-test-002", confirm: preview.confirm }),
 	).toMatchObject({ ok: false, error: { code: "conflict", message: expect.stringContaining("review") } });
-	h.app.config.github = undefined;
+	delete h.app.config.github;
 	expect(
 		await h.raw("tracker", { do: "create", result, cmd: "removed-config-001", confirm: preview.confirm }),
 	).toMatchObject({ ok: false, error: { code: "conflict" } });
@@ -1581,3 +1583,32 @@ test("tracker refuses a stale destination confirmation without sending; CLI need
 	await deliverTrackerRequests(h.app, receiving);
 	expect(sent).toBe(1);
 });
+
+for (const [table, reference] of [
+	["tests", "test"],
+	["targets", "target"],
+	["batches", "batch"],
+	["cases", "basis_case"],
+] as const) {
+	test(`tracker refuses cross-project ${reference} evidence`, async () => {
+		const result = await failure();
+		await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+		await h.app.database.write(async (db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<readonly SqlValue[]>(
+						`UPDATE ${table} SET project = (SELECT id FROM projects WHERE key = 'other') WHERE id = (SELECT ${reference} FROM results WHERE id = $1)`,
+					),
+					[result],
+				);
+			}),
+		);
+		for (const action of [{ do: "preview" }, { do: "create" }, { do: "link", key: "42" }] as const) {
+			expect(await h.raw("tracker", { ...action, result, cmd: `foreign-${reference}-${action.do}` })).toMatchObject({
+				ok: false,
+				error: { code: "not_found" },
+			});
+		}
+		expect(await deliverTrackerRequests(h.app, port)).toBe(0);
+	});
+}
