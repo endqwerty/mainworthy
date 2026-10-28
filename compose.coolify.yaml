@@ -52,8 +52,8 @@ services:
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
       # To rename the owner: the name the owner has now, beside the new name above. Unset it after that start.
       MAINWORTHY_OWNER_WAS: ${MAINWORTHY_OWNER_WAS:-}
-      # The address people open the instance at. Passkeys belong to its host name and an invitation link starts
-      # with it. Empty means no passkeys and a link without a host.
+      # The address people open the instance at. An invitation link starts with it. Empty means a link without a
+      # host.
       MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}
       # The marked project the server swaps and fills with the demo again once per known deployed revision, so it shows this build. Only
       # a project `mainworthy seed` made is replaced. Unset means `demo`; set it empty in Coolify for none (hence

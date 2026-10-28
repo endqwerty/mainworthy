@@ -12,8 +12,10 @@ google has one) will be better") and on 2026-10-27 chose "auth changes to OIDC".
 ## Decision
 
 A person signs in through the instance's OpenID Connect provider, and only that way. Mainworthy keeps no
-password, passkey, authenticator secret or recovery code, and sends no sign-in mail. The provider owns
-credentials, a second factor and account recovery; the customer this is for already has one (Google Workspace,
+password, passkey, authenticator secret, recovery code or recovery address, and sends no mail at all: mail
+existed only for sign-in (resets, verification, notices) and for invitation links an admin can hand over
+themselves. The provider owns credentials, a second factor and account recovery, so
+`MAINWORTHY_REQUIRE_ADMIN_MFA` and `MAINWORTHY_OIDC_MFA` go too; the customer this is for already has one (Google Workspace,
 Microsoft Entra, Okta, Keycloak). Tokens stay: the owner token, personal tokens for scripts, and the tokens of
 agents and pipelines.
 
@@ -24,10 +26,16 @@ agents and pipelines.
   in local mode or against the test provider.
 - **Joining.** An invitation is accepted by signing in at the provider (the `join` ceremony, as today).
   Recovery is a new invitation for the same person, which links the identity they sign in with next.
-- **Recent proof** (0145) is a fresh sign-in at the provider: the server asks with `max_age=0` and takes the
-  proof only when the ID token's `auth_time` is inside the last ten minutes. It still guards linking and
-  unlinking an identity, creating a token from a browser and issuing an invitation from a browser. A person
-  linking their first identity needs no proof, as first enrollment did.
+- **Recent proof** (0145) is a fresh sign-in at the provider: the server asks with `max_age=0`, and when the
+  ID token carries `auth_time` it must be inside the last ten minutes. Google's OpenID Connect page lists no
+  `max_age`, and gives `auth_time` only when a request asks for that claim and the client's settings enable it
+  (its discovery document lists no `auth_time`, read 2026-10-27). So with Google the proof is, by default, the
+  fresh round trip alone: it shows the browser still holds the person's provider session, not that they typed
+  anything. A browser session opened by typing a token has proof
+  for ten minutes, unlike under 0145: a token already speaks for its person over the API, so the browser gains
+  nothing the token lacked. Proof still guards linking a second identity and unlinking one, creating a token or
+  an invitation from a browser, granting admin, team admin changes and archive import. A person linking their
+  first identity needs no proof, as first enrollment did.
 - **The hosted instance** uses Google accounts (`https://accounts.google.com`) until a customer needs its own
   provider. More than one provider per instance waits for a need, as in 0093.
 

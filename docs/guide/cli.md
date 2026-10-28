@@ -8,35 +8,14 @@ every other command talks to a running server over HTTP, on this machine or
 another one. `mainworthy fmt`, `mainworthy audit verify <file>`, and
 `mainworthy help` need no server.
 
-## Sign in with a password and a code
+## Sign in from the command line
 
-`login` exchanges your password for a personal CLI token. If you have an enrolled
-authenticator, `login` also needs an authenticator or recovery code. The command
-prints the token once and tries to end the temporary session. It reads the input
-secrets from private files, as in this example:
-
-```
-mainworthy login --url https://mainworthy.example --name robin --password-file /private/password --code-file /private/code --label laptop --expires 30d
-```
-
-The password file holds the password, with one optional final newline. The code
-file holds a current authenticator code or an unused recovery code. Each file is
-limited to 4096 bytes. Neither secret appears as an argument or in an error.
-`--code-file` is required only for an account with an enrolled authenticator. The
-command refuses plain HTTP to another machine. It ignores existing token options
-because the command starts a new sign-in.
-
-The returned token works as `MAINWORTHY_TOKEN` or in a private token file.
-`--json` returns `id`, `actor`, `token`, and `expiresAt`. The default token lifetime
-is 30 days, and the maximum is 365 days. Delete the password and code files when
-you no longer need them.
-
-For the local owner, `mainworthy credential --do totp.begin` starts
-[authenticator enrolment](./access.md#add-an-authenticator-for-password-sign-in).
-`mainworthy credential --do totp.confirm --challenge <challenge> --code <code>`
-confirms enrolment within five minutes and prints recovery codes once. Remote
-bearer tokens cannot enrol an authenticator. Remote enrolment is available in
-Settings in a signed-in browser.
+The command line signs in with a token. A person makes a personal token in a browser signed in through the
+identity provider, under Settings, **Your sign-in**, **Your command-line tokens**: see
+[make your own command-line token](./access.md#make-your-own-command-line-token). An admin can also make one with
+`mainworthy token new --human <name>`. Give it to the command line as `MAINWORTHY_TOKEN` or in a private token file,
+as [below](#give-the-token-in-the-environment-or-in-a-file). In local mode on the same machine the command line
+needs no token.
 
 ## Reach a server
 
@@ -136,10 +115,9 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
 | `mainworthy announce --deploy <build> --env <env> [--digest sha256:<hash> --repo <repo> --commit <sha>]` | Announce a deployed build. A new artifact needs its digest, repository and full commit. |
 | `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] \| report --nothing-required [--commit <sha>] [--json]` | Upload test reports or declare no tests required, detect the CI build, and print the receipt. Use gate to check the verdict. |
-| `mainworthy login --name <name> --password-file <path> [--code-file <path>] [--label <label>] [--expires 30d] [--json]` | Sign in with a password and, when enrolled, an authenticator or recovery code. Print a personal CLI token once. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. Each carries its actor's current grants on every project. A new secret is shown once. |
-| `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] [--email <address>] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
+| `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--roles approver,lead] [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
 | `mainworthy audit export --out <file> [--from <time>] [--to <time>] [--receipt <id> --cursor <cursor> --limit <n>] \| audit verify <file>` | Export a project's audit history, or verify a saved audit file offline. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
@@ -184,14 +162,6 @@ Flags of `mainworthy report`:
 - `--shard <string>`: This report is one shard of its job, as index/count, for example 2/6. The commit's gate waits for every shard.
 - `--nothing-required`: CI declares this commit requires no tests, if its policy allows. No files.
 
-Flags of `mainworthy login`:
-
-- `--name <string>`: Your sign-in name, or your email address.
-- `--password-file <string>`: A private file holding your password. One final newline is ignored.
-- `--code-file <string>`: A private file holding a current authenticator code or unused recovery code.
-- `--label <string>`: The personal token label. Default: command line.
-- `--expires <string>`: How long the personal token lasts. Default: 30d; at most 365d.
-
 Flags of `mainworthy gate`:
 
 - `--commit <string>`: Commit to check. Defaults to CI/Git detection.
@@ -210,7 +180,6 @@ Flags of `mainworthy token`:
 
 Flags of `mainworthy invite`:
 
-- `--email <string>`: Send the invitation to this address. Requires instance mail settings.
 - `--can <a,b,...>`: What a new person may do, comma-separated or repeated. Not for one who exists.
 - `--expires <string>`: How long the link works: 12h, 3d, 2w. At most 30d.
 
@@ -218,7 +187,7 @@ Flags of `mainworthy actor`:
 
 - `--roles <a,b,...>`: Named roles, comma-separated or repeated. Omit to keep; an empty value clears.
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
-- `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities and recovery email addresses are erased. So are password hashes, passkey public keys, authenticator secrets and recovery-code hashes, token network addresses, and token and credential labels. Team memberships are removed. Passwords, passkeys, authenticators, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
+- `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities are erased, and so are token network addresses and token and identity labels. Team memberships are removed. Identities, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
 
 Flags of `mainworthy audit`:
 
@@ -296,8 +265,8 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |
 | `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating tokens or granting admin from a browser requires recent credential proof. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
-| `mainworthy invitation` | Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing any invitation from a browser needs the caller's recent credential proof; token and local authority remain. |
+| `mainworthy credential` | Your identities at the identity provider and your CLI tokens: list or remove them, and make a token. Only a person may call. Removing an identity and making a personal token from a browser need recent proof in that session. An identity is linked in the web UI. A personal token is shown once and expires after 30d by default. |
+| `mainworthy invitation` | Invite a person with a link: make one, list them, revoke one. The person accepts it by signing in at the identity provider, so an instance with none makes no invitation. The link is shown once. Issuing any invitation from a browser needs the caller's recent proof; token and local authority remain. |
 
 ### Flags every command takes
 

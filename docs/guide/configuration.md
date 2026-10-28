@@ -42,25 +42,17 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_OWNER_TOKEN` | none | An optional token for the owner, 20 to 512 visible ASCII characters without spaces. Without it, server mode generates one when the owner has no working token. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
-| `MAINWORTHY_REQUIRE_ADMIN_MFA` | `false` | `true` requires a second factor for password sign-in by anyone with `admin` on any project. See [require a second factor for admins](#require-a-second-factor-for-admins). Other nonempty values except `false` stop startup. |
-| `MAINWORTHY_OIDC_ISSUER` | none | The issuer address of an OpenID Connect identity provider, such as `https://login.example.com`. Set it with `MAINWORTHY_OIDC_CLIENT_ID`, `MAINWORTHY_OIDC_CLIENT_SECRET`, `MAINWORTHY_OIDC_NAME` and `MAINWORTHY_PUBLIC_URL`. See [sign in through an identity provider](#sign-in-through-an-identity-provider). |
+| `MAINWORTHY_OIDC_ISSUER` | none | The issuer address of the OpenID Connect identity provider people sign in through, such as `https://accounts.google.com`. Set it with `MAINWORTHY_OIDC_CLIENT_ID`, `MAINWORTHY_OIDC_CLIENT_SECRET`, `MAINWORTHY_OIDC_NAME` and `MAINWORTHY_PUBLIC_URL`. See [sign in through an identity provider](#sign-in-through-an-identity-provider). |
 | `MAINWORTHY_OIDC_CLIENT_ID` | none | The client id the provider gave this instance. |
 | `MAINWORTHY_OIDC_CLIENT_SECRET` | none | The client secret the provider gave this instance. |
 | `MAINWORTHY_OIDC_NAME` | none | What the sign-in button calls the provider, such as `Okta`: "Sign in with Okta". |
-| `MAINWORTHY_OIDC_MFA` | `false` | `true` says that the provider requires a second factor of everybody. Only then can an admin sign in through it when `MAINWORTHY_REQUIRE_ADMIN_MFA` is `true`. Other nonempty values stop startup. |
-| `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. A passkey belongs to its host name, and an invitation link starts with it. Without it there are no passkeys and `mainworthy invite` prints a link with no host. |
-| `MAINWORTHY_SMTP_HOST` | none | SMTP host. Set it with `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL` to enable mail. |
-| `MAINWORTHY_SMTP_PORT` | `587` | SMTP port, from 1 to 65535. |
-| `MAINWORTHY_SMTP_TLS` | `starttls` | `starttls` requires an encrypted upgrade. `tls` starts encrypted, usually on port 465. `none` sends without encryption, for a local relay or development server. Certificates are checked in both encrypted modes. |
-| `MAINWORTHY_SMTP_USER` | none | SMTP username. Set it with the password, or leave both unset for an unauthenticated relay. |
-| `MAINWORTHY_SMTP_PASSWORD` | none | SMTP password, read only from the process environment. It never enters the database, archives, replies or logs. |
-| `MAINWORTHY_MAIL_FROM` | none | A single sender email address, such as `mainworthy@example.com`. Display names and address lists are refused. |
+| `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. The identity provider sends people back to it, and an invitation link starts with it. Required with an identity provider. Without it `mainworthy invite` prints a link with no host. |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Cannot be set with `MAINWORTHY_PROXY_SECRET`. |
 | `MAINWORTHY_PROXY_SECRET` | none | A secret of at least 32 characters that the proxy overwrites `x-mainworthy-proxy` with on every request. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. Requests without matching proof receive 403, except `GET /health`. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which the proxy reports one visitor address. Requires either the trusted proxy addresses or the proxy secret. |
 | `MAINWORTHY_JOB_AUDIENCE` | none | Set with `MAINWORTHY_JOB_ACCOUNT` to accept `POST /api/job` from a scheduler: the HTTPS audience in its Google OIDC token, the server's own address on Cloud Run. Without both, `/api/job` refuses every caller. |
 | `MAINWORTHY_JOB_ACCOUNT` | none | Set with `MAINWORTHY_JOB_AUDIENCE`. The service account email that may call `/api/job`. Tokens must have a valid Google signature, issuer, audience, expiry and verified account email. No shared job secret is used. That call needs no proxy proof (`MAINWORTHY_PROXY_SECRET`): the token is its proof. |
-| `MAINWORTHY_JOB_KEY` | none | Base64 encoding of 32 random bytes, shared by every instance that queues or runs private jobs. Required to queue mail. An invalid value stops startup; a missing value refuses private enqueue. See [turn on mail](#turn-on-mail). |
+| `MAINWORTHY_JOB_KEY` | none | Base64 encoding of 32 random bytes, shared by every instance that queues or runs private jobs. An invalid value stops startup; a missing value refuses private enqueue. |
 | `MAINWORTHY_JOB_RUNNER` | `1` | Set to `0` when a scheduler's `/api/job` calls run the jobs, as on Cloud Run, where the CPU is throttled between requests. The runner polls durable rows on development and hosts with CPU between requests. |
 | `MAINWORTHY_DATABASE_URL` | required | PostgreSQL connection URL. `compose.yaml` starts PostgreSQL 18 and sets this for the app. |
 | `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
@@ -83,7 +75,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 
 An invalid session duration also stops startup with a line that names the variable.
 
-For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, or `http://localhost` with its optional port. The server refuses IP addresses and plain `http` anywhere else because browsers do not make passkeys there. Paths and queries are refused because the server needs the instance's root address.
+For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, or `http://localhost` with its optional port. The server refuses plain `http` anywhere else. Paths and queries are refused because the server needs the instance's root address.
 
 The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or form, or reserved owner name creates no files.
 
@@ -99,25 +91,6 @@ GitHub Issues and Jira Cloud are optional. Each supports one destination for one
 Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner must be a person. The server refuses to start if the name belongs to an agent, a pipeline or a forgotten person, or starts with `forgotten-`.
 
 Changing the variable to a new name creates a second person with every capability. The previous owner keeps their grant and tokens. Remove their grant with `mainworthy actor ungrant` if you no longer want them to administer the instance. Changing `MAINWORTHY_OWNER_TOKEN` to a new value also revokes earlier tokens issued through that variable. To give the same person a new name instead, [rename the owner](#rename-the-owner).
-
-### Turn on mail
-
-To enable mail, configure the server's environment as follows:
-
-1. Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM`, `MAINWORTHY_PUBLIC_URL` and `MAINWORTHY_JOB_KEY`.
-2. If your SMTP server requires authentication, set `MAINWORTHY_SMTP_USER` and `MAINWORTHY_SMTP_PASSWORD` together.
-3. Set `MAINWORTHY_SMTP_PORT` and `MAINWORTHY_SMTP_TLS` to the provider's values.
-4. Restart the server.
-
-The default is port 587 with required STARTTLS. SMTP authentication uses AUTH PLAIN. The Compose service passes these variables through.
-
-Set `MAINWORTHY_JOB_KEY` to a base64 encoding of 32 random bytes, generated once with `openssl rand -base64 32`. Keep it in the secret environment and use the same value on every public and job instance. Private job inputs use AES-256-GCM with a random nonce and authenticate the job id and kind. The database holds ciphertext, never the usable mail link. The key must stay outside PostgreSQL and its backups. Without the key, private enqueue fails and rolls back the transaction that issued the link. Instances without mail can still start. An invalid configured key stops startup without printing its value.
-
-Drain private jobs before replacing this key on every instance together. Keep the old key until the queue drains and keep it separately for backups that contain queued mail. A job encrypted with an old key fails decryption under a new key, records an error naming `MAINWORTHY_JOB_KEY`, and sends nothing on that attempt. It follows the bounded retry policy; restoring the old key before exhaustion lets it retry. Exhausted jobs erase their input, so request a new link. Plaintext jobs left by an earlier build are rejected too. There is no plaintext fallback or automatic re-encryption.
-
-With all mail variables unset, invitations remain links you copy and the sign-in page offers no password reset. Partial or malformed settings stop startup with a generic configuration message that does not repeat their values. These settings are never stored in the database or an archive, and are never returned by an API.
-
-Mail delivery starts after the identity transaction commits. The runner takes bounded batches of jobs, and each SMTP exchange has a five-second deadline. A failed delivery writes a generic log line. No message body, recipient, username, password or transport error is logged. Mail jobs and pending links survive restarts. Delivery retries at least once with a stable Message-ID; an interrupted delivery can send a duplicate. Completed or exhausted jobs erase their private input. [Access](./access.md#a-lost-password-or-passkey) describes verification, reset and admin recovery.
 
 ### Rename the owner
 
@@ -135,16 +108,12 @@ Follow these steps:
 2. Start the server again. It says one line:
 
    ```
-   MAINWORTHY_OWNER_WAS: owner is now robin, with the tokens, password, passkeys, sessions and history owner had. robin signs in under the new name. Unset MAINWORTHY_OWNER_WAS.
+   MAINWORTHY_OWNER_WAS: owner is now robin, with the tokens, identities, sessions and history owner had. robin signs in under the new name. Unset MAINWORTHY_OWNER_WAS.
    ```
 
 3. Unset `MAINWORTHY_OWNER_WAS`. If the variable stays set, the server renames nobody and says so at every start.
 
-The owner's tokens and passkeys keep working. Their browser sessions stay signed in, and history shows their new name. The rename affects sign-in and browser drafts as follows:
-
-- A password is typed with the new name. Change the name in your password manager.
-- A passkey signs in as before. The device or password manager that holds it still shows the old name for it.
-- A browser keeps an unrecorded draft for the person, not for their name, so the owner still sees their drafts under the new name.
+The owner's tokens and linked identities keep working. Their browser sessions stay signed in, and history shows their new name. A browser keeps an unrecorded draft for the person, not for their name, so the owner still sees their drafts under the new name.
 
 Startup refuses the rename when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline, a forgotten person, or a person without every capability on every project. The error says why. The database has no separate owner marker, so the rename checks the grants that every start gives the owner. An admin granted all of those capabilities also passes that check and becomes the owner under the new name.
 
@@ -156,7 +125,7 @@ Nobody else's name can be changed.
 
 A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then. It also left a copy of the original database beside it, named `mainworthy.db.v<N>.bak`.
 
-For the first server-mode sign-in, use the owner's token. Later you can set up a password or passkey. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. Otherwise, a start on which the owner has no working token prints a generated one. The first start and a start after an import do this.
+For the first server-mode sign-in, use the owner's token. Then link your identity at the provider in Settings, **Your sign-in**. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. Otherwise, a start on which the owner has no working token prints a generated one. The first start and a start after an import do this.
 
 To replace a lost token, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. The start revokes every token previously issued through that variable, whoever the owner was then. It ends browser sessions opened with those tokens and names each token and actor in one log line. Tokens you made yourself and tokens the server generated keep working.
 
@@ -199,7 +168,7 @@ $ docker compose up -d
 
 The app waits for PostgreSQL health before starting. `MAINWORTHY_POSTGRES_PASSWORD` overrides the development password
 in `compose.yaml`; in Coolify the password is generated (`docs/deploy.md`). Running elsewhere is possible but not yet supported.
-Compose passes owner, session, proxy, public URL, Apple app, demo and mail settings to the app.
+Compose passes owner, session, proxy, public URL, identity provider and demo settings to the app.
 
 Set `MAINWORTHY_OWNER_TOKEN` to a long random string. If you leave it empty on first start, the server generates one and prints it once in `docker compose logs`. Open `http://localhost:7357` and sign in with it.
 
@@ -231,15 +200,15 @@ When a browser sends `Origin` while signing in or using a session cookie, the se
 
 The server also reads `Sec-Fetch-Site`, the header that identifies which site made a browser request. The server refuses sign-in and session-cookie requests from another site's page. A browser sends that header only to HTTPS addresses and to this machine. For plain HTTP to a name or address on your network, the browser sends no `Sec-Fetch-Site` header. The server then checks `Origin` alone.
 
-The session cookie still has `SameSite=Strict`, so the browser excludes it from requests made by another site's page. However, plain HTTP sends the password or token and the cookie without encryption. The cookie also lacks its `__Host-` prefix and `Secure` mark. HTTPS through a proxy is the supported way to serve an instance to anybody but yourself.
+The session cookie still has `SameSite=Strict`, so the browser excludes it from requests made by another site's page. However, plain HTTP sends the token and the cookie without encryption. The cookie also lacks its `__Host-` prefix and `Secure` mark. HTTPS through a proxy is the supported way to serve an instance to anybody but yourself.
 
 The server counts wrong tokens by their source address and first 8 characters, both on authenticated operations and in the sign-in form. `/health`, the API description and the documentation need no sign-in and ignore tokens. The fifth wrong token within 15 minutes blocks that address or token prefix for one second. Each further wrong token doubles the wait, up to 15 minutes. A blocked request gets HTTP 429 with `Retry-After`. Repeated checks and valid sign-ins do not spend the failed-attempt allowance.
 
-Failed-attempt counts and anonymous sign-in start allowances are shared by all instances on the same database. Restarting an instance does not reset them. Session expiry and sign-in-record retention jobs check their lease after waiting for identity and actor locks; an expired worker cannot commit over its successor. Passkey, authenticator, provider and mail ceremonies can start on one instance and finish on another; each can be used once. Importing an archive invalidates pending ceremonies on every instance. Token and session last uses are stored during requests, at most once a minute for each credential. The idle check uses that stored time, so an active session can end up to a minute early.
+Failed-attempt counts and anonymous sign-in start allowances are shared by all instances on the same database. Restarting an instance does not reset them. Session expiry and sign-in-record retention jobs check their lease after waiting for identity and actor locks; an expired worker cannot commit over its successor. A provider sign-in can start on one instance and finish on another; each can be used once. Importing an archive invalidates pending ceremonies on every instance. Token and session last uses are stored during requests, at most once a minute for each credential. The idle check uses that stored time, so an active session can end up to a minute early.
 
 A signed-in browser is unaffected. A correct server-generated token also works while blocked. These include tokens from `mainworthy token new` or Settings and the owner token printed at startup. A token supplied through `MAINWORTHY_OWNER_TOKEN` waits with other user-chosen tokens. Copying an existing server-generated token into that variable keeps its server-generated status. A request that presents a token uses that token's identity, whatever cookie comes with it.
 
-Password sign-in shares the address count. The server counts a wrong password by the address and account name, including a wrong current password entered when changing it. Names count the same regardless of capitalisation, and unknown names count like existing names. While an address or name is blocked, the server does not check passwords, so the right one waits too. Refused passkey answers and invitation codes count by address alone. Valid passkeys and invitation codes still work from a blocked address.
+Refused provider answers and invitation codes count by address alone. A valid invitation code still works from a blocked address.
 
 Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
 
@@ -262,9 +231,9 @@ In server mode everything that reads or changes a project needs a token or a sig
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |
 
-`/api/login` opens a browser's session and sets its cookie. `/api/logout` ends the session and clears the cookie. `GET /api/login/methods` answers anyone and says whether the instance offers passkeys and mail. `/api/login/challenge` gives a browser what it needs to use a passkey. With a valid invitation code, the challenge route also says whose invitation it is and when it expires. Without a valid code, it reveals no invitation details.
+`/api/login` opens a browser's session and sets its cookie. `/api/logout` ends the session and clears the cookie. `GET /api/login/methods` answers anyone and names the instance's identity provider, if it has one. `/api/login/oidc` gives a browser the provider's address to sign in, accept an invitation, link an identity or confirm it is you. `/api/login/invitation` says, for a valid invitation code, whose invitation it is and when it expires. Without a valid code, it reveals no invitation details.
 
-`/api/login`, `/api/logout` and `/api/login/challenge` refuse requests from another site's page. A script, `curl` or the command line can send requests without a site header. If nobody outside your network should see these addresses, keep the server off the public internet or put the proxy's access control in front of it.
+`/api/login`, `/api/logout`, `/api/login/oidc` and `/api/login/invitation` refuse requests from another site's page. A script, `curl` or the command line can send requests without a site header. If nobody outside your network should see these addresses, keep the server off the public internet or put the proxy's access control in front of it.
 
 ## Build the single executable
 
@@ -285,33 +254,42 @@ The same file is the command line: `./dist/mainworthy gate`. The variables above
 
 ## Sign in through an identity provider
 
-Mainworthy signs people in through one OpenID Connect provider. It uses the authorization code flow with PKCE and checks the provider's ID token, including its signature.
+Everybody but the owner signs in through one OpenID Connect identity provider, such as Google, Microsoft Entra ID,
+Okta, Keycloak or Authentik. Mainworthy keeps no password, passkey or second factor and sends no mail: the provider
+asks for those, and recovers an account a person cannot get into. Without a provider the instance has one person,
+the owner, who signs in with the owner token, plus agents and pipelines, and `mainworthy invite` refuses.
+
+Mainworthy uses the authorization code flow with PKCE and checks the provider's ID token, including its signature.
 
 1. At the provider, register a web application (a "confidential client"). Set its redirect address, also called the callback URL, to the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`. Allow the scopes `openid`, `email` and `profile`.
 2. Set `MAINWORTHY_OIDC_ISSUER` to the provider's issuer address. It is the address whose `/.well-known/openid-configuration` the provider publishes, exactly as that document's `issuer` writes it. Set `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to what the provider gave you, and `MAINWORTHY_OIDC_NAME` to the name the button shows.
 3. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
+4. Sign in with the owner token, open Settings, **Your sign-in**, and link your identity at the provider. Then invite people.
 
 The four variables are set together or not at all. Startup stops when only some are set, when `MAINWORTHY_PUBLIC_URL` is missing, or when the issuer is not `https`. Plain `http` is accepted only on the loopback address, for a provider on the same machine.
 
-Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through an identity provider](./access.md#through-an-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
+Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through the identity provider](./access.md#through-the-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
 
-## Require a second factor for admins
+To confirm it is somebody before a sign-in change, Mainworthy sends them back to the provider with `max_age=0`, which asks the provider to sign them in again. When the ID token carries `auth_time`, it must be within the last ten minutes. A provider that leaves it out, as Google does, gives proof by the fresh round trip alone. [Confirm it is you](./access.md#confirm-it-is-you) has the rest.
 
-Before enabling the requirement, give each admin a verified passkey or [enrol an authenticator](./access.md#add-an-authenticator-for-password-sign-in). Then follow these steps:
+An identity is the provider's issuer and its subject for the person. If you change `MAINWORTHY_OIDC_ISSUER`, identities linked at the old issuer sign nobody in: sign in with the owner token, link your new identity, and invite everybody else again.
 
-1. Set `MAINWORTHY_REQUIRE_ADMIN_MFA=true`.
-2. Restart the instance.
+### Google accounts
 
-A password with no enrolled authenticator then opens no admin session. Neither does the identity provider, unless `MAINWORTHY_OIDC_MFA=true` says that the provider requires a second factor of everybody. This applies to `admin` held through personal or team grants, on one project or every project. A verified passkey still signs in without a code. An invitation that would sign an admin in must include a verified passkey, or be accepted through an identity provider that `MAINWORTHY_OIDC_MFA=true` vouches for. The owner can sign in with the owner token to enrol an authenticator when no other session is available. Tokens and local-owner access keep their existing authority.
+To let people sign in with their Google account or Google Workspace account:
 
-Each start with this setting ends every admin password session, including sessions that previously completed a second step, and every admin session opened through an identity provider that `MAINWORTHY_OIDC_MFA` does not vouch for. The admin signs in again. Becoming an admin ends the same sessions, whether through a personal grant, a team grant, or joining an admin team. Passkey sessions remain signed in.
+1. In the Google Cloud console, open **Google Auth Platform**, then **Clients**, and create a client of type **Web application**.
+2. Under **Authorised redirect URIs**, add the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`.
+3. Set `MAINWORTHY_OIDC_ISSUER=https://accounts.google.com`, `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to the client's id and secret, and `MAINWORTHY_OIDC_NAME=Google`.
 
-An admin password with no enrolled authenticator does not count as a working way to sign in. The last usable passkey stays until the person adds another passkey or enrols an authenticator. An admin with a password must remove the password before removing their authenticator to rely only on passkeys.
+Google decides who may sign in to the client. Under **Audience** in the same console, choose the users of your
+Workspace organisation, or any Google account; an external client that is still in testing admits only the test
+users listed there. Either way, Mainworthy admits only an identity somebody invited or linked.
 
 ### Container network lockdown
 
 The production Coolify Compose file sets `MAINWORTHY_LOCKDOWN=1` to block new outbound network connections from Mainworthy. The ordinary image defaults to `0`; any other value refuses startup.
 Its image entrypoint installs the policy before starting the app without capabilities.
-This deployment cannot send outbound mail or webhooks, or contact an OIDC provider.
+This deployment cannot send webhooks or contact an OIDC provider, so on it only the owner signs in, with the owner token.
 The ordinary image and local Compose file leave lockdown off and retain these integrations.
 See the repository's `docs/deploy.md` for the Linux startup checks and the trusted-proxy boundary.

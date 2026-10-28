@@ -27,7 +27,7 @@ services:
       - "7357:7357"
     environment:
       # Generate once with `openssl rand -base64 32`, keep in .env alongside the database password.
-      # Empty refuses private mail enqueue; instances without mail can start.
+      # Empty refuses private job enqueue; instances without private jobs can start.
       MAINWORTHY_JOB_KEY: ${MAINWORTHY_JOB_KEY:-}
       MAINWORTHY_DATABASE_URL: postgres://mainworthy:${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}@postgres:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
@@ -42,18 +42,18 @@ services:
       # that failed sign-ins are counted for each visitor. Both or neither; empty means not set (docs/deploy.md).
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:-}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:-}
-      # The address people open the instance at, like https://mainworthy.example. Passkeys belong to its host
-      # name and an invitation link starts with it. Empty means no passkeys and a link without a host.
+      # The address people open the instance at, like https://mainworthy.example. The identity provider sends
+      # people back to it and an invitation link starts with it. Empty means a link without a host.
       MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}
+      # The identity provider people sign in through: all four or none. Empty means only the owner signs in, with
+      # the owner token (docs/guide/configuration.md, "Sign in through an identity provider").
+      MAINWORTHY_OIDC_ISSUER: ${MAINWORTHY_OIDC_ISSUER:-}
+      MAINWORTHY_OIDC_CLIENT_ID: ${MAINWORTHY_OIDC_CLIENT_ID:-}
+      MAINWORTHY_OIDC_CLIENT_SECRET: ${MAINWORTHY_OIDC_CLIENT_SECRET:-}
+      MAINWORTHY_OIDC_NAME: ${MAINWORTHY_OIDC_NAME:-}
       # A marked project the server swaps and fills with the demo again once per known deployed revision (`mainworthy seed`). Only a
       # project that command made is replaced. Empty means none.
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO:-}
-      MAINWORTHY_SMTP_HOST: ${MAINWORTHY_SMTP_HOST:-}
-      MAINWORTHY_SMTP_PORT: ${MAINWORTHY_SMTP_PORT:-}
-      MAINWORTHY_SMTP_TLS: ${MAINWORTHY_SMTP_TLS:-}
-      MAINWORTHY_SMTP_USER: ${MAINWORTHY_SMTP_USER:-}
-      MAINWORTHY_SMTP_PASSWORD: ${MAINWORTHY_SMTP_PASSWORD:-}
-      MAINWORTHY_MAIL_FROM: ${MAINWORTHY_MAIL_FROM:-}
     depends_on:
       postgres:
         condition: service_healthy

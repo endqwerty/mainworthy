@@ -10,17 +10,18 @@ This policy covers the instance at `mainworthy.com`. The owner of the Mainworthy
 
 ### Identity and access
 
-An account is a name and a way to sign in. We do not require an email address or a real name. You can add an email address, and sign in with it in place of your name. We store the address and whether and when you verified it. If the instance has mail enabled, we use that information to send recovery links and notices about changes to your sign-in methods; without mail, nothing is sent to it and it stays unverified. Pending outgoing mail jobs temporarily hold the recipient and message, including any one-use sign-in link. They are excluded from exports. A completed or exhausted job removes that message input. SMTP credentials stay in the server environment.
+An account is a name and a way to sign in. Mainworthy keeps no password, asks for no email address and sends no
+mail. Somebody who already has an account invites you, and you sign in through the instance's identity provider.
+On `mainworthy.com` that provider is Google: you sign in with your Google account.
 
-Somebody who already has an account invites you. You choose how you sign in:
-
-- **A password.** We store it as an argon2id hash, never the password itself.
-- **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. Mainworthy never receives the private key. Your device or password manager decides where it keeps that key and whether it syncs between devices.
+- **An identity at the provider.** When you link one, we store the provider's issuer and its subject for you (an
+  identifier the provider gives this instance for your account), a label made of the provider's name and the email
+  address it reports as verified, or else the name it gives, and when the identity was linked and last used. We
+  use the subject to recognise you when you sign in, never the email address or the name. Your password at the
+  provider, and any second sign-in step there, stay with the provider.
 - **A token**, for scripts and pipelines. We store a SHA-256 hash of it, its label, when it was made and last used, and the network address it was last used from.
 
-If you add an authenticator as a second sign-in step, we store its shared secret, the last accepted time step and SHA-256 hashes of its unused recovery codes. The shared secret is not encrypted by Mainworthy. Removing the authenticator erases the secret and recovery-code hashes.
-
-We store an invitation as a hash of its code, with who it is for and who made it. Email verification and password reset links are stored in PostgreSQL by a hash of their code. Their rows hold the contact id and revision, without copying the name or email address. A verification link works once for 24 hours, and a reset link works once for 15 minutes. Restarting an instance preserves them; importing an archive invalidates them.
+We store an invitation as a hash of its code, with who it is for and who made it.
 
 ### Sessions
 
@@ -32,7 +33,7 @@ The server checks retention every minute while it runs. A stopped server or a lo
 
 ### Failed sign-ins
 
-To slow down guesses, the server stores counts under SHA-256 digests of source addresses, account names and token prefixes. It stores these counters in PostgreSQL, shared by every instance, without keeping those keys as plaintext. The server stops using a failure count at most 30 minutes after the last failed attempt. Anonymous starts have a separate one-minute count. Restarting an instance preserves both counts. Expired rows can remain until cleanup or eviction, but do not extend a block.
+To slow down guesses, the server stores counts under SHA-256 digests of source addresses and token prefixes. It stores these counters in PostgreSQL, shared by every instance, without keeping those keys as plaintext. The server stops using a failure count at most 30 minutes after the last failed attempt. Anonymous starts have a separate one-minute count. Restarting an instance preserves both counts. Expired rows can remain until cleanup or eviction, but do not extend a block.
 
 ### Product interactions
 
@@ -43,7 +44,7 @@ We store the content you put into Mainworthy: cases, test results, decisions, no
 The web app sets two cookies, both strictly necessary:
 
 - One keeps you signed in.
-- The other binds this browser to a five-minute passkey sign-in, authenticator step or identity-provider ceremony.
+- The other binds this browser to a five-minute sign-in at the identity provider.
 
 There are no analytics, advertising or tracking cookies.
 
@@ -57,7 +58,7 @@ Your personal home is stored separately for each signed-in name and project. It 
 
 ### Logs
 
-The server writes no log of requests. It logs when it starts and when something fails. A failed sign-in is logged without the name, the address or the password.
+The server writes no log of requests. It logs when it starts and when something fails. A failed sign-in is logged as a reason code, without the token, the identity or the address.
 
 ### Voluntary correspondence
 
@@ -73,6 +74,9 @@ We keep your account, your sessions and your content because you asked us to pro
 
 - **Cloudflare** carries every request to `mainworthy.com`. It provides the domain's DNS, the encrypted connection and the tunnel to our server.
   Cloudflare sees your network address and the requests you make. See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
+- **Google** is the identity provider of `mainworthy.com`. When you sign in, Google checks who you are and tells us
+  your account's subject, and the email address and name you allow it to share. Your Google account is under
+  [Google's privacy policy](https://policies.google.com/privacy).
 
 The server and its database are ours, not a cloud provider's.
 
@@ -87,24 +91,24 @@ We apply the same rights to everyone, wherever they are:
 - **Right to know.** This page lists what we collect and why.
 - **Right of access and portability.** An instance admin can export everything in an instance as a text file that any tool can read ([Your data](./data.md)). We will export what we hold about you on request.
 - **Right to correction.** Ask us to correct anything about you that is wrong.
-- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, including attribution in question evidence, saved command replies and report receipts. New question evidence stores actor ids and resolves names when read. We revoke your passwords, passkeys, authenticators, tokens and invitations. We erase your password's hash, your passkeys' public keys and your authenticator's secret and recovery-code hashes. We clear your token and credential labels, including labels on previously revoked rows. We also delete your recovery email address. We end your sessions, whose records are then deleted as [sessions](#sessions) describes. The history still says that one person did each thing, without saying who.
+- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, including attribution in question evidence, saved command replies and report receipts. New question evidence stores actor ids and resolves names when read. We revoke your linked identities, tokens and invitations. We erase each identity's issuer and subject. We clear your token and identity labels, including labels on previously revoked rows. We end your sessions, whose records are then deleted as [sessions](#sessions) describes. The history still says that one person did each thing, without saying who.
 
   Attachments and their file names also stay when a person is forgotten. Screenshots and files can contain personal information. Mainworthy does not scan or redact them, and has no attachment deletion control yet. Text you typed into cases and notes stays because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)).
 
-  A fingerprint of each request sent with a command id also stays. The fingerprint is a SHA-256 hash. It prevents a retried request from being recorded twice. Someone who holds the database can also use the fingerprint to confirm a name they already guess. Your name stays in replies and questions saved before 2026-10-14 if you were forgotten before then. Records of your tokens, passwords, passkeys and authenticators stay, with nothing in them that signs in. The records include when those credentials were made and used and each passkey's credential id. Your invitations are deleted 30 days after they end. Your tokens' network addresses are erased 30 days after the tokens end. See [Data retention](#data-retention).
+  A fingerprint of each request sent with a command id also stays. The fingerprint is a SHA-256 hash. It prevents a retried request from being recorded twice. Someone who holds the database can also use the fingerprint to confirm a name they already guess. Your name stays in replies and questions saved before 2026-10-14 if you were forgotten before then. Records of your tokens and identities stay, with nothing in them that signs in. The records include when they were made and used. Your invitations are deleted 30 days after they end. Your tokens' network addresses are erased 30 days after the tokens end. See [Data retention](#data-retention).
 - **Right to restrict processing and to object.** Ask us, and we will tell you what we can do.
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
 
-You can manage your sessions and sign-in methods yourself. Under Settings, **Your sessions** lists every session you have open and lets you end any of them. **Your sign-in** removes a password or a passkey, as long as one way to sign in is left.
+You can manage your sessions and sign-in methods yourself. Under Settings, **Your sessions** lists every session you have open and lets you end any of them. **Your sign-in** unlinks an identity, as long as one is left.
 
-A person who administers the instance can forget somebody through Settings, **People**, **Forget a person**, or `mainworthy actor forget <name> --confirm <name>`. Both the page and the command require confirmation and explain what stays. Their warning also names the recovery email address, linked provider identities and authenticator data that forgetting erases, and the team memberships it removes. The page opens a confirmation beside the selection. **Cancel** or <kbd>Esc</kbd> closes the confirmation without forgetting anybody. Your own name and the current owner's name are unavailable, with the reason beside each. [People, agents and pipelines](./access.md#forget-a-person) gives the steps.
+A person who administers the instance can forget somebody through Settings, **People**, **Forget a person**, or `mainworthy actor forget <name> --confirm <name>`. Both the page and the command require confirmation and explain what stays. Their warning also names the linked provider identities that forgetting erases, and the team memberships it removes. The page opens a confirmation beside the selection. **Cancel** or <kbd>Esc</kbd> closes the confirmation without forgetting anybody. Your own name and the current owner's name are unavailable, with the reason beside each. [People, agents and pipelines](./access.md#forget-a-person) gives the steps.
 
 There is no in-app request for forgetting or self-service account deletion yet. For other requests, contact us as described in [changes and questions](#changes-and-questions). We may need to make sure a request comes from you before acting on it.
 
 ## How we secure your data
 
-Every connection to `mainworthy.com` is encrypted with TLS. We store passwords as argon2id hashes. We store tokens, session cookies and invitation codes as SHA-256 hashes. Credential tables keep only hashes of these secrets. A pending mail job can temporarily contain the one-use link it is delivering, as described above. Mainworthy does not encrypt the database itself. The server protects the database. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status are included in exports.
+Every connection to `mainworthy.com` is encrypted with TLS. We store tokens, session cookies and invitation codes as SHA-256 hashes. Credential tables keep only hashes of these secrets. Mainworthy does not encrypt the database itself. The server protects the database. An export never contains a linked identity, a token, a session or an invitation.
 
 ## Data retention
 
@@ -113,12 +117,9 @@ We keep information only for as long as it is needed:
 | What | How long |
 | --- | --- |
 | Failed sign-in attempts | Digest-keyed counters in PostgreSQL, used for at most 30 minutes after the last failure. Restarts preserve them; periodic cleanup removes expired rows, and capacity eviction can remove older rows sooner. |
-| A passkey sign-in or authenticator step in progress | Usable for 5 minutes across instances and restarts. Stored in PostgreSQL; expired records are removed by periodic cleanup or when that ceremony kind next allocates. |
-| An email verification link | Usable once for 24 hours across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it and periodic cleanup removes expired records. |
-| A password reset link | Usable once for 15 minutes across instances and restarts. Stored by code hash in PostgreSQL; import invalidates it and periodic cleanup removes expired records. |
-| An outgoing mail message | Until its job succeeds or exhausts its bounded retries. Private job input is excluded from archives. |
+| A sign-in at the identity provider in progress | Usable once for 5 minutes across instances and restarts. Stored in PostgreSQL; periodic cleanup removes expired records. |
+| A linked identity | Until you unlink it, a recovery link replaces it, or your account is forgotten |
 | Project change-stream hints | 24 hours. A returning stream with older or missing history refreshes the project. |
-| A recovery email address | Until you remove or replace it, or your account is forgotten |
 | A session's record | Deleted by the running server once the session has been ended for 30 days. See [sessions](#sessions). |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |
 | An invitation's record | Deleted 30 days after use, revocation or expiry, whichever happens first |

@@ -13,7 +13,7 @@ An actor makes each change in Mainworthy, and the record names who made it. Ther
 - A pipeline. A CI job that reports results and reads the gate.
 - The policy. A rule that answers a question on a project's behalf. It holds no grant and no token, and you do not create it.
 
-An actor has a name, a kind and grants. There are no seats, so an actor costs nothing. A token proves who is calling, and a person can also [sign in as themselves](#sign-in-as-yourself) with a password or a passkey. A name uses letters, digits, `.`, `_`, `@` and `-`, starts with a letter or digit, and runs up to 64 characters.
+An actor has a name, a kind and grants. There are no seats, so an actor costs nothing. A token proves who is calling, and a person can also [sign in as themselves](#sign-in-as-yourself) through the instance's identity provider. A name uses letters, digits, `.`, `_`, `@` and `-`, starts with a letter or digit, and runs up to 64 characters.
 
 ## Capabilities
 
@@ -92,13 +92,10 @@ The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./confi
 
 ## Make your own command-line token
 
-Sign in with your password or a passkey, then open Settings, **Your sign-in**, **Your command-line tokens**. A provider session can also create a token after you prove an existing password, passkey or authenticator code.
-Creating a personal token or issuing any token under **Tokens** requires proof of
-your own credential within ten minutes in that browser session. Settings asks
-inline when needed and retries after proof. Admin token issuance with a bearer
+Sign in through the instance's identity provider, then open Settings, **Your sign-in**, **Your command-line tokens**.
+Creating a personal token or issuing any token under **Tokens** requires [recent proof](#confirm-it-is-you) in that
+browser session. Settings asks inline when needed and retries after proof. Admin token issuance with a bearer
 token and local CLI issuance keep their existing authority.
-If you signed in with the owner token and have no credential yet, add a password or passkey in **Your sign-in**, then return to **Tokens** and confirm that credential when asked.
-If your only sign-in method is a provider identity, ask the owner for a recovery link and accept it with a password or passkey before creating a personal token. Adding a local credential from that provider-only session requires proof too.
 You need no admin capability. As the local owner, you can make one without signing in.
 
 To create a personal token, follow these steps:
@@ -118,10 +115,10 @@ $ mainworthy find --json '{"in":"cases","limit":10}'
 
 The token acts as you, with your current personal and team grants on each project. Making it changes no grants.
 A grant removed from you is removed from every token of yours. Forgetting you stops them all.
-Changing your password does not revoke tokens. Do not give a personal token to an agent or a pipeline that needs its own identity.
+Unlinking an identity does not revoke tokens. Do not give a personal token to an agent or a pipeline that needs its own identity.
 
 The list shows only your tokens, including any an admin made for you, with their ids, labels, creation and last-use times, expiry, and revocation.
-Choose **Revoke** beside a token to stop it immediately. Your password or passkey session stays signed in.
+Choose **Revoke** beside a token to stop it immediately. Your browser session stays signed in.
 The owner's last working token stays until another is made.
 A missing creation reply may mean a token was made but its secret was lost. Check the list, revoke that token, and make another.
 
@@ -136,13 +133,13 @@ The `credential` operation accepts `token.create` with `label`, optional `expire
 The reply holds `id`, `actor`, `token`, and `expiresAt`, a Unix timestamp in milliseconds.
 An expiry is required internally, defaults to `30d`, and cannot exceed `365d`.
 A command id prevents a repeated creation. Its secret reply is never saved, and a retry receives `conflict`.
-Creation accepts no actor, project, or grants. It requires a browser session opened with a password, passkey or identity provider, plus recent proof of an existing password, passkey or authenticator code, or local-owner access. A provider sign-in alone does not supply that proof.
+Creation accepts no actor, project, or grants. It requires a browser session opened through the identity provider, plus [recent proof](#confirm-it-is-you), or local-owner access.
 A bearer token and a browser signed in with a token cannot make a personal token.
 There is no instance setting to disable personal tokens. An admin who is a person may revoke another person's token by id, as with other credentials.
 
 ## Teams
 
-A browser setting a personal or team grant that includes `admin`, or adding someone to a team holding `admin` on any project, requires recent proof of the caller's own credential. Settings asks inline for team changes. Bearer-token and local CLI grant and membership changes retain their existing authority. Non-admin grants and removal operations keep their existing rules.
+A browser setting a personal or team grant that includes `admin`, or adding someone to a team holding `admin` on any project, requires the caller's [recent proof](#confirm-it-is-you). Settings asks inline for team changes. Bearer-token and local CLI grant and membership changes retain their existing authority. Non-admin grants and removal operations keep their existing rules.
 
 A team is a named set of grants. A person's effective permissions are their own grants plus the grants of every team they belong to. Grants on one project and on every project add up. Removing a person from one team takes away that team's contribution immediately, including requests waiting to run. A personal grant or another team's grant still applies.
 
@@ -241,7 +238,7 @@ token 2 revoked
 
 The server reads your token or session, your actor and your grants in the same snapshot that runs an operation. A read waiting for a pooled connection sees a grant removed before it starts. Before sending a read reply, the server checks the project, caller's grant and required capability again; if the project was replaced, it reads the replacement instead of returning the old project's data. A report already accepted keeps its actor and finishes even if that actor's token is then revoked.
 
-A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym made from `forgotten-` and the actor's number. If an archive imported from an older build already holds that name, Mainworthy adds `-2`, `-3` or a later suffix. The tokens stop working. Mainworthy revokes the person's passwords, passkeys and open invitations. The history keeps what the actor did.
+A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym made from `forgotten-` and the actor's number. If an archive imported from an older build already holds that name, Mainworthy adds `-2`, `-3` or a later suffix. The tokens stop working. Mainworthy unlinks the person's provider identities and revokes their open invitations. The history keeps what the actor did.
 
 Forgetting also clears the person's token and credential labels, including labels on revoked rows. Question evidence, saved command replies and report receipts use the pseudonym for attribution. New questions keep actor ids and resolve names when read. Forgetting rewrites display names saved by older builds. This leaves the evidence hash unchanged because it covers the decision's material basis and target, not display attribution. Command ids still name the same requests, so retrying a command does not repeat the write. Replies that held secrets remain unavailable. Text in cases and notes stays as written.
 
@@ -251,35 +248,6 @@ $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
 ```
 
 The raw operation remains available. The page and shorter command are described in [Forget a person](#forget-a-person).
-
-## Add an authenticator for password sign-in
-
-In Settings, open **Your sign-in**, then choose **Add an authenticator**.
-
-If confirmation is needed, use a password or passkey you already added. The
-confirmation offers an authenticator code only when an authenticator is enrolled.
-If you signed in with only a token, add your first password or passkey in
-**Your sign-in**, then choose **Add an authenticator** again and confirm that credential.
-
-To enrol the authenticator, follow these steps:
-
-1. Scan the QR code with a TOTP authenticator, or enter the setup key by hand. Mainworthy generates the QR code on the instance without contacting another service.
-2. Enter the six-digit **Authenticator code**.
-3. Within five minutes, choose **Confirm authenticator**.
-4. Save the ten recovery codes somewhere private.
-5. Choose **I saved the recovery codes**. Mainworthy shows these codes once. Each code works once with your password.
-
-Your other sessions end when you confirm. Your current session stays signed in. The next password sign-in shows **One more step**. Enter a fresh authenticator code or an unused recovery code. The password alone opens no session. A passkey with user verification needs no extra code.
-
-If you choose a passkey during **One more step** and cancel, restart password sign-in before entering a code.
-
-Authenticator codes change every 30 seconds. Mainworthy allows the previous and next 30-second step for clock differences and refuses a code already used. Wait for a new code if you just confirmed enrolment. Wrong sign-in codes count against your account and the request address. Re-entering the right password does not clear failed-code attempts. Enrolment has a separate failed-code count, so setup typos do not block sign-in codes.
-
-The credential list identifies your authenticator without showing its setup key or recovery codes. **Remove** removes it and ends all your sessions. Removing your own authenticator uses your signed-in session and does not ask for a fresh code. To replace lost recovery codes, remove the authenticator and enrol again from a session you can still open. Otherwise, ask the owner for a recovery invitation.
-
-An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. The requirement covers personal and team grants on any project. An admin recovery invitation on such an instance must be accepted with a passkey. An admin password without an authenticator does not count as a working sign-in method. Add another passkey or enrol an authenticator before removing the last usable passkey.
-
-The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) also supports the second step.
 
 ## Forget a person
 
@@ -294,7 +262,7 @@ To forget a person, follow these steps:
 
 The confirmation takes the keyboard focus. **Cancel** or <kbd>Esc</kbd> closes it without changing anything and returns focus to **Forget this person**.
 
-The warning names the sign-in data that forgetting erases, including linked provider identities, recovery email addresses, authenticator secrets and recovery-code hashes. It also names token network addresses and labels, and explains that team memberships are removed. History, attachments and typed case and note text stay. Some sign-in records and request fingerprints stay too. [Privacy](./privacy.md#your-rights-with-respect-to-your-information) describes those retained records.
+The warning names the sign-in data that forgetting erases, including linked provider identities and their labels. It also names token network addresses and labels, and explains that team memberships are removed. History, attachments and typed case and note text stay. Some sign-in records and request fingerprints stay too. [Privacy](./privacy.md#your-rights-with-respect-to-your-information) describes those retained records.
 
 The page shows the pseudonym and the number of tokens revoked. It reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it reads the lists again. If the person is no longer listed, the page says so and clears the confirmation. Otherwise, retrying the same confirmation uses the same command id.
 
@@ -311,15 +279,27 @@ A person cannot yet request forgetting inside Mainworthy or delete their own acc
 
 ## Sign in as yourself
 
-A person can sign in with their email address or their name and a password, or with a passkey, and needs no token for it. A person gets their first way in through an invitation link. An admin copies it or sends it by mail when [SMTP is configured](./configuration.md#turn-on-mail). Nobody chooses a password for somebody else.
+A person signs in through the instance's OpenID Connect identity provider, such as Google, Microsoft Entra ID,
+Okta, Keycloak or Authentik, and needs no token for it. Mainworthy keeps no password, passkey or second factor
+and sends no mail: the provider owns those, and account recovery at the provider too. Whoever runs the instance
+[sets the provider up](./configuration.md#sign-in-through-an-identity-provider). An instance has one provider.
 
-Manage invitations and sign-in methods in Settings. The sections below also list the commands and API requests for scripts.
+A person gets their first way in through an invitation link, which an admin copies and hands over. The owner is
+the exception: the owner signs in first with the owner token, under [Use a token](#sign-in-to-the-web-ui), and
+then links their identity at the provider in **Your sign-in**.
+
+An instance with no provider has one person, the owner, who signs in with the owner token, plus agents and
+pipelines. It makes no invitation, because nobody could accept one: `mainworthy invite new` and **Make invitation
+link** are refused and say to configure a provider first.
+
+Manage invitations and identities in Settings. The sections below also list the commands and API requests for
+scripts.
 
 ### Invite a person
 
-If your first sign-in used the owner token and you have no credential yet, add a password or passkey in **Your sign-in**, then return to **People** and prove it when asked.
-
-Making any invitation from a browser requires recent proof of your own credential, even for a read-only invite. Settings prompts inline and retries after proof. Bearer-token and local CLI invitations keep their existing authority.
+Making any invitation from a browser requires your [recent proof](#confirm-it-is-you), even for a read-only
+invite. Settings prompts inline and retries after proof. Bearer-token and local CLI invitations keep their
+existing authority.
 
 In Settings, open People. This section is visible to a person who holds `admin` on every project. To invite a person, follow these steps:
 
@@ -331,8 +311,6 @@ In Settings, open People. This section is visible to a person who holds `admin` 
 
 The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again. If no answer comes back when you make a link, the page says so and reads its lists again. A person who is in the lists was invited, but the invitation link is lost. A recovery link is then their way in.
 
-With mail enabled, the form also offers **Send to email address, optional**. The CLI accepts `mainworthy invite new robin --email robin@example.com`, and the API accepts `email` on `invitation` with `do: "create"`. The recipient gets the same single-use link and expiry. The reply still shows the link once so you can deliver it yourself if mail fails. Sending an invitation does not verify or save a recovery address.
-
 "Open invitations" lists the links nobody has accepted yet: who each is for, what that person may do, who made it and when it runs out. "Revoke" withdraws one.
 
 To create an invitation from the command line, run `mainworthy invite new`:
@@ -341,7 +319,7 @@ To create an invitation from the command line, run `mainworthy invite new`:
 $ mainworthy invite new dana --can read,produce,answer --project checkout
 invitation 1 for "dana" (may read, record, produce, answer on checkout), until 2026-10-16 09:57 UTC
 https://mainworthy.example/invite#<code>
-This link is shown once. Hand it to dana: it works once.
+This link is shown once. Hand it to dana: it works once, when they sign in at the identity provider.
 ```
 
 Command-line invitations follow these rules:
@@ -356,126 +334,91 @@ Command-line invitations follow these rules:
 
 ### Accept an invitation
 
-Open the link. The page says "You are invited as dana" and until when the link works. To accept the invitation, follow these steps:
-
-1. Choose a password, a passkey, or both:
-   - For a password, type the password twice. The page counts the characters as you type. A password is 12 to 256 characters. No digit, capital letter or symbol is required.
-   - For a passkey, tick "Make a passkey on this device". Give the passkey a name. The default is the name of your browser.
-2. Press "Accept and sign in". You are signed in and the app opens.
+Open the link. The page says "You are invited as dana" and until when the link works. Press "Accept with" and the
+provider's name. The browser goes to the provider; sign in there as yourself. The provider sends you back, the
+identity you signed in with becomes your way in, and the app opens.
 
 The page takes the code out of the address bar as soon as it has read it. The address you see, and the one Back returns to, has no code. Copying that address does not copy the invitation. The browser's own record of the address first opened still holds the whole link. The code is the part after the `#`. The browser does not send that part of the address to the server. If you reload the page, open the original link again.
 
-If the browser is signed in as somebody else, the page names them and asks before signing them out. The fields stay disabled until the page knows who is signed in and you answer. If the request fails or takes more than twenty seconds, the page says so and keeps the fields disabled. **Try again** checks once more and keeps the invitation.
+If the browser is signed in as somebody else, the page names them and asks before signing them out. The button stays disabled until the page knows who is signed in and you answer. If the request fails or takes more than twenty seconds, the page says so and keeps the button disabled. **Try again** checks once more and keeps the invitation.
 
-Your confirmation applies to the person the page named. If the acceptance request carries a different person's cookie, the server accepts nothing and the page asks about that person instead. **Stay signed in** leaves the invitation unchanged.
+Your confirmation applies to the person the page named. If the request carries a different person's cookie, the server accepts nothing and the page asks about that person instead. **Stay signed in** leaves the invitation unchanged.
 
 Two sign-ins already in flight can each finish and set this browser's cookie. The last response chooses who this browser is signed in as. A session whose cookie was replaced can remain open on the server, because the earlier request did not carry that cookie. Sign in as that person and end it in **Your sessions**, or leave it to expire after 14 days without use, at the default lifetime. This does not end their sessions on other devices.
 
-If no answer comes back when you accept, the page says that it cannot tell whether the invitation was accepted. Go to the sign-in page and try what you chose. If sign-in succeeds, the invitation was accepted.
+An identity that is linked to somebody else on this instance accepts nothing, and the invitation stays open. Sign
+in at the provider with another account.
 
 A link that was used, was revoked or has run out says "This invitation does not work any more." So does one that was cut short when it was copied. Ask whoever sent it for a new one.
 
-A script accepts an invitation with `POST /api/login`. [API](./api.md#sign-in-as-a-person) has the request.
+A script reads an invitation with `POST /api/login/invitation` and accepts it through the provider with
+`POST /api/login/oidc`. [API](./api.md#sign-in-as-a-person) has the requests.
 
-### An email address or a name and a password, or a passkey
+### Through the identity provider
 
-Mainworthy normalizes passwords to Unicode NFC before hashing and checking them. An accented letter such as `é` matches the same letter entered as `e` followed by a combining accent, including from an iPhone keyboard. Compatibility characters such as full-width letters stay distinct. Passkeys and the PIN or biometric check that unlocks them are unchanged.
+On the sign-in page, press "Sign in with" and the provider's name. The browser goes to the provider and comes back
+signed in.
 
-A password stored before this change still accepts its original spelling. For an older non-NFC spelling, the first successful sign-in with that spelling refreshes its hash. After that refresh, canonical spellings both work. Until then, a different spelling may fail. Refreshing the hash keeps existing sessions signed in. Changing a password accepts the original spelling of an older password too.
+The provider says who signed in. Mainworthy decides which person that is here, and it never decides by an email address or a name the provider sends. An identity reaches a person in one of two ways:
 
-Sign in on the sign-in page with your email address or your name, and your password, or choose "Sign in with a passkey". The email address is the one set under **Your sign-in**, **Email**. A name wins over another person's email address that reads the same. A wrong email address, name or password gets the same message: "That email or name and password did not sign you in." A wrong token and a refused passkey each have their own message. After too many failed attempts, the page says how long to wait.
+- **An invitation.** On the invitation's page, choose "Accept with" and the provider's name. The identity becomes the person's way in. A recovery invitation accepted this way replaces every other identity and token the person had.
+- **Linking.** A person who is signed in opens Settings, **Your sign-in**, and chooses "Link" with the provider's name. The browser goes to the provider and comes back to that section. This is how the owner, signed in with the owner token, gets an identity.
 
-A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`, where `name` can also be the person's email address. Failed attempts are counted against what was typed, so a person's name and address are counted apart, and a blocked name tells nothing about whose an address is. A successful sign-in clears the count of what was typed only when that text, in any case, is nobody else's name or email address. When the server checks and refuses those credentials, it replies `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server logs the reason as a code, never the name or password tried.
+An identity belongs to one person at a time. Linking one that somebody already has is refused. **Your sign-in** lists each identity with the provider's name and the email the provider gave. A person can link more than one, for example a second account at the same provider. Removing one, or forgetting the person, erases the identity, and it can be linked again later. The last identity stays: link another first.
 
-A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. At another host name of the same instance, the sign-in page hides the passkey button. Use a password or a token there. Without that variable the pages offer no passkey. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
+Linking your first identity needs no proof. Linking another, and removing one, needs [recent proof](#confirm-it-is-you).
 
-To set or change your password, open Settings, **Your sign-in**. <kbd>n</kbd> puts the caret in the new password. Changing a password asks for the current one. The server ends other sessions opened with the old password, and the page says how many. The browser making the change stays signed in, and the page empties the fields.
+An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
 
-Adding or removing a password, passkey or authenticator, changing your recovery
-address, and linking or removing a provider identity need recent proof of your
-own credential. Password or passkey sign-in counts for ten minutes in that
-session. When proof is older, Settings asks inline for your password, passkey or
-six-digit authenticator code, showing only methods you have already added, then retries the change. A recovery code alone does
-not count. Another browser's proof does not count for this session.
+An identity belongs to the provider it was linked at. If the instance's provider changes, identities linked at the old one sign nobody in. The owner signs in with the owner token and links again, and everybody else gets a new invitation.
 
-An admin removing somebody else's credential, or the owner changing their
-recovery address in **People**, proves their own credential. A bearer token
-cannot provide session proof. Use a signed-in browser for these changes. The
-local-mode owner, invitation acceptance, and recovery links need no prior proof.
-If you have no live credential, adding your first password or passkey needs no
-prior proof either. Add it in **Your sign-in**, then retry and prove it before
-setting or removing a recovery address or enrolling an authenticator. If you have
-only a provider identity, ask the owner for a recovery link to establish a
-password or passkey first. The last usable way to sign in stays even after proof.
-Removing a credential that this session rests on ends the session.
+Failed attempts are counted by address and by token prefix, as for a token: a wrong token, a wrong invitation code and a provider answer that is refused each count. The fifth failure from one address within 15 minutes blocks it for one second, and each further failure doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. [Troubleshooting](./troubleshooting.md#limited-too-many-attempts) says what to do.
 
-Making any invitation or recovery link from a browser asks for the admin's recent proof.
-If you lost every credential, the operator can still issue a link with their
-owner token or the local CLI. Accepting the link needs no prior proof.
-
-A password manager such as 1Password can generate a password, fill both new-password fields and save it under your name. The fields tell password managers the allowed length. The sign-in page asks them to ignore the token field. A bearer token cannot change a password. If no reply comes back, the page says it cannot tell whether the password changed and reads your sign-in methods again. Try signing in with the new password to find out.
-
-To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
-
-Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-attempts) says what to do.
-
-The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
-
-Starting a passkey or provider sign-in has a separate limit of 300 successful starts per public IPv4 address or IPv6 /56 in one minute.
-Every start from that address shares it. People sharing that address or network share its allowance too.
+Starting a provider sign-in has a separate limit of 300 successful starts per public IPv4 address or IPv6 /56 in one minute.
+People sharing that address or network share its allowance too.
 A blocked start says how long to wait, with `429 limited` and `Retry-After` seconds in the API.
 The wait never escalates, and retries do not extend it. No instance-wide start allowance lets another network block your first attempt.
-Unavailable passkey options and an unreachable provider do not spend the allowance. Signed-in provider linking and a working invitation bypass it.
+An unreachable provider does not spend the allowance. Signed-in provider linking and a working invitation bypass it.
 
-Ordinary starts never add to failed-credential counts or cause a password refusal. Wrong invitation codes still count as failed proofs.
-Password sign-in keeps the failed-attempt rule described above. Valid answers to pending passkey/provider ceremonies can still finish during a start limit.
-A working invitation opens its form and can be accepted with a password or passkey during an address block.
-Reloading it reuses its passkey challenge; with one minute left, a successor preserves an ongoing prompt until its original deadline.
-The page uses the remaining lifetime supplied by the server.
+Ordinary starts never add to failed-attempt counts. Valid answers to pending provider sign-ins can still finish during a start limit.
+A working invitation opens its page and can be accepted during an address block.
 
-Pending ceremonies still have a memory limit. At capacity, the source holding the most live ceremonies loses its oldest entry,
+Pending sign-ins still have a memory limit. At capacity, the source holding the most live ones loses its oldest entry,
 so a large flood does not discard a small unrelated source's pending sign-in. If sources hold equal shares, an oldest entry can still be displaced.
 A client controlling many independent IPv4 addresses or /56 networks can appear as many sources; the server cannot identify them as one person.
 The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls).
 Unknown and private addresses are not counted and share one retention bucket, so configure the proxy to distinguish visitors.
 
-### Through an identity provider
+### Confirm it is you
 
-An instance can let people sign in through an OpenID Connect identity provider, such as Okta, Microsoft Entra ID, Google Workspace, Keycloak or Authentik. Whoever runs the instance [sets it up](./configuration.md#sign-in-through-an-identity-provider). The sign-in page then has a "Sign in with" button named after the provider.
+Some changes need recent proof in the browser session that asks: linking a second identity or removing one,
+creating a token from a browser, making an invitation or recovery link from a browser, granting `admin`, team
+changes that give `admin`, and importing an archive. Proof lasts ten minutes.
 
-The provider says who signed in. Mainworthy decides which person that is here, and it never decides by an email address or a name the provider sends. An identity reaches a person in one of two ways:
+- A session opened by typing a token has proof for ten minutes from sign-in. After that, sign out and sign in with
+  the token again.
+- A session opened through the provider gets proof with **Confirm with** and the provider's name. Settings offers
+  it inline when a change needs it, then retries the change. The browser goes to the provider, which asks you to
+  sign in again rather than reuse its own session. The provider must sign in the same person: another identity is
+  refused.
 
-- **An invitation.** On the invitation's page, choose "Accept with" and the provider's name instead of setting a password. The identity becomes the person's way in. A recovery invitation accepted this way replaces every other way in, as one accepted with a password does.
-- **Linking.** A person who is signed in opens Settings, **Your sign-in**, and chooses "Link" with the provider's name. The browser goes to the provider and comes back to that section.
+When the provider reports when you last signed in there (the ID token's `auth_time`), it must be within the last
+ten minutes. Some providers do not report it; Google does not. With those, the fresh round trip to the provider is
+the proof, and how hard the provider asks depends on its own settings.
 
-An identity belongs to one person at a time. Linking one that somebody already has is refused. "Ways you sign in" lists it with the provider's name and the email the provider gave. Removing it, or forgetting the person, erases the identity, and it can be linked again later. An identity counts as a way in: with it, a person can remove their password. When admins must use a second factor, an admin signs in through the provider only if the operator has said the provider asks everybody for one (`MAINWORTHY_OIDC_MFA=true`). Without that, becoming an admin ends the person's sessions opened through the provider, as it ends password sessions. An identity counts as a way in only while the instance is configured with its provider: after the provider is removed or replaced, the last password or passkey stays.
+Another browser's proof does not count for this session. A bearer token cannot provide session proof, so use a
+signed-in browser for these changes, or the local CLI. The local-mode owner and accepting an invitation need no
+prior proof. The last identity a person has stays even after proof. Removing an identity that this session rests
+on ends the session.
 
-An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
+If you lost every identity, the operator can still issue a recovery link with their owner token or the local CLI.
 
+### A lost identity
 
-### A lost password or passkey
+Mainworthy has no password to reset. If you cannot sign in at the provider, recover your account there, as its own
+help says. If the provider account is gone, or you need a different one, ask for a recovery link.
 
-With mail enabled, **Forgot your password?** on the sign-in page opens a reset request. Enter your verified email address. The page gives the same answer for known, unknown and unverified addresses. Requests are counted per email address and client address by the failed-attempt limiter, including its exemption for private and loopback client addresses. The sixth request inside the counting window waits one second, and later requests increase the wait. A public client's count is shared with failed sign-ins. [Configuration](./configuration.md#run-behind-a-proxy-that-ends-tls) describes how a proxy supplies the client address.
-
-The reset link works once for 15 minutes. It replaces your password and ends all your sessions, without signing you in. Your passkeys and tokens stay, and an enrolled authenticator is still required for password sign-in. A later password change, address change, accepted admin recovery invitation, reset request or archive import invalidates the link. Restarting an instance does not invalidate a pending link. Losing your authenticator still needs a recovery code, a passkey or an admin recovery invitation.
-
-To set a recovery address, follow these steps:
-
-1. In **Your sign-in**, set your address under **Email**.
-2. Open the verification mail.
-3. Press **Verify email**.
-
-The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
-
-As with adding a passkey, the browser session is sufficient without re-entering an existing credential. With mail enabled, replacing or removing a verified address sends a notice to the previous address. That notice contains no verification or reset code. If you did not make the change, the notice asks you to contact an instance admin. You can remove a stored address through the API even after mail is switched off, when no notice can be sent.
-
-Without mail, **Email** under **Your sign-in** still saves an address, with **Save email address**. Nothing is sent to it and it stays unverified: it signs you in, in place of your name, and receives no reset link or notice. Another person who wants the same address finds it taken, and the owner can change or remove it under that person's **Sign-in details**.
-
-Without mail, there is no reset link or invitation address field. An admin recovery invitation remains available. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
-
-The public sign-in exchange is `POST /api/login`. To request a reset, send `{ "resetRequest": "robin@example.com" }`. To verify an address, send `{ "emailVerification": "<code>" }`. To finish a reset, send `{ "reset": "<code>", "password": "<new password>" }`. A successful request replies `{ "requested": true }` for every address. A blocked request returns `429` with `Retry-After`. Successful verification replies `{ "verified": true }`, and a successful reset replies `{ "changed": true }` without a session cookie. `GET /api/login/methods` includes `mail`, which says whether the instance offers these flows.
-
-A verified address receives a notice when a password, passkey or authenticator is added, changed or removed, and when account recovery replaces sign-in methods. Replacing or removing that address sends a notice to the previous verified mailbox. Mail is queued in the account change transaction and delivered after it commits. Delivery failure does not undo a change or reveal SMTP details. Pending links and queued mail are stored in PostgreSQL and survive restarts across instances. Failed sends retry with bounded backoff. SMTP delivery is at least once, so a lost receipt can produce a duplicate message. Ask for another link if none arrives before it expires. Archives preserve contacts and verification status. Import clears pending verification and reset links.
+In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
 
 Opening the confirmation moves focus to **Make the recovery link**. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to that person's **Recovery link** button.
 
@@ -485,14 +428,14 @@ From the command line, invite the person again. For a person who exists, the lin
 $ mainworthy invite new dana
 invitation 2 for "dana" (a recovery: accepting it replaces every way dana signs in), until 2026-10-16 09:57 UTC
 https://mainworthy.example/invite#<code>
-This link is shown once. Hand it to dana: it works once. When it is accepted, every password, passkey and token dana had stops working and every session of theirs ends.
+This link is shown once. Hand it to dana: it works once, when they sign in at the identity provider. When it is accepted, every identity and token dana had stops working and every session of theirs ends.
 ```
 
-Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner. A person who does not administer cannot make an invitation. An admin cannot make another person's recovery link because whoever accepts that link acts as that person, as with a token.
+Nothing changes until the link is accepted, so a link nobody uses locks nobody out. Accepting it links the identity the person signs in with at the provider, unlinks every other identity, and ends every session of theirs. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner. A person who does not administer cannot make an invitation. An admin cannot make another person's recovery link because whoever accepts that link acts as that person, as with a token.
 
 Accepting recovery revokes every token belonging to that person, including personal CLI tokens and tokens made by an admin. Scripts using those tokens stop working and need new tokens. Tokens belonging to other people, agents and pipelines stay as they are.
 
-Recovering the owner also revokes their configured `MAINWORTHY_OWNER_TOKEN`, even if it was their last token. The new password or passkey still signs them in. To restore a configured owner token, set the variable to a new value and restart. Restarting with the revoked value does not revive it. CI jobs that use that owner token also fail authentication until their configured secret is updated to the new value. CI using a separate pipeline actor's token is unaffected.
+Recovering the owner also revokes their configured `MAINWORTHY_OWNER_TOKEN`, even if it was their last token. The identity they accepted with still signs them in. To restore a configured owner token, set the variable to a new value and restart. Restarting with the revoked value does not revive it. CI jobs that use that owner token also fail authentication until their configured secret is updated to the new value. CI using a separate pipeline actor's token is unaffected.
 
 ### Your sessions and your ways of signing in
 
@@ -500,9 +443,9 @@ A session is one browser that is signed in. Settings, "Your sessions" lists your
 
 A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. For another person, **End** asks you to confirm with **End this session** or **Cancel**. Ending this browser's session opens the sign-out dialog.
 
-The details say whether the person has a password. They also list the person's passkeys and authenticator, with labels, creation times and last-use times. **Remove** removes a password or passkey and ends the sessions that used it. Removing an authenticator ends all of the person's sessions. For another person, removal first asks you to confirm with **Remove this sign-in method** or **Cancel**. The person's last usable password or passkey stays. They must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
+The details also list the person's linked identities, with labels, creation times and last-use times. **Remove** unlinks one and ends the sessions that used it. For another person, removal first asks you to confirm with **Remove this identity** or **Cancel**. The person's last identity stays. You cannot link an identity for somebody else. Recovery links keep the rules described above.
 
-These confirmations move focus to **End this session** or **Remove this sign-in method** when they open. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to the original **End** or **Remove** button. Cancel has a target of at least 44 by 44 pixels on a phone, as it does for a recovery link.
+These confirmations move focus to **End this session** or **Remove this identity** when they open. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to the original **End** or **Remove** button. Cancel has a target of at least 44 by 44 pixels on a phone, as it does for a recovery link.
 
 A script lists them and ends one:
 
@@ -511,8 +454,8 @@ $ mainworthy session --do list
 [
   {
     "id": 2,
-    "openedWith": "password",
-    "label": "password",
+    "openedWith": "oidc",
+    "label": "dana@example.com",
     "userAgent": "Mozilla/5.0 ...",
     "createdAt": 1791885461648,
     "createdFrom": "203.0.113.9",
@@ -529,26 +472,28 @@ $ mainworthy session --do end --id 2
 }
 ```
 
-`openedWith` is `token`, `password`, `passkey` or `oidc`. `current` is true for the session that sent the request. The command line uses a token, so `current` is always false for command-line requests.
+`openedWith` is `token` or `oidc`. `current` is true for the session that sent the request. The command line uses a token, so `current` is always false for command-line requests.
 
-`mainworthy credential --do list` shows your password, passkeys and authenticator, each with an id, a label and when it was last used. It never shows a password, a hash or a key. `mainworthy credential --do remove --id <id>` removes one and ends the sessions that used it. Removing an authenticator ends all your sessions. Your last usable way of signing in stays:
+`mainworthy credential --do list` shows your linked identities, each with an id, a label and when it was last used. It never shows the provider's subject. `mainworthy credential --do remove --id <id>` unlinks one and ends the sessions that used it. It needs recent proof, so from the command line it works only as the local owner. Your last identity stays:
 
 ```
 $ mainworthy credential --do remove --id 1
-invalid: this is the last way dana signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new dana)
+invalid: this is the last identity dana signs in with, so it stays. Link another first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new dana)
 ```
 
-These two commands need no capability. A person who is signed in runs them for what is their own. An agent can list and end its own sessions. The `credential` operation refuses an agent with `forbidden` because only a person has a password or a passkey. A pipeline is refused by both.
+The `credential` operation also lists, makes and revokes your [personal tokens](#make-your-own-command-line-token) with `token.list`, `token.create` and `token.revoke`.
+
+These two commands need no capability. A person who is signed in runs them for what is their own. An agent can list and end its own sessions. The `credential` operation refuses an agent with `forbidden` because only a person signs in through the provider. A pipeline is refused by both.
 
 ### What an admin can do for somebody else
 
 A person who holds `admin` on every project can:
 
 - List somebody's sessions with `mainworthy session --do list --actor dana` and end any session by its id.
-- List somebody's password, passkeys and authenticator with `mainworthy credential --do list --actor dana`. An admin can remove one by its id, except the last usable sign-in method.
+- List somebody's linked identities with `mainworthy credential --do list --actor dana`. An admin can unlink one by its id, except the last.
 - Invite a new person and list and revoke invitations.
 
-An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. Settings, **People**, offers the first two under each person's **Sign-in details**.
+An admin cannot link an identity for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. Settings, **People**, offers the first two under each person's **Sign-in details**.
 
 ## Sign in to the web UI
 
@@ -556,12 +501,10 @@ In local mode you sign in as the owner, with no step. An operation waiting acros
 
 In server mode the sign-in page has these ways in, one under the other:
 
-- Your email address or your name, and your password, then "Sign in".
-- "Sign in with" and the name of the instance's identity provider, where it has one. See [through an identity provider](#through-an-identity-provider).
-- "Sign in with a passkey", where the instance has passkeys and your browser has them. You type no name.
-- "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before anybody has a password, and how you try a token somebody handed you.
+- "Sign in with" and the name of the instance's identity provider, where it has one. See [through the identity provider](#through-the-identity-provider).
+- "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before linking an identity, the only way in on an instance with no provider, and how you try a token somebody handed you.
 
-The caret starts in **Email or name**, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser holds neither the token nor the password.
+<kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser does not hold the token.
 
 A page's operation requests and signed-in account changes carry the actor id the page loaded, so a shared cookie cannot record your text as somebody else. If another tab signs in as a different person, the server refuses the stale page's request and asks you to sign in again. This also applies when the new person has the same name as a forgotten person.
 
@@ -582,7 +525,7 @@ If a check finds you still signed in, the attempt ends and keeps your browser da
 A session ends after 14 days without use and after 90 days in any case. It also ends in these cases:
 
 - The token you signed in with is revoked or reaches its end.
-- The password or passkey you signed in with is removed or replaced.
+- The identity you signed in with is unlinked, or replaced by a recovery link.
 - Your actor is forgotten.
 
 Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
@@ -595,11 +538,11 @@ The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, th
 
 ```
 Mainworthy 0.1.0 · server · data in /data · http://localhost:7357
-project "scratch" · owner robin · sign in with a token, a password or a passkey · policy: loose
+project "scratch" · owner robin · sign in with a token or through Google · policy: loose
 owner token (shown once): <token>
 ```
 
-The second line says who the owner is and how people sign in. Server mode signs nobody in on its own. In local mode the line reads `you are robin@this-machine`, because there you are the owner.
+The second line says who the owner is and how people sign in: with a token, and through the provider when the instance has one. Server mode signs nobody in on its own. In local mode the line reads `you are robin@this-machine`, because there you are the owner.
 
 Copy the owner token when it appears. If you miss the token, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 visible ASCII characters without spaces. `openssl rand -hex 32` makes a suitable value. Startup refuses whitespace, control characters and non-ASCII characters before changing any token or session. Restart the server to add a valid value as a token. A new value also revokes every token previously issued through that variable. At startup, the server names those tokens in one log line. The server refuses a value that matches a revoked or expired token, or somebody else's token. At startup, it names the reason in one line and leaves the token unchanged. If no value is set and the owner holds no working token, the server prints a new token at startup, as on its first start. In the container, `docker compose logs` has the line.
 
@@ -622,10 +565,10 @@ These Settings sections manage policy, access and sign-in:
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
-- People invites a person, lists and revokes open invitations, makes a recovery link, manages teams and their grants, and forgets a person after confirmation. Sign-in details lists and ends each person's sessions and lists and removes their password, passkeys and authenticator. Issued tokens lists token use and revokes tokens. Only a person who holds `admin` on every project has this section.
+- People invites a person, lists and revokes open invitations, makes a recovery link, manages teams and their grants, and forgets a person after confirmation. Sign-in details lists and ends each person's sessions and lists and unlinks their identities. Issued tokens lists token use and revokes tokens. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
-- Your sign-in sets or changes your password, adds and removes passkeys and an authenticator, manages your recovery email address, and creates your personal command-line tokens. Only a person has this section.
+- Your sign-in links and unlinks your identities at the provider, confirms it is you with the provider, and creates your personal command-line tokens. Only a person has this section.
 - Your sessions lists the browsers you are signed in on and ends any of them.
 
 People shows personal grants with their roles and the permissions received from each team. Use `mainworthy actor grant` to edit personal grants.

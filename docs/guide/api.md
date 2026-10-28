@@ -57,11 +57,11 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid` | 400 | The input is wrong. `details` says which field. |
-| `unauthenticated` | 401 | The caller supplied no working credentials. Refused names, passwords, passkey answers, and invitation codes get the same reply, regardless of the reason. |
+| `unauthenticated` | 401 | The caller supplied no working credentials. Refused tokens, provider answers, and invitation codes get the same reply, regardless of the reason. |
 | `forbidden` | 403 | The caller lacks the required capability, or the operation or policy refuses the action. |
 | `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
-| `limited` | 429 | An authentication or anonymous-start allowance has been exhausted. Failed attempts can be wrong tokens from this address or for a token that starts as this one does, wrong passwords or authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. Anonymous starts have separate, non-escalating limits of 300 successful starts per public IPv4 address or IPv6 /56 per minute. The `Retry-After` header says how many seconds to wait. |
+| `limited` | 429 | An authentication or anonymous-start allowance has been exhausted. Failed attempts can be wrong tokens from this address or for a token that starts as this one does, or refused provider answers or invitation codes from this address. Anonymous starts have separate, non-escalating limits of 300 successful starts per public IPv4 address or IPv6 /56 per minute. The `Retry-After` header says how many seconds to wait. |
 | `busy` | 503 | A writer could not acquire a lock or connection within its bound, a sign-in resolved to another actor while waiting, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. A report that committed acceptance returns success with a pending receipt if application hits one of these failures. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
@@ -99,8 +99,8 @@ what the token may do.
 
 ## Sign in as a person
 
-These routes handle sign-in, recovery, and password changes outside the operation
-registry. A successful sign-in sets a session cookie. Each `POST` refuses requests
+These routes handle sign-in outside the operation registry. A person signs in through the instance's identity
+provider, or with a token. A successful sign-in sets a session cookie. Each `POST` refuses requests
 from another site's page and allows scripts such as `curl` that send no site headers.
 `GET /api/login/methods` answers anybody. The `POST` requests take JSON, except that
 logout needs no body. Replies use the operation envelope without `seq`.
@@ -108,31 +108,21 @@ logout needs no body. Replies use the operation envelope without `seq`.
 
 | Request | Body | What it does |
 | --- | --- | --- |
-| `GET /api/login/methods` | none | Returns `{"password": true, "passkey": <boolean>, "passkeyHost": <hostname> or null, "mail": <boolean>, "oidc": {"name"} or null}`. The booleans say whether the instance offers passkeys and mail. `passkeyHost` is the hostname from `MAINWORTHY_PUBLIC_URL`, or `null` without that setting. The web sign-in page offers its passkey button only at that hostname. `oidc` names the identity provider, or is `null` when the instance has none. |
-| `POST /api/login` | `{"token"}` | Signs in with a token. |
-| `POST /api/login` | `{"name", "password"}` | Signs in with a name, or the person's email address, and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. A second-factor reply creates no session. The next step requires the ceremony cookie from this response. |
-| `POST /api/login` | `{"challenge", "code"}` | Completes the password sign-in with a fresh six-digit TOTP or unused recovery code, plus the ceremony cookie from the first step. The challenge lasts five minutes and works once. A successful reply is `{"signedIn": true}` and sets the session cookie. |
-| `POST /api/login/challenge` | `{}` | Returns the options for `navigator.credentials.get` in `result.passkey`. The challenge works once for five minutes. The reply sets an `HttpOnly` cookie, `mainworthy_ceremony` over HTTP or `__Host-mainworthy_ceremony` over HTTPS. The answer must carry that cookie. A browser sends the cookie automatically. A script must retain the cookie. |
-| `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
-| `POST /api/login/challenge` | `{"invitation"}` | Returns the invitation's recipient, purpose (`join` or `recover`), and expiry, with options for `navigator.credentials.create`. On an instance without passkeys, the options are `null`. On an instance with passkeys, a valid lookup reuses a challenge stored in PostgreSQL; near expiry it creates a successor while retaining the original deadline. Each challenge works for five minutes across all instances. A code that accepts nothing is answered `not_found`. |
-| `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey, or both, and signs in. `passkey` holds `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, and `transports` from the browser. If the browser is signed in as another person, the reply is `conflict` with their name in `details.signedInAs`. Sending that name as `replace` signs them out of this browser when the invitation is accepted. Any other name is refused the same way, with the name the browser is signed in as. A `replace` that is not a string, such as `true`, returns `invalid`. |
-| `POST /api/login/oidc` | `{}`, `{"invitation", "replace"?}` or `{"link": true}` | Begins signing in through the identity provider, accepting an invitation that way, or linking the provider to the person whose browser session sends it. Returns `{"url"}`, the provider's address to send the browser to, and sets the ceremony cookie. The provider sends the browser back to `/signin/oidc` with a code and a state. A refused invitation is `not_found`. A browser signed in as somebody else is `conflict`, as when accepting with a password. `{"link": true}` with a token is `forbidden`. On an instance with no provider, every body is `invalid`. |
-| `POST /api/login` | `{"oidc": "<query>"}` | Finishes what `/api/login/oidc` began, with the query the provider sent the browser back with, and the ceremony cookie. The ceremony works once, in the browser that began it, for five minutes. A sign-in or an accepted invitation returns `{"signedIn": true}` and sets the session cookie. A link returns `{"linked": true}`. An identity linked already, to anybody, is `conflict`. An identity nobody linked is refused like a wrong password. |
-| `POST /api/login` | `{"resetRequest":"robin@example.com"}` | Requests a password-reset email for a verified address. Returns `{"requested":true}` whether or not the address matches an account. Requires mail. |
-| `POST /api/login` | `{"emailVerification":"<code>"}` | Verifies a recovery email address. Returns `{"verified":true}` on success. The code works once for 24 hours. Requires mail. |
-| `POST /api/login` | `{"reset":"<code>","password":"<new password>"}` | Replaces the password and ends existing sessions. Returns `{"changed":true}` without signing in. The code works once for 15 minutes. An enrolled authenticator remains required. Requires mail. |
-| `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
-| `POST /api/account/proof` | `{"password"}`, `{"code"}` or `{"passkey"}` | Proves an existing credential for the current session for ten minutes. `code` is a six-digit TOTP, not a recovery code. Returns `{"proved":true}`. A wrong proof is `forbidden`; failed-attempt limits apply. |
-| `POST /api/account/proof` | `{"begin":true}` | Returns `{"passkey":<assertion options>}` for a single-use passkey proof bound to this session and its person. Finish at the same endpoint with `{"passkey":<assertion>}`. |
+| `GET /api/login/methods` | none | Returns `{"token": true, "oidc": {"name"} or null}`. `oidc` names the identity provider, or is `null` when the instance has none. |
+| `POST /api/login` | `{"token"}` | Signs in with a token. The session has [recent proof](#recent-proof) for ten minutes. |
+| `POST /api/login/invitation` | `{"invitation"}` | Returns `{"invitation": {"name", "purpose", "expiresAt"}}`: the invitation's recipient, purpose (`join` or `recover`), and expiry. Looking never spends it. A code that accepts nothing is answered `not_found`. |
+| `POST /api/login/oidc` | `{}`, `{"invitation", "replace"?}`, `{"link": true}` or `{"proof": true}` | Begins signing in through the identity provider, accepting an invitation that way, linking the provider to the person whose browser session sends it, or proving it is that person. Returns `{"url"}`, the provider's address to send the browser to, and sets an `HttpOnly` ceremony cookie, `mainworthy_ceremony` over HTTP or `__Host-mainworthy_ceremony` over HTTPS. A script must keep that cookie. The provider sends the browser back to `/signin/oidc` with a code and a state. `{"proof": true}` asks the provider to sign the person in again (`max_age=0`). A refused invitation is `not_found`. If the browser is signed in as another person, accepting an invitation is `conflict` with their name in `details.signedInAs`; sending that name as `replace` signs them out of this browser when the invitation is accepted. `{"link": true}` and `{"proof": true}` with a token are `forbidden`. On an instance with no provider, every body is `invalid`. |
+| `POST /api/login` | `{"oidc": "<query>"}` | Finishes what `/api/login/oidc` began, with the query the provider sent the browser back with, and the ceremony cookie. The ceremony works once, in the browser that began it, for five minutes. A sign-in or an accepted invitation returns `{"signedIn": true}` and sets the session cookie. A link returns `{"linked": true}`, and a proof `{"proven": true}`. An identity linked already, to anybody, is `conflict`. A proof from a different identity, or with an `auth_time` older than ten minutes, is `forbidden`. An identity nobody linked is `unauthenticated`. |
 | `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
 
-Credential changes, recovery-address changes, and provider linking return HTTP
-403 with `recent_proof_required` when the caller's session has no proof within
-ten minutes. Prove a credential in that session and retry the refused action.
-This refusal leaves the session signed in and writes no command. When changing
-another person's details, prove the admin's own credential. Bearer tokens do not
-carry session proof. A first credential and invitation or recovery acceptance
-need no prior proof. Replacing a password retains its current-password check.
+### Recent proof
+
+Linking a second identity or removing one returns HTTP 403 with `recent_proof_required` when the caller's session
+has no proof within ten minutes. The proof is the session's own: a session opened with a token has it for ten
+minutes from sign-in, and a session opened through the provider gets it with `POST /api/login/oidc` and
+`{"proof": true}`. Retry the refused action after proving. The refusal leaves the session signed in and writes no
+command. When changing another person's details, the admin proves it is them. Bearer tokens do not carry session
+proof. A first identity and invitation or recovery acceptance need no prior proof.
 Creating a token through `credential` or `admin`, issuing any invitation,
 setting a direct or team grant containing `admin`, and adding a member to an
 admin team from a browser also need the caller's recent proof. These operations remain
@@ -145,37 +135,19 @@ bearer-token and local imports remain available without proof.
 A body holds one of these shapes and no other fields. `GET /api/session` returns
 who is signed in, their numeric actor id (`actorId`), the current session id
 (`session`), and whether they own the instance (`owner`). For a person,
-`credentials` says whether they have a password and how many passkeys they have.
+`credentials` says how many identities they have linked (`identities`).
 An archive import can replace actor ids.
 
-Passwords use Unicode NFC before hashing and checking. An older password also
-accepts its original spelling. If that spelling is not NFC, successful sign-in
-refreshes the password's hash without ending existing sessions. Accepting a
-recovery invitation revokes the person's previous passwords, passkeys, and tokens,
+Accepting a recovery invitation revokes the person's previous identities and tokens,
 and ends their existing sessions. Recovery does not change other actors' tokens. See
-[passwords and recovery](./access.md#an-email-address-or-a-name-and-a-password-or-a-passkey) for the
-legacy-password behavior and the limit when concurrent responses replace the
-browser's cookie.
+[a lost identity](./access.md#a-lost-identity) and
+[accept an invitation](./access.md#accept-an-invitation) for the limit when concurrent
+responses replace the browser's cookie.
 
-A signed-in person registers another passkey with the `credential` operation.
-`passkey.begin` returns the options for `navigator.credentials.create`.
-`passkey.add` takes the browser's answer and a label. The session that begins
-registration must also finish it. A bearer token cannot register a passkey or
-set a password. Both requests return `forbidden`.
-
-The `credential` operation also enrols an authenticator in the caller's session
-or as the local owner. `{"do": "totp.begin"}` returns `challenge`, `expiresAt`,
-`secret`, `uri`, and `qr` with `size` and an SVG `path`. The QR path fits a white
-square of that size with four modules of quiet space already included.
-`{"do": "totp.confirm", "challenge", "code"}` confirms a six-digit code in the
-same session and returns `id`, ten `recoveryCodes`, and `sessionsEnded`.
-These inputs refuse command ids, and the server never caches or replays their
-secret replies. Ordinary credential lists return kind `totp` and descriptive
-fields only. `remove` removes the authenticator and ends all the person's sessions.
-
-The same operation manages personal CLI tokens with `token.create`, `token.list`,
-and `token.revoke`. Creation requires a password, passkey or identity-provider
-session, or local-owner access. The new token belongs to the caller, and the reply returns the secret once.
+The `credential` operation lists and removes the caller's identities, and manages personal CLI tokens with
+`token.create`, `token.list`, and `token.revoke`. An identity is linked through `/api/login/oidc`, not through the
+operation. Token creation requires a session opened through the identity provider, with recent proof, or
+local-owner access. The new token belongs to the caller, and the reply returns the secret once.
 The default expiry is 30 days, with a 365-day maximum. A bearer token or a
 token-backed browser session cannot create a personal CLI token.
 [Make your own command-line token](./access.md#make-your-own-command-line-token)
@@ -192,7 +164,7 @@ and input.
 
 Secret replies are an exception. Token and invitation creation keep the command's
 record but do not save its secret reply. Retrying the same id returns `conflict`
-without repeating the write. Authenticator enrolment refuses command ids.
+without repeating the write.
 
 ## Say when a write happened
 
@@ -1308,7 +1280,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
+Your identities at the identity provider and your CLI tokens: list or remove them, and make a token. Only a person may call. Removing an identity and making a personal token from a browser need recent proof in that session. An identity is linked in the web UI. A personal token is shown once and expires after 30d by default.
 
 |  |  |
 | --- | --- |
@@ -1323,35 +1295,22 @@ Your password, passkeys, authenticator, recovery email and CLI tokens: list, add
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `[1].do` | `"email.get"` | yes |  |
-| `[1].actor` | `string` | no |  |
-| `[2].do` | `"email.set"` | yes |  |
-| `[2].actor` | `string` | no |  |
-| `[2].email` | `string \| null` | yes |  |
-| `[3].do` | `"list"` | yes |  |
-| `[3].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
-| `[4].do` | `"passkey.begin"` | yes |  |
-| `[5].do` | `"totp.begin"` | yes |  |
-| `[6].do` | `"totp.confirm"` | yes |  |
-| `[6].challenge` | `string` | yes |  |
-| `[6].code` | `string` | yes |  |
-| `[7].do` | `"passkey.add"` | yes |  |
-| `[7].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
-| `[7].label` | `string` | yes | What you call this passkey: the device it is on. |
-| `[8].do` | `"remove"` | yes |  |
-| `[8].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
-| `[9].do` | `"token.create"` | yes |  |
-| `[9].label` | `string` | yes | What you use this token for. |
-| `[9].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
-| `[10].do` | `"token.list"` | yes |  |
-| `[11].do` | `"token.revoke"` | yes |  |
-| `[11].id` | `integer` | yes |  |
+| `[1].do` | `"list"` | yes |  |
+| `[1].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
+| `[2].do` | `"remove"` | yes |  |
+| `[2].id` | `integer` | yes | The identity, from the list. The last one a person has is not removed. |
+| `[3].do` | `"token.create"` | yes |  |
+| `[3].label` | `string` | yes | What you use this token for. |
+| `[3].expires` | `string` | no | Default: 30d. At most 365d. A session opened through the identity provider creates your own token, shown once. Default: `"30d"`. |
+| `[4].do` | `"token.list"` | yes |  |
+| `[5].do` | `"token.revoke"` | yes |  |
+| `[5].id` | `integer` | yes |  |
 
 </details>
 
 ### invitation
 
-Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing any invitation from a browser needs the caller's recent credential proof; token and local authority remain.
+Invite a person with a link: make one, list them, revoke one. The person accepts it by signing in at the identity provider, so an instance with none makes no invitation. The link is shown once. Issuing any invitation from a browser needs the caller's recent proof; token and local authority remain.
 
 |  |  |
 | --- | --- |
@@ -1367,8 +1326,7 @@ Invite a person with a link: make one, list them, revoke one. Optionally send it
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `[1].do` | `"create"` | yes |  |
-| `[1].email` | `string` | no | Send the link to this address when mail is enabled. |
-| `[1].name` | `string` | yes | The person. A new name: an invitation to join. A person who exists: a recovery, which replaces every way they sign in once it is accepted. |
+| `[1].name` | `string` | yes | The person. A new name: an invitation to join. A person who exists: a recovery, which replaces their identities and tokens once it is accepted. |
 | `[1].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new person may do. Absent: everything. Not for a person who exists: use grant.set. Default: `[]`. |
 | `[1].project` | `string` | no | Limit the grant to one project. Absent: every project. |
 | `[1].expires` | `string` | no | How long the link works: 12h, 3d, 2w. At most 30d. Default: `"3d"`. |

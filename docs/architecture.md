@@ -94,7 +94,7 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Read | `attachment` (list or read a result's files) · `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` · `tracker-status` (delivery state and issue reference) · `handoff-status` (whether a failure's hand-off was sent) |
 | Background work | `job` (authenticated job service only; an in-process runner uses the same operation) |
 | Administer | `audit` (export retained decisions and evidence) · `admin` (projects, actors, grants, teams, tokens) |
-| Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password, passkeys, authenticator, recovery email and CLI tokens) · `invitation` (an admin invites or recovers a person with a link) |
+| Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your identities at the identity provider and your CLI tokens) · `invitation` (an admin invites or recovers a person with a link) |
 
 `test/docs.test.ts` holds this table to the registry's operation names.
 
@@ -134,7 +134,7 @@ across the two phases. [Project writes and authority](development/concurrency.md
 instance-write rules, and bounded waits that return retryable `busy`.
 
 A write outside a write scope does not compile. A write statement without an active transaction fails.
-`beforeCommit` writes run on the same transaction before COMMIT; mail uses this to keep enqueue atomic through synchronous callers. `afterCommit` effects run after a confirmed commit. Rolled-back savepoints discard both kinds of effect.
+`beforeCommit` writes run on the same transaction before COMMIT, so an enqueue stays atomic through synchronous callers. `afterCommit` effects run after a confirmed commit. Rolled-back savepoints discard both kinds of effect.
 A lost connection fails the operation and is never replaced mid-operation. Migrations use a separate
 advisory lock and dedicated connection. There are no reader threads, checkpoint workers or database-file locks.
 
@@ -152,7 +152,7 @@ process maps track shutdown only. A separate one-connection bookkeeping pool kee
 
 The registry's `job` operation is available only on the separate job service. HTTP verifies the Google OIDC
 signature, issuer, audience, validity and service account email; the public service refuses that operation even for
-an admin. The local runner invokes the same registry operation. Cloud Tasks dispatch is step 3 of issue #821. Outgoing mail is a repeatable job with at-least-once delivery and a stable Message-ID. Its reply buffers and socket deadline belong to each attempt. Private message input is removed when the job succeeds or exhausts retries, and SMTP credentials remain process configuration.
+an admin. The local runner invokes the same registry operation. Cloud Tasks dispatch is step 3 of issue #821.
 
 Blob I/O is asynchronous. Every put, including reuse, commits a hash's last-put time before writing bytes, on a
 separate small metadata pool so it cannot wait behind its own domain transaction. A prune locks that row, checks its
@@ -195,7 +195,7 @@ actor's effective capabilities. A new token for an actor that exists changes not
 
 `session` and `credential` ask for no capability. Their need is `self`: whoever is signed in runs them, a person
 or an agent, with whatever grants, on what is their own. `credential` then refuses an agent (403), which has
-no password and no passkey: an agent lists and ends its own sessions and no more. A person who holds `admin` on
+no identity at the provider: an agent lists and ends its own sessions and no more. A person who holds `admin` on
 every project may also
 list and end what is somebody else's, and one function decides that for every such operation (`mayActFor` in
 `src/server/identity/identity.ts`; a test names the operations and where the decision is made). A pipeline is
@@ -250,44 +250,48 @@ its actor is forgotten. By default it also ends after 14 days without use or 90 
 so a copy of the cookie stops working with it. Signing in and out are routes of the HTTP surface and not
 operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
 
-A person signs in as themselves with a name and a password or with a passkey, and the first time with an
-invitation, the link an admin hands them or sends through optional mail (decisions 0017 and 0086). These are
-further bodies of `POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
-passkey's challenge and `POST /api/account/password` to set a password. They are routes and not operations for
-one more reason: the registry keeps a digest of each request that carries a command id, and a password must
-not reach it. A test fails when an operation's input has a field named like a password. A name, a password, a
-passkey's answer or an invitation code that is looked at and refused is answered 401 and one sentence whatever
-was wrong, and the reason goes to the log as a code, so a reply does not say which names exist. The other
-replies are 429 while the caller is limited, 400 for a request that is wrong in itself (a password's length, a
-passkey where there are none), 409 for a browser signed in as somebody else and 408 for a body that took too
-long (decision 0017). A name with no password is checked against a hash nobody's password matches, so the
-refusal takes as long.
+A person signs in as themselves through the instance's one OpenID Connect identity provider, and the first time
+through an invitation, the link an admin hands them (decision 2026-10-27, "People sign in through an identity
+provider", which narrows 0093 and replaces the password, passkey, second-factor and recovery parts of 0017,
+0067, 0072, 0122 and 0145). Mainworthy keeps no password, passkey or authenticator and sends no mail: the
+provider owns them. The owner token typed into the sign-in form is the first way in, and on an instance with no
+provider the only one for a person; there `invitation` refuses, since nobody could accept. The provider's routes
+are in `src/surfaces/signin.ts`: `POST /api/login/oidc` begins a ceremony (`{}` to sign in, `{ invitation }` to
+accept one, `{ link: true }` and `{ proof: true }` for a signed-in person), `POST /api/login` with `{ oidc }`
+finishes it with the query the provider sent the browser back to `/signin/oidc` with, and
+`POST /api/login/invitation` says whose an invitation is. They are routes and not operations: nobody is signed in
+yet, the provider's answer comes back to a page, and an invitation code must not reach the registry, which keeps a
+digest of each request that carries a command id. A test fails when an operation's input has a field named like a
+password. A provider's answer or an invitation code that is looked at and refused is answered 401 and one
+sentence whatever was wrong, and the reason goes to the log as a code, so a reply does not say which identities
+are linked. The other replies are 429 while the caller is limited, 400 for a request that is wrong in itself, 409
+for a browser signed in as somebody else and 408 for a body that took too long.
 
-What a person signs in with is a row of `credentials`: a password as an argon2id string (`Bun.password`), a
-passkey as its public key and counter. A row is one secret and is never changed into another, and a session
-rests on the row or the token that opened it, never on both, and says where it was opened and last used from
-whichever it is. Removing a credential, or changing a password,
-ends the sessions that rested on it; the session that changed the password moves to the new row. An
-invitation and a session cookie are stored as SHA-256 hashes, like a token. None of these tables is in an
-archive.
+What a person signs in with is a row of `credentials` of kind `oidc`: the provider's issuer and subject as its
+handle, and a label of the provider's name and the email or name it gave. Mainworthy never decides who somebody is
+by an email address or a name. A row is one identity and is never changed into another, and a session rests on
+the row or the token that opened it, never on both, and says where it was opened and last used from whichever it
+is. Unlinking an identity ends the sessions that rested on it; the last one a person has stays. An invitation and
+a session cookie are stored as SHA-256 hashes, like a token. None of these tables is in an archive.
 
-Every way in has two halves (`src/server/identity/people.ts`). Outside the write gate the proof is judged
-against committed rows: a password is hashed on another thread, two at a time, and a passkey's signature is
-checked. Under the gate, in one transaction, everything is read and judged again before anything is written,
-and it is read by what it holds and never by a row's number alone: a person by name, a password by its stored
-hash, a passkey by its credential id, key and counter, an invitation by the hash of its code. Between the two
-halves a password can change, a person can be forgotten and an archive can be imported, after which a row's
-number belongs to somebody else.
+Every way in has two halves (`src/server/identity/people.ts`). Outside the write gate the provider's answer is
+judged by `openid-client` (`src/server/identity/oidc.ts`: authorization code with PKCE, the ID token's signature,
+issuer, audience and nonce) against a ceremony stored in PostgreSQL for five minutes with what it was begun for
+and where (the browser's ceremony cookie, a session, an invitation). Under the gate, in one transaction,
+everything is read and judged again before anything is written, and it is read by what it holds and never by a
+row's number alone: an identity by its handle, an invitation by the hash of its code, a session by the hash of its
+cookie. Between the two halves a person can be forgotten, an identity unlinked and an archive imported, after
+which a row's number belongs to somebody else.
 
-The passkey verifier (`src/server/identity/webauthn.ts`) is hand-written, parses no CBOR and keeps nothing.
-The code around it keeps what it must (the list above `verifyRegistration` there). A challenge lives in PostgreSQL
-for five minutes with what it was issued for and where it was asked from (a browser's ceremony cookie, a
-session, an invitation), an answer is taken only from there, and the commit that stores the passkey or opens
-the session spends it. A credential id is unique on the instance for good, by an index. The person is the one the stored
-row names, and the user handle the browser returns must be theirs. The counter is compared again in the
-commit: of two answers with the same counter above zero the second is refused. Two answers that are zero
-against a stored zero both sign in, each on its own challenge: such an authenticator does not count. The relying party comes from `MAINWORTHY_PUBLIC_URL` and never from a request's `Host`; without the
-variable the instance has no passkeys.
+Recent proof (decision 0145, re-based by the decision above) is one timestamp, `sessions.reauthenticated_at`,
+good for ten minutes in that session (`requireRecentProof` in `src/server/identity/sessions.ts`). It guards linking
+a second identity and unlinking one, creating a token and issuing an invitation from a browser, granting `admin`,
+team changes that give it, and a browser's archive import. A session opened with a token is stamped at sign-in:
+typing a token proves holding it, and a token already speaks for its person over the API. A provider session
+gets it from the `proof` ceremony, which asks the provider with `max_age=0`; the identity that comes back must be
+a live one of the same person, and when the ID token carries `auth_time` it must be within ten minutes. A provider
+that leaves `auth_time` out (Google) gives proof by the fresh round trip alone. Linking a first identity needs no
+proof. Bearer tokens and the local owner keep their own authority.
 
 `admit` writes a token or session use during the request (`src/server/identity/uses.ts`). A conditional update
 changes the row only when its stored use is more than a minute old. The hash of the presented secret binds the
@@ -315,11 +319,9 @@ A route that takes none (`/health`, the API description, the documentation) look
 body the schema refuses is refused before it is counted.
 
 A person's sign-in is counted in the same limiter (`src/server/identity/attempts.ts` holds its shared database implementation).
-A name and a password, and the current password of a change, are counted under the address and under the name
-(`accountKey`, lower-cased), and are not looked at while either is blocked; a success clears the name and never
-the address, and a name nobody has is counted exactly as a wrong password is. A passkey's answer that is
-refused, and an invitation code that accepts nothing, are counted under the address alone, and a right one of
-either passes a blocked address as a right generated token does.
+A provider's answer that is refused, and an invitation code that accepts nothing, are counted under the address
+alone, and a right invitation code passes a blocked address as a right generated token does. There is no count
+by name: Mainworthy has no password to guess.
 
 The address a request came from is the address of its connection (`clientAddress` in `src/surfaces/http.ts`).
 Headers that claim another one are ignored, with one exception: when the connection comes from a proxy the
@@ -446,10 +448,9 @@ even when a forgotten person's name has been given to somebody else (issue #441)
 Two pages render with nobody signed in: the sign-in page and the page of an invitation, at `/invite`
 (`src/web/signin/`). They call the routes of `src/surfaces/signin.ts` through `src/web/lib/signin.ts`. An
 invitation's code arrives after the `#` of its link, which a browser sends to no server; the page reads it,
-takes it out of the address bar and keeps it in memory until the invitation is accepted. `src/web/lib/passkey.ts`
-turns the server's passkey options into what `navigator.credentials` takes and a browser's answer into what the
-server reads: the new key as `getPublicKey()` gives it and the authenticator data as bytes, so the server parses
-no CBOR. Which operations are the instance's, and so are sent to `/api/<op>`, is a list in `src/core/api.ts`
+takes it out of the address bar and keeps it in memory until the invitation is accepted at the provider. The
+provider sends the browser back to `/signin/oidc` (`src/web/signin/oidc.tsx`), which hands the query to the server
+and shows what came of it. Which operations are the instance's, and so are sent to `/api/<op>`, is a list in `src/core/api.ts`
 that a test holds equal to the registry's.
 
 ## What every reply carries

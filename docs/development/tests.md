@@ -125,7 +125,7 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 | Where | What it checks |
 | --- | --- |
 | `src/**/*.test.ts` | pure functions beside their code: the outline grammar, diff, merge, signatures, durations |
-| `test/<area>.test.ts` | an area through the real registry: suite, evidence, runs, policy, sessions, tokens, passkeys, trackers, archives |
+| `test/<area>.test.ts` | an area through the real registry: suite, evidence, runs, policy, sessions, tokens, identities, trackers, archives |
 | `test/sequences-*.test.ts` | deterministic operation sequences under each policy preset, seeds 1–8 per PR and local check, 1–40 daily |
 | `test/architecture.test.ts` | the module map, the registry, the witness writers, the PostgreSQL baseline, the identity rules, the phone layout and what a public repository may contain |
 | `test/integrity.test.ts` | one test for each thing that must never happen, such as a green gate with nothing proven or an agent's result counted as a pipeline's. Each came from an independent review. |
