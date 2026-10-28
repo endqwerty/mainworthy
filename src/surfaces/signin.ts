@@ -153,6 +153,11 @@ export function signInRoutes(app: App, tools: Tools) {
 				"forbidden",
 				"the identity provider signed in somebody other than you; sign in there as yourself and confirm again",
 			);
+		if (entry.why === "unverified")
+			return failed(
+				"forbidden",
+				"the identity provider did not say when you last signed in there, so this cannot confirm it is you. Whoever runs this instance turns on the auth_time claim at the provider; a session opened with a token confirms by signing in with the token again",
+			);
 		if (entry.why === "stale")
 			return failed(
 				"forbidden",

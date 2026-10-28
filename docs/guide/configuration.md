@@ -270,7 +270,7 @@ The four variables are set together or not at all. Startup stops when only some 
 
 Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through the identity provider](./access.md#through-the-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
 
-To confirm it is somebody before a sign-in change, Mainworthy sends them back to the provider with `max_age=0`, which asks the provider to sign them in again. When the ID token carries `auth_time`, it must be within the last ten minutes. A provider that leaves it out, as Google does, gives proof by the fresh round trip alone. [Confirm it is you](./access.md#confirm-it-is-you) has the rest.
+To confirm it is somebody before a sign-in change, Mainworthy sends them back to the provider with `max_age=0`, which asks the provider to sign them in again. It also asks for the `auth_time` claim, and takes the proof only when the ID token says the person signed in there within the last ten minutes. A provider that leaves the claim out gives no proof, so enable it where the provider offers the choice. [Confirm it is you](./access.md#confirm-it-is-you) has the rest.
 
 An identity is the provider's issuer and its subject for the person. If you change `MAINWORTHY_OIDC_ISSUER`, identities linked at the old issuer sign nobody in: sign in with the owner token, link your new identity, and invite everybody else again.
 
@@ -281,6 +281,7 @@ To let people sign in with their Google account or Google Workspace account:
 1. In the Google Cloud console, open **Google Auth Platform**, then **Clients**, and create a client of type **Web application**.
 2. Under **Authorised redirect URIs**, add the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`.
 3. Set `MAINWORTHY_OIDC_ISSUER=https://accounts.google.com`, `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to the client's id and secret, and `MAINWORTHY_OIDC_NAME=Google`.
+4. Enable the `auth_time` claim for the client. Google's [OpenID Connect page](https://developers.google.com/identity/openid-connect/openid-connect) says it provides `auth_time` when a request asks for it, which Mainworthy does when confirming it is somebody, and it is enabled in settings. Without it, nobody signed in through Google can confirm it is them, and only token sessions can make sign-in changes.
 
 Google decides who may sign in to the client. Under **Audience** in the same console, choose the users of your
 Workspace organisation, or any Google account; an external client that is still in testing admits only the test

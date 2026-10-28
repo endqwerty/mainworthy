@@ -5,7 +5,8 @@
 // A ceremony is the authorization code flow with PKCE, a state and a nonce. The state finds the ceremony when the
 // browser comes back, and the ceremony cookie binds it to the browser that began. A ceremony is spent the moment it
 // is found, before the code is exchanged, so of two answers to one the second finds nothing. A ceremony of proof
-// asks the provider to sign the person in again (`max_age=0`) and reports when it did (`auth_time`), if it says.
+// asks the provider to sign the person in again (`max_age=0`) and to say when it did (`auth_time`, asked for as an
+// essential claim); `people.ts` takes the proof only when it says, and recently.
 //
 // The ID token is checked by the library: issuer, audience, nonce, its times, and its signature against the
 // provider's published keys. The signature check is switched on here (`enableNonRepudiationChecks`): the library
@@ -167,7 +168,9 @@ export async function beginOidc(
 		code_challenge_method: "S256",
 		state,
 		nonce,
-		...(purpose.purpose === "proof" ? { max_age: "0" } : {}),
+		...(purpose.purpose === "proof"
+			? { max_age: "0", claims: JSON.stringify({ id_token: { auth_time: { essential: true } } }) }
+			: {}),
 	}).href;
 }
 
