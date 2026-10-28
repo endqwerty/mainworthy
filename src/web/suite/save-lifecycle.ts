@@ -3,11 +3,11 @@ import type { Api } from "../../core/api.ts";
 export type SaveState =
 	| { kind: "unsent" }
 	| { kind: "sent"; input: Api["propose"]["input"] }
-	| { kind: "succeeded"; reply: Api["propose"]["reply"] }
-	| { kind: "adopted"; ref: string; version: number };
+	| { kind: "succeeded"; cmd: string; reply: Api["propose"]["reply"] }
+	| { kind: "adopted"; cmd: string; ref: string; version: number };
 export type SaveEvent =
 	| { kind: "sent"; input: Api["propose"]["input"] }
-	| { kind: "succeeded"; reply: Api["propose"]["reply"] }
+	| { kind: "succeeded"; cmd: string; reply: Api["propose"]["reply"] }
 	| { kind: "adopted"; ref: string; version: number }
 	| { kind: "refused" }
 	| { kind: "read-failed" };
@@ -19,7 +19,7 @@ export function saveTransition(state: SaveState, event: SaveEvent): SaveState {
 		case "succeeded":
 			return state.kind === "sent" || state.kind === "unsent" ? event : state;
 		case "adopted":
-			return state.kind === "succeeded" ? event : state;
+			return state.kind === "succeeded" ? { ...event, cmd: state.cmd } : state;
 		case "refused":
 			return state.kind === "sent" ? { kind: "unsent" } : state;
 		case "read-failed":

@@ -7,7 +7,9 @@ export class SaveCommands {
 	private readonly states = new Map<string, SaveState>();
 	restore(draft: Draft): void {
 		const state = this.states.get(draft.id);
+		const cmd = state?.kind === "sent" ? state.input.cmd : state && state.kind !== "unsent" ? state.cmd : undefined;
 		if (
+			(draft.sent && cmd !== draft.sent.input.cmd) ||
 			(state?.kind === "adopted" && draft.id === state.ref) ||
 			(state?.kind === "succeeded" && !draft.sent && draft.submission.kind !== "waiting")
 		)
@@ -17,8 +19,8 @@ export class SaveCommands {
 	sent(id: string, input: Api["propose"]["input"]): void {
 		this.states.set(id, saveTransition(this.states.get(id) ?? { kind: "unsent" }, { kind: "sent", input }));
 	}
-	succeeded(id: string, reply: Api["propose"]["reply"]): void {
-		this.states.set(id, saveTransition(this.states.get(id) ?? { kind: "unsent" }, { kind: "succeeded", reply }));
+	succeeded(id: string, reply: Api["propose"]["reply"], cmd: string): void {
+		this.states.set(id, saveTransition(this.states.get(id) ?? { kind: "unsent" }, { kind: "succeeded", cmd, reply }));
 	}
 	reply(id: string): Api["propose"]["reply"] | null {
 		const effect = nextSaveEffect(this.states.get(id) ?? { kind: "unsent" });

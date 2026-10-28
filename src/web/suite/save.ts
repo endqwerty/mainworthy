@@ -380,7 +380,7 @@ export function createSaveWorkflow(context: SaveContext) {
 					}
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 				}
-				commands.succeeded(snapshot.id, reply);
+				commands.succeeded(snapshot.id, reply, recovered?.input.cmd ?? source.cmd);
 				if (reply.status === "conflict" || reply.status === "rejected") {
 					commands.clear(snapshot.id);
 					forgetRequest(snapshot.id);

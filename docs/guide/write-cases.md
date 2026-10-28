@@ -104,7 +104,9 @@ This includes requirement-link changes, even when one proposal adds many links t
 While review is pending, none of those changes is current. Rejecting it leaves the case unchanged.
 A conflict or failed save keeps your text and metadata on this device.
 If the save succeeds but reading its recorded version fails, saving again finishes that read
-without creating another case. Reloading asks the server what became of the stored command first.
+without creating another case. Taking over a draft from another tab recovers that draft’s outstanding save,
+even if this tab still remembers an earlier successful save for the same case.
+Reloading asks the server what became of the stored command first.
 
 The editor records a step once the step has an action.
 A step with an expected result but no action stays in your draft on this device, including after a reload.
