@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
 import { parseCase } from "../../src/core/markdown.ts";
 import { CaseView, editDraft } from "../../src/web/suite/model.ts";
-import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
+import { browserAvailable, eventually, joinPerson, keyCount, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"a save lets the Suite's first list read finish when there is no cached list to patch",
@@ -254,7 +254,7 @@ for (const device of ["desktop", "phone"] as const) {
 	test.skipIf(!browserAvailable)(
 		`the ${device} editor validates and saves defined custom fields for a case author`,
 		async () => {
-			const server = await startServer({ mode: "server" });
+			const server = await startServer({ mode: "server", provider: true });
 			const policy = Policy.extend({ version: z.number() }).parse(
 				await server.api("admin", { do: "policy.show", project: "scratch" }),
 			);
@@ -278,24 +278,8 @@ for (const device of ["desktop", "phone"] as const) {
 			const question = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (!question) throw new Error("Policy question missing");
 			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
-			const invitation = await server.api("invitation", {
-				do: "create",
-				name: "case-author",
-				project: "scratch",
-				can: ["read", "produce"],
-			});
-			if (!("code" in invitation)) throw new Error("Invitation missing");
-			const password = "a long enough password";
-			expect(
-				(
-					await fetch(`${server.url}/api/login`, {
-						method: "POST",
-						headers: { "content-type": "application/json" },
-						body: JSON.stringify({ invitation: invitation.code, password }),
-					})
-				).status,
-			).toBe(200);
-			const h = await openPage(server, { device, as: { name: "case-author", password } });
+			await joinPerson(server, "case-author", { project: "scratch", can: ["read", "produce"] });
+			const h = await openPage(server, { device, as: { name: "case-author" } });
 			try {
 				const { page } = h;
 				let saves = 0;

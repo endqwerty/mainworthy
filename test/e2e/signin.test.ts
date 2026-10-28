@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { advanceClock, browserAvailable, eventually, openPage, startServer, subjectOf } from "./support.ts";
 
 for (const surface of ["case draft", "run note"]) {
 	test.skipIf(!browserAvailable)(
@@ -151,11 +151,11 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const request of ["session", "password"])
+for (const request of ["session", "link"])
 	test.skipIf(!browserAvailable)(
 		`a late ${request} 401 cannot undo a newer sign-in (issue #447)`,
 		async () => {
-			const server = await startServer({ mode: "server" });
+			const server = await startServer({ mode: "server", provider: true });
 			const next = z.object({ token: z.string() }).parse(
 				await server.api("admin", {
 					do: "token.create",
@@ -170,11 +170,12 @@ for (const request of ["session", "password"])
 			const held = Promise.withResolvers<void>();
 			try {
 				const { page } = browser;
+				// A list of sessions is asked for as the person signed in; linking an identity begins as them.
+				const path = request === "session" ? "/api/session" : "/api/login/oidc";
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-				await page.locator("#password-next").fill("a password for the old session");
-				await page.locator("#password-again").fill("a password for the old session");
+				await page.getByRole("button", { name: "Link Example ID", exact: true }).waitFor();
 				let intercepted = false;
-				await page.route(request === "session" ? "**/api/session" : "**/api/account/password", async (route) => {
+				await page.route(`**${path}`, async (route) => {
 					if (intercepted) return route.continue();
 					intercepted = true;
 					// Get a real expired-session refusal, then hold its reply while this tab signs in again.
@@ -183,7 +184,8 @@ for (const request of ["session", "password"])
 					await held.promise;
 					await route.fulfill({ response });
 				});
-				await page.getByRole("button", { name: "Set password", exact: true }).click();
+				if (request === "session") await page.getByRole("option", { name: "Your sessions", exact: true }).click();
+				else await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
 				expect(await arrived.promise).toBe(401);
 				await page.getByRole("button", { name: "Sign out", exact: true }).click();
 				await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
@@ -200,7 +202,7 @@ for (const request of ["session", "password"])
 					});
 				});
 				const completed = page.waitForEvent("requestfinished", {
-					predicate: (sent) => sent.url().endsWith(request === "session" ? "/api/session" : "/api/account/password"),
+					predicate: (sent) => sent.url().endsWith(path),
 				});
 				held.resolve();
 				await completed;
@@ -228,11 +230,11 @@ for (const request of ["session", "password"])
 		30_000,
 	);
 
-for (const request of ["session", "password", "operation", "round-trip", "different actor"] as const)
+for (const request of ["session", "link", "operation", "round-trip", "different actor"] as const)
 	test.skipIf(!browserAvailable)(
 		`a cross-tab ${request} transition discards its late 401 and preserves actor privacy`,
 		async () => {
-			const server = await startServer({ mode: "server" });
+			const server = await startServer({ mode: "server", provider: true });
 			const browser = await openPage(server, { path: "/p/scratch/settings" });
 			const arrived = Promise.withResolvers<number>();
 			const held = Promise.withResolvers<void>();
@@ -249,13 +251,12 @@ for (const request of ["session", "password", "operation", "round-trip", "differ
 				const info = z.object({ result: z.object({ session: z.number(), actorId: z.number() }) });
 				const before = info.parse(await (await context.request.get(`${server.url}/api/session`)).json()).result;
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-				await page.locator("#password-next").fill("a password for the old session");
-				await page.locator("#password-again").fill("a password for the old session");
+				await page.getByRole("button", { name: "Link Example ID", exact: true }).waitFor();
 				const path =
 					request === "operation"
 						? "/api/p/scratch/find"
-						: request === "password" || request === "round-trip"
-							? "/api/account/password"
+						: request === "link" || request === "round-trip"
+							? "/api/login/oidc"
 							: "/api/session";
 				let intercepted = false;
 				let released = false;
@@ -271,7 +272,9 @@ for (const request of ["session", "password", "operation", "round-trip", "differ
 					await route.fulfill({ response });
 				});
 				if (request === "operation") await page.getByRole("link", { name: "Suite", exact: true }).click();
-				else await page.getByRole("button", { name: "Set password", exact: true }).click();
+				else if (path === "/api/login/oidc")
+					await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
+				else await page.getByRole("option", { name: "Your sessions", exact: true }).click();
 				expect(await arrived.promise).toBe(401);
 				const generation = await page.evaluate(() => localStorage.getItem("mainworthy:auth-generation"));
 				const other = await context.newPage();
@@ -497,7 +500,7 @@ for (const replacements of [1, 2])
 test.skipIf(!browserAvailable)(
 	"a held successful session reply cannot restore obsolete credentials after another tab signs in",
 	async () => {
-		const server = await startServer({ mode: "server" });
+		const server = await startServer({ mode: "server", provider: true });
 		const browser = await openPage(server, { path: "/p/scratch/settings" });
 		const arrived = Promise.withResolvers<number>();
 		const held = Promise.withResolvers<void>();
@@ -515,11 +518,11 @@ test.skipIf(!browserAvailable)(
 			await first.goto(`${server.url}/p/scratch/settings`);
 			expect(await arrived.promise).toBe(200);
 			const { page } = browser;
+			// The other tab links the owner's first identity, through the provider and back.
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-			await page.locator("#password-next").fill("a password established in the other tab");
-			await page.locator("#password-again").fill("a password established in the other tab");
-			await page.getByRole("button", { name: "Set password", exact: true }).click();
-			await page.locator("#password-current").waitFor();
+			server.idp?.next({ subject: subjectOf("robin") });
+			await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
+			await page.getByRole("button", { name: "Link another Example ID identity", exact: true }).waitFor();
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await page.locator("#token").fill(server.token);
@@ -527,9 +530,15 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#app").waitFor();
 			held.resolve();
 			await first.locator("#app").waitFor();
+			// What the held reply said (no identity) is not what the tab acts on: once the token's proof has run
+			// out, it offers to confirm with the identity linked meanwhile.
+			await advanceClock(server, 10 * 60_000 + 1);
 			await first.getByRole("option", { name: "Your sign-in", exact: true }).click();
-			await first.locator("#password-current").waitFor();
-			expect(await first.getByRole("button", { name: "Change password", exact: true }).count()).toBe(1);
+			await first.getByRole("button", { name: "Link another Example ID identity", exact: true }).click();
+			await first
+				.getByRole("region", { name: "Confirm it is you", exact: true })
+				.getByRole("button", { name: "Confirm with Example ID", exact: true })
+				.waitFor();
 			expect(browser.errors).toEqual([]);
 		} finally {
 			held.resolve();
@@ -573,7 +582,7 @@ for (const cookie of ["ended", "valid"] as const)
 				await page.reload();
 				expect((await reply).status()).toBe(cookie === "ended" ? 401 : 200);
 				try {
-					await page.locator(cookie === "ended" ? "#signin-name" : "#app").waitFor();
+					await page.locator(cookie === "ended" ? "#token" : "#app").waitFor();
 				} finally {
 					const evidence = process.env.MAINWORTHY_STARTUP_CLEAR_EVIDENCE;
 					if (evidence) await page.screenshot({ path: `${evidence}/startup-clear-${cookie}.png` });

@@ -3,7 +3,15 @@ import { mkdir } from "node:fs/promises";
 import axe from "axe-core";
 import type { Page } from "playwright-core";
 import { KINDS } from "../../src/core/kinds.ts";
-import { browserAvailable, openPage, startServer } from "./support.ts";
+import {
+	advanceClock,
+	browserAvailable,
+	confirmWithProvider,
+	joinPerson,
+	linkIdentity,
+	openPage,
+	startServer,
+} from "./support.ts";
 
 declare global {
 	interface Window {
@@ -89,8 +97,7 @@ async function keyboard(page: Page): Promise<string[]> {
 test.skipIf(!browserAvailable)(
 	"WCAG 2.2 AA: every web screen, both themes, keyboard, targets and live status",
 	async () => {
-		const started = await startServer({ mode: "server", cases: 8, passkeys: true });
-		const server = { ...started, url: started.url.replace("127.0.0.1", "localhost") };
+		const server = await startServer({ mode: "server", cases: 8, provider: true });
 		const h = await openPage(server, { signedIn: false, path: "/" });
 		const { page } = h;
 		const findings: string[] = [];
@@ -186,24 +193,18 @@ test.skipIf(!browserAvailable)(
 			await page.locator(ready).first().waitFor();
 		};
 		try {
-			await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).waitFor();
+			await page.getByRole("button", { name: "Sign in with Example ID", exact: true }).waitFor();
 			await scan("sign-in");
 			const invitation = await server.api("invitation", { do: "create", name: "pat" });
 			if (!("code" in invitation)) throw new Error("No invitation code");
-			await visit(`/invite#${invitation.code}`, "#invite-password");
+			await page.goto(`${server.url}/invite#${invitation.code}`);
+			await page.getByRole("button", { name: "Accept with Example ID", exact: true }).waitFor();
 			await scan("invitation");
-			await page.getByRole("checkbox", { name: "Make a passkey on this device" }).check();
-			await scan("invitation-passkey");
-			const accepted = await h.context.request.post(`${server.url}/api/login`, {
-				data: { invitation: invitation.code, password: "a long enough password" },
-			});
-			expect(accepted.ok()).toBe(true);
+			// pat accepts a new link through the provider; the owner signs in with the token and links an identity to
+			// confirm with later.
+			await joinPerson(server, "pat");
 			await h.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
-				).status(),
-			).toBe(200);
+			await linkIdentity(h.context, server, "robin");
 			const closed = await server.api("plan", { name: "Closed audit run", select: { cases: ["C-2"] } });
 			await server.api("report", { run: closed.run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
 			const pending = await server.api("plan", {
@@ -292,16 +293,19 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Recovery link for pat", exact: true }).click();
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("pat");
 			await scan("people-forms");
-			await page.getByLabel("Name", { exact: true }).fill("sam");
-			await page.getByRole("button", { name: "Make invitation link", exact: true }).click();
-			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await proof.waitFor();
-			await proof.getByLabel("Password", { exact: true }).fill("wrong password");
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
-			await proof.getByRole("status").filter({ hasText: "that credential proof was not accepted" }).waitFor();
+			// The token's sign-in proof runs out, so the invitation asks the owner to confirm it is them.
+			await advanceClock(server, 10 * 60_000 + 1);
+			const invite = async () => {
+				await page.getByLabel("Name", { exact: true }).fill("sam");
+				await page.getByRole("button", { name: "Make invitation link", exact: true }).click();
+			};
+			await invite();
+			const proof = page.getByRole("region", { name: "Confirm it is you", exact: true });
+			await proof.getByRole("button", { name: "Confirm with Example ID", exact: true }).waitFor();
 			await scan("recent-proof");
-			await proof.getByLabel("Password", { exact: true }).fill("the owner password");
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await confirmWithProvider(page, server, "robin");
+			await scan("recent-proof-confirmed");
+			await invite();
 			await page.getByLabel("Invitation link for sam", { exact: true }).waitFor();
 			expect(await proof.count()).toBe(0);
 			await scan("people-invitation-link");
@@ -359,9 +363,7 @@ test.skipIf(!browserAvailable)(
 			await scan("phone-palette");
 			await page.keyboard.press("Escape");
 			expect(await page.locator("[data-overlay=palette]").count()).toBe(0);
-			expect(h.errors).toEqual(
-				Array(2).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
-			);
+			expect(h.errors).toEqual(["Failed to load resource: the server responded with a status of 403 (Forbidden)"]);
 			if (capture) await Bun.write(`${capture}/manual-checks.json`, JSON.stringify(manual, null, 2));
 			console.info(
 				`Accessibility: ${scanned.length} screens in light and dark; keyboard, targets and live status checked; ${manual.length} axe results need human review.`,

@@ -127,7 +127,7 @@ test("an invalid public address is refused before waiting for another server's d
 	]);
 	expect(code).toBe(4);
 	expect(stdout).toBe("");
-	expect(stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
+	expect(stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use");
 	expect(stderr).not.toContain("waiting for another server");
 	expect((await fetch(`${first.url}/health`)).status).toBe(200);
 });

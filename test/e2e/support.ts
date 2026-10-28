@@ -19,7 +19,9 @@ import { processIdentity } from "../../scripts/work/test-databases.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
+import type { Capability } from "../../src/core/kinds.ts";
 import { call } from "../../src/web/lib/api.ts";
+import { provider as fakeProvider, type Provider } from "../oidc-support.ts";
 import { browserDiagnostics } from "./browser-diagnostics.ts";
 
 const found = findChromium();
@@ -35,6 +37,11 @@ export type Server = {
 	url: string;
 	project: string;
 	token: string;
+	/**
+	 * The identity provider people sign in through, which this process runs (`startServer({ provider: true })`);
+	 * absent or null for a server with none.
+	 */
+	idp?: Provider | null;
 	seeded: SeedResult | null;
 	api: <O extends OpName>(op: O, input: Api[O]["input"], options?: { token?: string }) => Promise<Api[O]["reply"]>;
 	stop: () => Promise<void>;
@@ -58,9 +65,7 @@ export async function startServer({
 	unlinked,
 	seed: seedData = cases > 0,
 	days = 0,
-	passkeys = false,
-	mail,
-	oidc,
+	provider = false,
 	handoff,
 }: {
 	/** Exercise Bun's source bundler even when the check supplies a compiled fixture. */
@@ -75,17 +80,17 @@ export async function startServer({
 	unlinked?: "ask" | "track" | "create";
 	seed?: boolean;
 	/**
-	 * The server is told that people open it at `http://localhost:<port>`, so it offers passkeys there. A test
-	 * then opens its pages at `localhost`: Chromium makes no passkey at `127.0.0.1` (`passkey-verifier.test.ts`).
+	 * The server is given a public address, `http://localhost:<port>`, and an identity provider people sign in
+	 * through (`test/oidc-support.ts`, named "Example ID"), which this process runs: `idp` of the server. The
+	 * provider sends the browser back to the public address, so `url` is at `localhost` too.
 	 */
-	passkeys?: boolean;
-	mail?: { port: number };
-	/** An identity provider (`test/oidc-support.ts`). People open the pages at `localhost`, as with passkeys. */
-	oidc?: { issuer: string; clientId: string; clientSecret: string; name: string };
+	provider?: boolean;
 	/** Where failures of the first project are handed to an agent (`MAINWORTHY_HANDOFF_*`). */
 	handoff?: { url: string; secret: string };
 } = {}): Promise<Server> {
 	sweepOwned(tmpdir(), "mainworthy-e2e-");
+	const idp = provider ? await fakeProvider() : null;
+	const oidc = idp?.config();
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
 	markOwned(dataDir);
@@ -121,18 +126,11 @@ export async function startServer({
 					MAINWORTHY_MODE: mode,
 					MAINWORTHY_FIRST_PROJECT: firstProject,
 					MAINWORTHY_OWNER_TOKEN: token,
-					MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? "http://localhost:0" : "",
+					MAINWORTHY_PUBLIC_URL: oidc ? "http://localhost:0" : "",
 					MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
 					MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
 					MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
 					MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
-					MAINWORTHY_JOB_KEY: Buffer.alloc(32, 7).toString("base64"),
-					MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
-					MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
-					MAINWORTHY_SMTP_TLS: mail ? "none" : "",
-					MAINWORTHY_SMTP_USER: "",
-					MAINWORTHY_SMTP_PASSWORD: "",
-					MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
 					MAINWORTHY_HANDOFF_PROJECT: handoff ? firstProject : "",
 					MAINWORTHY_HANDOFF_URL: handoff?.url ?? "",
 					MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
@@ -148,6 +146,7 @@ export async function startServer({
 		// behind. Do not delete them in the worker's exit hook: the fixture can still own its database then.
 		ownedDirectories.delete(dataDir);
 	} catch (error) {
+		idp?.stop();
 		await rm(dataDir, { recursive: true, force: true });
 		ownedDirectories.delete(dataDir);
 		throw error;
@@ -169,6 +168,7 @@ export async function startServer({
 	let stopping: Promise<void> | undefined;
 	const stop = () =>
 		(stopping ??= (async () => {
+			idp?.stop();
 			child.stdin.end();
 			// The supervisor stops a blocked fixture inside 1.5 seconds. Its own cleanup then drops the fixture's
 			// database, about 7 seconds on a cluster that has just started (#961), so it gets longer, but less than
@@ -209,8 +209,9 @@ export async function startServer({
 		15_000,
 	);
 	try {
-		const url = await readiness.promise;
+		const bound = await readiness.promise;
 		clearTimeout(deadline);
+		const url = idp ? bound.replace("127.0.0.1", "localhost") : bound;
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
 			call(op, input, { url, project: firstProject, token: options.token ?? token });
 		const seeded = seedData
@@ -227,7 +228,7 @@ export async function startServer({
 			const question = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (question) await api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
 		}
-		return { url, project: firstProject, token, seeded, api, stop };
+		return { url, project: firstProject, token, idp, seeded, api, stop };
 	} catch (error) {
 		await stop();
 		throw error;
@@ -247,6 +248,130 @@ export async function advanceClock(server: Server, ms: number): Promise<void> {
 	});
 	if (!moved.ok) throw new Error(`The e2e server's clock did not move: ${moved.status}`);
 }
+/** The subject a person of this name has at the test's provider, as in `test/people-support.ts`. */
+export const subjectOf = (name: string): string => `sub-${name}`;
+
+/**
+ * An identity at the test's provider: by default the one `name` joined as, `subjectOf(name)`, whose email
+ * `name@example.com` names it in a list ("Example ID (name@example.com)").
+ */
+export type Identity = { subject: string; email?: string };
+const identityOf = (name: string): Identity => ({ subject: subjectOf(name), email: `${name}@example.com` });
+
+/** Where a ceremony begun with the provider sends the browser back to: the query the page hands the server. */
+async function providerAnswer(server: Server, url: string, who: Identity): Promise<string> {
+	if (!server.idp) throw new Error("this server has no identity provider: startServer({ provider: true })");
+	server.idp.next(who);
+	const answered = await fetch(url, { redirect: "manual" });
+	const back = new URL(answered.headers.get("location") ?? "");
+	if (back.origin + back.pathname !== `${server.url}/signin/oidc`)
+		throw new Error(`the provider sent the browser to ${back.href}`);
+	return back.search;
+}
+
+/**
+ * Accepts the invitation `code` as a script would, with no page: begins with the provider, signs in there as `who`
+ * and hands the answer back. The session cookie it opened, as `name=value`.
+ */
+export async function acceptInvitation(server: Server, code: string, who: Identity): Promise<string> {
+	const post = (path: string, body: unknown, cookie = "") =>
+		fetch(`${server.url}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+			body: JSON.stringify(body),
+		});
+	const begun = await post("/api/login/oidc", { invitation: code });
+	if (!begun.ok) throw new Error(`the invitation did not begin: ${begun.status} ${await begun.text()}`);
+	const ceremony = begun.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+	const { url } = z.object({ result: z.object({ url: z.string() }) }).parse(await begun.json()).result;
+	const accepted = await post("/api/login", { oidc: await providerAnswer(server, url, who) }, ceremony);
+	if (!accepted.ok) throw new Error(`the invitation was not accepted: ${accepted.status} ${await accepted.text()}`);
+	return (
+		accepted.headers
+			.getSetCookie()
+			.find((cookie) => cookie.startsWith("mainworthy_sid="))
+			?.split(";")[0] ?? ""
+	);
+}
+
+/**
+ * Invites `name` as the owner does, with `grant`, and accepts the invitation through the provider as
+ * `subjectOf(name)`, as the invitation's page does, then signs that session out: the person has no session, and
+ * can be signed in by `openPage({ as })`.
+ */
+export async function joinPerson(
+	server: Server,
+	name: string,
+	grant: { can?: Capability[]; project?: string } = {},
+): Promise<void> {
+	const invitation = await server.api("invitation", { do: "create", name, ...grant });
+	if (!("code" in invitation)) throw new Error(`the invitation for ${name} has no code`);
+	const cookie = await acceptInvitation(server, invitation.code, identityOf(name));
+	await fetch(`${server.url}/api/logout`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie },
+		body: "{}",
+	});
+}
+
+/** Signs `name` in through the provider in `context` as `who`, as the sign-in page's button does. */
+async function signInThroughProvider(
+	context: BrowserContext,
+	server: Server,
+	name: string,
+	who: Identity = identityOf(name),
+): Promise<void> {
+	const begun = await context.request.post(`${server.url}/api/login/oidc`, { data: {} });
+	if (!begun.ok()) throw new Error(`The e2e sign-in of ${name} did not begin: ${begun.status()}`);
+	const { url } = z.object({ result: z.object({ url: z.string() }) }).parse(await begun.json()).result;
+	const opened = await context.request.post(`${server.url}/api/login`, {
+		data: { oidc: await providerAnswer(server, url, who) },
+	});
+	if (!opened.ok()) throw new Error(`The e2e sign-in of ${name} was refused: ${opened.status()}`);
+}
+
+/** One round through the provider from the browser of `context`, begun with `body`, signed in there as `who`. */
+async function ceremonyIn(context: BrowserContext, server: Server, body: object, who: Identity): Promise<void> {
+	const begun = await context.request.post(`${server.url}/api/login/oidc`, { data: body });
+	if (!begun.ok()) throw new Error(`${JSON.stringify(body)} did not begin: ${begun.status()} ${await begun.text()}`);
+	const { url } = z.object({ result: z.object({ url: z.string() }) }).parse(await begun.json()).result;
+	const done = await context.request.post(`${server.url}/api/login`, {
+		data: { oidc: await providerAnswer(server, url, who) },
+	});
+	if (!done.ok()) throw new Error(`${JSON.stringify(body)} was refused: ${done.status()} ${await done.text()}`);
+}
+
+/**
+ * Links an identity to whoever is signed in in `context`, as "Link Example ID" in Settings does: the one `name`
+ * joins as, or `who`. The first identity of a person needs no proof; a later one needs the session's recent
+ * proof (`proveIdentity`, or a token's sign-in).
+ */
+export const linkIdentity = (context: BrowserContext, server: Server, name: string, who = identityOf(name)) =>
+	ceremonyIn(context, server, { link: true }, who);
+
+/** `name`, signed in in `context` through the provider, confirms it is them there: ten minutes of proof. */
+export const proveIdentity = (context: BrowserContext, server: Server, name: string) =>
+	ceremonyIn(context, server, { proof: true }, identityOf(name));
+
+/**
+ * Answers the "Confirm it is you" prompt on the page by signing in at the provider as `name`: the page leaves for
+ * the provider and comes back to the section of Settings it was on, which says that the confirmation took. The
+ * change that asked for it is not repeated: the test repeats it, as the person does.
+ */
+export async function confirmWithProvider(page: Page, server: Server, name: string): Promise<void> {
+	if (!server.idp) throw new Error("this server has no identity provider: startServer({ provider: true })");
+	server.idp.next({ subject: subjectOf(name) });
+	// The page the provider sends the browser back to is a new document; the sentence of an earlier confirmation
+	// may still be on the one before it.
+	const back = page.waitForEvent("load");
+	await page
+		.getByRole("region", { name: "Confirm it is you", exact: true })
+		.getByRole("button", { name: "Confirm with Example ID", exact: true })
+		.click();
+	await back;
+	await page.getByText("Confirmed it is you. Repeat the change within ten minutes.", { exact: true }).waitFor();
+}
+
 export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Promise<Browser> {
 	if (found.path === null) throw new Error(found.skipped);
 	return chromium.launch(chromiumLaunchOptions(found.path, args));
@@ -325,8 +450,11 @@ export async function openPage(
 	}: {
 		path?: string;
 		signedIn?: boolean;
-		/** Who is signed in when not the owner by their token: a person, by name and password. */
-		as?: { name: string; password: string };
+		/**
+		 * Who is signed in when not the owner by their token: a person who joined through the provider (`joinPerson`),
+		 * signed in there as `subjectOf(name)`, or as another identity of theirs (`linkIdentity`).
+		 */
+		as?: { name: string; identity?: Identity };
 		/** What shows that the page is up, for a page that is neither the app nor the sign-in page. */
 		ready?: string;
 		/** Installs routes and init scripts before the first document loads. */
@@ -357,8 +485,8 @@ export async function openPage(
 	routesWaitForInterception(context);
 	throttleRenderers(context);
 	if (signedIn) {
-		const opened = await context.request.post(`${server.url}/api/login`, { data: as ?? { token: server.token } });
-		if (as && !opened.ok()) throw new Error(`The e2e sign-in of ${as.name} was refused: ${opened.status()}`);
+		if (as) await signInThroughProvider(context, server, as.name, as.identity);
+		else await context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
 	}
 	const page = await context.newPage();
 	await throttled(page);
@@ -433,30 +561,6 @@ async function throttled(page: Page): Promise<void> {
 }
 function throttleRenderers(context: BrowserContext): void {
 	if (THROTTLE > 1) context.on("page", (page) => void throttled(page).catch(() => {}));
-}
-/**
- * Gives the page an authenticator that Chromium keeps in memory and that confirms the person by itself, so a
- * passkey is made and used with no dialog. `remove` takes it away again: a second one stands for another device.
- * The page must be open at `localhost` (`startServer({ passkeys: true })`).
- */
-export async function addAuthenticator(harness: PageHarness): Promise<{ remove: () => Promise<void> }> {
-	const cdp = await harness.context.newCDPSession(harness.page);
-	await cdp.send("WebAuthn.enable");
-	const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
-		options: {
-			protocol: "ctap2",
-			transport: "internal",
-			hasResidentKey: true,
-			hasUserVerification: true,
-			isUserVerified: true,
-			automaticPresenceSimulation: true,
-		},
-	});
-	return {
-		remove: async () => {
-			await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
-		},
-	};
 }
 /** The start of every storage key the page keeps for the actor this token belongs to: their id, not their name (issue #380). */
 export async function devicePrefix(server: Pick<Server, "url" | "project">, token: string): Promise<string> {

@@ -6,7 +6,6 @@ import { sql } from "../kernel/db.ts";
 import { limiterOf } from "./attempts.ts";
 import { admit, createToken, hashToken } from "./identity.ts";
 import {
-	accountKey,
 	addressKey,
 	createLimiter,
 	createStartLimiter,
@@ -832,41 +831,5 @@ describe("for any sequence of failures, successes and waits", () => {
 			),
 			{ numRuns: 500 },
 		);
-	});
-});
-
-describe("accountKey", () => {
-	test("a name is one key however it is capitalised or padded, and no key is longer than a name's", () => {
-		expect(accountKey("robin")).toBe("account:robin");
-		expect(accountKey("Robin")).toBe("account:robin");
-		expect(accountKey("  ROBIN\t")).toBe("account:robin");
-		expect(accountKey("robin@example.com")).toBe("account:robin@example.com");
-		// What a stranger types does not decide how much memory a key takes.
-		expect(accountKey("x".repeat(5000))?.length).toBeLessThanOrEqual("account:#".length + 64);
-		expect(accountKey(`${"a".repeat(64)}b`)?.length).toBeLessThanOrEqual("account:#".length + 64);
-		expect(accountKey(`${"a".repeat(64)}b`)).toBe(accountKey(` ${"A".repeat(64)}B `));
-		// An email address may be longer than a name: two that differ only past a name's length are two keys, and
-		// neither is the key of a name.
-		const local = "a".repeat(64);
-		expect(accountKey(`${local}@example.com`)).not.toBe(accountKey(`${local}@example.org`));
-		expect(accountKey(`${local}@example.com`)).not.toBe(accountKey(local));
-		// Another name is another key, and no key is one a token or an address is counted under.
-		expect(accountKey("robin")).not.toBe(accountKey("robina"));
-		expect(accountKey("203.0.113.9")).not.toBe(addressKey("203.0.113.9"));
-		expect(accountKey("robin")).not.toBe(prefixKey("robin"));
-	});
-
-	test("a name that is empty or only spaces has no key: it would be one key for everybody who sends nothing", () => {
-		for (const name of ["", " ", "\t\n "]) expect(accountKey(name)).toBeNull();
-	});
-
-	test("the fifth failure for a name blocks it under any spelling, and a success for it clears it", () => {
-		const w = world();
-		w.fail(accountKey("robin") ?? "", 3);
-		w.fail(accountKey("ROBIN") ?? "", 2);
-		expect(w.check(accountKey("Robin") ?? "")).toEqual(blocked(1));
-		expect(w.check(accountKey("sam") ?? "")).toEqual(FREE);
-		w.limiter.succeeded([accountKey("robin") ?? ""]);
-		expect(w.check(accountKey("ROBIN") ?? "")).toEqual(FREE);
 	});
 });

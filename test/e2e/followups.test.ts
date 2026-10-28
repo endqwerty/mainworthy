@@ -194,16 +194,9 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#token").fill(server.token);
 			await page.keyboard.press("Enter");
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
-				).status(),
-			).toBe(200);
+			// Typing the token in this browser proved it is the owner: the token is made with no further question.
 			await page.getByLabel("Token actor").fill("http-reader");
 			await page.getByRole("button", { name: "Create token", exact: true }).click();
-			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await proof.getByLabel("Password", { exact: true }).fill("the owner password");
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			const token = page.getByLabel("New token", { exact: true });
 			await token.waitFor();
 			const value = await token.inputValue();
@@ -215,9 +208,7 @@ test.skipIf(!browserAvailable)(
 			const reader = await context.newPage();
 			await reader.goto(`${server.url}/health`);
 			expect((await reader.evaluate(() => navigator.clipboard.readText())) === value).toBe(true);
-			expect(browser.errors).toEqual([
-				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
-			]);
+			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser?.close();
 			await chromium.close();

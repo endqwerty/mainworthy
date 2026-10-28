@@ -1,21 +1,16 @@
-// What the tests of people share: an instance on a real listener with the test's own clock, the requests a
-// browser and a script make, and an authenticator written from the specification, as the passkey verifier's
-// unit tests have one. Everything said to the server and everything it answered is kept, so a test can search it.
-import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+// What the tests of people share: an instance on a real listener with the test's own clock, its identity provider
+// (`test/oidc-support.ts`), and the requests a browser and a script make, a sign-in through the provider among
+// them. Everything said to the server and everything it answered is kept, so a test can search it.
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
-import type {
-	AssertionOptions,
-	AssertionResponse,
-	RegistrationOptions,
-	RegistrationResponse,
-} from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { closeIdentityDatabases, databaseContents, holdWriter, identityDatabaseUrl, pgRows } from "./identity-db.ts";
+import { type Next, type Provider, provider, stopProviders } from "./oidc-support.ts";
 
 /** The owner of every instance here, and the token the owner signs in with. */
 export const OWNER = "kim";
@@ -23,7 +18,7 @@ export const TOKEN = "owner-secret-0123456789";
 export const HOUR = 3_600_000;
 export const DAY = 24 * HOUR;
 export const T0 = 1_800_000_000_000;
-/** Where people open the instance: the relying party of its passkeys. No request in a test is sent there. */
+/** Where people open the instance, and where the provider sends them back to. No request in a test is sent there. */
 export const PUBLIC = "https://mainworthy.example";
 
 export type Clock = { now: () => number; advance: (ms: number) => void };
@@ -67,6 +62,8 @@ export function must<T>(reply: Answer<T>): T {
 
 export type World = {
 	instance: Instance;
+	/** The instance's identity provider, or null for an instance that has none. */
+	idp: Provider | null;
 	clock: Clock;
 	dataDir: string;
 	/** Every reply the server gave in this test, headers and body, as text. */
@@ -91,6 +88,7 @@ const dirs: string[] = [];
 /** Stops every instance a test started and removes its directory. Each test file calls it after each test. */
 export async function cleanUp(): Promise<void> {
 	for (const world of worlds.splice(0)) await world.instance.stop();
+	stopProviders();
 	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
@@ -104,7 +102,7 @@ export function scratch(): string {
 export type Boot = {
 	clock?: Clock;
 	dataDir?: string;
-	/** `null` is an instance that was told no public address, where passkeys are off. */
+	/** `null` is an instance that was told no public address; it has no provider either. */
 	publicUrl?: string | null;
 	mode?: Config["mode"];
 	/**
@@ -113,18 +111,23 @@ export type Boot = {
 	 * comes from loopback, which is never counted by its address.
 	 */
 	proxied?: boolean;
-	/** An identity provider people may sign in through (`test/oidc-support.ts` makes one). */
-	oidc?: Config["oidc"];
-	requireAdminMfa?: boolean;
+	/**
+	 * The identity provider people sign in through: by default a new one (`test/oidc-support.ts`), and null for an
+	 * instance with none. `oidc` changes what the instance is told of it.
+	 */
+	idp?: Provider | null;
+	oidc?: Partial<NonNullable<Config["oidc"]>>;
 	/** Run background jobs on their timers. Off by default: a job's write would count in `waitingAtGate` (#971). */
 	jobRunner?: boolean;
 };
-/** A server-mode instance whose owner signs in with `TOKEN`. Passwords are hashed at a cost a test can afford. */
+/** A server-mode instance whose owner signs in with `TOKEN`, and whose people sign in through `idp`. */
 export async function world(options: Boot = {}): Promise<World> {
 	const clock = options.clock ?? clockAt();
 	const dataDir = options.dataDir ?? scratch();
 	const mode = options.mode ?? "server";
 	const publicUrl = options.publicUrl === undefined ? PUBLIC : options.publicUrl;
+	const idp =
+		publicUrl === null || options.idp === null ? null : (options.idp ?? (await provider({ subject: "nobody" })));
 	const instance = await start(
 		{
 			databaseUrl: await identityDatabaseUrl(dataDir),
@@ -141,11 +144,9 @@ export async function world(options: Boot = {}): Promise<World> {
 				? defaultConfig({ MAINWORTHY_TRUSTED_PROXY: "127.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "X-Client-Address" })
 						.proxy
 				: null,
-			passwordCost: { memoryCost: 8, timeCost: 1 },
 			jobRunner: options.jobRunner ?? false,
 			...(publicUrl === null ? {} : { publicUrl }),
-			...(options.oidc ? { oidc: options.oidc } : {}),
-			...(options.requireAdminMfa ? { requireAdminMfa: true } : {}),
+			...(idp ? { oidc: idp.config(options.oidc) } : {}),
 		},
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
 		{ now: clock.now },
@@ -179,6 +180,7 @@ export async function world(options: Boot = {}): Promise<World> {
 		post<T>(`/api/${name}`, input, headers);
 	const made: World = {
 		instance,
+		idp,
 		clock,
 		dataDir,
 		replies,
@@ -204,22 +206,84 @@ export type Invited = { id: number; name: string; purpose: string; code: string;
 export const invite = (w: World, input: Record<string, unknown>, headers?: Sent): Promise<Invited> =>
 	w.ok<Invited>("invitation", { do: "create", ...input }, headers);
 
-/** Invites a person and accepts with a password: the cookie of the session that opens, as `name=value`. */
+/** The cookies of a reply as a browser sends them back, joined with any it already holds. */
+export const jar = (...cookies: (string | null | undefined)[]): Sent => ({
+	cookie: cookies.filter((cookie): cookie is string => !!cookie).join("; "),
+});
+export const cookiesOf = (reply: Answer<unknown>): string[] =>
+	reply.setCookies.map((cookie) => cookie.split(";")[0] ?? "");
+export const ceremonyOf = (reply: Answer<unknown>): string =>
+	cookiesOf(reply).find((cookie) => cookie.startsWith("mainworthy_ceremony=")) ?? "";
+export const sessionOf = (reply: Answer<unknown>): string =>
+	cookiesOf(reply).find((cookie) => cookie.startsWith("mainworthy_sid=")) ?? "";
+
+/** The subject a person of this name has at the test's provider. */
+export const subjectOf = (name: string): string => `sub-${name}`;
+
+/** A ceremony begun in a browser: where the page sends the person, and the ceremony cookie it was handed. */
+export type Begun = { url: URL; ceremony: string };
+export async function begin(w: World, body: Record<string, unknown> = {}, headers: Sent = {}): Promise<Begun> {
+	const reply = await w.post<{ url: string }>("/api/login/oidc", body, headers);
+	return { url: new URL(must(reply).url), ceremony: ceremonyOf(reply) };
+}
+
+/** The provider's answer to a ceremony: the query the provider sent the browser back to the page with. */
+export async function authorize(w: World, begun: Begun, who: Next): Promise<string> {
+	if (!w.idp) throw new Error("this instance has no identity provider");
+	w.idp.next(who);
+	const answer = await fetch(begun.url, { redirect: "manual" });
+	const location = new URL(answer.headers.get("location") ?? "");
+	if (location.origin + location.pathname !== `${PUBLIC}/signin/oidc`)
+		throw new Error(`the provider sent the browser to ${location.href}`);
+	return location.search;
+}
+
+/** The page at `/signin/oidc` hands the query to the server, with the cookies the browser holds. */
+export const finish = (w: World, query: string, headers: Sent) =>
+	w.post<{ signedIn?: true; linked?: true; proven?: true }>("/api/login", { oidc: query }, headers);
+
+/** The whole round: begin with `body`, sign in at the provider as `who`, and hand the answer back. */
+export async function viaProvider(
+	w: World,
+	who: Next,
+	body: Record<string, unknown> = {},
+	cookie: string | null = null,
+): Promise<Answer<{ signedIn?: true; linked?: true; proven?: true }>> {
+	const begun = await begin(w, body, jar(cookie));
+	const query = await authorize(w, begun, who);
+	return finish(w, query, jar(cookie, begun.ceremony));
+}
+
+/**
+ * Invites a person as the owner does and accepts through the provider as `subjectOf(name)`: the cookie of the
+ * session that opens, as `name=value`.
+ */
 export async function joined(
 	w: World,
 	name: string,
-	password: string,
 	grant: Record<string, unknown> = { can: ["read"], project: "scratch" },
 ): Promise<string> {
 	const { code } = await invite(w, { name, ...grant });
-	const accepted = await w.post("/api/login", { invitation: code, password });
+	const accepted = await viaProvider(
+		w,
+		{ subject: subjectOf(name), email: `${name}@example.com` },
+		{ invitation: code },
+	);
 	if (accepted.status !== 200) throw new Error(`${name} did not join: ${accepted.status} ${accepted.text}`);
-	return accepted.cookie;
+	return sessionOf(accepted);
 }
 
-/** Signs in with a name and a password. */
-export const signIn = (w: World, name: string, password: string, headers: Sent = {}) =>
-	w.post<{ signedIn: boolean }>("/api/login", { name, password }, headers);
+/** Signs in through the provider as the person `name` joined as. */
+export const signIn = (w: World, name: string) => viaProvider(w, { subject: subjectOf(name) });
+
+/** The person signed in with `cookie` signs in at the provider again, before a sign-in change. */
+export const prove = (w: World, cookie: string, name: string, authTime?: number) =>
+	viaProvider(
+		w,
+		{ subject: subjectOf(name), ...(authTime === undefined ? {} : { authTime }) },
+		{ proof: true },
+		cookie,
+	);
 
 /** Holds the existing actors for a deterministic authority wait, until `release`. */
 export function holdGate(instance: Instance) {
@@ -246,93 +310,4 @@ export function waitingAtGate(instance: Instance, count: number): Promise<void> 
 			return run(fn);
 		};
 	});
-}
-
-const encoded = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
-const digest = (bytes: Uint8Array): Buffer => createHash("sha256").update(bytes).digest();
-const UP = 0x01;
-const UV = 0x04;
-const AT = 0x40;
-
-/** What a test may change about one answer of the authenticator. */
-export type Twist = {
-	/** The counter the answer carries, in place of the next one. */
-	signCount?: number;
-	/** The user handle the answer carries: another text, or null for none. */
-	userHandle?: string | null;
-	/** The origin the browser writes, in place of the page's. */
-	origin?: string;
-	/** The authenticator did not check who the person is (no fingerprint, face or PIN): only that somebody is there. */
-	unverified?: boolean;
-	/** The client data begins with a UTF-8 byte-order mark, which a reader of JSON drops and a signature covers. */
-	bom?: boolean;
-};
-
-/**
- * An authenticator holding one ES256 key, and the browser around it: it takes the options the server answers
- * and makes what the page would send. Its counter grows by one with each sign-in.
- */
-export type Authenticator = {
-	/** The credential id, base64url. */
-	readonly id: string;
-	register: (options: RegistrationOptions, twist?: Twist) => RegistrationResponse;
-	assert: (options: AssertionOptions, twist?: Twist) => AssertionResponse;
-};
-export function authenticator(origin = PUBLIC): Authenticator {
-	const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-	const id = randomBytes(32);
-	const jwk = pair.publicKey.export({ format: "jwk" });
-	// The key in COSE form, as an authenticator writes it into its data: {1: 2, 3: -7, -1: 1, -2: x, -3: y}.
-	const cose = Buffer.concat([
-		Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
-		Buffer.from(jwk.x ?? "", "base64url"),
-		Buffer.from([0x22, 0x58, 0x20]),
-		Buffer.from(jwk.y ?? "", "base64url"),
-	]);
-	let counter = 0;
-	let filedUnder: string | null = null;
-	const data = (rpId: string, flags: number, signCount: number, credential: boolean): Buffer => {
-		const fixed = Buffer.alloc(37);
-		digest(Buffer.from(rpId)).copy(fixed, 0);
-		fixed.writeUInt8(flags, 32);
-		fixed.writeUInt32BE(signCount, 33);
-		if (!credential) return fixed;
-		const length = Buffer.alloc(2);
-		length.writeUInt16BE(id.length);
-		return Buffer.concat([fixed, Buffer.alloc(16), length, id, cose]);
-	};
-	const clientData = (type: string, challenge: string, twist: Twist): Buffer =>
-		Buffer.concat([
-			Buffer.from(twist.bom ? [0xef, 0xbb, 0xbf] : []),
-			Buffer.from(JSON.stringify({ type, challenge, origin: twist.origin ?? origin, crossOrigin: false })),
-		]);
-	return {
-		id: encoded(id),
-		register(options, twist = {}) {
-			filedUnder = options.user.id;
-			return {
-				id: encoded(id),
-				clientDataJSON: encoded(clientData("webauthn.create", options.challenge, twist)),
-				authenticatorData: encoded(
-					data(options.rp.id, twist.unverified ? UP | AT : UP | UV | AT, twist.signCount ?? 0, true),
-				),
-				publicKey: encoded(pair.publicKey.export({ format: "der", type: "spki" })),
-				publicKeyAlgorithm: -7,
-				transports: ["internal"],
-			};
-		},
-		assert(options, twist = {}) {
-			counter = twist.signCount ?? counter + 1;
-			const client = clientData("webauthn.get", options.challenge, twist);
-			const authenticatorData = data(options.rpId, twist.unverified ? UP : UP | UV, counter, false);
-			const handle = twist.userHandle === undefined ? filedUnder : twist.userHandle;
-			return {
-				id: encoded(id),
-				clientDataJSON: encoded(client),
-				authenticatorData: encoded(authenticatorData),
-				signature: encoded(sign("sha256", Buffer.concat([authenticatorData, digest(client)]), pair.privateKey)),
-				...(handle === null ? {} : { userHandle: handle }),
-			};
-		},
-	};
 }

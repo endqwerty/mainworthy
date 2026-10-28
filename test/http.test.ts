@@ -21,8 +21,7 @@ import { AuditReply, REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import { API_VERSION } from "../src/core/version.ts";
 import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
-import { lockAllActors, waitMail } from "../src/server/identity/identity.ts";
-import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
+import { lockAllActors } from "../src/server/identity/identity.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { lockNamedProject } from "../src/server/kernel/ctx.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
@@ -35,8 +34,8 @@ import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { grantedProjects, openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { type TestDatabase, testDatabase } from "./db.ts";
-import { fakeSmtp } from "./mail-support.ts";
-import { authenticator, waitingAtGate } from "./people-support.ts";
+import { type Provider, provider, stopProviders } from "./oidc-support.ts";
+import { waitingAtGate } from "./people-support.ts";
 
 const databases = new Map<string, TestDatabase>();
 async function databaseFor(directory: string): Promise<string> {
@@ -49,6 +48,7 @@ async function databaseFor(directory: string): Promise<string> {
 }
 afterAll(async () => {
 	for (const db of databases.values()) await db.close();
+	stopProviders();
 });
 
 function testDirectory(prefix: string) {
@@ -80,25 +80,6 @@ async function startFixture(
 			removeDirectory();
 		},
 	});
-}
-
-async function schemaMail(instance: Instance) {
-	const smtp = await fakeSmtp();
-	instance.app.config.publicUrl ??= "https://mainworthy.example";
-	instance.app.config.jobKey = Buffer.alloc(32, 7).toString("base64");
-	instance.app.config.mail = defaultConfig({
-		MAINWORTHY_SMTP_HOST: "127.0.0.1",
-		MAINWORTHY_SMTP_PORT: String(smtp.port),
-		MAINWORTHY_SMTP_TLS: "none",
-		MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
-		MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
-	}).mail;
-	return {
-		async [Symbol.asyncDispose]() {
-			await waitMail(instance.app);
-			await smtp.close();
-		},
-	};
 }
 
 async function boot(
@@ -223,6 +204,30 @@ async function post<T>(
 	};
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+/** What an instance is told of a test's identity provider, and the public address it sends people back to. */
+const withProvider = (idp: Provider) => ({ publicUrl: "https://mainworthy.example", oidc: idp.config() });
+
+/**
+ * One round through the provider as `subject`, as the browser holding `headers` makes it: `body` begins it (`{}`
+ * to sign in, `{ invitation }`, `{ link: true }`, `{ proof: true }`). The reply to the provider's answer.
+ */
+async function viaProvider(
+	instance: Instance,
+	idp: Provider,
+	subject: string,
+	body: unknown,
+	headers: Record<string, string> = {},
+) {
+	const begun = await post<{ url: string }>(instance, "/api/login/oidc", body, headers);
+	if (!begun.body.ok) throw new Error(`the ceremony did not begin: ${begun.status}`);
+	const ceremony = begun.cookie?.split(";")[0] ?? "";
+	idp.next({ subject });
+	const answer = await fetch(begun.body.result.url, { redirect: "manual" });
+	const query = new URL(answer.headers.get("location") ?? "").search;
+	const cookie = [headers.cookie, ceremony].filter(Boolean).join("; ");
+	return await post(instance, "/api/login", { oidc: query }, { ...headers, cookie });
+}
 
 test.each(["answer-then-pass", "pass-then-answer"])(
 	"HTTP disputes keep the slot separate from its cause: %s",
@@ -1382,7 +1387,6 @@ describe("server mode", () => {
 				clientId: "example",
 				clientSecret: "example",
 				name: "Example",
-				mfa: false,
 			},
 		});
 		const owner = new Client({ url: instance.url, project: "scratch", token: "owner-secret-0123456789" });
@@ -1406,8 +1410,8 @@ describe("server mode", () => {
 			})),
 			{ method: "GET", path: "/api/session" },
 			{ method: "GET", path: "/api/p/scratch/events" },
-			{ method: "POST", path: "/api/account/password" },
 			{ method: "POST", path: "/api/login/oidc", body: { link: true } },
+			{ method: "POST", path: "/api/login/oidc", body: { proof: true } },
 			{ method: "POST", path: "/mcp" },
 			{ method: "GET", path: "/api/export" },
 			{ method: "POST", path: "/api/import" },
@@ -2486,7 +2490,8 @@ describe("the surface", () => {
 	});
 
 	test("every public operation validates real replies against Zod and the served OpenAPI schema", async () => {
-		await using instance = await boot("local", null, undefined, { jobRunner: false });
+		const idp = await provider();
+		await using instance = await boot("local", null, undefined, { jobRunner: false, ...withProvider(idp) });
 		const sweep = await replySweep(instance, "scratch");
 		const { checked } = sweep;
 		await checked("admin", { do: "project.create", key: "schema-demo" });
@@ -2704,9 +2709,6 @@ describe("the surface", () => {
 		await checked("session", { do: "list" });
 		await checked("credential", { do: "list" });
 		await checked("invitation", { do: "create", name: "schema-person" });
-		await using _mail = await schemaMail(instance);
-		await checked("credential", { do: "email.get", actor: "schema-person" });
-		await checked("credential", { do: "email.set", actor: "schema-person", email: "schema@example.com" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
 		await checked("admin", { do: "team.create", name: "Schema team" });
@@ -2732,9 +2734,8 @@ describe("the surface", () => {
 	}, 60_000);
 
 	test("seeded reply sweep covers variants, empty results, paging and errors in Zod and served OpenAPI", async () => {
-		await using instance = await boot("local", "schema-owner-token-0123456789", undefined, {
-			publicUrl: "https://mainworthy.example",
-		});
+		const idp = await provider();
+		await using instance = await boot("local", "schema-owner-token-0123456789", undefined, withProvider(idp));
 		const client = new Client({ url: instance.url, token: undefined, project: "demo" });
 		const seeded = await seed(client, { project: "demo", cases: 24, days: 0, unlinkedFiles: 8 });
 		const sweep = await replySweep(instance, "demo");
@@ -2948,52 +2949,29 @@ describe("the surface", () => {
 		const cookie = login.cookie?.split(";")[0];
 		if (!cookie) throw new Error("No session cookie");
 		const headers = { cookie, origin: instance.url };
-		// The authenticator uses the configured public origin without sending a request there.
-		const options = await checked("credential", { do: "passkey.begin" }, headers);
-		const device = authenticator();
-		const registration = options as RegistrationOptions;
-		const credential = z
-			.object({ id: z.number() })
-			.parse(
-				await checked(
-					"credential",
-					{ do: "passkey.add", passkey: device.register(registration), label: "Sweep key" },
-					headers,
-				),
-			);
-		const beganProof = await post<{ passkey: AssertionOptions }>(
-			instance,
-			"/api/account/proof",
-			{ begin: true },
-			headers,
-		);
-		if (!beganProof.body.ok) throw new Error("No proof options");
-		expect(
-			(await post(instance, "/api/account/proof", { passkey: device.assert(beganProof.body.result.passkey) }, headers))
-				.status,
-		).toBe(200);
-		await checked("credential", { do: "list" }, headers);
+		// Two identities at the provider, linked from the browser the token signed in: the first needs no proof, and
+		// the token's sign-in is the proof for the second.
+		for (const subject of ["sub-robin", "sub-robin-2"])
+			expect((await viaProvider(instance, idp, subject, { link: true }, headers)).status).toBe(200);
+		const [credential] = z
+			.array(z.object({ id: z.number() }))
+			.parse(await checked("credential", { do: "list" }, headers));
+		if (!credential) throw new Error("No identity");
+		expect((await viaProvider(instance, idp, "sub-robin", { proof: true }, headers)).status).toBe(200);
 		const personalInvite = z
 			.object({ code: z.string() })
 			.parse(await checked("invitation", { do: "create", name: "personal-schema" }));
-		const personalLogin = await post(instance, "/api/login", {
-			invitation: personalInvite.code,
-			password: "a schema password",
-		});
-		if (!personalLogin.cookie) throw new Error("No personal session cookie");
-		const personalHeaders = { cookie: personalLogin.cookie.split(";")[0] ?? "", origin: instance.url };
+		const personalLogin = await viaProvider(instance, idp, "sub-personal", { invitation: personalInvite.code });
+		const personalCookie = personalLogin.cookie?.split(";")[0] ?? "";
+		if (!personalCookie.startsWith("mainworthy_sid=")) throw new Error("No personal session cookie");
+		const personalHeaders = { cookie: personalCookie, origin: instance.url };
+		expect((await viaProvider(instance, idp, "sub-personal", { proof: true }, personalHeaders)).status).toBe(200);
 		const personal = z
 			.object({ id: z.number() })
 			.parse(await checked("credential", { do: "token.create", label: "Schema CLI" }, personalHeaders));
 		await checked("credential", { do: "token.list" }, personalHeaders);
 		await checked("credential", { do: "token.revoke", id: personal.id }, personalHeaders);
-		// Keep a second key so removing the first is allowed.
-		const second = (await checked("credential", { do: "passkey.begin" }, headers)) as RegistrationOptions;
-		await checked(
-			"credential",
-			{ do: "passkey.add", passkey: authenticator().register(second), label: "Second key" },
-			headers,
-		);
+		// The second identity is kept, so removing the first is allowed.
 		await checked("credential", { do: "remove", id: credential.id }, headers);
 		const sessions = z.array(z.object({ id: z.number() })).parse(await checked("session", { do: "list" }));
 		const session = sessions.at(-1);
@@ -3018,9 +2996,6 @@ describe("the surface", () => {
 				}),
 			]),
 		);
-		await using _mail = await schemaMail(instance);
-		await checked("credential", { do: "email.get", actor: "sweep-person" });
-		await checked("credential", { do: "email.set", actor: "sweep-person", email: "sweep@example.com" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: invitation.id });
 		const empty = await replySweep(instance, "empty");
@@ -3520,8 +3495,8 @@ test("an unversioned browser cannot run operations, while native clients and log
 		});
 		expect(await native.json()).toMatchObject({ ok: true });
 	}
-	// Signing in and starting a passkey ceremony must not bypass the version gate either.
-	for (const path of ["/api/login", "/api/login/challenge"]) {
+	// Signing in, looking at an invitation and beginning with the provider must not bypass the version gate either.
+	for (const path of ["/api/login", "/api/login/invitation", "/api/login/oidc"]) {
 		for (const version of [null, String(API_VERSION - 1)]) {
 			const response = await fetch(`${instance.url}${path}`, {
 				method: "POST",
