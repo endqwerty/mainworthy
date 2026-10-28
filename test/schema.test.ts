@@ -634,10 +634,13 @@ INSERT INTO identity_limits(key,entry,expires_at,version) VALUES
 			const after = await schemaCatalog(target.raw);
 			expect(after).not.toEqual(before);
 			expect(after).toEqual(await schemaCatalog(db));
-			expect(
-				target.raw.unsafe(
-					"INSERT INTO credentials(actor,kind,data,label,created_at) VALUES (9001,'password','hash','password',0)",
-				),
+			// Started with `execute()` and awaited: Bun 1.4.3's `rejects` hangs on a query that was never started.
+			await expect(
+				target.raw
+					.unsafe(
+						"INSERT INTO credentials(actor,kind,data,label,created_at) VALUES (9001,'password','hash','password',0)",
+					)
+					.execute(),
 			).rejects.toThrow("credentials_kind_check");
 		} finally {
 			await database.close();
