@@ -3186,6 +3186,42 @@ test("a statement refusal in one answer leaves both neighboring batch answers co
 	]);
 });
 
+test("a forgotten person's approval no longer counts toward a sign-off's quorum", async () => {
+	const names = ["leaving-approver", "second-approver", "third-approver"];
+	for (const name of names) {
+		await h.actor(name, "human", ["read", "produce", "answer"]);
+		await h.call("admin", { do: "grant.set", actor: name, can: ["read", "produce", "answer"], roles: ["approver"] });
+	}
+	const [forgotten, second, third] = await h.app.database.read(
+		async (db) => await Promise.all(names.map(async (name) => (await actorByName(db, name, 1)) ?? undefined)),
+	);
+	if (!forgotten || !second || !third) throw new Error("an approver was not made");
+	const clauses = PRESETS.loose.clauses
+		.filter((c) => c.id !== "signoff-passed")
+		.map((c) => (c.kind === "signoff" ? { ...c, ask: { ...c.ask, approvals: 2, who: "role:approver" } } : c));
+	await h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+	const adopt = first((await queue({ kind: "adopt" })).items);
+	await h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } });
+	await h.call("propose", { edits: [{ op: "create", outline: "Release works" }] });
+	const planned = await h.call<PlanReply>("plan", {
+		name: "release",
+		select: { cases: ["C-1"] },
+		accepts: { commit: "release1" },
+	});
+	await h.call("report", {
+		run: planned.run,
+		target: { commit: "release1", branch: "main" },
+		results: [{ test: { case: "C-1" }, outcome: "pass" }],
+	});
+	const q = first((await queue({ kind: "signoff" })).items);
+	const approve = { q: q.q, onEvidence: q.evidenceHash, answer: { is: "approve" } };
+	expect(await h.call("decide", approve, forgotten)).toMatchObject([{ status: "pending" }]);
+	// Forgetting keeps the person's grants for history; their approval stays recorded but no longer stands.
+	await h.call("admin", { do: "actor.forget", name: "leaving-approver" });
+	expect(await h.call("decide", approve, second)).toMatchObject([{ status: "pending" }]);
+	expect(await h.call("decide", approve, third)).toMatchObject([{ status: "decided" }]);
+});
+
 for (const notProducer of [false, true])
 	test(`sign-off quorum keeps two distinct approvals on current evidence (producer exclusion: ${notProducer})`, async () => {
 		let producer = await h.actor("run-producer", "human", ["read", "produce", "answer"]);

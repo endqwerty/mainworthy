@@ -48,7 +48,7 @@ import {
 	testRef,
 } from "../evidence/evidence.ts";
 import { sameCodeEvidenceByTests } from "../evidence/flaky.ts";
-import { actorById, actorLabel, ruleActorId } from "../identity/identity.ts";
+import { activeActorById, actorById, actorLabel, ruleActorId } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
@@ -784,8 +784,9 @@ async function approvalSigners(
 			stored.approval.policy !== policy
 		)
 			continue;
-		const actor = await actorById(db, answer.actor, question.project);
-		if (actor.kind !== "human") continue;
+		// A person forgotten since keeps the grants history needs, so only an actor who stands now is counted.
+		const actor = await activeActorById(db, answer.actor, question.project);
+		if (actor?.kind !== "human") continue;
 		const isProducer =
 			ask.notProducer && (await producedRun(db, json<{ run: number }>(question.subject).run, actor.id));
 		if (standingOf({ actor, ask, isAuthor: false, isProducer }) === "counts") signers.push(stored.approval);
