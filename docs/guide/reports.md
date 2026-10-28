@@ -69,7 +69,10 @@ however many times that attempt was reported. The report adds up the time those 
 it (of an attempt reported twice, the time of the result it counted: the worse, then the later), and lists the tests
 that cost the most. A correction counts in place of the attempt it corrects, its time included, whichever attempt
 the correction was sent with. Where older stored history has two corrections of the same result, the attempt
-counts the worse of the corrections that stand, then the later.
+counts the worse of the corrections that stand, then the later. The report follows at most 64 correction links.
+If any branch continues beyond that, the attempt contributes unknown time; durations and runner tries from
+its unresolved prefix are not used. An unresolved attempt counts once, including when its final runner tries
+cannot be read within the bound. Only corrections keeping the same project, test, producer, target and run count.
 
 The runner's earlier tries inside an attempt also count as reruns, even if the pipeline ran only once. Each try
 adds its reported duration. When a later pipeline attempt repeats the whole attempt, its reported duration counts

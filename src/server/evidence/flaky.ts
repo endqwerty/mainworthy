@@ -52,13 +52,13 @@ const Q = {
 			  AND a.at >= $since AND r.at >= $since
 			  AND ((coalesce(ft.outcome, a.outcome) = 'pass' AND coalesce(st.outcome, r.outcome) IN ('fail', 'error'))
 			    OR (coalesce(st.outcome, r.outcome) = 'pass' AND coalesce(ft.outcome, a.outcome) IN ('fail', 'error')))
-			  AND ${uncorrectedResults("a.id", "r.id")}
+			  AND ${uncorrectedResults("f.project", "a.id", "r.id")}
 			  AND (a.id = r.id OR NOT EXISTS (
 			    SELECT 1 FROM results worse JOIN batches wb ON wb.id = worse.batch
 			    WHERE worse.target = r.target AND worse.test = r.test AND worse.actor = r.actor
 			      AND worse.method = 'auto' AND wb.job = b.job AND worse.outcome IN ('fail', 'error')
 			      AND worse.attempt = CASE WHEN coalesce(ft.outcome, a.outcome) = 'pass' THEN a.attempt ELSE r.attempt END
-			      AND ${uncorrectedResults("worse.id")}
+			      AND ${uncorrectedResults("f.project", "worse.id")}
 			  ))
 		) WHERE sample <= 3 ORDER BY test, CASE class WHEN 'assertion' THEN 0 WHEN 'timeout' THEN 1 ELSE 2 END, signature, sample
 	`),
