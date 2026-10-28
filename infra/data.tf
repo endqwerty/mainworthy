@@ -41,6 +41,14 @@ resource "google_sql_database_instance" "app" {
       name  = "cloudsql.iam_authentication"
       value = "on"
     }
+    # Which statements take the time, split into lock, I/O and execution (#1084). Free on Enterprise, kept seven days;
+    # client addresses stay off.
+    insights_config {
+      query_insights_enabled  = true
+      query_string_length     = 1024
+      record_application_tags = false
+      record_client_address   = false
+    }
     backup_configuration {
       enabled                        = true
       point_in_time_recovery_enabled = true

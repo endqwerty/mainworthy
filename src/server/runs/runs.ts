@@ -1521,7 +1521,12 @@ export async function inheritedEvidenceOf(db: ReadDb, run: RunRow) {
 	return out;
 }
 
-/** Runs affected by this commit's base, or by this commit being a base for another change. */
+/**
+ * Runs whose inherited failures this run's results can change: its own, those of every change based on its commit,
+ * and the planned runs counting any of these commits. The change's other commits are not among them: each compares
+ * with the base alone, so a report on one leaves the others as they were. A moved base reaches them through
+ * `ctx.changedBases`, and a decision they depend on through `ctx.recompute` (#1084).
+ */
 export async function inheritanceAffected(db: ReadDb, run: RunRow): Promise<number[]> {
 	if (run.origin !== "change" || !run.accepts_what) return [];
 	const targets = await targetsOfCommit(db, run.project, run.accepts_what);
@@ -1530,7 +1535,6 @@ export async function inheritanceAffected(db: ReadDb, run: RunRow): Promise<numb
 			target.commit_sha === null ? [] : await changesBasedOn(db, run.project, target.commit_sha, target.repo),
 		),
 	);
-	if (run.change !== null) changes.add(run.change);
 	const runs = new Set<number>([run.id]);
 	for (const change of changes) for (const id of await changeRunsOf(db, change)) runs.add(id);
 	for (const id of [...runs]) {

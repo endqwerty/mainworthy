@@ -11,6 +11,7 @@ images Cloud Run pulls through it from GHCR, at Artifact Registry's storage pric
 | Production SSD, initially 10 GiB | $1.70 at $0.17/GiB-month | [SQL pricing](https://cloud.google.com/sql/pricing) |
 | Production retained standard backups | $0.08 per average retained GiB-month, $0.80 for 10 GiB | [SQL pricing](https://cloud.google.com/sql/pricing) |
 | Production PITR logs, seven days | Included for a new Enterprise instance with PITR enabled | [PITR log storage](https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/restore) |
+| Production Query Insights | $0 on Enterprise; its metrics count against Cloud Monitoring's free allotment | [Query Insights](https://docs.cloud.google.com/sql/docs/postgres/using-query-insights) |
 | The app, one idle minimum instance, 1 vCPU and 512 MiB, excluding proxy | $9.855 before credits. CPU and RAM each $0.0000025 per allocated unit-second while idle | [Run request-based pricing](https://cloud.google.com/run/pricing) |
 | Proxy, 1 vCPU and 128 MiB per instance | Adds $7.39125/month to the idle minimum instance | [Run pricing](https://cloud.google.com/run/pricing) |
 | Active preview Run services | $0 idle reservation at minimum zero. Reprice their allocated CPU, RAM and active seconds when created | [Run pricing](https://cloud.google.com/run/pricing) |
