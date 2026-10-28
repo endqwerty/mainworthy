@@ -1452,11 +1452,13 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 			"./chromium-diagnostics.ts",
 			"./preflight.ts",
 			"./work/processes.ts",
+			"./work/scratch.ts",
 			"node:fs",
 			"node:os",
 			"node:path",
 		].sort(),
 	);
+	expect(loaded("scripts/work/scratch.ts").sort()).toEqual(["node:fs", "node:os", "node:path"]);
 	expect(loaded("scripts/work/processes.ts").sort()).toEqual([
 		"../pg.ts",
 		"./run.ts",
