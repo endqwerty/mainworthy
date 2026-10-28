@@ -698,7 +698,7 @@ Preview or queue a defect from a failed result, or validate an existing issue fo
 | --- | --- |
 | HTTP | `POST /api/p/<project>/tracker` |
 | Command | `mainworthy tracker` |
-| Needs | `produce` |
+| Needs | `read` and `produce` |
 | Effect | writes |
 | Agent tool | no |
 

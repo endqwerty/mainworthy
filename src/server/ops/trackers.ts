@@ -11,7 +11,7 @@ export const trackerOp = defineOp({
 		"Preview or queue a defect from a failed result, or validate an existing issue for linking; requires read and produce.",
 	input: TrackerInput,
 	output: REPLIES.tracker,
-	needs: "produce",
+	needs: { all: ["read", "produce"] },
 	scope: "project",
 	effect: "write",
 	mcp: null,

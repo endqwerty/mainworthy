@@ -1,12 +1,16 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import type { TrackerItem, TrackerReceipt } from "../src/core/tracker.ts";
+import { createToken } from "../src/server/identity/identity.ts";
 import { type App, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { OPS } from "../src/server/ops/index.ts";
+import { invoke } from "../src/server/ops/registry.ts";
 import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../src/server/ops/tracker-holds.ts";
 import { githubPort } from "../src/server/trackers/github.ts";
 import { jiraPort } from "../src/server/trackers/jira.ts";
@@ -1612,3 +1616,86 @@ for (const [table, reference] of [
 		expect(await deliverTrackerRequests(h.app, port)).toBe(0);
 	});
 }
+
+test("tracker preview rechecks read after its snapshot", async () => {
+	const result = await failure();
+	const { secret } = await createToken(h.app, {
+		actor: "preview-reader",
+		kind: "agent",
+		can: ["read", "produce"],
+		project: 0,
+		label: "test",
+	});
+	const reference = { via: "token" as const, hash: createHash("sha256").update(secret).digest("hex") };
+	const call = { op: "tracker", project: "scratch", reference, actor: async () => null };
+
+	const operation = OPS.tracker;
+	if (operation?.scope !== "project" || operation.effect !== "write" || !operation.read)
+		throw new Error("expected tracker preview");
+	const preview = operation.read;
+	const started = Promise.withResolvers<void>();
+	const resume = Promise.withResolvers<void>();
+	const ops = {
+		...OPS,
+		tracker: {
+			...operation,
+			read: {
+				...preview,
+				run: async (ctx: Parameters<typeof preview.run>[0], input: Parameters<typeof preview.run>[1]) => {
+					const draft = await preview.run(ctx, input);
+					started.resolve();
+					await resume.promise;
+					return draft;
+				},
+			},
+		},
+	};
+	const pending = invoke(h.app, ops, { ...call, input: { do: "preview", result, cmd: "paused-preview-001" } });
+	try {
+		await started.promise;
+		await h.call("admin", { do: "grant.set", actor: "preview-reader", can: ["produce"] });
+		resume.resolve();
+		expect(await pending).toMatchObject({ ok: false, error: { code: "forbidden" } });
+	} finally {
+		resume.resolve();
+		await pending;
+	}
+});
+
+test("get refuses a result whose recorded case belongs to another project", async () => {
+	const result = await failure();
+	await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+	await h.app.database.write(async (db) =>
+		db.transaction(async () => {
+			await db.run(
+				sql<readonly SqlValue[]>(
+					"UPDATE cases SET project = (SELECT id FROM projects WHERE key = 'other') WHERE id = (SELECT basis_case FROM results WHERE id = $1)",
+				),
+				[result],
+			);
+		}),
+	);
+	expect(await h.raw("get", { refs: [`result:${result}`] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+});
+
+test("tracker command replay requires read after a grant reduction", async () => {
+	const result = await failure();
+	const { secret } = await createToken(h.app, {
+		actor: "replay-reader",
+		kind: "agent",
+		can: ["read", "produce"],
+		project: 0,
+		label: "test",
+	});
+	const reference = { via: "token" as const, hash: createHash("sha256").update(secret).digest("hex") };
+	const call = {
+		op: "tracker",
+		project: "scratch",
+		reference,
+		actor: async () => null,
+		input: { do: "create", result, cmd: "read-revoked-replay" },
+	};
+	expect((await invoke(h.app, OPS, call)).ok).toBe(true);
+	await h.call("admin", { do: "grant.set", actor: "replay-reader", can: ["produce"] });
+	expect(await invoke(h.app, OPS, call)).toMatchObject({ ok: false, error: { code: "forbidden" } });
+});

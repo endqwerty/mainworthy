@@ -123,7 +123,14 @@ function capabilities(): string {
 		Capability.options.map((capability) => [
 			code(capability),
 			OP_LIST.filter((op) => op.effect !== "service" && needs(op.needs).includes(capability))
-				.map((op) => code(op.name))
+				.map((op) => {
+					if (typeof op.needs !== "object" || !("all" in op.needs)) return code(op.name);
+					const also = op.needs.all
+						.filter((need) => need !== capability)
+						.map(code)
+						.join(" and ");
+					return `${code(op.name)} (also requires ${also})`;
+				})
 				.join(", ") || "none by itself; it makes an answer count where the policy asks a member",
 			kinds
 				.filter(([kind]) => defaultCapabilities(kind).includes(capability))
@@ -218,7 +225,9 @@ function operations(): string {
 							? "Google OIDC identity of the configured job service account; ordinary admin tokens are refused"
 							: op.needs === "self"
 								? "no capability: any person or agent that is signed in, for what is their own"
-								: needs(op.needs).map(code).join(" or "),
+								: needs(op.needs)
+										.map(code)
+										.join(typeof op.needs === "object" && "all" in op.needs ? " and " : " or "),
 					],
 					[
 						"Effect",

@@ -607,6 +607,7 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 			const row = id && Number.isSafeInteger(Number(id)) ? await resultById(ctx.db, Number(id)) : null;
 			if (!row || row.project !== ctx.project.id) throw notFound(text);
 			const recordedCase = row.basis_case === null ? null : await caseById(ctx.db, row.basis_case);
+			if (recordedCase && recordedCase.project !== ctx.project.id) throw notFound(text);
 			return {
 				ref: text,
 				...(await resultView(ctx, row)),

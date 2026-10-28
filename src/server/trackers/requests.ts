@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { mayRun } from "../../core/kinds.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody } from "../../core/model.ts";
 import { type TrackerInput, TrackerItem, type TrackerPreview, type TrackerReceipt } from "../../core/tracker.ts";
@@ -8,7 +7,7 @@ import { batchById, mustTarget, resultById, testById, testRef } from "../evidenc
 import type { App } from "../kernel/app.ts";
 import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
-import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { enqueueJob, fenceJob, type JobClaim, runKindJobs, stopKindJobs, waitKindJobs } from "../kernel/jobs.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
@@ -64,7 +63,6 @@ export async function trackerStatus(db: ReadDb, project: number, id: string): Pr
 }
 
 export async function previewDefect(ctx: Ctx<ReadDb>, input: TrackerInput): Promise<TrackerPreview> {
-	if (!mayRun(ctx.actor, "read")) throw forbidden("tracker needs the read capability");
 	const config = configuredTrackers(ctx.app.config, ctx.project.key)[0];
 	if (!config) {
 		if (input.do === "create" && input.confirm !== undefined)
