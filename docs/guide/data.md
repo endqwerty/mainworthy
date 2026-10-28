@@ -78,7 +78,7 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":43,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":44,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
@@ -388,7 +388,7 @@ original values.
 
 Build bindings, artifact provenance and deployment history travel in archives.
 Archives exported before those tables were added cannot import into this build.
-Restore such an archive with the build that exported it. An archive must use format 1 and schema 43 and pass the current table, column and evidence checks.
+Restore such an archive with the build that exported it. An archive must use format 1 and schema 44 and pass the current table, column and evidence checks.
 
 An import loads an archive into a new instance. A full archive restores every project, and a project archive restores only its selected project. Import does not merge data. The server keeps answering reads during the import. Writes wait until the import finishes.
 
@@ -460,7 +460,7 @@ A migration changes the archive version if it adds or removes exported tables, r
 
 An archive with a newer version is refused with a message to upgrade. An archive with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
 
-This build uses archive format 1 and schema 43. Import validates the table and column shapes and the evidence
+This build uses archive format 1 and schema 44. Import validates the table and column shapes and the evidence
 before committing. It does not open or convert a SQLite database file. Preserve the original database and a
 matching executable for archives whose older schema this build refuses.
 

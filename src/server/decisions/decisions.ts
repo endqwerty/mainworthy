@@ -1145,7 +1145,8 @@ async function askAgain(
 /** A question about a file's tests with no case, given the file's evidence and basis as they are now. */
 async function withCurrentFile(ctx: Ctx, question: QuestionRow): Promise<QuestionRow> {
 	if (question.kind === "failure") return question;
-	const r = await mapRaise(ctx, json<{ file: string }>(question.subject).file, question.producer);
+	const { file, batch = null } = json<{ file: string; batch?: number }>(question.subject);
+	const r = await mapRaise(ctx, file, question.producer, batch);
 	const basis = contentHash(r.material);
 	return await attachEvidence(ctx, question, {
 		title: r.title,
