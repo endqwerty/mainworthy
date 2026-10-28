@@ -150,7 +150,7 @@ An admin who is a person accepts the resulting question in Queue or with `decide
 
 `standard` holds an agent's edit for a person. A person's own edit still takes effect at once. A test needs no case. Two reports that disagree go to a person who did not produce either one.
 
-`strict` requires a person and a reason for ordinary case edits, failures, findings and closing passed runs. It starts by asking about tests with no case too, but you can choose to track them instead. No agent gives a counted answer, except to reject its own conflicting proposal. Custom clauses can require a named role. Two-person approval, frozen evidence, gap waivers and a regulated preset are not built yet.
+`strict` requires a person and a reason for ordinary case edits, failures, findings and closing passed runs. It starts by asking about tests with no case too, but you can choose to track them instead. No agent gives a counted answer, except to reject its own conflicting proposal. Custom clauses can require a named role. Custom sign-off clauses can require multiple independent approvers. Frozen evidence, gap waivers and a regulated preset are not built yet.
 
 All three send a change to the policy to an admin, and send a conflicting edit back to its author. The presets differ most in what they ask of people. This table is built from the presets themselves and shows who answers each question.
 
@@ -412,7 +412,7 @@ An admin has no implicit role. A role does not override `notProducer` or the cla
 An agent can hold a role, and its answer counts with `agents: "answer"` when it meets the other conditions.
 Use `agents: "none"` when the sign-off must come from a person.
 
-This is one-person role approval. Mainworthy does not yet collect two independent approvals, freeze evidence, or waive coverage gaps.
+This example uses one-person role approval. A custom sign-off clause can also require multiple independent approvers, as described below. Mainworthy does not yet freeze evidence or waive coverage gaps.
 It makes no certification claim.
 
 ## See also
@@ -439,6 +439,8 @@ Each distinct eligible person contributes at most one approval. The server reche
 eligibility when collecting the quorum. Approvals must name the same current evidence
 and policy version. A changed tally, applied-result sequence, or policy requires fresh
 approvals. This uses the existing planned-run evidence identity, not a frozen release snapshot.
+
+Queue describes whether your approval records one of the required approvals or closes the run. After you approve, the question stays visible with a waiting message and no Approve action for you. Pending approvals show only people who still qualify under the current clause. A sign-off clause with `notProducer: true` excludes people whose results are admitted to that run, including when only one approval is required.
 
 ## Historical change gates
 

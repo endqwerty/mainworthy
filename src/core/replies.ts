@@ -214,6 +214,7 @@ const DecisionItem = z.object({
 });
 
 export const QuestionItem = z.object({
+	approvalNeeded: schemaNumber.optional(),
 	approvals: z.array(ApprovalSigner).optional(),
 	q: schemaText,
 	kind: Kind,

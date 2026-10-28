@@ -77,6 +77,7 @@ import {
 	nothingCounted,
 	passesAny,
 	passingIn,
+	producedRun,
 	type Retallied,
 	type RunRow,
 	receiptGateEvidence,
@@ -720,7 +721,7 @@ export async function* answerSteps(
 		};
 		let signers = [signer];
 		if (question.kind === "signoff" && given.is === "approve" && (ask.approvals ?? 1) > 1) {
-			signers = await approvalSigners(ctx, question, ask, clause.id, policy.version);
+			signers = await approvalSigners(ctx.db, question, ask, clause.id, policy.version);
 			if (signers.length < (ask.approvals ?? 1)) {
 				ctx.touched.add(questionRef(question));
 				return reply(question, "pending", {
@@ -751,15 +752,16 @@ export async function* answerSteps(
 }
 
 async function approvalSigners(
-	ctx: Ctx<ReadDb>,
+	db: ReadDb,
 	question: QuestionRow,
 	ask: Ask,
 	clause: string,
 	policy: number,
 ): Promise<Signer[]> {
-	const after = (await decisionsOf(ctx.db, question.id)).at(-1)?.seq ?? 0;
+	if (question.kind !== "signoff") return [];
+	const after = (await decisionsOf(db, question.id)).at(-1)?.seq ?? 0;
 	const latest = new Map<number, Awaited<ReturnType<typeof answersOf>>[number]>();
-	for (const answer of await answersOf(ctx.db, question.id)) {
+	for (const answer of await answersOf(db, question.id)) {
 		if (answer.seq > after && answer.on_evidence === question.evidence_hash) latest.set(answer.actor, answer);
 	}
 	const signers: Signer[] = [];
@@ -772,10 +774,11 @@ async function approvalSigners(
 			stored.approval.policy !== policy
 		)
 			continue;
-		const actor = await actorById(ctx.db, answer.actor, ctx.project.id);
+		const actor = await actorById(db, answer.actor, question.project);
 		if (actor.kind !== "human") continue;
-		const asActor = { ...ctx, actor };
-		if ((await standingFor(asActor, question, ask)) === "counts") signers.push(stored.approval);
+		const isProducer =
+			ask.notProducer && (await producedRun(db, json<{ run: number }>(question.subject).run, actor.id));
+		if (standingOf({ actor, ask, isAuthor: false, isProducer }) === "counts") signers.push(stored.approval);
 	}
 	return signers;
 }
@@ -2540,19 +2543,14 @@ async function itemOf(
 			? await decisionById(db, decision.supersedes)
 			: null;
 	const fixedIn = decision && supersedes ? await fixedInOf(db, row, decision) : null;
-	const approvals = new Map<number, Signer>();
 	const current = known?.policy ?? (await currentPolicy(db, row.project));
-	const after = row.kind === "signoff" ? ((await decisionsOf(db, row.id)).at(-1)?.seq ?? 0) : 0;
-	for (const answer of answers) {
-		const storedAnswer = json<{ is: string; approval?: Signer }>(answer.answer);
-		if (answer.on_evidence !== row.evidence_hash || answer.seq <= after) continue;
-		approvals.delete(answer.actor);
-		if (answer.counts && storedAnswer.is === "approve" && storedAnswer.approval?.policy === current.version)
-			approvals.set(answer.actor, storedAnswer.approval);
-	}
+	const clause = clauseFor(current, { kind: row.kind, facts, answer: "approve" });
+	const approvals =
+		row.kind === "signoff" ? await approvalSigners(db, row, clause.ask, clause.id, current.version) : [];
 
 	return {
-		approvals: await mapAsync([...approvals.values()], async (signer) => ({
+		approvalNeeded: row.kind === "signoff" ? (clause.ask.approvals ?? 1) : undefined,
+		approvals: await mapAsync(approvals, async (signer) => ({
 			...signer,
 			by: (await actorLabel(db, signer.by)).name,
 		})),

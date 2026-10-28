@@ -51,6 +51,7 @@ import {
 	resultFailedStep,
 	resultsByIds,
 	resultsOfCaseOnTargets,
+	resultsProducedByActor,
 	resultTrail,
 	type SignatureRow,
 	SLICE,
@@ -136,6 +137,9 @@ export type RunTestWrite = {
 };
 
 const Q = {
+	producedRun: sql<{ run: number; actor: number }, { found: boolean }>(
+		`SELECT EXISTS (SELECT 1 FROM slots s JOIN slot_results sr ON sr.slot = s.id WHERE s.run = $run AND sr.result IN (${resultsProducedByActor()}) AND sr.corrected = 0 AND sr.discounted_by IS NULL) AS found`,
+	),
 	passesAny: sql<{ run: number; tests: readonly number[] }, { n: number }>(
 		"SELECT 1 AS n FROM run_tests WHERE run = $run AND outcome = 'pass' AND test = ANY($tests::bigint[]) LIMIT 1",
 	),
@@ -2379,4 +2383,8 @@ async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Pr
 		out.push(...(Array.isArray(found) ? found : [found]));
 	}
 	return out;
+}
+
+export async function producedRun(db: ReadDb, run: number, actor: number): Promise<boolean> {
+	return (await db.get(Q.producedRun, { run, actor }))?.found ?? false;
 }

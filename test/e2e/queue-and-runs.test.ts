@@ -1702,12 +1702,21 @@ check("failure tracker creation is absent without a configured tracker", async (
 			if (!q) throw new Error("missing signoff");
 			await h.page.reload();
 			await h.page.locator(`[data-current-question="${q.q}"]`).waitFor();
+			await h.page.getByText("Records 1 of 2 required approvals.", { exact: true }).waitFor();
 			await h.page.keyboard.press("a");
 			await h.page.getByText("Approval recorded.", { exact: false }).first().waitFor();
 			expect(await qref(h.page)).toBe(q.q);
 			await h.page.reload();
-			await h.page.getByText("approved:", { exact: false }).first().waitFor();
+			await h.page.getByText("You approved. Waiting for 1 more approval.", { exact: true }).waitFor();
+			expect(await h.page.getByRole("button", { name: /Approve/ }).count()).toBe(0);
+			expect(await h.page.locator(".hintbox").allTextContents()).not.toContainEqual(
+				expect.stringContaining("approved: ."),
+			);
 			const token = await grant(server, "second-approver");
+			await h.context.request.post(`${server.url}/api/login`, { data: { token } });
+			await h.page.reload();
+			await h.page.getByText("Closes the run with the verdict it has now.", { exact: true }).waitFor();
+			expect(await h.page.getByRole("button", { name: /Approve/ }).count()).toBe(1);
 			await server.api(
 				"decide",
 				{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "approve" }, reason: "Ready for release" },
@@ -1716,6 +1725,7 @@ check("failure tracker creation is absent without a configured tracker", async (
 			await h.page.getByRole("button", { name: "Settled", exact: true }).click();
 			await h.page.locator(`[data-question="${q.q}"]`).click();
 			await h.page.getByText("second-approver: Ready for release.", { exact: false }).waitFor();
+			expect(await h.page.locator(".queue-decision").textContent()).not.toContain(": .");
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();

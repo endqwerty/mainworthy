@@ -2619,3 +2619,6 @@ async function insertFlips(ctx: Ctx, rows: readonly FlipWrite[]): Promise<void> 
 export async function cancelBatch(ctx: Ctx, batch: number): Promise<void> {
 	await ctx.db.run(Q.cancelBatch, { id: batch });
 }
+
+/** Result authorship predicate for run admissions; parameters belong to the enclosing statement. */
+export const resultsProducedByActor = (): string => "SELECT id FROM results WHERE actor = $actor";
