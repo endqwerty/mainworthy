@@ -126,3 +126,8 @@ the window: failed when one of them failed, passed when none failed and one pass
 is all they were, and not run when none of its tests has a result in the window. A requirement with no active case
 is marked. A case covers a requirement through `covers: [KEY]` in its Markdown, or `@KEY` on the title line of a
 capture outline.
+
+Reports with new tests in more than 100 files finish asking about those files in background pages.
+The first 100 files are handled with the report; the rest follow after its results have committed.
+Each page uses the project's current policy, so **Create** cases and **Ask** questions may appear
+shortly after the report receipt. Interrupted pages retry without duplicating their decisions.

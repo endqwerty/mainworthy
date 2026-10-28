@@ -171,6 +171,11 @@ export async function finishJob(app: App, claim: JobClaim, error: boolean, detai
 		),
 	);
 }
+/** Commit repeatable database work and its acknowledgement together. */
+export async function completeJob(db: WriteDb, claim: JobClaim, now: number): Promise<void> {
+	await fenceJob(db, claim, now);
+	await db.run(Q.finish, { id: claim.id, token: claim.token, now, state: "succeeded", next: now, error: null });
+}
 export type JobHandler = (claim: JobClaim, input: JobInput) => Promise<void>;
 /** Both runners and the HTTP operation enter here. A duplicate dispatch of a live/completed job does nothing. */
 export async function runJob(
