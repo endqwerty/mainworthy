@@ -35,8 +35,8 @@ refused with `409 conflict` before the operation runs. Except for `/api/logout`,
 using local mode. An already-open old page that omits the header is refused too. Its error asks you
 to reload before trying again; the refused operation writes nothing.
 
-Unversioned requests without those browser headers remain accepted. This includes bearer scripts,
-MCP clients and the iPhone app, which sends its session cookie through a native HTTP client.
+Unversioned requests without those browser headers remain accepted. This includes bearer scripts
+and MCP clients.
 A cookie alone does not identify a browser. Read-only browser streams use `GET` and need no header.
 
 Signing out at `/api/logout` works even when the API version is missing or mismatched. It keeps the
@@ -235,7 +235,7 @@ the subscriber's error text. Committed events are stored in PostgreSQL. A write 
 
 If the server cannot check an open stream's read permission, it closes that
 stream so the client can reconnect and read again. Other streams keep receiving
-changes. The web app and iPhone app reconnect and reload their project reads.
+changes. The web app reconnects and reloads its project reads.
 
 The stream does not replay missed events on reconnect. A client that misses an
 event can read the data again or request changes through `since` with its last

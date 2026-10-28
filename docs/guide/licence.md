@@ -32,7 +32,3 @@ None of these licences limits the licence of Mainworthy's own code. Some licence
 - **LGPL** covers JavaScriptCore, WebKit, and TinyCC inside Bun. You may replace the library with a version of your own and link the program again. Mainworthy's source is public, so you can build it with a Bun that you built yourself. The notices name each library's revision and source location.
 - **MPL-2.0** covers CSS code in Bun from Lightning CSS and Servo, the crates `cssparser`, `selectors`, and `dtoa-short`, and Mozilla's list of root certificates. Those files stay under the MPL. Their source is public at the revisions named in the notices.
 - **GPL with a runtime library exception** covers GCC's C++ runtime. The exception lets a compiled program use the library under the program's own licence. Bun also carries TinyCC's runtime source under the GPL with a linking exception.
-
-## The iPhone app
-
-The iPhone app uses its own code and Apple's frameworks, with no third-party libraries. **You**, **About** lists its copyright and licence and links to this page on your instance. On the App Store, Mainworthy uses Apple's standard licence agreement for apps. The app's source is under the Apache License 2.0, like the rest of Mainworthy.

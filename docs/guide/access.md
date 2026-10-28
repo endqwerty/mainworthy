@@ -38,7 +38,6 @@ A pipeline holds `read` and `record` at most, whatever its grant lists.
 
 A person with only `read,record` can claim and release run slots, record Pass, Fail, Blocked or Skip, and attach evidence to their own results in the web cockpit.
 They can also correct their last result in an open run.
-The iPhone app lets them record these outcomes and correct their last result in an open run. It can read attachments but does not upload them.
 Case edits and answers need `produce`. Starting a run needs `plan`. Withdrawing a sign-off to reopen a closed run needs the permissions that answer requires.
 
 A new person gets all six capabilities, a new agent gets `read` and `produce`, and a new pipeline gets `record`. These defaults apply only when you make a token for a name that does not exist yet and give no `--can`.
@@ -280,7 +279,7 @@ The credential list identifies your authenticator without showing its setup key 
 
 An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. The requirement covers personal and team grants on any project. An admin recovery invitation on such an instance must be accepted with a passkey. An admin password without an authenticator does not count as a working sign-in method. Add another passkey or enrol an authenticator before removing the last usable passkey.
 
-The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) and [iPhone app](./iphone.md#sign-in) also support the second step.
+The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) also supports the second step.
 
 ## Forget a person
 
@@ -453,10 +452,6 @@ An identity belongs to one person at a time. Linking one that somebody already h
 
 An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
 
-The [iPhone app](./iphone.md#sign-in) also offers the configured provider. Its system browser sheet returns
-a one-time code to the app, which exchanges it for a session of its own. The provider identity must already
-be linked to your person. Operators register the additional callback
-`MAINWORTHY_PUBLIC_URL/api/login/oidc/native/callback` at their provider, alongside the web callback.
 
 ### A lost password or passkey
 

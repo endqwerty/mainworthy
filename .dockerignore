@@ -10,8 +10,6 @@ docs/diagrams/src
 docs/diagrams/*.png
 test
 bench
-# The iPhone app is built on a Mac, from the repository.
-ios
 *.db
 *.db-wal
 *.db-shm

@@ -81,7 +81,6 @@
     "test/e2e/tag-removal.test.ts": 5637,
     "test/results.test.ts": 5470,
     "test/passkeys.test.ts": 5202,
-    "test/ios-contract.test.ts": 5150,
     "test/e2e/people-settings.test.ts": 5081,
     "test/e2e/results.test.ts": 5080,
     "test/tracker.test.ts": 4949,

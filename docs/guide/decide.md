@@ -232,9 +232,6 @@ The other questions stay answered.
 In a phone browser, open a question and choose **Actions** for "Select question", "Select all of this kind", or "Clear selection".
 The rows have no box there.
 
-The iPhone app has its own **Select**. See [answer several questions at once](./iphone.md#answer-several-questions-at-once).
-The app saves an answer on the device before sending it. **Unsent answers** in Queue shows what has not reached the server.
-See [answer during a network drop](./iphone.md#answer-during-a-network-drop).
 
 ## Review a proposal
 
@@ -453,7 +450,6 @@ After a lost reply, pressing <kbd>u</kbd> again sends the same request under the
 In "Settled", <kbd>u</kbd> withdraws the question shown; it retries a lost withdrawal only when that withdrawal names the question shown.
 After a refusal, read the question again before withdrawing its current answer.
 The queue updates only withdrawals it has not yet confirmed, including when the first reply was lost.
-The iPhone's **Undo** after **Answer all** also withdraws the selection in one request.
 If somebody already withdrew the decision, the queue reads the question again and says
 it is already open.
 

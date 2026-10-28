@@ -123,7 +123,7 @@ with the full text of each licence, is in `THIRD-PARTY-NOTICES.md`, which `bun s
 build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and the container image has it in
 `/usr/share/doc/mainworthy/`. The web UI's script opens with a comment that names it, its page does too
 (`<link rel="license">`), every page of the docs links
-it at its foot, each diagram page carries Archify's notice, and the iPhone app links it under **You**, **About**. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
+it at its foot, and each diagram page carries Archify's notice. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
 
 **Giving others the executable or the image** was settled on 2026-10-23 ([#234](https://github.com/endqwerty/mainworthy/issues/234)).
 Since [#857](https://github.com/endqwerty/mainworthy/pull/857) every passing `main` run publishes the image to public GHCR.
@@ -140,7 +140,6 @@ inspected (`licences/README.md`).
 | The executable, and of those the web UI a browser loads takes some | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-3-Clause, CC0-1.0 |
 | The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 84 npm packages it embeds for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (giving it to others is settled below) |
 | The pages at `/docs` | Archify 3.0.1's viewer and the JetBrains Mono font in the diagrams; the privacy policy, adapted from Basecamp's policies | MIT, OFL-1.1, CC-BY-4.0 |
-| The iPhone app | Nothing from others: its own code and Apple's frameworks | |
 
 None of these places a condition on Mainworthy's own licence. The container's base image, `debian:bookworm-slim`,
 carries Debian's packages with their copyright files in `/usr/share/doc`, as Debian ships them.

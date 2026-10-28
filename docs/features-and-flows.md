@@ -23,7 +23,6 @@ file as text, so download a diagram or open it from a checkout in a browser.
 | Surface | Who uses it | What it reaches |
 | --- | --- | --- |
 | Web UI | people, on a desktop or a phone | every screen below. A phone gets one pane at a time and a palette for what keys do. |
-| iPhone app | people | the queue, runs, cases, changes and the account (`ios/`) |
 | `mainworthy` command | people and pipelines | every operation, plus adapters such as `report`, `gate`, `export` and `seed` |
 | HTTP API | any client | every operation at `POST /api/p/<project>/<op>`, or `/api/<op>` for the four instance operations. The OpenAPI document comes from the same registry. |
 | MCP | agents | ten of the operations as tools, at `/mcp` or through `mainworthy mcp` on stdin and stdout |
@@ -63,22 +62,6 @@ actions, switches projects and searches the docs. `?` lists the keys of the scre
   where the app opens for you.
 - **Your sign-in** holds your password, passkeys, authenticator app and recovery email. **Your sessions** lists
   and ends your browser sessions.
-
-## The iPhone app
-
-The app has five tabs: Queue, Runs, Cases, Changes and You. It follows the project's change stream like the web
-UI does.
-
-- **Queue.** Open or decided questions, filtered by kind. Answer one or many, withdraw an answer, and link a
-  test with no case to a chosen or new case.
-- **Runs.** Plan a run from a selection and an optional commit, work it step by step and correct the last result.
-- **Cases.** Browse folders and tags, search, read a case and its history, and edit the title, preconditions and
-  steps. An overlapping edit is resolved one field at a time.
-- **Changes.** Read changes, their runs, their results and the automated tests.
-- **You.** The account, its tokens and sessions, and sign-out.
-
-The app cannot yet sign in with a passkey, choose another instance than the one it was built for ([#233](https://github.com/endqwerty/mainworthy/issues/233)) or edit
-shared fragments. [The iPhone app](guide/iphone.md) has the rest.
 
 ## The command line
 
@@ -250,7 +233,7 @@ the tracker and status delivery tables, and a few that belong to one instance, s
 grants, teams and recovery contacts travel, and nobody's secrets do.
 
 Every committed write publishes an event on `/api/p/<project>/events` with the project's sequence number, the
-operation, the actor and what it touched. The web UI and the iPhone app listen there and refetch only what an
+operation, the actor and what it touched. The web UI listens there and refetch only what an
 event touched. An agent passes the sequence number back to `since` as its cursor.
 
 [![One request, from a client to the database and back](development/diagrams/request-path.png)](development/diagrams/request-path.html)
@@ -264,6 +247,5 @@ These are limits the code states, not guesses. The [roadmap](roadmap.md) and
 - There is no preset for regulated work, with a quorum and frozen evidence. The presets are `loose`, `standard`
   and `strict`.
 - CSV import makes new cases. It does not update a case through an alias it already has.
-- The iPhone app has no passkey sign-in, no choice of instance and no fragment editing.
 - Mainworthy runs no tests. Results come from runners, people and agents.
 - An agent's report alone cannot pass a commit's gate, and a report of skips only proves nothing.

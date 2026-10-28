@@ -42,7 +42,6 @@ jobs:
       TF_VAR_preview_project: ${{ secrets.GCP_PREVIEW_PROJECT }}
       TF_VAR_attachments_bucket: ${{ secrets.GCP_ATTACHMENTS_BUCKET }}
       # Public (the site serves it), so a variable: the repository holds no team id.
-      TF_VAR_apple_apps: ${{ vars.MAINWORTHY_APPLE_APPS }}
       # The repository variable, carried as a secret so the step logs mask the owner's name.
       TF_VAR_owner: ${{ secrets.MAINWORTHY_OWNER }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

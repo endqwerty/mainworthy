@@ -59,13 +59,6 @@ export type Config = {
 	publicUrl?: string;
 	requireAdminMfa?: boolean;
 	/**
-	 * The iPhone apps whose sign-in screen may be offered the logins a phone keeps for this instance's site:
-	 * `MAINWORTHY_APPLE_APPS`, each a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). They are
-	 * served at `/.well-known/apple-app-site-association`, which Apple reads to tie an app to the site its
-	 * entitlements name. Absent or empty, that path is not found.
-	 */
-	appleApps?: string[];
-	/**
 	 * What hashing a password costs, where it is not what the build ships with. A test sets it, because a
 	 * test hashes hundreds of passwords; nothing reads it from the environment.
 	 */
@@ -267,24 +260,6 @@ function proxyOf(env: Record<string, string | undefined>): TrustedProxy | null {
 	return { by: "address", peers, header: header.toLowerCase() };
 }
 
-/** An app as Apple names it: the team's ten-character id, a dot, and the bundle identifier. */
-const APPLE_APP = /^[A-Z0-9]{10}\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$/;
-
-/** The apps `MAINWORTHY_APPLE_APPS` lists, separated by commas. One that cannot be an app's name stops the start. */
-function appleAppsOf(env: Record<string, string | undefined>): string[] {
-	const list = env.MAINWORTHY_APPLE_APPS?.trim() ?? "";
-	if (list === "") return [];
-	const apps = list.split(",").map((entry) => entry.trim());
-	for (const app of apps) {
-		if (!APPLE_APP.test(app)) {
-			throw new Error(
-				`MAINWORTHY_APPLE_APPS: "${app}" is not an app: write the team id and the bundle identifier, ABCDE12345.com.mainworthy.app, separated by commas`,
-			);
-		}
-	}
-	return apps;
-}
-
 export function defaultConfig(env: Record<string, string | undefined>): Config {
 	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -305,7 +280,6 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
 		proxy: proxyOf(env),
 		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
-		appleApps: appleAppsOf(env),
 		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
 		...jiraOf(env),

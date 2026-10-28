@@ -216,10 +216,10 @@ exact commit, its gate is pending. A pipeline that tests only the newest commit 
 push leaves a landing inside a stack without a report.
 
 When `change --state merged` arrives, Mainworthy records the head's gate before moving
-any landing to trunk. The web and iPhone pages show **Head H when the merge was reported**
+any landing to trunk. The web page shows **Head H when the merge was reported**
 beside the current head gate, with the report time. Expand **Counted results** to see
 what counted and how each result stood then, including the decision and answer behind its standing.
-Read another page with **More counted results**. The iPhone panel has a button to read each page.
+Read another page with **More counted results**.
 The receipt records pending, failed and blocked gates too. It describes what Mainworthy
 knew when the report arrived, not the actual merge time or permission to merge.
 

@@ -407,7 +407,7 @@ Assign an eligible holder again or remove the role clause in the proposal.
 The clause editor preserves existing role selectors. Introduce a new role selector through a policy proposal in the API or CLI.
 Use this `ask` on an adoption clause to require a reviewer who did not write the proposal.
 The reviewer opens the question and answers with a reason. Someone without the role gets `forbidden`. A blank reason gets `invalid`.
-The queue says which role is needed. The same check applies to the web UI, iPhone app, CLI, API and MCP.
+The queue says which role is needed. The same check applies to the web UI, CLI, API and MCP.
 An admin has no implicit role. A role does not override `notProducer` or the clause's rules for agents.
 An agent can hold a role, and its answer counts with `agents: "answer"` when it meets the other conditions.
 Use `agents: "none"` when the sign-off must come from a person.

@@ -23,7 +23,6 @@ const SECTIONS = [
 			{ slug: "changes", title: "Changes and the gate" },
 			{ slug: "reports", title: "Reports" },
 			{ slug: "agents", title: "Let an agent in" },
-			{ slug: "iphone", title: "The iPhone app" },
 		],
 	},
 	{

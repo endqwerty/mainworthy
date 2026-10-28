@@ -419,13 +419,12 @@ A refusal names the field in the status line and keeps your draft on this device
 Clearing an optional field removes its value. The editor preserves stored keys without a definition. A save sends the field map only when you change it, so
 resuming a draft from before custom field reads preserves values the draft never loaded, unless you change a field in it:
 then the save sends only the fields that draft knows, and stored values it never loaded are removed.
-The iPhone editor preserves custom field values but does not edit them.
 
 A project can define text or choice fields and require values.
 See [Custom fields](./policy.md#custom-fields) for the procedure.
 New cases, restores, and changed field values must meet the definitions in force when proposed and adopted.
 An edit can keep unchanged values from the current case, including missing required values or choices no longer allowed.
-The web and iPhone editors can therefore edit older cases without filling new required fields.
+The web editor can therefore edit older cases without filling new required fields.
 Older versions remain readable as recorded.
 
 ## Reuse pinned fragments
@@ -489,7 +488,6 @@ Markdown preserves a reference with its own step id:
 A fragment's header uses `kind: fragment`. A literal action beginning with `!`
 is escaped as `\!` in canonical Markdown. Instance and project archives preserve
 fragment history and pins. Use the web editor to edit a fragment or a case with pinned fragments.
-The iPhone app reads these documents but cannot save edits to them.
 Fragment authoring and batch updates use the web,
 HTTP `propose`, or CLI JSON. MCP discovery omits these inputs.
 When a creation supplies both `kind` and Markdown, their kinds must agree.

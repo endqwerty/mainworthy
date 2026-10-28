@@ -108,14 +108,6 @@ file as text, so a repository page shows `<name>.png`, a picture of the whole di
 `build` draws it with the Chromium the browser tests use. To draw it again alone, run
 `bun scripts/diagrams.ts picture <name>`.
 
-## Change what the iPhone app reads
-
-The app reads the server through one contract, `scripts/ios/contract.ts` (decision 0023). To change a reply the
-app reads, change the contract, then run `bun scripts/ios.ts gen` to rewrite the Swift in the `Generated/`
-directories. Never edit those directories by hand. `test/ios-contract.test.ts` holds real replies to the contract
-and the Swift to the generator, and names the field that broke. The Swift tests need a Mac:
-[ios/README.md](../../ios/README.md).
-
 ## Change a dependency
 
 After you add, remove or upgrade a package, run `bun scripts/licences.ts` and commit the regenerated

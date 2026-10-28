@@ -2,9 +2,9 @@
 
 This policy explains what Mainworthy keeps, why we keep it, how we handle it and your rights over your data. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
-*Last updated: October 25, 2026*
+*Last updated: October 27, 2026*
 
-This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app. The owner of the Mainworthy project runs both. "We" and "us" refer to that owner. Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there. Ask that person about their policy. Most of this page describes what the software itself keeps on every instance.
+This policy covers the instance at `mainworthy.com`. The owner of the Mainworthy project runs it. "We" and "us" refer to that owner. Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there. Ask that person about their policy. Most of this page describes what the software itself keeps on every instance.
 
 ## What we collect and why
 
@@ -59,14 +59,6 @@ Your personal home is stored separately for each signed-in name and project. It 
 
 The server writes no log of requests. It logs when it starts and when something fails. A failed sign-in is logged without the name, the address or the password.
 
-### The iPhone app
-
-The app talks only to `mainworthy.com`, or to the instance named in a build made from the app's source code. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to that instance. The app keeps your session in the phone's keychain and your last project in its settings.
-
-Except for answers that link tests or create cases, the app saves queue answers in its files before sending them. The saved data includes each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear, or you confirm **Forget** after 24 hours on the device clock. There is no automatic expiry. Removing the app deletes the files.
-
-The app does not keep your password. It contains no analytics, advertising or crash-reporting code. Its user agent tells the server that it is "Mainworthy for iPhone" and which version. The only permission the app can ask for is to reach your local network. It asks only when the instance it talks to is on that network.
-
 ### Voluntary correspondence
 
 If you contact us through GitHub, that conversation is kept by GitHub, under [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
@@ -81,7 +73,6 @@ We keep your account, your sessions and your content because you asked us to pro
 
 - **Cloudflare** carries every request to `mainworthy.com`. It provides the domain's DNS, the encrypted connection and the tunnel to our server.
   Cloudflare sees your network address and the requests you make. See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
-- **Apple** delivers the iPhone app to the internal tester group through TestFlight, under [Apple's privacy policy](https://www.apple.com/legal/privacy/).
 
 The server and its database are ours, not a cloud provider's.
 

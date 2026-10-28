@@ -527,7 +527,6 @@ describe("a proxy proved by a secret", () => {
 			["GET", "/api/login/oidc/native/callback"],
 			["POST", "/api/account/password"],
 			["POST", "/api/account/proof"],
-			["GET", "/.well-known/apple-app-site-association"],
 			["GET", "/api/openapi.json"],
 			["GET", "/docs"],
 			["GET", "/"],

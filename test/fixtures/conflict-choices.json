@@ -1,0 +1,570 @@
+[
+	{
+		"name": "both edit action, mine",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Current action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step-field", "id": "a1", "name": "action" }, "side": "mine" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step-field", "id": "a1", "name": "action" }]
+	},
+	{
+		"name": "both edit action, current",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Current action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step-field", "id": "a1", "name": "action" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Current action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step-field", "id": "a1", "name": "action" }]
+	},
+	{
+		"name": "S2 restore deleted step beside neighbours",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": "E" },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step", "id": "a1" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": "E" },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step", "id": "a1" }]
+	},
+	{
+		"name": "mine edits, current deletes, mine",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My edited step", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step", "id": "a1" }, "side": "mine" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My edited step", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step", "id": "a1" }]
+	},
+	{
+		"name": "mine edits, current deletes, current",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My edited step", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step", "id": "a1" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step", "id": "a1" }]
+	},
+	{
+		"name": "both reorder",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step-order" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step-order" }]
+	},
+	{
+		"name": "both reorder, current adds",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step-order" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step-order" }]
+	},
+	{
+		"name": "mine adds and title overlaps",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "My title",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Current title",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "field", "name": "title" }, "side": "current" }],
+		"expected": {
+			"title": "Current title",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "field", "name": "title" }]
+	},
+	{
+		"name": "current adds and action overlaps",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Current action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"choices": [{ "address": { "kind": "step-field", "id": "a1", "name": "action" }, "side": "mine" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "My action", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "b0", "action": "Added", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step-field", "id": "a1", "name": "action" }]
+	},
+	{
+		"name": "explicit order survives later restoration and reload",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a3", "action": "Action 3", "expected": null }
+			]
+		},
+		"mine": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a3", "action": "Action 3", "expected": null },
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a3", "action": "Action 3", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": "E" },
+				{ "id": "a2", "action": "Action 2", "expected": null }
+			]
+		},
+		"addresses": [{ "kind": "step", "id": "a1" }, { "kind": "step-order" }],
+		"choices": [
+			{ "address": { "kind": "step-order" }, "side": "mine" },
+			{ "address": { "kind": "step", "id": "a1" }, "side": "current" }
+		],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [
+				{ "id": "a3", "action": "Action 3", "expected": null },
+				{ "id": "a0", "action": "Action 0", "expected": null },
+				{ "id": "a2", "action": "Action 2", "expected": null },
+				{ "id": "a1", "action": "Action 1", "expected": "E" }
+			]
+		}
+	},
+	{
+		"name": "current restores deleted step named order",
+		"base": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [{ "id": "order", "action": "Before", "expected": null }]
+		},
+		"mine": { "title": "Base", "pre": "", "methods": ["human"], "automate": "none", "fields": {}, "steps": [] },
+		"current": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [{ "id": "order", "action": "Current change", "expected": null }]
+		},
+		"choices": [{ "address": { "kind": "step", "id": "order" }, "side": "current" }],
+		"expected": {
+			"title": "Base",
+			"pre": "",
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {},
+			"steps": [{ "id": "order", "action": "Current change", "expected": null }]
+		},
+		"addresses": [{ "kind": "step", "id": "order" }]
+	}
+]

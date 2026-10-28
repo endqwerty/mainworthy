@@ -18,13 +18,9 @@
 # image carries is decided by the Dockerfile and .dockerignore, which no test runs. Nothing reports to it.
 # On main it saves that tested image for `publish`, which pushes it to GHCR only after `gate` succeeds.
 #
-# `ios` runs the tests of the iPhone app's Swift package on a Mac, against a Mainworthy started from this commit,
-# and builds the app (ios/README.md). Nothing reports to it either. What the app reads of a reply is checked
-# before that, in the shards (test/ios-contract.test.ts); this job is where the Swift is compiled.
-#
 # `scope` decides first what the change needs (scripts/ci-scope.ts, decision 0090): each of the other jobs runs when
 # a file it reads changed, and the tests run whole unless every changed file is one that only the tests naming it
-# read (prose, the iPhone app, another workflow); then one runner runs those tests and the ones that read every file.
+# read (prose, another workflow); then one runner runs those tests and the ones that read every file.
 # A job the change does not need is skipped, and the gate counts a skip as a pass only when `scope` asked for it.
 # The image also runs for every main push, so even a prose-only commit has an image bearing its revision.
 #
@@ -62,7 +58,6 @@ jobs:
     outputs:
       static: ${{ steps.scope.outputs.static }}
       image: ${{ steps.scope.outputs.image }}
-      ios: ${{ steps.scope.outputs.ios }}
       matrix: ${{ steps.scope.outputs.matrix }}
       shards: ${{ steps.scope.outputs.shards }}
       files: ${{ steps.scope.outputs.files }}
@@ -173,29 +168,6 @@ jobs:
           compression-level: 0
           overwrite: true
 
-  ios:
-    needs: scope
-    if: ${{ needs.scope.outputs.ios == 'true' }}
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-      - run: bun install --frozen-lockfile
-      - name: Native PostgreSQL 18 for the live server fixtures
-        run: |
-          brew install postgresql@18
-          echo "MAINWORTHY_PG_BIN=$(brew --prefix postgresql@18)/bin" >> "$GITHUB_ENV"
-      - name: The package's tests, against a Mainworthy started from this commit
-        run: bun scripts/ios.ts test
-      - name: With no Mainworthy to reach, live suites skip and the other package tests pass
-        run: swift test --package-path ios/Kit --scratch-path "$HOME/.cache/mainworthy-ios/offline"
-      - run: brew install xcodegen
-      - name: The app builds for a simulator
-        run: bun scripts/ios.ts build
-
   description:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
@@ -298,7 +270,7 @@ jobs:
           fi
 
   gate:
-    needs: [scope, static, tests, image, ios, description]
+    needs: [scope, static, tests, image, description]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -366,7 +338,6 @@ jobs:
           test "${{ needs.tests.result }}" = success
           test "${{ needs.static.result }}" = success || test "${{ needs.scope.outputs.static }}:${{ needs.static.result }}" = false:skipped
           test "${{ needs.image.result }}" = success || test "${{ needs.scope.outputs.image }}:${{ needs.image.result }}" = false:skipped
-          test "${{ needs.ios.result }}" = success || test "${{ needs.scope.outputs.ios }}:${{ needs.ios.result }}" = false:skipped
           test "${{ needs.description.result }}" = success || test "${{ github.event_name }}:${{ needs.description.result }}" = push:skipped
 
   publish:
