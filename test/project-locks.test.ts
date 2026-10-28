@@ -2422,3 +2422,16 @@ for (const kind of ["token", "session"] as const) {
 		).toEqual([{ address: "192.0.2.50" }]);
 	});
 }
+
+test("a write is named in the slow-write log only after a well-formed project key, whatever a caller sends (#1084)", async () => {
+	h = await harness();
+	const write = spyOn(h.app.database, "write");
+	for (const project of ["scratch", "missing\n[mainworthy] forged line", "x".repeat(10_000)])
+		await invoke(h.app, OPS, {
+			op: "report",
+			project,
+			input: ciReport({ commit: "named", n: 1 }),
+			actor: async () => h.owner,
+		});
+	expect(write.mock.calls.map((call) => call[1]?.name)).toEqual(["report in scratch", "report", "report"]);
+});
