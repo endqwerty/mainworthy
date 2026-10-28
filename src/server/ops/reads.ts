@@ -24,7 +24,7 @@ import {
 	TimelineInput,
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
-import { emptyTally, isResultStanding, RESULT_STANDINGS } from "../../core/runs.ts";
+import { emptyTally, isResultStanding, type Obligation, obligationMethods, RESULT_STANDINGS } from "../../core/runs.ts";
 import { openFailureQuestion, toItem, toItemFor, toItemsFor } from "../decisions/decisions.ts";
 import {
 	decisionById,
@@ -148,6 +148,7 @@ import {
 	type CaseRow,
 	caseById,
 	caseRef,
+	casesAtVersions,
 	casesByIds,
 	coversOf,
 	expandSteps,
@@ -966,8 +967,15 @@ async function caseRows(ctx: Ctx<ReadDb>, rows: readonly CaseRow[]): Promise<Rec
 	);
 }
 
-async function slotRow(ctx: Ctx<ReadDb>, slot: SlotRow): Promise<Record<string, unknown>> {
-	const row = await caseById(ctx.db, slot.case_id);
+async function slotRow(
+	ctx: Ctx<ReadDb>,
+	slot: SlotRow,
+	row: Awaited<ReturnType<typeof casesAtVersions>>[number] | null,
+	obligations: ReadonlyMap<string, ReadonlySet<MethodKind>>,
+): Promise<Record<string, unknown>> {
+	const methods = row?.pinned_methods ?? [];
+	const allowed = obligations.get(slot.obligation);
+	const admittedMethods = methods.filter((method) => allowed?.has(method));
 	const fills = await fillsOf(ctx.db, slot.id);
 	const lease = await leaseOf(ctx, slot.id);
 	return {
@@ -975,6 +983,8 @@ async function slotRow(ctx: Ctx<ReadDb>, slot: SlotRow): Promise<Record<string, 
 		case: row ? caseRef(row) : null,
 		title: row?.title ?? null,
 		version: slot.version,
+		methods,
+		admittedMethods,
 		head: row?.head ?? null,
 		state: slot.state,
 		rank: slot.rank,
@@ -1093,9 +1103,22 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			const after = input.cursor ? Number(input.cursor) : -1;
 			const rows = await slotsPage(ctx.db, run.id, after, limit + 1);
 			const page = rows.slice(0, limit);
+			const pairs = [
+				...new Map(
+					page.map((slot) => [`${slot.case_id}:${slot.version}`, { caseId: slot.case_id, no: slot.version }]),
+				).values(),
+			];
+			const pinned = new Map((await casesAtVersions(ctx.db, pairs)).map((row) => [`${row.id}:${row.version}`, row]));
+			const obligations = obligationMethods(
+				json<Obligation[]>(run.require),
+				new Set(page.map((slot) => slot.obligation)),
+			);
 			return {
 				count: await slotCount(ctx.db, run.id),
-				items: await Array.fromAsync(page, async (slot) => await slotRow(ctx, slot)),
+				items: await Array.fromAsync(
+					page,
+					async (slot) => await slotRow(ctx, slot, pinned.get(`${slot.case_id}:${slot.version}`) ?? null, obligations),
+				),
 				cursor: rows.length > limit ? String(page.at(-1)?.rank ?? "") : null,
 			};
 		}

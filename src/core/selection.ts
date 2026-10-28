@@ -1,7 +1,7 @@
 // Case selections and the input contracts that preview or plan them.
 import { z } from "zod";
 import { projectCommand } from "./commands.ts";
-import { Obligation, TargetMatch } from "./runs.ts";
+import { MAX_OBLIGATIONS, Obligation, TargetMatch } from "./runs.ts";
 import {
 	optionalFlag as schemaOptionalFlag,
 	optionalText as schemaOptionalText,
@@ -28,7 +28,7 @@ export const PlanInput = z.object({
 	name: schemaText.min(1).max(200),
 	select: Selection,
 	accepts: TargetMatch.optional().describe("Which results count. Default: only results recorded in this run."),
-	require: z.array(Obligation).optional(),
+	require: z.array(Obligation).max(MAX_OBLIGATIONS).optional(),
 	assign: schemaOptionalTexts.describe("Actor names to split the slots between."),
 	...projectCommand,
 });

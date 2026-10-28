@@ -10,7 +10,7 @@ import {
 	schemaVersion,
 } from "../src/server/kernel/migrate.ts";
 import { testDatabase } from "./db.ts";
-import { BEFORE_EIGHT } from "./migration-undo.ts";
+import { BEFORE_EIGHT, BEFORE_NINE } from "./migration-undo.ts";
 
 let db: ReservedSQL;
 let pool: SQL;
@@ -460,12 +460,13 @@ test("the migration chain upgrades the immutable baseline without replacing its 
 	}
 });
 
-/** Undo migration 8, then 7 when needed, before setting migration 6 indexes as `undo` leaves them. */
+/** Undo migrations 9 and 8, then 7 when needed, before setting migration 6 indexes as `undo` leaves them. */
 async function atSchema(version: 5 | 6 | 7, undo = ""): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
 	const fixture = await testDatabase();
 	const raw = new SQL(fixture.url, { max: 3, bigint: true });
 	await raw
 		.unsafe(`
+${BEFORE_NINE}
 ${BEFORE_EIGHT}
 ${version < 7 ? "DROP TABLE report_map_pages; UPDATE meta SET value = '43' WHERE key = 'archive_version';" : ""}
 UPDATE meta SET value = '${version}' WHERE key = 'schema_version';
@@ -619,7 +620,7 @@ INSERT INTO identity_limits(key,entry,expires_at,version) VALUES
 		const database = await Database.open({ url: target.url });
 		try {
 			await migrate(database);
-			expect(await database.read(schemaVersion)).toBe(8);
+			expect(await database.read(schemaVersion)).toBe(9);
 			const rows = async (query: string) => await target.raw.unsafe(query);
 			expect(await rows("SELECT id, kind FROM credentials WHERE id >= 9001 ORDER BY id")).toEqual([
 				{ id: 9001n, kind: "oidc" },
@@ -649,3 +650,33 @@ INSERT INTO identity_limits(key,entry,expires_at,version) VALUES
 	},
 	60_000,
 );
+test("schema 8 upgrade backfills bounded methods without changing bodies", async () => {
+	const fixture = await testDatabase();
+	const raw = new SQL(fixture.url, { max: 1 });
+	const target = await Database.open({ url: fixture.url });
+	try {
+		await raw.unsafe(`${BEFORE_NINE} UPDATE meta SET value='8' WHERE key='schema_version'`).simple();
+		await raw.unsafe("ALTER TABLE versions DISABLE TRIGGER ALL");
+		const bodies = [
+			'{"methods":["human","human","agent"]}',
+			'{"methods":"human"}',
+			"{",
+			'{"methods":["bogus","auto"]}',
+		];
+		for (const [i, body] of bodies.entries())
+			await raw.unsafe(
+				"INSERT INTO versions(case_id,no,body,hash,claim_hash,proposal,decision,author,at,seq) VALUES(999,$1,$2,'h','c',999,999,999,0,0)",
+				[i + 1, body],
+			);
+		await raw.unsafe("ALTER TABLE versions ENABLE TRIGGER ALL");
+		await migrate(target);
+		expect(
+			await raw.unsafe<{ body: string; methods: string }[]>("SELECT body,methods FROM versions ORDER BY no"),
+		).toEqual(bodies.map((body, i) => ({ body, methods: ['["human", "agent"]', "[]", "[]", '["auto"]'][i] ?? "[]" })));
+		expect(await target.read(schemaVersion)).toBe(9);
+	} finally {
+		await raw.close();
+		await target.close();
+		await fixture.close();
+	}
+});

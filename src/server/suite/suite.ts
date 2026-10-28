@@ -20,6 +20,7 @@ import {
 	type ExpandedStep,
 	emptyBody,
 	fieldErrors,
+	type MethodKind,
 	REQUIREMENT_KEY,
 	type Step,
 	StepId,
@@ -141,6 +142,15 @@ export type Resolved =
 const Q = {
 	caseByNo: sql<{ project: number; no: number }, CaseRow>("SELECT * FROM cases WHERE project = $project AND no = $no"),
 	caseById: sql<{ id: number }, CaseRow>("SELECT * FROM cases WHERE id = $id"),
+	casesAtVersions: sql<
+		{ ids: readonly number[]; nos: readonly number[] },
+		{ id: number; no: number; head: number; title: string; version: number; pinned_methods: MethodKind[] }
+	>(`SELECT c.id, c.no, c.head, c.title, asked.no AS version,
+    ARRAY(SELECT jsonb_array_elements_text(coalesce(v.methods, '[]')::jsonb)) AS pinned_methods
+   FROM unnest($ids::bigint[], $nos::bigint[]) AS asked(id, no)
+   JOIN cases c ON c.id = asked.id
+   LEFT JOIN versions v ON v.case_id = c.id AND v.no = asked.no`),
+
 	caseByAlias: sql<{ project: number; alias: string }, CaseRow>(
 		"SELECT c.* FROM case_aliases a JOIN cases c ON c.id = a.case_id WHERE a.project = $project AND a.alias = $alias",
 	),
@@ -251,7 +261,7 @@ const Q = {
 	>(
 		"WITH asked AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($rows::text::jsonb) AS x(no bigint, kind text, hash text, claim text, title text, methods text, automate text, steps bigint, folder bigint, rank text, tags text, aliases text, body text, search text)), " +
 			"added AS (INSERT INTO cases (kind, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags, aliases, created_by, created_at, updated_by, updated_at, rev) SELECT kind, $project, no, 1, hash, claim, title, methods, automate, steps, folder, rank, tags, aliases, $actor, $at, $actor, $at, $rev FROM asked ORDER BY no RETURNING id, no), " +
-			"versioned AS (INSERT INTO versions (case_id, no, parent, body, hash, claim_hash, proposal, decision, author, reason, at, seq) SELECT a.id, 1, NULL, x.body, x.hash, x.claim, $proposal, $decision, $actor, $reason::text, $at, $rev FROM added a JOIN asked x USING (no)), " +
+			"versioned AS (INSERT INTO versions (case_id, no, parent, body, methods, hash, claim_hash, proposal, decision, author, reason, at, seq) SELECT a.id, 1, NULL, x.body, x.methods, x.hash, x.claim, $proposal, $decision, $actor, $reason::text, $at, $rev FROM added a JOIN asked x USING (no)), " +
 			"tagged AS (INSERT INTO case_tags (project, tag, case_id) SELECT $project, tag, a.id FROM added a JOIN asked x USING (no) CROSS JOIN LATERAL jsonb_array_elements_text(x.tags::jsonb) tag), " +
 			"aliased AS (INSERT INTO case_aliases (project, alias, case_id) SELECT $project, alias, a.id FROM added a JOIN asked x USING (no) CROSS JOIN LATERAL jsonb_array_elements_text(x.aliases::jsonb) alias), " +
 			"indexed AS (INSERT INTO search_docs (id, title, body, tags, project) SELECT a.id, x.title, x.search, (SELECT coalesce(string_agg(tag, ' '), '') FROM jsonb_array_elements_text(x.tags::jsonb) tag), $project FROM added a JOIN asked x USING (no)) " +
@@ -301,6 +311,7 @@ const Q = {
 		no: number;
 		parent: number | null;
 		body: string;
+		methods: string;
 		hash: string;
 		claim: string;
 		proposal: number;
@@ -310,8 +321,8 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT INTO versions (case_id, no, parent, body, hash, claim_hash, proposal, decision, author, reason, at, seq)
-		 VALUES ($id, $no, $parent, $body, $hash, $claim, $proposal, $decision, $author, $reason, $at, $seq)`,
+		`INSERT INTO versions (case_id, no, parent, body, methods, hash, claim_hash, proposal, decision, author, reason, at, seq)
+		 VALUES ($id, $no, $parent, $body, $methods, $hash, $claim, $proposal, $decision, $author, $reason, $at, $seq)`,
 	),
 	editVersions: sql<{
 		rows: string;
@@ -322,9 +333,9 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(`
- INSERT INTO versions (case_id,no,parent,body,hash,claim_hash,proposal,decision,author,reason,at,seq)
- SELECT id,head,head-1,body,hash,claim,$proposal,$decision,$actor,$reason::text,$at,$seq
- FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint,head bigint,body text,hash text,claim text)`),
+ INSERT INTO versions (case_id,no,parent,body,methods,hash,claim_hash,proposal,decision,author,reason,at,seq)
+ SELECT id,head,head-1,body,methods,hash,claim,$proposal,$decision,$actor,$reason::text,$at,$seq
+ FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint,head bigint,body text,methods text,hash text,claim text)`),
 	editHeads: sql<{ rows: string; actor: number; at: number; seq: number }>(`
  UPDATE cases c SET head=x.head,head_hash=x.hash,claim_hash=x.claim,title=x.title,methods=x.methods,
  automate=x.automate,step_count=x.steps,updated_by=$actor,updated_at=$at,rev=$seq
@@ -456,6 +467,14 @@ export async function mustCase(db: ReadDb, project: number, text: string): Promi
 }
 
 export const caseById = async (db: ReadDb, id: number): Promise<CaseRow | null> => await db.get(Q.caseById, { id });
+
+export const casesAtVersions = async (db: ReadDb, pairs: readonly { caseId: number; no: number }[]) =>
+	pairs.length
+		? await db.all(Q.casesAtVersions, {
+				ids: pairs.map((p) => p.caseId),
+				nos: pairs.map((p) => p.no),
+			})
+		: [];
 
 export async function versionOf(db: ReadDb, caseId: number, no: number): Promise<VersionRow | null> {
 	return await db.get(Q.version, { id: caseId, no });
@@ -788,6 +807,14 @@ export async function* sealSteps(
 		);
 	if (input.edits.some((edit) => edit.op === "quarantine") && (input.edits.length !== 1 || !input.reason?.trim()))
 		throw invalid("a quarantine edit stands alone and needs a reason");
+	input = {
+		...input,
+		edits: input.edits.map((edit) =>
+			(edit.op === "create" || edit.op === "edit") && edit.body?.methods
+				? { ...edit, body: { ...edit.body, methods: [...new Set(edit.body.methods)] } }
+				: edit,
+		),
+	};
 	const index = await currentFolders(ctx.db, ctx.project.id);
 	const resolved: Resolved[] = [];
 	const conflicts: Sealed["conflicts"] = [];
@@ -1613,7 +1640,7 @@ export async function* adoptSteps(
 			hash,
 			claim: claimHash(body),
 			title: body.title,
-			methods: JSON.stringify(body.methods),
+			methods: JSON.stringify([...new Set(body.methods)]),
 			automate: body.automate,
 			steps: (await expandSteps(ctx.db, ctx.project.id, body)).length,
 			actor: author,
@@ -1760,7 +1787,7 @@ export async function* adoptSteps(
 							hash,
 							claim: claimHash(body),
 							title: body.title,
-							methods: JSON.stringify(body.methods),
+							methods: JSON.stringify([...new Set(body.methods)]),
 							automate: body.automate,
 							steps: body.steps.length,
 							body: JSON.stringify(body),
@@ -2011,6 +2038,7 @@ async function insertVersion(
 		no,
 		parent,
 		body: JSON.stringify(body),
+		methods: JSON.stringify([...new Set(body.methods)]),
 		hash,
 		claim: claimHash(body),
 		proposal: proposal.id,

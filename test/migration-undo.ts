@@ -14,3 +14,9 @@ ALTER TABLE passkey_users ADD FOREIGN KEY (actor) REFERENCES actors (id) DEFERRA
 CREATE TABLE mail_contacts (actor bigint PRIMARY KEY, email TEXT NOT NULL UNIQUE, verified_at bigint, revision TEXT NOT NULL);
 ALTER TABLE mail_contacts ADD FOREIGN KEY (actor) REFERENCES actors (id) DEFERRABLE INITIALLY IMMEDIATE;
 `;
+
+/** Remove the methods projection and restore the archive format before migration 9. */
+export const BEFORE_NINE = `
+ALTER TABLE versions DROP COLUMN methods;
+UPDATE meta SET value = '45' WHERE key = 'archive_version';
+`;
