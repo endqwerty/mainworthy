@@ -49,11 +49,8 @@
 //     not lengthen the block; and not a success, so the holder of a token does not clear the count of whoever
 //     is guessing at it.
 //   - `failed` is given the keys `check` was asked about, all of them.
-//   - `succeeded` is given the prefix key (for a password, the account key: `accountKey`), never the address key: one valid token of
+//   - `succeeded` is given the prefix key, never the address key: one valid token of
 //     little standing, used between guesses, would otherwise reset the count of the address that is guessing.
-//
-// A sign-in that verifies a password does the same around its `await`, and reads the clock again after it. A
-// password is a secret a person chose, so a blocked sign-in is refused without verifying it.
 //
 // Where `facts.address` comes from, on the HTTP surface (`clientAddress` in `surfaces/http.ts`): the peer's own
 // address, unless the peer is a proxy the operator named, whose header is then read. The list is parsed once,
@@ -62,7 +59,6 @@
 //
 //   const address = proxy?.peers.contains(peer) ? headerAddress(request.headers.get(proxy.header)) : peer;
 
-import { createHash } from "node:crypto";
 import { ADDRESS_LENGTH, inPrivateRange, parseAddress } from "../kernel/address.ts";
 
 const SECOND_MS = 1000;
@@ -255,31 +251,6 @@ const GENERATED_SECRET = /^cb_[0-9a-zA-Z]{32}$/;
 export function prefixKey(secret: string): string | null {
 	const body = secret.startsWith(TOKEN_MARKER) ? secret.slice(TOKEN_MARKER.length) : secret;
 	return body === "" ? null : `prefix:${body.slice(0, PREFIX_LENGTH)}`;
-}
-
-/** The longest account name there is (`createToken` and an invitation refuse a longer one), and so the longest key kept as typed. */
-const ACCOUNT_LENGTH = 64;
-
-/**
- * The key a sign-in for an account is counted under: the name that was typed, in lower case. A text longer than
- * a name, as an email address may be, is `#` and its digest instead: one character longer than any text kept as
- * typed, so no typed text's key. It is never cut, since two addresses that differ only past the cut would share
- * one count, and one person signing in would clear the other's; and its length is fixed, so that what a stranger
- * types does not decide how much memory a key takes. A name that does not exist is counted exactly as one that
- * does: the count must not say which names there are. Guesses at one person's password share this key wherever
- * they come from, as guesses at one token share its prefix.
- *
- * Lower case, because a key is not a lookup: `Robin` and `robin` are two names to the instance and one target
- * to whoever is guessing, and counting them apart would double the guesses.
- *
- * Null for a name that is empty or only spaces: its key would be the same one for everybody who sends nothing.
- */
-export function accountKey(name: string): string | null {
-	const text = name.trim().toLowerCase();
-	if (text === "") return null;
-	return text.length <= ACCOUNT_LENGTH
-		? `account:${text}`
-		: `account:#${createHash("sha256").update(text).digest("hex")}`;
 }
 
 /**

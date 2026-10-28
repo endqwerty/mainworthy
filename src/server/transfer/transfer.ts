@@ -91,8 +91,8 @@ const Q = {
 
 /**
  * The tables an archive never holds. Identity tables keep what lets somebody in. A token's, a session's and an
- * invitation's row holds the hash of a secret; a credential's holds a password's hash or a passkey's public key;
- * `passkey_users` holds the handle a person's passkeys are filed under. An export leaves them out and an import
+ * invitation's row holds the hash of a secret; a credential's holds who a person is at the identity provider.
+ * An export leaves them out and an import
  * empties them, in this order, so a table comes before the one it refers to. This one list serves both, and
  * `test/architecture.test.ts` holds it to the schema: a table of identity that is neither listed here nor one
  * of the tables an archive is meant to hold fails there.
@@ -127,7 +127,6 @@ export const UNEXPORTED: readonly string[] = [
 	"sessions",
 	"credentials",
 	"invitations",
-	"passkey_users",
 	"tokens",
 	"change_ends",
 	"merge_receipt_heads",
@@ -246,9 +245,6 @@ const INSTANCE_TABLES = [
 	"sessions",
 	"credentials",
 	"invitations",
-	"passkey_users",
-	// A person's recovery address: removing a project does not touch how its people sign in.
-	"mail_contacts",
 	// A team spans projects: its grant on this project and its events about it go, the team and its members stay.
 	"teams",
 	"team_members",
@@ -285,7 +281,7 @@ async function projectFilters(db: ReadDb, metadata: readonly Table[], key: strin
 	]);
 	for (const table of metadata) {
 		if (filters.has(table.name)) continue;
-		if (["actors", "orgs", "grants", "mail_contacts"].includes(table.name)) continue;
+		if (["actors", "orgs", "grants"].includes(table.name)) continue;
 		filters.set(table.name, table.name === "meta" ? "WHERE false" : ownedBy(table, id, "project export"));
 	}
 	// Declared actor references plus the schema's intentional non-FK references. Keep actors who have access,
@@ -314,7 +310,6 @@ async function projectFilters(db: ReadDb, metadata: readonly Table[], key: strin
 	);
 	const included = `WITH RECURSIVE included(id) AS (${actors.join(" UNION ")} UNION SELECT a.on_behalf_of FROM actors a JOIN included i ON a.id = i.id WHERE a.on_behalf_of IS NOT NULL) SELECT id FROM included`;
 	filters.set("actors", `WHERE id IN (${included})`);
-	filters.set("mail_contacts", `WHERE actor IN (${included})`);
 	filters.set(
 		"orgs",
 		`WHERE id IN (SELECT org FROM projects WHERE id = ${id} UNION SELECT org FROM actors WHERE id IN (${included}))`,

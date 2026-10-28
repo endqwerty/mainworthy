@@ -11,29 +11,13 @@ import {
 } from "./schema.ts";
 
 export const FORGET_NOTICE =
-	"A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities and recovery email addresses are erased. So are password hashes, passkey public keys, authenticator secrets and recovery-code hashes, token network addresses, and token and credential labels. Team memberships are removed. Passwords, passkeys, authenticators, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
-
-/**
- * How long a password is, in characters. Twelve, because nothing else is asked of it: no digit, no capital
- * and no sign, which make passwords harder to remember and no harder to guess. The upper end only bounds the
- * work of hashing what a stranger sends. Said here once, for the server that refuses and the page that warns.
- */
-export const PASSWORD_LENGTH = { min: 12, max: 256 } as const;
-
-/** Why this text cannot be a password, as a sentence for the person who typed it, or null when it can. */
-export function whyNotPassword(text: string): string | null {
-	// Characters as a person counts them, not UTF-16 units.
-	const length = [...text].length;
-	return length >= PASSWORD_LENGTH.min && length <= PASSWORD_LENGTH.max
-		? null
-		: `a password is ${PASSWORD_LENGTH.min} to ${PASSWORD_LENGTH.max} characters`;
-}
+	"A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities are erased, and so are token network addresses and token and identity labels. Team memberships are removed. Identities, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
 
 /** One browser session that is alive. Never the cookie, nor its hash. */
 export const SessionRow = z.object({
 	id: schemaNumber,
 	/** What proved who the person was when it was opened. */
-	openedWith: z.enum(["token", "password", "passkey", "oidc"]),
+	openedWith: z.enum(["token", "oidc"]),
 	/** The label of that token or credential. */
 	label: schemaText,
 	/** What the browser called itself at sign-in, cut to 256 characters. Not verified. */
@@ -72,10 +56,10 @@ export const PersonalTokenRow = z.object({
 });
 export type PersonalTokenRow = z.infer<typeof PersonalTokenRow>;
 
-/** One way a person signs in. Never the hash, the key or the passkey's credential id. */
+/** One identity a person signs in with. Never its issuer and subject. */
 export const CredentialRow = z.object({
 	id: schemaNumber,
-	kind: z.enum(["password", "passkey", "oidc", "totp"]),
+	kind: z.enum(["oidc"]),
 	label: schemaText,
 	createdAt: schemaNumber,
 	lastUsedAt: schemaNullableNumber,
@@ -124,31 +108,8 @@ export const InvitationRow = z.object({
 export type InvitationRow = z.infer<typeof InvitationRow>;
 
 /**
- * What a signed-in page is told about how its person signs in: whether they have a password, and how many
- * passkeys. Null for a caller that is not a person.
+ * What a signed-in page is told about how its person signs in: how many identities they have linked. Null for a
+ * caller that is not a person.
  */
-export const CredentialSummary = z.object({
-	password: schemaFlag,
-	passkeys: schemaNumber,
-});
+export const CredentialSummary = z.object({ identities: schemaNumber });
 export type CredentialSummary = z.infer<typeof CredentialSummary>;
-
-export const TotpEnrolment = z.object({
-	challenge: schemaText,
-	expiresAt: schemaNumber,
-	secret: schemaText,
-	uri: schemaText,
-	qr: z.object({ size: schemaWhole.positive(), path: schemaText }),
-});
-export type TotpEnrolment = z.infer<typeof TotpEnrolment>;
-export const TotpConfirmed = z.object({
-	id: schemaWhole,
-	recoveryCodes: schemaTexts,
-	sessionsEnded: schemaWhole,
-});
-export type TotpConfirmed = z.infer<typeof TotpConfirmed>;
-export const PasswordEntry = z.union([
-	z.object({ signedIn: z.literal(true) }),
-	z.object({ signedIn: z.literal(false), secondFactor: z.object({ challenge: schemaText, expiresAt: schemaNumber }) }),
-]);
-export type PasswordEntry = z.infer<typeof PasswordEntry>;

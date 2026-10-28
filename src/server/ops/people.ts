@@ -1,6 +1,6 @@
-// What a signed-in caller does about signing in: their sessions, their passwords and passkeys, and the
+// What a signed-in caller does about signing in: their sessions, their identities and tokens, and the
 // invitations an admin hands out. Signing in itself is not here. It is an exchange of the HTTP surface
-// (`src/surfaces/signin.ts`), because nobody is signed in yet and a password never enters the registry.
+// (`src/surfaces/signin.ts`), because nobody is signed in yet and the provider's answer comes back to a page.
 import { durationMs } from "../../core/duration.ts";
 import { defaultCapabilities } from "../../core/kinds.ts";
 import {
@@ -13,15 +13,10 @@ import {
 import { REPLIES } from "../../core/replies.ts";
 import {
 	actorByName,
-	addPasskey,
-	beginPasskey,
-	beginTotp,
-	confirmTotp,
 	createInvitation,
 	createPersonalToken,
 	credentialOwner,
 	endSessionById,
-	getEmail,
 	invitedPerson,
 	KIND_NOUN,
 	listCredentials,
@@ -29,13 +24,10 @@ import {
 	listPersonalTokens,
 	listSessions,
 	mayActFor,
-	queueMail,
 	removeCredential,
-	requireMail,
 	revokeInvitation,
 	revokeToken,
 	sessionOwner,
-	setEmail,
 	tokenOwner,
 } from "../identity/identity.ts";
 import type { Actor } from "../kernel/ctx.ts";
@@ -64,12 +56,6 @@ async function subject(env: InstanceCtx, named: string | undefined, what: string
  */
 function own(env: InstanceCtx, owner: number | null, what: string): void {
 	if (owner === null || !mayActFor(env.actor, owner)) throw notFound(what);
-}
-
-/** Where the caller is signed in, for a passkey registration; a caller with a token is refused. */
-function signedInAt(env: InstanceCtx, what = "a passkey"): string {
-	if (env.context === null) throw forbidden(`${what} is registered from a browser that is signed in, not with a token`);
-	return env.context;
 }
 
 export const sessionOp = defineInstanceOp({
@@ -108,7 +94,7 @@ export const credentialOp = defineInstanceOp({
 	name: "credential",
 	output: REPLIES.credential,
 	summary:
-		"Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
+		"Your identities at the identity provider and your CLI tokens: list or remove them, and make a token. Only a person may call. Removing an identity and making a personal token from a browser need recent proof in that session. An identity is linked in the web UI. A personal token is shown once and expires after 30d by default.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",
@@ -117,42 +103,11 @@ export const credentialOp = defineInstanceOp({
 	async run(env, input) {
 		// An agent and a pipeline sign in with a token and nothing else.
 		if (env.actor.kind !== "human")
-			throw forbidden(`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: only a person has a password or a passkey`);
+			throw forbidden(`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: only a person signs in through the provider`);
 		const db = env.db;
 		switch (input.do) {
-			case "email.get":
-				return await getEmail(db, (await subject(env, input.actor, "the email address")).id);
-			case "email.set": {
-				const person = await subject(env, input.actor, "the email address");
-				return await setEmail(env.app, db, { caller: env.actor, person, context: env.context, email: input.email });
-			}
 			case "list":
-				return await listCredentials(db, (await subject(env, input.actor, "the passwords and passkeys")).id);
-			// A passkey is registered by the person it is for, signed in, and for nobody else: an admin who could
-			// add one to another person's account could sign in as them.
-			// It is registered where the person is signed in, and finished there: the challenge keeps the caller's
-			// context, and another session of the same person does not complete it. A token is no place to sign in
-			// from, so it begins and finishes none, as it sets no password: a way in that a script could add would
-			// outlive the token.
-			case "totp.begin":
-				return await beginTotp(env.app, db, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
-			case "totp.confirm":
-				return await confirmTotp(env.app, db, {
-					actor: env.actor.id,
-					session: env.session,
-					context: signedInAt(env, "an authenticator"),
-					challenge: input.challenge,
-					code: input.code,
-				});
-			case "passkey.begin":
-				return await beginPasskey(env.app, db, { actor: env.actor.id, context: signedInAt(env) });
-			case "passkey.add":
-				return await addPasskey(env.app, db, {
-					actor: env.actor.id,
-					context: signedInAt(env),
-					answer: input.passkey,
-					label: input.label,
-				});
+				return await listCredentials(db, (await subject(env, input.actor, "the identities")).id);
 			case "remove":
 				own(env, await credentialOwner(db, input.id), `credential ${input.id}`);
 				return await removeCredential(env.app, db, input.id, { actor: env.actor.id, context: env.context });
@@ -178,14 +133,14 @@ export const credentialOp = defineInstanceOp({
 			}
 		}
 	},
-	secret: (input) => input.do === "token.create" || input.do === "totp.begin" || input.do === "totp.confirm",
+	secret: (input) => input.do === "token.create",
 });
 
 export const invitationOp = defineInstanceOp({
 	name: "invitation",
 	output: REPLIES.invitation,
 	summary:
-		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing any invitation from a browser needs the caller's recent credential proof; token and local authority remain.",
+		"Invite a person with a link: make one, list them, revoke one. The person accepts it by signing in at the identity provider, so an instance with none makes no invitation. The link is shown once. Issuing any invitation from a browser needs the caller's recent proof; token and local authority remain.",
 	input: InvitationInput,
 	needs: "admin",
 	scope: "instance",
@@ -198,7 +153,6 @@ export const invitationOp = defineInstanceOp({
 		const db = env.db;
 		switch (input.do) {
 			case "create": {
-				if (input.email !== undefined) requireMail(env.app);
 				const lastsMs = durationMs(input.expires);
 				if (lastsMs === null || lastsMs > INVITATION_LASTS.mostMs)
 					throw invalid(
@@ -222,13 +176,6 @@ export const invitationOp = defineInstanceOp({
 					lastsMs,
 					context: env.context,
 				});
-				if (input.email !== undefined)
-					await queueMail(env.app, db, {
-						to: input.email,
-						subject: "Your Mainworthy invitation",
-						text: `You have been invited as ${person.name}:\n${made.link}\n\nThis link works once, until ${new Date(made.expiresAt).toISOString()}.${purpose === "recover" ? " Accepting it replaces your passwords, passkeys and tokens and ends your sessions." : ""}`,
-					});
-				const relative = made.link.startsWith("/");
 				return {
 					id: made.id,
 					name: person.name,
@@ -239,13 +186,9 @@ export const invitationOp = defineInstanceOp({
 					expiresAt: made.expiresAt,
 					code: made.code,
 					link: made.link,
-					note: `${input.email === undefined ? "" : "Mail delivery requested. "}This link is shown once. Hand it to ${person.name}: it works once.${
+					note: `This link is shown once. Hand it to ${person.name}: it works once, when they sign in at the identity provider.${
 						purpose === "recover"
-							? ` When it is accepted, every password, passkey and token ${person.name} had stops working and every session of theirs ends.`
-							: ""
-					}${
-						relative
-							? " This instance was given no public address (MAINWORTHY_PUBLIC_URL): put the address people open it at before the link."
+							? ` When it is accepted, every identity and token ${person.name} had stops working and every session of theirs ends.`
 							: ""
 					}`,
 				} satisfies InvitationCreated;

@@ -41,10 +41,9 @@ import { Busy, isBusy, json, type ReadDb, sql, type WriteDb } from "../kernel/db
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { fenceJob, type JobClaim } from "../kernel/jobs.ts";
 import { limiterOf } from "./attempts.ts";
-import { clearChallenges } from "./challenges.ts";
-import { credentialNotice, forgetContact } from "./contacts.ts";
+import { clearChallenges } from "./ceremonies.ts";
 import { CONTEXT } from "./contexts.ts";
-import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
+import { credentialSummary, forgetCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitations } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
 import { publicAddress } from "./people.ts";
@@ -53,7 +52,6 @@ import {
 	endSessionById,
 	endSessionsOf,
 	endSessionsOnToken,
-	endSessionsWithoutFactor,
 	findSession,
 	hasUnendedSession,
 	listSessions,
@@ -73,40 +71,21 @@ import {
 } from "./teams.ts";
 import { clearUses, flushUses, noteUse } from "./uses.ts";
 
-export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
-export { queueMail, requireMail, stopMail, waitMail } from "./mail.ts";
-export { NATIVE_OIDC_CALLBACK } from "./oidc.ts";
 // What the sign-in routes and the operations of a signed-in person need of them.
 export {
 	type Accepted,
-	acceptInvitation,
-	addPasskey,
-	beginCredentialProof,
-	beginNativeOidc,
 	beginOidcSignIn,
-	beginPasskey,
-	beginTotp,
-	changePassword,
-	confirmTotp,
 	createInvitation,
 	credentialOwner,
-	exchangeNativeOidc,
-	finishNativeOidc,
 	finishOidcSignIn,
 	listCredentials,
+	NO_PROVIDER,
 	OIDC_OFF,
 	type OidcStart,
-	PASSKEYS_OFF,
-	type PasswordChange,
-	passkeySignInOptions,
-	proveCredential,
 	publicAddress,
 	removeCredential,
 	showInvitation,
 	signInMethods,
-	signInWithPasskey,
-	signInWithPassword,
-	signInWithTotp,
 	type WhyNot,
 } from "./people.ts";
 export { RECENT_PROOF_MESSAGE } from "./sessions.ts";
@@ -336,7 +315,6 @@ export async function orgId(db: ReadDb): Promise<number> {
 /** Refuses identity configuration that needs no database, before a start creates or locks its data. */
 export function validateBootstrap(config: Config): void {
 	publicAddress(config);
-	if (config.mail && !config.publicUrl) throw invalid("mail requires MAINWORTHY_PUBLIC_URL");
 	const configured = config.ownerToken;
 	if (configured && (configured.length < OWNER_TOKEN_MIN || configured.length > TOKEN_MAX)) {
 		const why =
@@ -405,7 +383,7 @@ export async function bootstrap(
 	const org = await orgId(db);
 	await db.get(Q.orgGuard, { id: org });
 	if ((await db.all(Q.bootstrapActors, discovery)).some((row) => !affected.includes(row.id))) throw new Busy();
-	const policyActor = await ensureActor(db, { org, kind: "rule", name: RULE_ACTOR, at });
+	await ensureActor(db, { org, kind: "rule", name: RULE_ACTOR, at });
 	const renamed = await renameOwner(app, db, org);
 	const existing = await db.get(Q.actorByName, { org, name: app.config.owner });
 	if (existing && existing.kind !== "human") {
@@ -496,12 +474,6 @@ export async function bootstrap(
 		);
 	}
 	if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
-	if (app.config.requireAdminMfa) {
-		for (const actor of (await db.all(Q.actors, { org })).filter(
-			(row) => affected.includes(row.id) || row.id === owner.id || row.id === policyActor.id,
-		))
-			if (await hasAdminGrant(db, actor.id)) await endSessionsWithoutFactor(db, actor.id, at, providerVouches(app));
-	}
 	return { owner: await toActor(db, owner, 0), generatedToken, warnings };
 }
 
@@ -527,7 +499,7 @@ async function ownsEverything(db: ReadDb, actor: number): Promise<boolean> {
  * them, every capability on every project. Anybody else would be renamed and made an owner beside the first.
  *
  * The new name must be one a person can be given. The start does not ask that of a new owner's name, and has
- * not since the first build; here an existing person's password would move to a name no sign-in reads.
+ * not since the first build; here an existing person's tokens and identities would move to a name nobody can be given.
  */
 async function renameOwner(app: App, db: WriteDb, org: number): Promise<string | null> {
 	const was = app.config.ownerWas;
@@ -558,7 +530,7 @@ async function renameOwner(app: App, db: WriteDb, org: number): Promise<string |
 		);
 	}
 	await db.run(Q.rename, { id: row.id, name: to });
-	return `MAINWORTHY_OWNER_WAS: ${was} is now ${to}, with the tokens, password, passkeys, sessions and history ${was} had. ${to} signs in under the new name. Unset MAINWORTHY_OWNER_WAS.`;
+	return `MAINWORTHY_OWNER_WAS: ${was} is now ${to}, with the tokens, identities, sessions and history ${was} had. ${to} signs in under the new name. Unset MAINWORTHY_OWNER_WAS.`;
 }
 
 /**
@@ -681,8 +653,8 @@ export type Session = {
 	id?: () => Promise<number | null>;
 	/**
 	 * Where the caller is signed in, as one text that every request of the same browser session gives and no
-	 * other does (`CONTEXT` in `contexts.ts`), or null once that session has ended. A passkey ceremony keeps
-	 * it with its challenge, so that what one session began another does not complete. The owner of this
+	 * other does (`CONTEXT` in `contexts.ts`), or null once that session has ended. A ceremony with the
+	 * provider for a link or a proof keeps it, so that what one session began another does not complete. The owner of this
 	 * machine, who has no session, is one place too. A token has none: it is no browser's session, and a way
 	 * of signing in is not added with one.
 	 */
@@ -1191,10 +1163,7 @@ export async function setGrant(
 	if (input.can.includes("admin") && caller?.context != null) await requireRecentProof(app, db, caller);
 	const row = await mustActor(db, input.actor);
 	refuseGrant(row.kind, input.can);
-	const wasAdmin = await hasAdminGrant(db, row.id);
 	await db.run(Q.setGrant, { actor: row.id, project: input.project, can: JSON.stringify(input.can) });
-	if (app.config.requireAdminMfa && !wasAdmin && (await hasAdminGrant(db, row.id)))
-		await endSessionsWithoutFactor(db, row.id, app.now(), providerVouches(app));
 	if (input.roles !== undefined)
 		await db.run(Q.setRoles, {
 			actor: row.id,
@@ -1299,7 +1268,7 @@ export async function createPersonalToken(
 	const session = (await listSessions(app, db, input.actor.id)).find((row) => row.id === input.session);
 	if (input.context === null || (input.context !== CONTEXT.local && (!session || session.openedWith === "token")))
 		throw forbidden(
-			"make a personal token from a browser signed in with a password or a passkey, or as the local owner",
+			"make a personal token from a browser signed in through the identity provider, or as the local owner",
 		);
 	const created = await createToken(
 		app,
@@ -1379,7 +1348,6 @@ export async function forgetActor(
 	if (row.kind === "rule") throw invalid("the policy's own actor cannot be forgotten");
 	const pseudonym = await freePseudonym(db, row);
 	const at = app.now();
-	await credentialNotice(app, db, row.id, "Your sign-in methods were removed because your account was forgotten");
 	await db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = await revokeTokensOf(db, row.id, at);
 	// A token's label and address can identify the person. Erase both; retain when it was last used.
@@ -1388,12 +1356,9 @@ export async function forgetActor(
 	// the row of the actor is ever changed by hand.
 	await endSessionsOf(db, row.id, at);
 	await dropTeamMemberships(db, row.id);
-	// The same for what a person signed in with and for a link that would still let them in. The handle their
-	// passkeys were filed under is deleted: it named the person to an authenticator, and names nobody now.
+	// The same for what a person signed in with and for a link that would still let them in.
 	await forgetCredentialsOf(db, row.id, at);
-	await forgetContact(db, row.id);
 	await revokeInvitationsOf(db, row.id, at);
-	await dropUserHandle(db, row.id);
 	forgottenCount++;
 	return { forgotten: pseudonym, tokensRevoked: revoked };
 }
@@ -1415,17 +1380,6 @@ export async function listActors(db: ReadDb) {
 			})),
 		});
 	return listed;
-}
-
-/**
- * Whether the identity provider counts as a second factor, for the rule that admins need one: the operator said
- * that it asks everybody for one (`MAINWORTHY_OIDC_MFA`). Mainworthy reads no claim for it.
- */
-export const providerVouches = (app: App): boolean => app.config.oidc?.mfa === true;
-
-export async function hasAdminGrant(db: ReadDb, actor: number): Promise<boolean> {
-	const row = await db.get(Q.actorById, { id: actor });
-	return row !== null && row.disabled_at === null && (await toActor(db, row, null)).can.includes("admin");
 }
 
 export { sweepAttempts } from "./attempts.ts";

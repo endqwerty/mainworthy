@@ -1,7 +1,7 @@
 // A browser's session: the row behind the cookie. Owns the table `sessions`.
 //
 // The cookie carries 32 random bytes and this file never sees them: it is given their SHA-256 and stores that.
-// A session is opened by a token or by a credential (a password, a passkey) and lives only while that one works
+// A session is opened by a token or by a credential (an identity at the provider) and lives only while that one works
 // and its actor stands. That is read each time, by a join, so a revoked token or credential refuses the
 // sessions it opened, and so does a token's own end (`expires_at`) when the clock reaches it. Revocation also
 // records their end, so deletion need not wait for a session's lifetime. A session rests on exactly one of
@@ -18,8 +18,8 @@ import { liveCredentials } from "./credentials.ts";
 import { lockActors, lockIdentity, lockSessionHash, lockTokenHash } from "./locks.ts";
 
 /**
- * Why a session ended. `ended`: somebody ended it, from a list or by taking away what it rested on (a password
- * that was changed, a credential that was removed, a recovery).
+ * Why a session ended. `ended`: somebody ended it, from a list or by taking away what it rested on (an identity
+ * that was unlinked, a token that was revoked, a recovery).
  */
 type EndedWhy = "signed-out" | "ended" | "forgotten" | "expired";
 
@@ -75,14 +75,14 @@ const Q = {
 		{ id: number }
 	>(
 		`INSERT INTO sessions
-			(actor, hash, token, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr)
-		 SELECT a.id, $sessionHash, t.id, $at, $at, $expires, $agent, $addr, $addr
+			(actor, hash, token, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr, reauthenticated_at)
+		 SELECT a.id, $sessionHash, t.id, $at, $at, $expires, $agent, $addr, $addr, $at
 		 FROM tokens t JOIN actors a ON a.id = t.actor AND a.disabled_at IS NULL
 		 WHERE t.hash = $tokenHash AND t.revoked_at IS NULL
 			AND (t.expires_at IS NULL OR t.expires_at > $at) RETURNING id`,
 	),
 	// The row is made only if, in the statement that makes it, the credential still holds what was verified
-	// (`data`: a password's hash, a passkey's key and counter), works, and is this person's, who stands. The
+	// (`data`), works, and is this person's, who stands. The
 	// credential's id alone would not say that: after an import a new row takes an old id.
 	insertOnCredential: sql<
 		{
@@ -99,7 +99,7 @@ const Q = {
 	>(
 		`INSERT INTO sessions
 			(actor, hash, credential, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr, reauthenticated_at)
-		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr, CASE WHEN c.kind = 'password' OR c.kind = 'passkey' THEN $at::bigint ELSE NULL END
+		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr, NULL
 		 FROM credentials c JOIN actors a ON a.id = c.actor AND a.disabled_at IS NULL AND a.kind = 'human'
 		 WHERE c.id = $credential AND c.actor = $actor AND c.revoked_at IS NULL AND c.data = $data RETURNING id`,
 	),
@@ -113,7 +113,7 @@ const Q = {
 			user_agent: string | null;
 			created_addr: string | null;
 			last_seen_addr: string | null;
-			via: "token" | "password" | "passkey" | "oidc";
+			via: "token" | "oidc";
 			label: string;
 		}
 	>(
@@ -135,12 +135,6 @@ const Q = {
 	endById: sql<{ id: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE id = $id AND ended_at IS NULL",
 	),
-	// A password session, and one through the identity provider unless the provider vouches for a second factor.
-	endWithoutFactorOf: sql<{ actor: number; at: number; vouched: number }>(
-		`UPDATE sessions SET ended_at = $at, ended_why = 'ended'
-		 WHERE actor = $actor AND ended_at IS NULL
-		   AND credential IN (SELECT id FROM credentials WHERE kind = 'password' OR (kind = 'oidc' AND $vouched = 0))`,
-	),
 	endOthers: sql<{ actor: number; keep: number; at: number }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = 'ended' WHERE actor = $actor AND id != $keep AND ended_at IS NULL",
 	),
@@ -154,10 +148,6 @@ const Q = {
 	),
 	endOn: sql<{ credential: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE credential = $credential AND ended_at IS NULL",
-	),
-	// A session moves to the password that replaced the one it rested on, and to no other row.
-	rest: sql<{ id: number; from: number; to: number }>(
-		"UPDATE sessions SET credential = $to WHERE id = $id AND credential = $from AND ended_at IS NULL",
 	),
 	overdue: sql<{ now: number; idleBefore: number }, Times>(
 		`SELECT id, last_seen_at, expires_at FROM sessions
@@ -177,7 +167,13 @@ const Q = {
 
 export type ProofContext = { actor: number; context: string | null };
 export const RECENT_PROOF_MESSAGE =
-	"confirm your password, passkey or authenticator code from a signed-in browser session before changing sign-in details; the proof lasts ten minutes";
+	"confirm it is you with your identity provider, or sign in with your token again, before changing sign-in details; the proof lasts ten minutes";
+/**
+ * How long a proof lasts. A session gets one when it is opened with a token (typing a token proves holding it,
+ * and a token already speaks for its person over the API) and when its person signs in at the provider again
+ * (`people.ts`, the ceremony of proof). A session opened through the provider has none until then.
+ */
+export const PROOF_MS = 10 * 60_000;
 
 /** Rechecks the session by its hash on the connection that owns the current transaction. */
 export async function proofSession(
@@ -197,7 +193,7 @@ export async function requireRecentProof(app: App, db: ReadDb, input: ProofConte
 	if (session) {
 		const at = (await db.get(Q.proof, { hash: session.hash }))?.reauthenticated_at;
 		const now = app.now();
-		if (at != null && at <= now && now - at <= 10 * 60_000) return;
+		if (at != null && at <= now && now - at <= PROOF_MS) return;
 		if (initial && (await liveCredentials(db, input.actor)).length === 0) return;
 	}
 	throw new OpError("recent_proof_required", RECENT_PROOF_MESSAGE);
@@ -253,12 +249,12 @@ export async function openSession(
 }
 
 /**
- * Opens a session for a person who signed in with a password or a passkey, on the credential's row. Under the
+ * Opens a session for a person who signed in through the provider, on the identity's row. Under the
  * gate. Null when that row is gone, was revoked, is another person's or no longer holds the `data` that was
  * verified, or when the person was forgotten: a session has a credential that works under it or it is not made.
  *
- * The id says which row and `data` says which secret: its caller verified a password's hash or a passkey's key
- * and counter, and after a wait at the gate, or an import, the row of that id may hold another. This makes a
+ * The id says which row and `data` says what it holds: after a wait at the gate, or an import, the row of that
+ * id may hold another. This makes a
  * row with a credential and no token, as `openSession` makes one with a token and no credential, so no session
  * rests on both. `address` is where the sign-in came from, as for a token's session.
  */
@@ -350,15 +346,6 @@ export async function endSessionsOnToken(db: WriteDb, token: number, at: number)
 	return (await db.run(Q.endOnToken, { token, at })).changes;
 }
 
-/**
- * Puts a session on the password (`to`) that replaced the one it rested on (`from`), so that revoking the old
- * one does not end the session whose own request changed it. False when the session did not rest on `from`.
- */
-export async function restSession(db: WriteDb, move: { session: number; from: number; to: number }): Promise<boolean> {
-	await lockIdentity(db);
-	return (await db.run(Q.rest, { id: move.session, from: move.from, to: move.to })).changes === 1;
-}
-
 /** The actor whose session this is, when it has not ended; else null. */
 export const sessionOwner = async (db: ReadDb, id: number): Promise<number | null> =>
 	(await db.get(Q.owner, { id }))?.actor ?? null;
@@ -442,19 +429,4 @@ export async function sweepSessions(app: App, claim?: JobClaim): Promise<{ expir
 export async function endOtherSessions(db: WriteDb, actor: number, keep: number | null, at: number): Promise<number> {
 	await lockActors(db, [actor], true);
 	return (await db.run(Q.endOthers, { actor, keep: keep ?? 0, at })).changes;
-}
-
-/**
- * Ends the sessions of an actor that rest on no second factor, for the rule that admins need one: those opened
- * with a password, and those opened through the identity provider unless `providerVouches` (the operator's word,
- * `MAINWORTHY_OIDC_MFA`). A passkey's sessions stay.
- */
-export async function endSessionsWithoutFactor(
-	db: WriteDb,
-	actor: number,
-	at: number,
-	providerVouches: boolean,
-): Promise<number> {
-	await lockActors(db, [actor], true);
-	return (await db.run(Q.endWithoutFactorOf, { actor, at, vouched: providerVouches ? 1 : 0 })).changes;
 }
