@@ -339,7 +339,7 @@ const fixtures: Record<string, Row[]> = {
 			batch: 504,
 			target: 502,
 			method: "human",
-			actor: 70,
+			actor: 71,
 			basis: "assumed",
 			basis_case: 101,
 			basis_version: 2,
@@ -1299,6 +1299,41 @@ describe("Mainworthy instance archives", () => {
 			const text = await archive(from);
 			await refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
 		}
+	});
+
+	test("malformed historical version bodies name the row and preserve the target", async () => {
+		const from = await source();
+		for (const body of ['{"title":"broken"}', "{", "null"]) {
+			await from.transaction(() =>
+				from.runDynamic("UPDATE versions SET body = $1 WHERE case_id = 101 AND no = 1", [body]),
+			);
+			await refuse(await archive(from), /invalid archive versions\.body.*case_id 101.*no 1.*line \d+/);
+		}
+	});
+
+	test("historical duplicate methods import without changing stored bodies", async () => {
+		const from = await source();
+		await from.transaction(() =>
+			from.runDynamic("UPDATE versions SET body = $1 WHERE case_id = 101 AND no = 1", [
+				body.replace('["human", "auto"]', '["human", "human", "auto"]'),
+			]),
+		);
+		const to = await target();
+		await importArchive(to, linesOf(await archive(from)));
+		expect(await dump(to)).toEqual(await dump(from));
+	});
+
+	test("missing slot version pins name the row and preserve the target", async () => {
+		const from = await source();
+		await from.transaction(() => from.runDynamic("UPDATE slots SET version = 99 WHERE id = 602", []));
+		await refuse(await archive(from), /invalid archive slots.*row 602.*case_id 101.*version 99/);
+	});
+
+	test("cross-project corrections name the row and preserve the target", async () => {
+		const from = await source();
+		await insert(from, "projects", { id: 24, org: 17, key: "other", name: "Other", created_at: time });
+		await from.transaction(() => from.runDynamic("UPDATE results SET project = 24 WHERE id = 200", []));
+		await refuse(await archive(from), /invalid archive results\.corrects.*row 200.*201.*same project, test and actor/);
 	});
 
 	test("invalid failure subjects name the archive row and line and roll back every table", async () => {
