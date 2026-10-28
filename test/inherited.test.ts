@@ -263,6 +263,32 @@ test("a report's inherited answer reads only its affected runs, regardless of si
 	}
 });
 
+test("a report on a pull request's newest commit costs the same however many commits came before (#1084)", async () => {
+	await base();
+	const push = async (commit: number) =>
+		await h.call<ReportReceipt>(
+			"report",
+			ciReport({
+				commit: `head${String(commit).padStart(4, "0")}`,
+				pr: 69,
+				base: "base0001",
+				n: 2,
+				fail: { 0: "same cause" },
+			}),
+		);
+	const statementsFor = async (commit: number) => {
+		h.app.database.resetStatementCount();
+		expect(await push(commit)).toMatchObject({ gate: { verdict: "passed", tally: { excused: 1, unexplained: 0 } } });
+		return h.app.database.statementCount;
+	};
+	for (let commit = 1; commit <= 2; commit++) await push(commit);
+	const early = await statementsFor(3);
+	for (let commit = 4; commit <= 12; commit++) await push(commit);
+	const late = await statementsFor(13);
+	expect(late, `the 13th commit took ${late} statements, the 3rd ${early}`).toBe(early);
+	expect(await gate("head0001")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
+});
+
 for (const dimension of ["env", "job"] as const) {
 	test(`inheritance matches the base's ${dimension} lane`, async () => {
 		const report = (commit: string, fail: boolean, otherLane: boolean) => {
