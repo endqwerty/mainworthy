@@ -1360,6 +1360,17 @@ describe("Mainworthy instance archives", () => {
 		await refuse(await archive(from), /invalid archive cases\.head_hash.*row 101.*head.*2/);
 	});
 
+	test("a stale case claim hash names the row and preserves the target", async () => {
+		const from = await source();
+		await from.transaction(() =>
+			from.runDynamic(
+				"UPDATE cases SET claim_hash = (SELECT claim_hash FROM versions WHERE case_id = 101 AND no = 1) WHERE id = 101",
+				[],
+			),
+		);
+		await refuse(await archive(from), /invalid archive cases\.claim_hash.*row 101.*head.*2/);
+	});
+
 	test("historical duplicate methods import without changing stored bodies", async () => {
 		const from = await source();
 		await from.transaction(() =>

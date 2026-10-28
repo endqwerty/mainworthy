@@ -77,9 +77,10 @@ const Q = {
  WHERE r.corrects IS NOT NULL AND (earlier.id IS NULL OR earlier.project <> r.project
  OR earlier.test <> r.test OR earlier.actor <> r.actor) LIMIT 1`,
 	),
-	invalidHeadHash: sql<readonly [], { id: number; head: number }>(
-		`SELECT c.id, c.head FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
- WHERE c.head_hash IS DISTINCT FROM v.hash LIMIT 1`,
+	invalidHeadHash: sql<readonly [], { id: number; head: number; column: "head_hash" | "claim_hash" }>(
+		`SELECT c.id, c.head, CASE WHEN c.head_hash IS DISTINCT FROM v.hash THEN 'head_hash' ELSE 'claim_hash' END AS column
+ FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
+ WHERE c.head_hash IS DISTINCT FROM v.hash OR c.claim_hash IS DISTINCT FROM v.claim_hash LIMIT 1`,
 	),
 	heads: sql<readonly [], { id: number; project: number; tags: string; body: string | null }>(
 		`SELECT c.id, c.project, c.tags, v.body FROM cases c
@@ -653,7 +654,9 @@ export async function importArchive(
 				);
 			const head = await db.get(Q.invalidHeadHash);
 			if (head)
-				throw invalid(`invalid archive cases.head_hash for row ${head.id}: does not match head version ${head.head}`);
+				throw invalid(
+					`invalid archive cases.${head.column} for row ${head.id}: does not match head version ${head.head}`,
+				);
 			await rebuildSearch(db);
 			// Earlier versions are history; the policy in force is what the next report is asked under.
 			const current = await db.all(Q.policy);
