@@ -176,6 +176,19 @@ test("a session holds one proof ceremony: starting another ends the first", asyn
 	expect(must(await finish(w, query, jar(cookie, last.ceremony)))).toEqual({ proven: true });
 });
 
+test("an invitation holds at most three acceptance ceremonies, so starting many cannot fill the instance's", async () => {
+	const w = await world();
+	const { code } = await invite(w, { name: "sam", can: ["read"], project: "scratch" });
+	const ceremonies = async () =>
+		(await pgRow<{ n: number }>(w.instance.app, "SELECT count(*)::int AS n FROM identity_ceremonies"))?.n ?? 0;
+	const before = await ceremonies();
+	let last = await begin(w, { invitation: code });
+	for (let i = 0; i < 9; i++) last = await begin(w, { invitation: code });
+	expect(await ceremonies()).toBe(before + 3);
+	const query = await authorize(w, last, { subject: subjectOf("sam"), email: "sam@example.com" });
+	expect(must(await finish(w, query, jar(null, last.ceremony)))).toEqual({ signedIn: true });
+});
+
 test("proof is of the person's own identity: another person's, or one nobody linked, proves nothing", async () => {
 	const w = await world();
 	const robin = await joined(w, "robin");
