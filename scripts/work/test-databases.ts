@@ -80,8 +80,26 @@ export function databaseCreated(path: string | null): void {
 	if (path)
 		appendFileSync(join(path, "..", "events.jsonl"), `${JSON.stringify(["created", basename(path, suffix)])}\n`);
 }
-export function releaseDatabase(path: string | null): void {
-	if (path) writeFileSync(`${path}.released`, "");
+export function releaseDatabase(path: string | null): boolean {
+	if (!path) return false;
+	try {
+		const owner: unknown = JSON.parse(readFileSync(join(path, "..", "owner.json"), "utf8"));
+		if (typeof owner !== "object" || owner === null) return false;
+		const pid: unknown = Reflect.get(owner, "pid"),
+			stamp: unknown = Reflect.get(owner, "stamp");
+		if (
+			typeof pid !== "number" ||
+			!Number.isSafeInteger(pid) ||
+			pid <= 0 ||
+			typeof stamp !== "string" ||
+			processStamp(pid) !== stamp
+		)
+			return false;
+	} catch {
+		return false;
+	}
+	writeFileSync(`${path}.released`, "");
+	return true;
 }
 export function databaseDropped(path: string | null): void {
 	if (!path) return;

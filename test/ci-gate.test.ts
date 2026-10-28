@@ -9,12 +9,13 @@ import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { runCiGate } from "../scripts/ci-gate.ts";
 import { chooseInstance, contractDifferences, deploymentFetch, type Probe, startOwn } from "../scripts/ci-instance.ts";
+import { cluster } from "../scripts/pg.ts";
 import { beginDatabaseRun, drainRecordedDatabases } from "../scripts/work/test-databases.ts";
 import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 import { inThisProcess, type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
-import { sql } from "../src/server/kernel/db.ts";
+import { databaseAdmin, sql } from "../src/server/kernel/db.ts";
 import { openApi } from "../src/surfaces/http.ts";
 import { onDatabaseCleanup } from "./db.ts";
 
@@ -663,6 +664,34 @@ test("a shard that left no report fails the job, and the gate waits for that sha
 	// The gate itself knows a shard is missing, and its exit code (3, pending) is the job's.
 	expect(result.code).toBe(3);
 }, 20_000);
+
+test.each(["missing", "stale"])(
+	"an own instance cleans up when its database run owner is %s",
+	async (owner) => {
+		const directory = await mkdtemp(join(tmpdir(), "mainworthy-ci-unowned-"));
+		try {
+			if (owner === "stale")
+				await writeFile(join(directory, "owner.json"), JSON.stringify({ pid: process.pid, stamp: "stale" }));
+			const result = await gate(green, {
+				configure: async () => ({ MAINWORTHY_URL: "", MAINWORTHY_TEST_DATABASES: directory }),
+			});
+			expect(result.code).toBe(0);
+			const events = await readFile(join(directory, "events.jsonl"), "utf8");
+			const created = z.tuple([z.literal("created"), z.string()]).parse(JSON.parse(events.split("\n")[0] ?? ""));
+			const { adminUrl } = await cluster();
+			const databases = await databaseAdmin(
+				adminUrl,
+				async (admin) => await admin.all("SELECT datname FROM pg_database WHERE datname = $1::text", [created[1]]),
+			);
+			expect(databases).toEqual([]);
+			expect((await readdir(directory)).filter((name) => name.endsWith(".database.json"))).toEqual([]);
+		} finally {
+			await drainRecordedDatabases(directory);
+			await rm(directory, { recursive: true, force: true });
+		}
+	},
+	20_000,
+);
 
 // Issue #124. A run that was run again holds one artifact of a shard for each attempt the shard ran in. The
 // workflow names each for its attempt and downloads each into its own directory.

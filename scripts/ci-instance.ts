@@ -243,8 +243,7 @@ export function startOwn(cli: string): Own {
 			});
 			return { child, database };
 		} catch (error) {
-			await database.close();
-			if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
+			if (!(await database.close())) await drainDatabaseDrops();
 			rmSync(data, { recursive: true, force: true });
 			throw error;
 		}
@@ -269,8 +268,7 @@ export function startOwn(cli: string): Own {
 			} finally {
 				clearTimeout(timeout);
 			}
-			await database.close();
-			if (!process.env.MAINWORTHY_TEST_DATABASES) await drainDatabaseDrops();
+			if (!(await database.close())) await drainDatabaseDrops();
 			rmSync(data, { recursive: true, force: true });
 		})();
 		return stopping;

@@ -14,8 +14,8 @@ import { Database, type DatabaseAdmin, databaseAdmin } from "../src/server/kerne
 
 export type TestDatabase = {
 	url: string;
-	/** Schedules the drop. drainDatabaseDrops waits for its completion at file teardown. */
-	close(): Promise<void>;
+	/** Schedules the drop; returns whether a live run owner received the release. */
+	close(): Promise<boolean>;
 	readonly timings: { cloneMs: number; dropMs: number | null };
 };
 const fixtures = new Set<TestDatabase>();
@@ -77,11 +77,12 @@ export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}
 	databaseCreated(record);
 	const timings = { cloneMs, dropMs: null as number | null };
 	let closed = false;
+	let released = false;
 	const fixture: TestDatabase = {
 		url: databaseUrl(adminUrl, name),
 		timings,
 		async close() {
-			if (closed) return;
+			if (closed) return released;
 			closed = true;
 			fixtures.delete(fixture);
 			const drop = async () => {
@@ -97,9 +98,10 @@ export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}
 				databaseDropped(record);
 			};
 			if (managed) {
-				releaseDatabase(record);
+				released = releaseDatabase(record);
 				deferredDrops.add(drop);
 			} else scheduleDrop(drop);
+			return released;
 		},
 	};
 	fixtures.add(fixture);
