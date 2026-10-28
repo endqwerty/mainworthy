@@ -41,9 +41,8 @@ concurrently. An identity writer waiting for a busy actor or project holds the i
 other identity writers, including token creation.
 
 Sign-in does not join the identity lock or lock projects. Token session creation takes `FOR SHARE` on the
-existing token owner and refuses an absent or replaced owner. Password, passkey, OIDC and TOTP sign-in
-commits lock their one discovered actor with `FOR NO KEY UPDATE` before rereading proof or updating credential
-counters. They never acquire another actor or the identity lock afterwards. Proof that resolves to another
+existing token owner and refuses an absent or replaced owner. OIDC sign-in commits lock their one discovered
+actor with `FOR NO KEY UPDATE` before rereading the identity or noting its use. They never acquire another actor or the identity lock afterwards. Proof that resolves to another
 actor returns `busy`. Session insertion does not change authority. Since sign-in can insert a session while
 an identity transaction holds the mutex, session ending rejects an id absent at discovery as `not_found`
 before the operation can discover a late owner. An existing session's owner stays stable: moving or ending
@@ -154,7 +153,7 @@ Sign-in accounting uses keyed PostgreSQL rows and a separate two-connection admi
 locks its sorted keys, rechecks their block, then counts it atomically. A success clears only failures no newer
 than the sequence version it observed. Anonymous ceremony starts have a local source ceiling before shared
 accounting. Ceremony allocation shares this pool, with one capacity lock per ceremony kind; it holds no connection while
-waiting for a provider or hashing a password. Authenticated ceremony consumption uses the domain transaction,
+waiting for a provider. Authenticated ceremony consumption uses the domain transaction,
 so spending a challenge and opening its session commit or roll back together. Import invalidates a shared
 random generation in its transaction; an OIDC exchange rechecks it after the provider answers.
 
@@ -168,13 +167,6 @@ notification delays delivery but loses no committed state. Missing history or a 
 refresh. The stream checks authority again after its snapshot closes before sending anything.
 
 ## Shared-state maintenance
-
-Password-reset requests read the contact and current password in their admission transaction. Their links
-carry the contact revision and password digest, which consumption rechecks under the identity lock. Issuance
-changes no authority and never waits for identity while holding an admission connection: sign-in commits may
-need that pool for limiter accounting while holding identity. Replacing the link and enqueuing its private
-mail job commit together. An enqueue failure
-rolls back the replacement, preserving the previous link; SMTP work starts only after commit.
 
 Periodic identity-state retention deletes expired ceremonies, failure counters and one-minute start windows
 through their owning modules on the admission pool. Periodic change-event retention deletes hints at least

@@ -13,7 +13,7 @@ accepted in `scripts/licences.ts`. It is absent from the application bundles and
 
 The test scans these states in light and dark themes:
 
-- Sign-in, an invitation, and its passkey form.
+- Sign-in, and an invitation.
 - Queue evidence for all five question kinds, plus a failure answer's reason form.
 - Runs, the planner, its commit form, an active run, its failure note, and a closed run.
 - Suite, a case, and the case editor.
@@ -74,7 +74,7 @@ result wherever human assessment supplies the missing evidence.
 | 1.3.2 Meaningful sequence | A | Not evaluated | Person | Reading order across panes, overlays, and phone transitions has not been heard. |
 | 1.3.3 Sensory characteristics | A | Not evaluated | Person | Instructions need review without visual position or shape cues. |
 | 1.3.4 Orientation | AA | Not evaluated | Person | Phone states are scanned in portrait; rotation and attached-keyboard use need review. |
-| 1.3.5 Input purpose | AA | Partially supports | Axe, Inspection, Person | Sign-in fields declare password-manager autocomplete purposes; supported assistive technology has not been tried. |
+| 1.3.5 Input purpose | AA | Partially supports | Axe, Inspection, Person | The token field declares its autocomplete purpose; supported assistive technology has not been tried. |
 | 1.4.1 Use of color | A | Partially supports | Axe, Inspection, Person | Links are underlined and outcomes have symbols or text; the meaning of every visual signal still needs review. |
 | 1.4.2 Audio control | A | Not applicable | Inspection | The application plays no audio. |
 | 1.4.3 Minimum contrast | AA | Partially supports | Axe, Script, Person | Both themes pass reported contrast violations and scripted badge contrast; incomplete contrast results still require visual assessment. |
@@ -113,10 +113,10 @@ result wherever human assessment supplies the missing evidence.
 | 3.2.6 Consistent help | A | Partially supports | Inspection, Person | Docs and keyboard help use shared shell controls; assess their accessibility in each layout. |
 | 3.3.1 Error identification | A | Not evaluated | Axe, Person | Error regions and labels are present; announcement and recovery need screen-reader tests. |
 | 3.3.2 Labels or instructions | A | Not evaluated | Axe, Person | Forms pass automated name checks; a person must assess instructions and required-field cues. |
-| 3.3.3 Error suggestions | AA | Not evaluated | Person | Try invalid credentials, invitation passwords, policy clauses, and conflicting case edits. |
+| 3.3.3 Error suggestions | AA | Not evaluated | Person | Try an invalid token, a used invitation, policy clauses, and conflicting case edits. |
 | 3.3.4 Error prevention | AA | Not evaluated | Person | Confirm destructive operations and recovery without relying on visual confirmation. |
-| 3.3.7 Redundant entry | A | Not evaluated | Person | Check repeated information across invitations, password changes, and case workflows. |
-| 3.3.8 Accessible authentication | AA | Not evaluated | Inspection, Person | Password managers, paste, and passkeys are supported in code; real assistive-technology sign-in remains untested. |
+| 3.3.7 Redundant entry | A | Not evaluated | Person | Check repeated information across invitations and case workflows. |
+| 3.3.8 Accessible authentication | AA | Not evaluated | Inspection, Person | People sign in at the identity provider, whose own page decides this; the token field accepts paste. Real assistive-technology sign-in remains untested. |
 | 4.1.2 Name, role, value | A | Not evaluated | Axe, Person | Axe passes names and roles; list selection, editor updates, and expanded states need screen-reader confirmation. |
 | 4.1.3 Status messages | AA | Not evaluated | Script, Person | A real proposal updates a polite, atomic status region; speech, interruptions, and repeated messages have not been heard. |
 
@@ -126,7 +126,7 @@ Use current Safari with VoiceOver on macOS and current Firefox or Chrome with NV
 screen-reader version, theme, zoom, input method, criterion, steps, and result. A successful automated run is not
 a substitute for these checks.
 
-1. Sign in with a password manager and a passkey. Accept and recover an invitation. Try mismatched passwords,
+1. Sign in through the identity provider and with a token. Accept and recover an invitation. Try a wrong token,
    expired links, and an interrupted sign-in. Check names, descriptions, errors, paste, and focus after refusal.
 2. Navigate every shell destination by landmarks, headings, links, and controls. Find a case through the palette
    and filter. Open the keyboard sheet, leave with Escape, and verify focus restoration. Check speech-input use

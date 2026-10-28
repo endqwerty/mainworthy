@@ -226,7 +226,7 @@ sending the token itself.
 | --- | --- | --- |
 | `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). Only visible ASCII characters without spaces are accepted. Whitespace, control characters and non-ASCII characters stop startup before any token or session changes. A value shorter than 20 characters or longer than 512 stops the start, in local mode too; one shorter than 32 starts, and every start warns. If unset, one is generated and printed once in the log whenever the owner holds no token that works: on the first start, on the start after an import, and on the start after the owner's last token expired. A value that is not yet a token replaces the old one: the start revokes every token that came from this variable and still works, whoever was the owner when it was set, and names them in one line ("Replacing a token" below). A value that is already a token replaces nothing. When that token was revoked, has reached its end or is somebody else's, it is not brought back: the start says which in one line on stderr, and the owner signs in again once the variable has a new value. |
 | `MAINWORTHY_OWNER` | `owner` | The owner's name, as it appears in history. Set it before the first start. The start gives this person every capability; when the name is an agent's or a pipeline's on the instance, the server does not start and says which variable to change. |
-| `MAINWORTHY_OWNER_WAS` | not set | To rename the owner: the name the owner has now, with the new name in `MAINWORTHY_OWNER`. The start renames that person, who keeps their tokens, password, passkeys, sessions and history, and says so in one line. Unset it afterwards. A former name that is nobody's, an agent's, a pipeline's, a forgotten person's or that of a person who does not hold every capability on every project stops the start, and so does a new name that is not one a person can be given. The guide has the steps: `docs/guide/configuration.md`, "Rename the owner". |
+| `MAINWORTHY_OWNER_WAS` | not set | To rename the owner: the name the owner has now, with the new name in `MAINWORTHY_OWNER`. The start renames that person, who keeps their tokens, linked identities, sessions and history, and says so in one line. Unset it afterwards. A former name that is nobody's, an agent's, a pipeline's, a forgotten person's or that of a person who does not hold every capability on every project stops the start, and so does a new name that is not one a person can be given. The guide has the steps: `docs/guide/configuration.md`, "Rename the owner". |
 | `MAINWORTHY_DATA` | `/data` | Local attachments and archive staging. Keep the existing volume mounted here. |
 | `MAINWORTHY_JOB_KEY` | not set | Base64 of exactly 32 random bytes. Generate once with `openssl rand -base64 32` and keep outside PostgreSQL. Every instance must use the same key for private jobs. Missing refuses private enqueue; invalid stops startup. |
 | `MAINWORTHY_DATABASE_URL` | required | PostgreSQL 18 URL; Compose points it at the database service. |
@@ -238,16 +238,17 @@ sending the token itself.
 | `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER` and cannot be set with `MAINWORTHY_PROXY_SECRET`. A missing header name or malformed address or range stops startup. See "The limit on failed sign-ins". |
 | `MAINWORTHY_PROXY_SECRET` | not set | The secret the proxy overwrites `x-mainworthy-proxy` with on every request, at least 32 characters. Requires `MAINWORTHY_CLIENT_ADDRESS_HEADER`. All requests without matching proof receive JSON 403 except `GET /health`. See the Cloud Run cutover section above. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only after the proxy is proved by its configured connecting address or secret, and must hold exactly one address. |
-| `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
+| `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. The identity provider sends people back to it, at `/signin/oidc`, and an invitation link starts with it. Write https, or `http://localhost:<port>` on a developer's machine. Plain http anywhere else stops the start with a line that names the variable. So does a path or a query, because the server wants the root address of the instance. Required with an identity provider. Not set: `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
+| `MAINWORTHY_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_NAME` | not set | The OpenID Connect identity provider people sign in through: its issuer address (`https://accounts.google.com` for Google), the client id and secret it gave this instance, and the name on the sign-in button. All four or none, with `MAINWORTHY_PUBLIC_URL`; a partial set or an issuer that is not https stops the start. Not set: only the owner signs in, with the owner token, and `mainworthy invite` refuses. "People sign in as themselves" below. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_DEMO` | not set | A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds it in the server's own process. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/health` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
 A container waiting for the data-directory lock ignores `docker stop` until Docker sends SIGKILL after its default 10 seconds, which is harmless with Compose's stop-then-create replacement.
 
-Mail jobs store authenticated ciphertext using AES-256-GCM, a random nonce per enqueue, and the job id and kind as associated data. `compose.coolify.yaml` uses `${SERVICE_REALBASE64_32_JOBKEY}` so Coolify generates and retains a key without an operator choosing one. Coolify's `SERVICE_BASE64_64` values are alphanumeric, not base64-encoded bytes; use the [documented REALBASE64 generator](https://coolify.io/docs/services/configuration/docker-compose). Plain `compose.yaml` reads `MAINWORTHY_JOB_KEY` from the environment or `.env`, like the database password override. Generate it once with `openssl rand -base64 32` and preserve it across restarts. Never commit the key or put it in a database backup.
+Private jobs store authenticated ciphertext using AES-256-GCM, a random nonce per enqueue, and the job id and kind as associated data. `compose.coolify.yaml` uses `${SERVICE_REALBASE64_32_JOBKEY}` so Coolify generates and retains a key without an operator choosing one. Coolify's `SERVICE_BASE64_64` values are alphanumeric, not base64-encoded bytes; use the [documented REALBASE64 generator](https://coolify.io/docs/services/configuration/docker-compose). Plain `compose.yaml` reads `MAINWORTHY_JOB_KEY` from the environment or `.env`, like the database password override. Generate it once with `openssl rand -base64 32` and preserve it across restarts. Never commit the key or put it in a database backup.
 
-A missing key refuses private enqueue and rolls back link issuance, while instances without private work can start. To rotate, first drain private jobs, then replace the key on every instance together. Retain the old key separately for backups containing pending jobs. Under a different key, queued jobs fail authentication, record a generic decryption error naming the setting, and send nothing on that attempt. Restoring the old key before bounded retries exhaust recovers delivery; otherwise request new links. Jobs never fall back to plaintext, including private rows from an older build. Completed or exhausted jobs erase the encrypted input. See [mail configuration](guide/configuration.md#turn-on-mail).
+A missing key refuses private enqueue, while instances without private work can start. To rotate, first drain private jobs, then replace the key on every instance together. Retain the old key separately for backups containing pending jobs. Under a different key, queued jobs fail authentication, record a generic decryption error naming the setting, and send nothing on that attempt. Restoring the old key before bounded retries exhaust recovers the job. Jobs never fall back to plaintext, including private rows from an older build. Completed or exhausted jobs erase the encrypted input.
 
 The process runs as an unprivileged user (uid 10001). The health check is `mainworthy health`, which reads
 `/health`.
@@ -339,18 +340,15 @@ wait. What it means for whoever runs an instance:
   Somebody who knows how your token begins can keep it blocked by guessing at it; a generated token cannot be
   blocked that way.
 - A browser that is signed in is never counted and never blocked.
-- A person's sign-in is counted in the same count. A wrong password is counted against the address and against
-  the name it was tried for, however the name is capitalised and whether or not anybody has it; so is a wrong
-  current password when somebody changes theirs. While either is blocked a password is not looked at, so the
-  right one waits too. Somebody who knows a person's name can keep that name's password sign-in blocked by
-  guessing at it, as with a token you chose; a passkey is not held up by that. A passkey's answer that is
-  refused and an invitation code that accepts nothing are counted against the address alone, and a right one
-  of either still works from a blocked address.
-- The count is in memory. A restart clears it.
+- A person's sign-in is counted in the same count. Mainworthy has no password to guess: a person signs in at
+  the identity provider, which runs its own limits. A provider's answer that is refused and an invitation code
+  that accepts nothing are counted against the address alone, and a right invitation code still works from a
+  blocked address.
+- The count is in PostgreSQL, shared by every instance on the database. A restart does not clear it.
 
-Anonymous passkey/provider starts have a separate allowance of 300 successful starts per public IPv4 address
+Anonymous provider sign-in starts have a separate allowance of 300 successful starts per public IPv4 address
 or IPv6 /56 per minute. There is no instance-wide refusal for another source to monopolise. Starts never add
-to failed-credential counts or block a password. A refused start gets `429` with remaining seconds in
+to failed-attempt counts. A refused start gets `429` with remaining seconds in
 `Retry-After`; retries do not extend or escalate its own source's wait. Unavailable starts do not spend it.
 Valid pending answers, working invitations and signed-in provider linking bypass this allocation wait.
 
@@ -412,7 +410,7 @@ address:
 ## Production network lockdown
 
 `compose.coolify.yaml` enables `MAINWORTHY_LOCKDOWN=1`. The ordinary image and `compose.yaml`
-leave it off, so outbound mail, webhooks, OIDC and other integrations keep working there.
+leave it off, so webhooks, OIDC and other integrations keep working there.
 Lockdown permits the configured PostgreSQL TCP endpoint and blocks other new outbound connections, including those integrations. Do not enable it
 on a deployment that needs them.
 
@@ -1137,31 +1135,38 @@ stored hash, so no start says so. Set a new value.
 
 ## People sign in as themselves
 
-Since 2026-10-13 a person signs in with a name and a password or with a passkey, and gets there through a link
-an admin hands them, because Mainworthy sends no mail (decision 0017). A token still signs a browser in, and the
-owner keeps theirs. What the first start of the new build does by itself:
+A person signs in through the instance's OpenID Connect identity provider, and only that way (decision
+2026-10-27, "People sign in through an identity provider"). Mainworthy keeps no password, passkey or second
+factor and sends no mail: the provider owns those, and account recovery too. A token still signs a browser in,
+and the owner keeps theirs: it is the first way in, and on an instance with no provider the only person is the
+owner, signed in with it. Agents and pipelines use tokens as before.
 
-- It adds the tables `credentials`, `invitations` and `passkey_users` and a column to `sessions`, after writing
-  a copy of the database beside it (`mainworthy.db.v<N>.bak`, `N` being the version it had).
-- Tokens and sessions are untouched: nobody is signed out.
+### Set up the provider
 
-What you do once:
+1. Register a web application with the provider. Its redirect address is `<MAINWORTHY_PUBLIC_URL>/signin/oidc`,
+   for example `https://mainworthy.example/signin/oidc`. Scopes: `openid`, `email` and `profile`.
+2. Set `MAINWORTHY_OIDC_ISSUER`, `MAINWORTHY_OIDC_CLIENT_ID`, `MAINWORTHY_OIDC_CLIENT_SECRET`,
+   `MAINWORTHY_OIDC_NAME` and `MAINWORTHY_PUBLIC_URL`, and start the instance again. Keep the client secret in
+   the secret environment; it goes to the provider and nowhere else.
+3. Sign in on the sign-in page under "Use a token" with the owner token, open Settings, "Your sign-in", and link
+   your identity at the provider. Linking the first identity needs no proof.
 
-- **Set `MAINWORTHY_PUBLIC_URL`** to the address people open the instance at, and start it again. For the
-  instance on Coolify that is `https://mainworthy.com`; `compose.coolify.yaml` passes the variable on. Without
-  it nobody can register a passkey and an invitation link has no host.
-- **Give yourself a password or a passkey**, if you want one beside the owner token: sign in with the token,
-  open Settings, "Your sign-in", and set a password or add a passkey there. The owner token keeps working
-  whatever else you sign in with, and the last one is still not revoked.
+For Google: Google Cloud console, Google Auth Platform, Clients, create a client of type Web application, with
+the redirect address above under "Authorised redirect URIs"; the issuer is `https://accounts.google.com`. The
+guide has the rest: `docs/guide/configuration.md`, "Sign in through an identity provider".
+
+`mainworthy.com` will use Google accounts once the owner has created its OAuth client. Until then nobody but the
+owner signs in there, with the owner token. On the Coolify file, `MAINWORTHY_LOCKDOWN=1` blocks the server from
+reaching any provider, so only the owner token signs in there either way.
 
 ### Inviting a person
 
-The first person is invited by the owner. Sign in on the sign-in page under "Use a token" with the owner
-token, open Settings, "People", type the person's name, choose what they may do and on which project, and
-press "Make invitation link". The link is shown once, with a button that copies it; hand it to the person. The
-same section lists the open invitations with "Revoke" on each, and makes a recovery link for a person who
-exists. An instance with no `MAINWORTHY_PUBLIC_URL` gives a link that starts with the address you opened
-Settings at.
+The owner invites the first person. Sign in with a token or through the provider, open Settings, "People", type
+the person's name, choose what they may do and on which project, and press "Make invitation link". The link is
+shown once, with a button that copies it; hand it to the person. The same section lists the open invitations
+with "Revoke" on each, and makes a recovery link for a person who exists. Making one from a browser needs recent
+proof: a session opened with a token has it for ten minutes after sign-in, and a provider session gets it with
+"Confirm with" and the provider's name. An instance with no provider makes no invitation.
 
 The command line does the same:
 
@@ -1181,45 +1186,44 @@ mainworthy invite revoke 3
   one project.
 - Whoever administers and is a person invites a new person. An agent that holds `admin` invites nobody.
 - The person opens the link. The page says who the invitation is for and until when it works, and the person
-  chooses a password of 12 characters or more, makes a passkey, or both; that signs them in. The page takes the
-  code out of the address bar as soon as it has read it, so a reload of that page has no code: open the link
-  again. A browser that is signed in as somebody else is told who, and asked before that session is replaced.
+  presses "Accept with" and the provider's name and signs in there; the identity they sign in with becomes
+  theirs. The page takes the code out of the address bar as soon as it has read it, so a reload of that page has
+  no code: open the link again. A browser that is signed in as somebody else is told who, and asked before that
+  session is replaced.
 - A link that was used, revoked or has run out, and one that was cut short when it was copied, all get the same
   sentence: the invitation does not work any more. Make a new one.
 
-### A lost password or passkey
+### A lost identity
 
-The sign-in page has no "forgot password": there is no mail to send one by. "Recovery link" beside a person in
-Settings, "People", or `mainworthy invite new <name>` for a person who exists, makes a recovery link. The owner
-makes one for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who
-does not administer makes no invitation, and another admin's word is not enough to become somebody. The page has
-the button where the server allows it and nowhere else. When the link is
-accepted, every password and passkey the person had stops working and every session of theirs ends. Until then
-nothing of theirs changes, so a link that is never used locks nobody out. Their tokens are not touched:
-`mainworthy token revoke <id>` ends those.
+There is nothing to reset here: a person who cannot sign in at the provider recovers that account there.
+"Recovery link" beside a person in Settings, "People", or `mainworthy invite new <name>` for a person who exists,
+makes a recovery link for a person who needs another identity. The owner makes one for anybody. An admin who is a
+person can make their own. Everybody else asks the owner: a person who does not administer makes no invitation,
+and another admin's word is not enough to become somebody. The page has the button where the server allows it
+and nowhere else. When the link is accepted, through the provider, the identity used becomes the person's only
+one, every token of theirs is revoked and every session of theirs ends. Until then nothing of theirs changes, so
+a link that is never used locks nobody out.
 
-A person changes their password, adds a passkey and removes one of their ways of signing in under Settings,
-"Your sign-in" (the operation `credential` for a script). The last one they have stays. "Your sessions" lists
-the browsers they are signed in on and ends any of them.
+A person links and unlinks identities under Settings, "Your sign-in" (the operation `credential` lists and
+removes them for a script). The last one they have stays. "Your sessions" lists the browsers they are signed in
+on and ends any of them.
 
-### What a passkey is tied to
+An identity is the provider's issuer and its subject for the person. Changing `MAINWORTHY_OIDC_ISSUER` leaves
+every identity linked at the old issuer unused: the owner signs in with the owner token, links again, and makes a
+recovery link for everybody else.
 
-A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL` when it was registered. One made at
-`https://mainworthy.com` does not sign in at another name of the same instance, such as its tailnet name;
-the web sign-in page hides the passkey button there, and people use a password or a token. If you change the
-variable to another host name, the passkeys made under the old one stay stored and no browser offers them: people sign in with a password and register again.
+### Upgrading to provider-only sign-in
 
-Automated browser coverage uses Chromium's built-in test authenticator
-(`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). On 2026-10-26 the owner reported successful
-sign-in with a 1Password passkey on iOS, macOS and omarchy through Chrome, and in the iPhone app
-([issue #132](https://github.com/endqwerty/mainworthy/issues/132)). This evidence covers sign-in only.
-Safari, Firefox and a hardware security key were not reported, nor were registration, adding or removing
-credentials on those devices.
+The first start of the build that made the provider the only way in deletes stored passwords, passkeys,
+authenticators, recovery codes, recovery email addresses and queued mail (migration 7); there is no path to keep
+them. A browser signed in with one of those is signed out. Tokens, linked identities and sessions opened with them
+stay. What you do once:
 
-### What it costs
-
-A password is hashed with argon2id, which takes 64 MiB and about a tenth of a second on purpose. The server
-hashes two at a time and lets thirty-two wait, so leave the container 130 MiB above what it otherwise uses.
+- Remove `MAINWORTHY_SMTP_HOST`, `_PORT`, `_TLS`, `_USER`, `_PASSWORD`, `MAINWORTHY_MAIL_FROM`,
+  `MAINWORTHY_REQUIRE_ADMIN_MFA` and `MAINWORTHY_OIDC_MFA` from the environment: nothing reads them.
+- Set up the provider, sign in with the owner token and link your identity (above).
+- Make a recovery link for each person who signed in with a password or a passkey. They accept it at the provider.
+- Archives exported before the upgrade (format 43) are refused on import: export again after it.
 
 ## Backup and restore
 

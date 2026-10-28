@@ -64,7 +64,7 @@ The list of capabilities an actor holds on one project, or on every project. See
 
 ## Invitation
 
-A link that an admin gives a person to choose a password or register a passkey. An invitation works once and expires. For an existing person, the invitation is a recovery link. Accepting a recovery link replaces every way that person signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
+A link that an admin gives a person, who accepts it by signing in at the instance's identity provider. An invitation works once and expires. For an existing person, the invitation is a recovery link. Accepting a recovery link replaces every identity and token that person had. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
 
 ## Job
 
@@ -73,10 +73,6 @@ A named part of a pipeline, such as `e2e`. A planned run can require that named 
 ## Method
 
 How a case may be exercised, by a person, an automated test or an agent. The case declares whether people and agents may exercise it. A link or a case annotation admits an automated test. The run says which methods it accepts.
-
-## Passkey
-
-A key that a device or a password manager holds for one site. A fingerprint, a face or a PIN unlocks the passkey. A person signs in with it in place of a password. It belongs to the host name of the instance.
 
 ## Pipeline
 
