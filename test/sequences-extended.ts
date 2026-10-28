@@ -495,7 +495,7 @@ export async function sequence(
 					if (stateNow === "disputed" && (unanswered > 0 || causes.length === 0)) tally.disputed++;
 					else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
 					else if (unanswered > 0 || causes.length === 0) tally[stateNow === "disputed" ? "disputed" : "unexplained"]++;
-					else if (stateNow === "disputed") tally.pass++;
+					else if (stateNow === "disputed") tally[passed.size >= minActors ? "pass" : "missing"]++;
 					else tally.excused++;
 				}
 			}

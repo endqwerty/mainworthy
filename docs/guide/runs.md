@@ -101,6 +101,10 @@ By default, a run asks for a person or an automated test, with one passing actor
 It accepts exact or assumed evidence under `loose` and `standard`.
 Under `strict`, the default requires exact evidence.
 A run can ask for other methods or two distinct passing actors through the CLI or API.
+Excusing a disputed failure does not supply a missing actor. Each actor with a counted
+pass contributes once, even if they pass by several methods. Excusing a failed method
+does not turn it into a pass; a separate passing method from that actor can contribute. A two-actor run with only one passing actor stays pending until
+another actor supplies a counted pass.
 
 A person's result counts when the pinned case admits people.
 An automated test counts when its link or annotation identifies the case and the
