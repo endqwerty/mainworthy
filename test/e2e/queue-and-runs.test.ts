@@ -1673,6 +1673,8 @@ check("failure tracker creation is absent without a configured tracker", async (
 		await server.stop();
 	}
 });
+
+check(
 	"a pending sign-off stays in the queue and shows its recorded approval",
 	async () => {
 		const server = await startServer({ preset: "loose" });
