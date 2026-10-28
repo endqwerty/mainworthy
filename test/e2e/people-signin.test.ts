@@ -38,7 +38,7 @@ async function throughProvider(page: PageHarness["page"], subject: string, press
 
 for (const device of ["phone", "desktop"] as const)
 	test.skipIf(!browserAvailable)(
-		`a token-only owner links a first identity without confirming, and a second after confirming with the first, on ${device}`,
+		`a token-only owner links a first identity within the token's proof, and a second after confirming with the first, on ${device}`,
 		async () => {
 			const started = await startServer({ mode: "server", provider: true });
 			let browser: PageHarness | null = null;
@@ -53,9 +53,7 @@ for (const device of ["phone", "desktop"] as const)
 				};
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 				await page.getByText("No identity is linked yet. You sign in with a token.", { exact: true }).waitFor();
-				// Long after the token's sign-in proof ran out, the first identity is still linked without a question:
-				// there is nothing else to confirm with.
-				await advanceClock(started, 10 * 60_000 + 1);
+				// Signing in with the token proved this session, so the first identity links without a question.
 				started.idp?.next({ subject: subjectOf("robin"), email: "robin@example.com" });
 				const linked = page.waitForEvent("load");
 				await page.getByRole("button", { name: "Link Example ID", exact: true }).click();
@@ -64,7 +62,9 @@ for (const device of ["phone", "desktop"] as const)
 				await page.getByText("Example ID (robin@example.com)", { exact: false }).waitFor();
 				expect(await page.getByRole("button", { name: /^Remove / }).isDisabled()).toBe(true);
 				await page.getByText("Your only identity stays.", { exact: false }).waitFor();
-				// A second one asks first; the session was opened with the token, which the prompt says confirms too.
+				// Once that proof has run out, a second one asks first; the session was opened with the token, which the
+				// prompt says confirms too.
+				await advanceClock(started, 10 * 60_000 + 1);
 				await page.getByRole("button", { name: "Link another Example ID identity", exact: true }).click();
 				const prompt = page.getByRole("region", { name: "Confirm it is you", exact: true });
 				await prompt
