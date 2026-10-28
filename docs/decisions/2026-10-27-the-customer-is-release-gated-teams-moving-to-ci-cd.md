@@ -32,8 +32,10 @@ What this means for the design:
 A team of strong developers that needs no test case manager is not this customer: Buildkite, Trunk and similar tools
 serve it.
 
-## What this leaves open
+## What this left open
 
-Which current work to freeze (the iPhone app, the extra sign-in methods, teams in M8, the loose end of the policy
-spectrum), the authentication provider, Google Cloud against Cloudflare, and whether the repository stays public are
-separate decisions.
+Which current work to freeze, the authentication provider, Google Cloud against Cloudflare, and whether the
+repository stays public. The owner answered all four the same day:
+[freeze what the customer does not need](2026-10-27-freeze-what-the-customer-does-not-need.md), which also keeps
+Google Cloud and the public repository, and
+[people sign in through an identity provider](2026-10-27-people-sign-in-through-an-identity-provider.md).

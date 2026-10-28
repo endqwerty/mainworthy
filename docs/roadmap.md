@@ -27,8 +27,11 @@ shared-state jobs, backups and cutover evidence remain in
 [issue #821](https://github.com/endqwerty/mainworthy/issues/821). Source completion does not
 prove the live instance or a restore works.
 
-Scope is software QA across the process spectrum, loose to regulated, with
-the full CI/CD flow in every profile (decision 0003).
+Scope is software QA for teams moving to CI/CD that still gate their releases
+([the customer decision](decisions/2026-10-27-the-customer-is-release-gated-teams-moving-to-ci-cd.md)).
+On 2026-10-27 the owner froze the iPhone app, teams owning projects (M8) and the loose end of the policy
+spectrum, and moved sign-in to an identity provider only
+([the freeze](decisions/2026-10-27-freeze-what-the-customer-does-not-need.md)).
 
 ## From the MVP to 1.0 (updated 2026-10-25)
 
@@ -43,21 +46,16 @@ wait for a device check or an owner decision.
 | Phase | Milestone | True when it ends |
 | --- | --- | --- |
 | 1: harden the preview | M1 Reliable checks and known defects | The known defects and agreed phone checks are finished, no `flaky-test` or `bug` issue remains open, and the check meets its under-120 s goal |
-| | M2 An instance to rely on | Scheduled backups leave the host, a restore drill is recorded, deployment waits for checks on the exact commit, instance limits are set, and real-device sign-in has evidence |
+| | M2 An instance to rely on | Scheduled backups leave the host, a restore drill is recorded, deployment waits for checks on the exact commit, and instance limits are set |
 | 2: the first usable version | M3 An exact gate that reaches the pull request | Each assigned issue has a fixture for its effect on the gate, including branch heads, scope, empty reports, disputes and failure signatures, and outbound GitHub checks publish the verdict |
 | | M4 Agents | Reviews belong to the exact change and patch, replies have registry schemas, delegation and edit limits preserve authority, and agent jobs meet budgets measured in two clients |
-| | M5 The rest of the workflow | The remaining case, execution, reporting, traceability and data-movement work meets its criteria, and each of the three team profiles runs its workflow end to end with policy switches only |
-| 2: the first usable version | M8 Teams own projects | A project is created in a team; each of the four roles (owner, admin, user, viewer) holds its capabilities on that team's projects and nothing on another's; a team's owner and admins administer members, invitations and service tokens without instance admin; the checks are recorded on web, CLI, MCP and the iPhone app |
+| | M5 The rest of the workflow | The remaining case, execution, reporting, traceability and data-movement work meets its criteria, and the gated and regulated team profiles each run their workflow end to end with policy switches only |
+| frozen 2026-10-27 | M8 Teams own projects | A project is created in a team; each of the four roles (owner, admin, user, viewer) holds its capabilities on that team's projects and nothing on another's; a team's owner and admins administer members, invitations and service tokens without instance admin; the checks are recorded on web, CLI and MCP |
 | 3: 1.0 | M6 Teams and organisations | Assigned organisation features meet their criteria, and a hosted tier has an owner-approved decision based on demonstrated need; PostgreSQL storage has landed |
 | | M7 Before 1.0 | The friction comparison, accessibility audit and trademark search have recorded results, distribution requirements are addressed, and the owner declares 1.0 |
 
-The native MVP has shipped. The separate `iOS app` milestone tracks the remaining
-app work and distribution evidence. TestFlight upload tooling does not prove that
-installation works. Edit-overlap resolution shipped in the app on 2026-10-15. The
-app also saves eligible queue answers on the device and sends them when it
-reconnects. Linking a test and creating a case still need a connection. Native
-passkey sign-in has shipped; [real-device verification](https://github.com/endqwerty/mainworthy/issues/205) remains. App instance selection and licence screens are deferred
-owner choices; distribution requirements remain separate obligations.
+The iPhone app is frozen (2026-10-27) and kept at the tag `ios-app-2026-10-27`; its milestone's issues are
+`deferred`.
 
 The check warns above 130 s; CI shards warn above 180 s. Elapsed time is advisory by the
 owner's decision 0097. Under 120 s remains the local goal, and
@@ -71,18 +69,17 @@ tests, case field values and policy presets also narrow the work left to do.
 
 Follow [issue #64, "Start next"](https://github.com/endqwerty/mainworthy/issues/64#start-next)
 for the individual issues, their order and dependencies. In outline: bounded defects and flaky tests first, then
-lower pull-request feedback cost, then what remains of the hosting transition, then projects under teams
-(milestone M8). M6 keeps SSO, compliance and the hosted tier.
+lower pull-request feedback cost, then what remains of the hosting transition. Projects under teams
+(milestone M8) are frozen. M6 keeps SCIM, compliance and the hosted tier.
 
 Issue #64 and each feature issue distinguish shipped source from remaining work. Optional features
 need a concrete workflow; they are not all prerequisites for this reliability and developer-experience cleanup.
 
-In parallel, gather sign-in and phone evidence on real devices. Public-source research for the
-1.0 audits can also proceed before every organisation feature is complete.
+Public-source research for the 1.0 audits can proceed before every organisation feature is complete.
 
 Correctness and recovery come first because later capabilities depend on decisions
 and evidence that remain true. Several workstreams can proceed together. M5 extends
-the existing workflow; M8 gives projects an owning team; M6 needs concrete organisational demand; M7 records the
+the existing workflow; M6 needs concrete organisational demand; M7 records the
 evidence for the owner's 1.0 decision. Source review alone proves no runtime,
 device, deployment or compliance result.
 
