@@ -32,17 +32,17 @@ export function startTicks(stat: string): string | null {
 	return start && /^\d+$/.test(start) ? start : null;
 }
 /**
- * A process's start as the kernel counts it, in clock ticks (hundredths of a second) since boot, where `/proc` has it;
- * `processStamp`'s one-second `ps` time elsewhere. A recycled pid matches only if the pid space wrapped within one
- * tick of the original's start. Only a reader of the same version compares it: the stamps runners share stay
- * `processStamp`'s.
+ * A process's start as the kernel counts it, in clock ticks (hundredths of a second) since boot, or null where
+ * `/proc` does not say. A recycled pid matches only if the pid space wrapped within one tick of the original's start.
+ * Without it there is no identity fine enough to signal by, so a caller signals nothing: `ps`'s one-second start time
+ * could match a process that took the pid in the same second.
  */
 export function processIdentity(pid: number): string | null {
 	try {
 		const start = startTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
 		if (start) return `ticks:${start}`;
 	} catch {}
-	return processStamp(pid);
+	return null;
 }
 const runsRoot = (root: string): string =>
 	join(
