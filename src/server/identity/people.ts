@@ -585,9 +585,11 @@ export async function finishOidcSignIn(
 		// say when (a provider that leaves out `auth_time`, or Google without it enabled) would be a silent single
 		// sign-on from whoever sits at the browser, so it proves nothing; a time still to come, beyond the clock
 		// tolerance the library allows a token, proves nothing either.
-		if (identity.authTime === null || identity.authTime - app.now() > AUTH_TIME_SKEW_MS) return no("unverified");
-		if (app.now() - identity.authTime > PROOF_MS) return no("stale");
+		const authTime = identity.authTime;
+		if (authTime === null || authTime - app.now() > AUTH_TIME_SKEW_MS) return no("unverified");
 		return await commit(app, { identity: [proving.actor] }, async (db): Promise<OidcFinished> => {
+			// Judged on the clock of the commit: a proof that went stale while waiting for the writer proves nothing.
+			if (app.now() - authTime > PROOF_MS) return no("stale");
 			if (!(await holdCeremonyGeneration(db, judged.generation))) return no("challenge");
 			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });
 			if (input.browser === null || hashOf(input.browser) !== proving.session || held?.actor.id !== proving.actor)
