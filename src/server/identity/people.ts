@@ -125,6 +125,8 @@ export type WhyNot =
 	| "other-identity"
 	/** The provider said when the person last signed in there, and that was too long ago to count as proof. */
 	| "stale"
+	/** The provider did not say when the person last signed in there, or said a time still to come. */
+	| "unverified"
 	/** What was judged outside the gate was not what the commit found: changed, revoked, forgotten or imported over. */
 	| "changed-meanwhile"
 	/** No ceremony of this server, for this purpose, inside its time and not yet spent. */
@@ -523,6 +525,9 @@ export async function beginOidcSignIn(app: App, start: OidcStart, address: strin
 	return url === null ? { ok: false, why: "unreachable" } : { ok: true, url, ceremony, lastsMs: CEREMONY_MS };
 }
 
+/** How far ahead of this server's clock a provider's `auth_time` may be: the tolerance `openid-client` allows a token. */
+const AUTH_TIME_SKEW_MS = 30_000;
+
 export type OidcFinished =
 	| Accepted
 	| { ok: true; linked: true }
@@ -576,9 +581,12 @@ export async function finishOidcSignIn(
 	}
 	if (purpose.purpose === "proof") {
 		const proving = purpose;
-		// The provider says when the person last signed in there only when it supports `max_age`; one that does not
-		// (Google) gives proof by this new answer alone.
-		if (identity.authTime !== null && app.now() - identity.authTime > PROOF_MS) return no("stale");
+		// Proof is a sign-in at the provider that it says happened in the last ten minutes. An answer that does not
+		// say when (a provider that leaves out `auth_time`, or Google without it enabled) would be a silent single
+		// sign-on from whoever sits at the browser, so it proves nothing; a time still to come, beyond the clock
+		// tolerance the library allows a token, proves nothing either.
+		if (identity.authTime === null || identity.authTime - app.now() > AUTH_TIME_SKEW_MS) return no("unverified");
+		if (app.now() - identity.authTime > PROOF_MS) return no("stale");
 		return await commit(app, { identity: [proving.actor] }, async (db): Promise<OidcFinished> => {
 			if (!(await holdCeremonyGeneration(db, judged.generation))) return no("challenge");
 			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });

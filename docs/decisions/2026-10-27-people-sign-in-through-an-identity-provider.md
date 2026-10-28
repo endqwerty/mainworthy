@@ -26,12 +26,12 @@ agents and pipelines.
   in local mode or against the test provider.
 - **Joining.** An invitation is accepted by signing in at the provider (the `join` ceremony, as today).
   Recovery is a new invitation for the same person, which links the identity they sign in with next.
-- **Recent proof** (0145) is a fresh sign-in at the provider: the server asks with `max_age=0`, and when the
-  ID token carries `auth_time` it must be inside the last ten minutes. Google's OpenID Connect page lists no
-  `max_age`, and gives `auth_time` only when a request asks for that claim and the client's settings enable it
-  (its discovery document lists no `auth_time`, read 2026-10-27). So with Google the proof is, by default, the
-  fresh round trip alone: it shows the browser still holds the person's provider session, not that they typed
-  anything. A browser session opened by typing a token has proof
+- **Recent proof** (0145) is a fresh sign-in at the provider: the server asks with `max_age=0` and asks for
+  `auth_time` as an essential claim, and takes the proof only when the ID token says the person signed in there
+  within the last ten minutes. An answer without `auth_time` proves nothing: it would be a silent single sign-on
+  from whoever sits at the browser (the security audit of #1048 found this; an earlier draft of this record
+  accepted it). Google gives `auth_time` only when a request asks for it and the client's settings enable it
+  (read 2026-10-27), so the hosted instance's client must have it enabled. A browser session opened by typing a token has proof
   for ten minutes, unlike under 0145: a token already speaks for its person over the API, so the browser gains
   nothing the token lacked. Proof still guards linking a second identity and unlinking one, creating a token or
   an invitation from a browser, granting admin, team admin changes and archive import. A person linking their

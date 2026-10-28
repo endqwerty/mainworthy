@@ -115,6 +115,18 @@ test("the provider's word is proof only when it signed the person in within the 
 	expect((await personalToken(w, cookie)).status).toBe(200);
 });
 
+test("an answer that does not say when the person signed in, or says a time to come, proves nothing", async () => {
+	const w = await world();
+	const cookie = await joined(w, "robin");
+	expect(said(await prove(w, cookie, "robin", null))).toBe("403 forbidden");
+	refused(await personalToken(w, cookie));
+	expect(said(await prove(w, cookie, "robin", seconds(w.clock.now()) + 31))).toBe("403 forbidden");
+	refused(await personalToken(w, cookie));
+	expect(w.idp?.asked.at(-1)?.get("claims")).toBe(JSON.stringify({ id_token: { auth_time: { essential: true } } }));
+	expect(must(await prove(w, cookie, "robin"))).toEqual({ proven: true });
+	expect((await personalToken(w, cookie)).status).toBe(200);
+});
+
 test("proof is of the person's own identity: another person's, or one nobody linked, proves nothing", async () => {
 	const w = await world();
 	const robin = await joined(w, "robin");
