@@ -25,7 +25,7 @@
 .signin-card p {
 	margin: 8px 0;
 }
-/* A second and a third way of doing what the first form does: set apart, and quieter than the first. */
+/* The token, a second way in beside the identity provider: set apart, and quieter than the first. */
 .signin-way {
 	margin-top: 14px;
 	padding-top: 14px;
@@ -50,36 +50,6 @@
 }
 .signin .signin-problem:empty {
 	display: none;
-}
-/* Under the first form the room is kept, so the button below it does not move when a refusal appears. */
-.signin .signin-problem.kept {
-	display: block;
-	min-height: 22px;
-}
-.signin-count {
-	margin-top: 4px;
-	color: var(--dim);
-	font-size: 12px;
-}
-.signin-card fieldset {
-	min-width: 0;
-	margin: 0;
-	padding: 0;
-	border: 0;
-}
-.signin-card fieldset:disabled {
-	opacity: 0.5;
-}
-.signin-card label.signin-check {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin-top: 14px;
-	color: var(--ink);
-}
-.signin .signin-check input {
-	width: auto;
-	accent-color: var(--acc);
 }
 /* The question a browser is asked when it is signed in as somebody else: it comes before the form. */
 .signin-ask {

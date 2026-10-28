@@ -18,10 +18,6 @@ const from = (address: string | null): string => (address === null ? "" : ` from
 /** What proved who the person was when the session was opened, as a phrase after "opened with". */
 function proof(row: SessionRow): string {
 	switch (row.openedWith) {
-		case "password":
-			return "the password";
-		case "passkey":
-			return `the passkey ${row.label}`;
 		case "oidc":
 			return row.label;
 		case "token":

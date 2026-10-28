@@ -54,16 +54,15 @@ const held = (grants: readonly { project: string; can: readonly string[]; roles?
 const STARTS_WITH: readonly Capability[] = defaultCapabilities("human").filter((capability) => capability !== "admin");
 
 /**
- * Who signs in to this instance, for an admin who is a person. An admin makes a link and
- * hands it over or sends it by mail. A new name gets an invitation to join; a person who exists gets a recovery link, which
- * replaces every way they sign in once they accept it.
+ * Who signs in to this instance, for an admin who is a person. An admin makes a link and hands it over. A new
+ * name gets an invitation to join; a person who exists gets a recovery link, which replaces the identities they
+ * sign in with once they accept it.
  */
 export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null> }) {
 	const { project, session } = useApp();
 	const proof = useRecentProof();
 	const client = useQueryClient();
 	const methods = useQuery({ queryKey: ["instance", "sign-in-methods"], queryFn: signInMethods, staleTime: Infinity });
-	const [email, setEmail] = useState("");
 	const invitations = useList("invitation", listInvitations);
 	const actors = useQueryOp({ project, op: "admin", input: { do: "actor.list" } });
 	const listed = Actor.array().safeParse(actors.data);
@@ -108,12 +107,10 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					name: wanted,
 					expires,
 					grant: { can, project: onProject || null },
-					...(methods.data?.mail && email ? { email } : {}),
 				}),
 			)
 			.then((link) => {
 				setName("");
-				setEmail("");
 				// The next person does not get `admin` because this one did.
 				setCan((now) => now.filter((capability) => capability !== "admin"));
 				return made(link);
@@ -180,9 +177,15 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 			<h2>People</h2>
 			{proof.prompt}
 			<p className="dim">
-				You make a link and hand it to the person{methods.data?.mail ? ", or send it by mail" : ""}; it works once, and
-				they choose a password or a passkey with it. <DocLink page="access">How a person gets in</DocLink>
+				You make a link and hand it to the person; it works once, and they accept it by signing in with the instance's
+				identity provider. <DocLink page="access">How a person gets in</DocLink>
 			</p>
+			{methods.data && !methods.data.oidc && (
+				<p className="dim">
+					This instance has no identity provider, so an invitation cannot be accepted here. Whoever runs it sets one up
+					first.
+				</p>
+			)}
 			<form className="settings-form" onSubmit={invite}>
 				<label htmlFor="invite-name">Name</label>
 				<input
@@ -197,20 +200,6 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					placeholder="robin"
 					required
 				/>
-				{methods.data?.mail && (
-					<>
-						<label htmlFor="invite-email">Send to email address, optional</label>
-						<input
-							className="form-input"
-							id="invite-email"
-							type="email"
-							maxLength={254}
-							value={email}
-							onChange={(event) => setEmail(event.target.value)}
-							autoComplete="email"
-						/>
-					</>
-				)}
 				<p className="settings-problem" role="status">
 					{exists && `${wanted} signs in here already. A recovery link is made from their row below.`}
 				</p>
@@ -332,8 +321,8 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 							))}
 							{confirming === person.name && (
 								<small>
-									A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
-									replaces their passwords and passkeys, revokes all their tokens and ends their sessions.
+									A recovery link is for somebody who cannot sign in with their identity any more. Once {person.name}{" "}
+									accepts it, it replaces their identities and tokens and ends their sessions.
 								</small>
 							)}
 							<small className="settings-refusal" role="status">
@@ -414,8 +403,8 @@ function InvitationLink({ created, dismiss }: { created: InvitationCreated; dism
 			</p>
 			{created.purpose === "recover" && (
 				<p>
-					When {created.name} accepts it, every password, passkey and token they had stops working and every session of
-					theirs ends.
+					When {created.name} accepts it, the identities and tokens they had stop working and every session of theirs
+					ends.
 				</p>
 			)}
 			{relative && (

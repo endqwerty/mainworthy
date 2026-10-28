@@ -11,18 +11,15 @@ import {
 	PersonalTokenCreated,
 	PersonalTokenRow,
 	type SessionRow,
-	TotpConfirmed,
-	TotpEnrolment,
 } from "../../core/people-replies.ts";
 import { type CallOptions, call } from "./api.ts";
-import { CreationOptions, type Registration } from "./passkey.ts";
 
 const Purpose = z.enum(["join", "recover"]);
 
 const SessionRows = z.array(
 	z.object({
 		id: z.number(),
-		openedWith: z.enum(["token", "password", "passkey", "oidc"]),
+		openedWith: z.enum(["token", "oidc"]),
 		label: z.string(),
 		userAgent: z.string().nullable(),
 		createdAt: z.number(),
@@ -37,7 +34,7 @@ const SessionRows = z.array(
 const CredentialRows = z.array(
 	z.object({
 		id: z.number(),
-		kind: z.enum(["password", "passkey", "oidc", "totp"]),
+		kind: z.enum(["oidc"]),
 		label: z.string(),
 		createdAt: z.number(),
 		lastUsedAt: z.number().nullable(),
@@ -81,19 +78,11 @@ export const listSessions = async (options: Options = {}, actor?: string): Promi
 export const endSession = async (id: number): Promise<{ current: boolean }> =>
 	z.object({ current: z.boolean() }).parse(await call("session", { do: "end", id }));
 
-/** The ways a person signs in: at most one password, and their passkeys. */
+/** The identities of the instance's identity provider a person signs in with. */
 export const listCredentials = async (options: Options = {}, actor?: string): Promise<CredentialRow[]> =>
 	CredentialRows.parse(await call("credential", { do: "list", ...(actor === undefined ? {} : { actor }) }, options));
 
-/** The options to make a passkey for the caller, with a challenge good for five minutes and one registration. */
-export const beginPasskey = async (): Promise<CreationOptions> =>
-	CreationOptions.parse(await call("credential", { do: "passkey.begin" }));
-
-export const addPasskey = async (input: { made: Registration; label: string }): Promise<void> => {
-	await call("credential", { do: "passkey.add", passkey: input.made, label: input.label });
-};
-
-/** Removes a way of signing in. The sessions that rested on it end, this browser's own among them if it did. */
+/** Removes an identity. The sessions that rested on it end, this browser's own among them if it did. */
 export const removeCredential = async (id: number): Promise<{ sessionsEnded: number }> =>
 	z.object({ sessionsEnded: z.number() }).parse(await call("credential", { do: "remove", id }));
 
@@ -108,7 +97,6 @@ export const listInvitations = async (options: Options = {}): Promise<Invitation
  */
 export const createInvitation = async (input: {
 	name: string;
-	email?: string;
 	/** How long the link works: `12h`, `3d`, `2w`. */
 	expires: string;
 	/** What a new person may do, and on which project (null: every project). Null for a person who exists. */
@@ -118,7 +106,6 @@ export const createInvitation = async (input: {
 		await call("invitation", {
 			do: "create",
 			name: input.name,
-			...(input.email ? { email: input.email } : {}),
 			expires: input.expires,
 			...(input.grant
 				? { can: input.grant.can, ...(input.grant.project === null ? {} : { project: input.grant.project }) }
@@ -153,8 +140,3 @@ export const revokePersonalToken = async (id: number): Promise<{ revoked: boolea
 	z
 		.object({ revoked: z.boolean() })
 		.parse(await call("credential", { do: "token.revoke", id, cmd: crypto.randomUUID() }));
-
-export const beginTotp = async (): Promise<TotpEnrolment> =>
-	TotpEnrolment.parse(await call("credential", { do: "totp.begin" }));
-export const confirmTotp = async (challenge: string, code: string): Promise<TotpConfirmed> =>
-	TotpConfirmed.parse(await call("credential", { do: "totp.confirm", challenge, code }));

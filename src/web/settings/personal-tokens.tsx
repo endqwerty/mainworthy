@@ -12,7 +12,7 @@ export function YourTokens() {
 	const proof = useRecentProof();
 	const tokens = useList("personal-token", listPersonalTokens);
 	const sessions = useList("session", listSessions);
-	const mayCreate = session.via === "local" || sessions.data?.some((row) => row.current && row.openedWith !== "token");
+	const mayCreate = session.via === "local" || sessions.data?.some((row) => row.current && row.openedWith === "oidc");
 	const [label, setLabel] = useState("");
 	const [expires, setExpires] = useState<string>(PERSONAL_TOKEN_LASTS.default);
 	const [created, setCreated] = useState<PersonalTokenCreated | null>(null);
@@ -73,7 +73,7 @@ export function YourTokens() {
 			{proof.prompt}
 			<p className="dim">
 				A token acts as you on every project you can access, with your current grants. Removing a grant takes it away
-				from your tokens too. Password changes do not revoke tokens.
+				from your tokens too.
 			</p>
 			{mayCreate ? (
 				<form className="settings-form" onSubmit={create}>
@@ -104,7 +104,7 @@ export function YourTokens() {
 					</button>
 				</form>
 			) : (
-				<p className="dim">To create a personal token, sign in with your password or a passkey.</p>
+				<p className="dim">A personal token is made from a session opened through the identity provider.</p>
 			)}
 			{sessions.error && <p role="status">{saidBy(sessions.error)}</p>}
 			{created && (

@@ -1,183 +1,119 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
-import { ApiError, exchange } from "../lib/api.ts";
-import { authenticationGeneration, authenticationUnchanged } from "../lib/device.ts";
-import { presentPasskey, RequestOptions } from "../lib/passkey.ts";
-import { listCredentials } from "../lib/people.ts";
-import { routeUrl } from "../lib/router.ts";
+import { ApiError } from "../lib/api.ts";
+import { listSessions } from "../lib/people.ts";
+import { signInMethods, startOidc } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { saidBy } from "./list.ts";
 
-/** Keeps the refused action in this component until this session proves a credential or cancels. */
+/**
+ * The section of Settings this page shows, as Settings keeps it in the page's history entry: a confirmation
+ * comes back to it from the identity provider.
+ */
+const shownSection = (): string | null => {
+	const section = (history.state as { settingsSection?: unknown } | null)?.settingsSection;
+	return typeof section === "string" ? section : null;
+};
+
+/**
+ * Runs a change to how somebody signs in, or one that the server guards the same way. When the server answers
+ * that this session must confirm it is the person first, the refused change waits in this component while the
+ * prompt says how: through the identity provider, which brings the page back here to repeat the change, or by
+ * signing in with the token again. Cancelling refuses the change with nothing changed.
+ */
 export function useRecentProof() {
-	const { project } = useApp();
-	const pending = useRef<((accepted: boolean) => void) | null>(null);
+	const { project, session } = useApp();
+	const pending = useRef<(() => void) | null>(null);
 	const [open, setOpen] = useState(false);
-	const [password, setPassword] = useState("");
-	const [code, setCode] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState("");
-	const field = useRef<HTMLInputElement>(null);
-	const setupLink = useRef<HTMLAnchorElement>(null);
+	const confirm = useRef<HTMLButtonElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
-	const passkeyButton = useRef<HTMLButtonElement>(null);
-	const credentials = useQuery({
-		queryKey: [project, "credential", { do: "list" }],
-		queryFn: ({ signal }) => listCredentials({ signal }),
-		enabled: open,
+	const identities = session.credentials?.identities ?? 0;
+	// What the instance offers does not change while it runs.
+	const methods = useQuery({
+		queryKey: ["instance", "sign-in-methods"],
+		queryFn: signInMethods,
+		staleTime: Infinity,
+		enabled: open && identities > 0,
+	});
+	// A session opened with a token may confirm with the token as well as through the provider.
+	const sessions = useQuery({
+		queryKey: [project, "session", { do: "list" }],
+		queryFn: ({ signal }) => listSessions({ signal }),
+		enabled: open && identities > 0,
 		staleTime: 0,
 	});
-	const rows = credentials.data ?? [];
-	const hasPassword = rows.some((row) => row.kind === "password");
-	const hasTotp = rows.some((row) => row.kind === "totp");
-	const hasPasskey = rows.some((row) => row.kind === "passkey");
-	const guidance = credentials.isPending
-		? "loading"
-		: credentials.isError && credentials.data === undefined
-			? "error"
-			: rows.length === 0
-				? "first"
-				: rows.every((row) => row.kind === "oidc")
-					? "recovery"
-					: "proof";
-	useEffect(() => () => pending.current?.(false), []);
+	const provider = identities > 0 ? (methods.data?.oidc?.name ?? null) : null;
+	const byToken = identities === 0 || sessions.data?.some((row) => row.current && row.openedWith === "token");
+	const guidance =
+		identities === 0
+			? "token"
+			: methods.isPending
+				? "loading"
+				: methods.isError
+					? "error"
+					: provider
+						? "provider"
+						: "token";
+	useEffect(() => () => pending.current?.(), []);
 	useEffect(() => {
-		if (!open) return;
-		if (guidance === "first") setupLink.current?.focus();
-		else if (guidance === "proof") {
-			if (hasPassword || hasTotp) field.current?.focus();
-			else passkeyButton.current?.focus();
-		} else cancel.current?.focus();
-	}, [open, guidance, hasPassword, hasTotp]);
-	function finish(accepted: boolean) {
+		if (!open || guidance === "loading") return;
+		(guidance === "provider" ? confirm : cancel).current?.focus();
+	}, [open, guidance]);
+	function finish() {
 		setOpen(false);
-		setPassword("");
-		setCode("");
-		pending.current?.(accepted);
+		pending.current?.();
 		pending.current = null;
 	}
 	async function run<T>(work: () => Promise<T>): Promise<T> {
-		const generation = authenticationGeneration();
 		try {
 			return await work();
 		} catch (error) {
 			if (!(error instanceof ApiError) || error.code !== "recent_proof_required") throw error;
-			pending.current?.(false);
+			pending.current?.();
 			setProblem("");
 			setOpen(true);
-			const accepted = await new Promise<boolean>((resolve) => {
+			// Confirming leaves the page for the provider; only cancelling, or leaving the screen, ends the wait.
+			await new Promise<void>((resolve) => {
 				pending.current = resolve;
 			});
-			if (!accepted)
-				throw new ApiError("recent_proof_required", "Credential confirmation cancelled. Nothing was changed.");
-			if (!authenticationUnchanged(generation))
-				throw new ApiError("unauthenticated", "The session changed. Try the action again.");
-			return work();
+			throw new ApiError("recent_proof_required", "Confirmation cancelled. Nothing was changed.");
 		}
 	}
-	async function prove(passkey: boolean) {
+	function prove() {
 		if (busy) return;
 		setBusy(true);
 		setProblem("");
-		try {
-			let body: { password: string } | { code: string } | { passkey: unknown };
-			if (passkey) {
-				const options = await exchange("/api/account/proof", { body: { begin: true }, signedIn: true });
-				const parsed = z.object({ passkey: RequestOptions }).parse(options).passkey;
-				body = { passkey: await presentPasskey(parsed) };
-			} else body = password ? { password } : { code: code.trim() };
-			await exchange("/api/account/proof", { body, signedIn: true });
-			finish(true);
-		} catch (error) {
-			setProblem(saidBy(error));
-		} finally {
-			setBusy(false);
-		}
+		startOidc({ proof: true }, shownSection())
+			.catch((error: unknown) => setProblem(saidBy(error)))
+			.finally(() => setBusy(false));
 	}
 	const prompt = open && (
-		<section
-			className="settings-proof"
-			aria-label="Confirm your sign-in"
-			onKeyDown={(event) => {
-				if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
-					event.preventDefault();
-					event.stopPropagation();
-					void prove(false);
-				}
-			}}
-		>
-			<h3>Confirm your sign-in</h3>
+		<section className="settings-proof" aria-label="Confirm it is you">
+			<h3>Confirm it is you</h3>
 			{guidance === "loading" ? (
-				<p role="status">Reading your sign-in methods…</p>
+				<p role="status">Reading how this instance confirms it is you…</p>
 			) : guidance === "error" ? (
-				<p role="status">
-					{saidBy(credentials.error)} Cancel confirmation and retry the action to read your sign-in methods again.
-				</p>
-			) : guidance === "first" ? (
-				<p>
-					Add your first password or passkey in{" "}
-					<a ref={setupLink} href={`${routeUrl({ project, screen: "settings" })}?section=signin`}>
-						Your sign-in
-					</a>
-					. Then return here, retry the action and confirm that credential.
-				</p>
-			) : guidance === "recovery" ? (
-				<p>
-					Provider sign-in does not count as proof. Ask the owner for a recovery link, accept it with a password or
-					passkey, then retry this action.
-				</p>
+				<p role="status">{saidBy(methods.error)} Cancel confirmation and repeat the change to try again.</p>
 			) : (
 				<>
-					<p>Prove your own credential to continue. This proof lasts ten minutes in this session.</p>
-					{(hasPassword || hasTotp) && (
-						<div className="settings-form">
-							{hasPassword && (
-								<label>
-									Password
-									<input
-										ref={field}
-										className="form-input"
-										type="password"
-										autoComplete="current-password"
-										value={password}
-										onChange={(event) => setPassword(event.target.value)}
-									/>
-								</label>
-							)}
-							{hasTotp && (
-								<label>
-									{hasPassword ? "Or authenticator code" : "Authenticator code"}
-									<input
-										ref={hasPassword ? undefined : field}
-										className="form-input"
-										autoComplete="one-time-code"
-										inputMode="numeric"
-										maxLength={6}
-										value={code}
-										onChange={(event) => setCode(event.target.value)}
-									/>
-								</label>
-							)}
-							<button className="out" type="button" aria-disabled={busy} onClick={() => void prove(false)}>
-								Confirm credential
-							</button>
-						</div>
+					<p>
+						{guidance === "provider"
+							? `Sign in with ${provider} again to confirm it is you. This page then opens again here: repeat the change. The confirmation lasts ten minutes in this session.`
+							: "Sign out, and sign in with your token again, to confirm it is you. Then repeat the change. The confirmation lasts ten minutes in this session."}
+					</p>
+					{guidance === "provider" && byToken && (
+						<p className="dim">You opened this session with a token: signing in with it again confirms too.</p>
 					)}
-					{hasPasskey && (
-						<button
-							ref={passkeyButton}
-							className="out"
-							type="button"
-							aria-disabled={busy}
-							onClick={() => void prove(true)}
-						>
-							Use a passkey
+					{guidance === "provider" && (
+						<button ref={confirm} className="out" type="button" aria-disabled={busy} onClick={prove}>
+							{busy ? `Opening ${provider}…` : `Confirm with ${provider}`}
 						</button>
 					)}
 				</>
 			)}
-			<button ref={cancel} className="out" type="button" disabled={busy} onClick={() => finish(false)}>
+			<button ref={cancel} className="out" type="button" disabled={busy} onClick={finish}>
 				Cancel confirmation
 			</button>
 			<p role="status">{problem}</p>
