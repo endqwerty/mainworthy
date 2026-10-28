@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import type { z } from "zod";
 import { mayRun, type Need, needs } from "../../core/kinds.ts";
+import { PROJECT_KEY } from "../../core/ops.ts";
 import { malformedText } from "../../core/text.ts";
 import { actorById, lockCallActors, lockIdentity, resolveCaller } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
@@ -581,7 +582,8 @@ export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, cal
 	if (ops[call.op]?.effect !== "write") return await read(app, ops, call);
 	try {
 		return await app.database.write(async (db) => await execute(app, db, ops, call), {
-			name: call.project ? `${call.op} in ${call.project}` : call.op,
+			// The project is the caller's text until the project is found; only a key's own characters reach the log.
+			name: call.project && PROJECT_KEY.test(call.project) ? `${call.op} in ${call.project}` : call.op,
 			...(call.signal ? { signal: call.signal } : {}),
 		});
 	} catch (error) {

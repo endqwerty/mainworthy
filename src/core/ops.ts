@@ -472,11 +472,14 @@ export type CommandInput = z.infer<typeof CommandInput>;
 
 // ── administer ─────────────────────────────────────────────────────────────────────────────────────────────
 
+/** What a project's key may be: lowercase letters, digits and hyphens, at most forty characters. */
+export const PROJECT_KEY = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
 export const AdminInput = z.discriminatedUnion("do", [
 	...TeamInput.options,
 	z.object({
 		do: z.literal("project.create"),
-		key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
+		key: z.string().regex(PROJECT_KEY),
 		name: z.string().max(120).optional(),
 		preset: z.string().optional(),
 		unlinked: Unlinked.optional().describe(
