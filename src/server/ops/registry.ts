@@ -256,14 +256,16 @@ async function execute(app: App, db: WriteDb, ops: Readonly<Record<string, AnyOp
 			}
 		}
 		// A retired demo takes no write from the moment its retirement commits, which happened under the same row lock:
-		// its removal drains each table once and does not read it again (#914). Reading its policy is no write.
+		// its removal drains each table once and does not read it again (#914). Reading its policy is no write. The
+		// refusal waits until the caller is admitted, so one with no grant learns nothing a missing project would not
+		// tell it.
 		const reading = call.op === "admin" && "do" in input && input.do === "policy.show";
+		let retired: string | null = null;
 		for (const row of named)
-			if (!reading && (await demoDeployment(db, row.id))?.kind === "retired")
-				return fail("conflict", `${row.key} is a retired demo being removed, and takes no more writes`);
+			if (!reading && retired === null && (await demoDeployment(db, row.id))?.kind === "retired") retired = row.key;
 		if (typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string")
 			await lockCommand(db, input.cmd);
-		const reply = await executeInSnapshot(app, db, ops, call);
+		const reply = await executeInSnapshot(app, db, ops, call, retired);
 		if (db.inTransaction) {
 			if (reply.ok) await db.commit();
 			else await db.rollback();
@@ -279,6 +281,7 @@ async function executeInSnapshot(
 	db: ReadDb | WriteDb,
 	ops: Readonly<Record<string, AnyOp>>,
 	call: Call,
+	retired: string | null = null,
 ): Promise<Reply> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
@@ -313,6 +316,7 @@ async function executeInSnapshot(
 	// word for word. A refusal that named the capability it lacks would confirm the key to any token, a
 	// pipeline's for another project included. One that holds a grant there is told which capability it lacks.
 	if ("reply" in admitted) return admitted.reply;
+	if (retired !== null) return fail("conflict", `${retired} is a retired demo being removed, and takes no more writes`);
 	const { actor } = admitted;
 	const present = (result: unknown): unknown => (op.present ? op.present(actor, op.output.parse(result)) : result);
 
