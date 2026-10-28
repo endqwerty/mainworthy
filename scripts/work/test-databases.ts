@@ -25,6 +25,25 @@ export function processStamp(pid: number): string | null {
 	});
 	return answer.exitCode === 0 ? answer.stdout.toString().trim() || null : null;
 }
+/** The start time in `/proc/<pid>/stat`, in clock ticks since boot: field 22, counted after the parenthesised name. */
+export function startTicks(stat: string): string | null {
+	// The command name is in parentheses and may hold spaces and parentheses itself, so count from the last one.
+	const start = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+	return start && /^\d+$/.test(start) ? start : null;
+}
+/**
+ * A process's start as the kernel counts it, in clock ticks (hundredths of a second) since boot, where `/proc` has it;
+ * `processStamp`'s one-second `ps` time elsewhere. A recycled pid matches only if the pid space wrapped within one
+ * tick of the original's start. Only a reader of the same version compares it: the stamps runners share stay
+ * `processStamp`'s.
+ */
+export function processIdentity(pid: number): string | null {
+	try {
+		const start = startTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
+		if (start) return `ticks:${start}`;
+	} catch {}
+	return processStamp(pid);
+}
 const runsRoot = (root: string): string =>
 	join(
 		homedir(),

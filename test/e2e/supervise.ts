@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { registerOwnedChild } from "../../scripts/work/processes.ts";
 import { markOwned } from "../../scripts/work/scratch.ts";
-import { processStamp } from "../../scripts/work/test-databases.ts";
+import { processIdentity } from "../../scripts/work/test-databases.ts";
 import { drainDatabaseDrops, testDatabase } from "../db.ts";
 
 const config = z
@@ -32,7 +32,7 @@ const unregisterFixture = pid === undefined ? async () => {} : await registerOwn
 if (pid !== undefined) {
 	markOwned(config.data, [process.pid, pid]);
 	await writeFile(join(config.data, "fixture-pid"), String(pid));
-	await writeFile(join(config.data, "fixture-stamp"), processStamp(pid) ?? "");
+	await writeFile(join(config.data, "fixture-stamp"), processIdentity(pid) ?? "");
 }
 // A fixture can publish its URL immediately; readiness must include its completed PID metadata.
 child.stdout?.pipe(process.stdout);
