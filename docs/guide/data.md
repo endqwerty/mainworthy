@@ -226,12 +226,20 @@ project before creating that marker. Question and evidence context always appear
 inside the file.
 
 A signer's numeric `policy` resolves to `policy:<version>`. A full-history file
-must include that policy. In a partial history, an omitted signing policy counts
-once per signer in `beforeRangeReferences`. Its version must be positive. Policy
-version order need not match timestamp order, as demo seeds write past history
-after project creation. The offline verifier cannot confirm an omitted policy's
-existence or date. An included signing policy cannot have a later project sequence
-than its decision.
+has `from: 0` and `to: exportedAt + 1`: the exclusive end includes the export
+millisecond. Every other range is partial, including a `to`-only export ending
+earlier. A full-history file must include every signing policy; verification
+checks that each included policy's project sequence does not follow its decision.
+In a partial file an omitted positive signing policy counts once per signer in
+`omittedSigningPolicyReferences`, separately from timestamped `before-range`
+markers counted in `beforeRangeReferences`. The header and numeric signer version
+do not distinguish an omitted policy before `from` from one at or after `to`.
+Policy version order need not match timestamp order, as demo seeds write past
+history after project creation. Partial verification cannot confirm an omitted
+policy's existence, date, or sequence, so success does not establish those signing
+policies. Included policies receive the same sequence checks in both file types.
+Neither file type proves server authenticity: the checksum detects byte changes,
+but a rewritten file can have its checksum recomputed.
 
 Recorded evidence is `{ state: "recorded", hash, ref }`. A decision made before
 migration 16 has `{ state: "not-recorded" }` because its exact seen-evidence hash was

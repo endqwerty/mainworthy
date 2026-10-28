@@ -66,6 +66,21 @@ test("audit exports through the real CLI and verifies offline without reading cr
 		expect(missingPolicy.code).toBe(4);
 		expect(missingPolicy.stdout).toBe("");
 		expect(missingPolicy.stderr).toContain(`record ${decision.id}: unresolved signing policy policy:999999`);
+		rows[0].from = 1;
+		const partialBody = `${rows.map((row) => canonicalJson(row)).join("\n")}\n`;
+		await writeFile(
+			file,
+			`${partialBody}${canonicalJson({ end: true, records: rows.length - 1, sha256: auditChecksum(partialBody) })}\n`,
+		);
+		const partial = await run(["audit", "verify", file]);
+		expect(partial.code).toBe(0);
+		expect(partial.stdout).toContain("0 references precede the range; 1 signing policy references are omitted");
+		const partialJson = await run(["audit", "verify", file, "--json"]);
+		expect(partialJson.code).toBe(0);
+		expect(JSON.parse(partialJson.stdout)).toMatchObject({
+			beforeRangeReferences: 0,
+			omittedSigningPolicyReferences: 1,
+		});
 		await writeFile(file, `\uFEFF${original}`);
 		const bom = await run(["audit", "verify", file]);
 		expect(bom.code).toBe(4);

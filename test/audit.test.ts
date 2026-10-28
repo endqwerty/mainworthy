@@ -43,7 +43,7 @@ async function fixture() {
 	return { h, first, cutoff };
 }
 
-test("audit resolves signer policies and counts each signing reference before the range", () => {
+test("audit resolves signer policies and counts omitted signing references separately", () => {
 	const by = { id: 1, name: "robin", kind: "human" };
 	const header = {
 		mainworthy: "audit",
@@ -51,7 +51,7 @@ test("audit resolves signer policies and counts each signing reference before th
 		project: "scratch",
 		from: 0,
 		to: 100,
-		exportedAt: 100,
+		exportedAt: 99,
 		seq: 10,
 		grantChanges: "team-history-only",
 		teamState: "at-export",
@@ -114,7 +114,7 @@ test("audit resolves signer policies and counts each signing reference before th
 		const row = rows.find((r) => r.type === "decision");
 		if (row) row.signers = [...decision.signers, ...decision.signers];
 	});
-	expect(verifyAudit(partial).beforeRangeReferences).toBe(2);
+	expect(verifyAudit(partial)).toMatchObject({ beforeRangeReferences: 0, omittedSigningPolicyReferences: 2 });
 	expect(() =>
 		verifyAudit(
 			rehash(file, (rows) => {
@@ -128,7 +128,7 @@ test("audit resolves signer policies and counts each signing reference before th
 			rehash(signingPolicy(999999), (rows) => {
 				if (rows[0]) rows[0].from = 1;
 			}),
-		).beforeRangeReferences,
+		).omittedSigningPolicyReferences,
 	).toBe(1);
 	expect(() =>
 		verifyAudit(
@@ -137,6 +137,46 @@ test("audit resolves signer policies and counts each signing reference before th
 			}),
 		),
 	).toThrow(/record decision:1: .*policy/);
+	for (const range of [
+		{ from: 0, to: 99 },
+		{ from: 1, to: 100 },
+		{ from: 1, to: 99 },
+	]) {
+		const partialPolicy = (version: number) =>
+			rehash(signingPolicy(version), (rows) => {
+				if (rows[0]) Object.assign(rows[0], range);
+			});
+		expect(verifyAudit(partialPolicy(999999))).toMatchObject({
+			beforeRangeReferences: 0,
+			omittedSigningPolicyReferences: 1,
+		});
+		expect(() => verifyAudit(partialPolicy(0))).toThrow(/record decision:1: .*policy/);
+	}
+});
+
+test("to-only demo audit verifies when its only signing policy is after the range", async () => {
+	const h = await harness();
+	try {
+		await h.call("admin", { do: "project.demo", key: "scratch" });
+		expect(
+			await invoke(h.app, OPS, {
+				op: "propose",
+				project: "scratch",
+				input: { edits: [{ op: "create", outline: "Backdated case" }] },
+				actor: async () => h.owner,
+				at: 1_780_000_000_000,
+			}),
+		).toMatchObject({ ok: true });
+		const full = AuditReply.parse(await h.call("audit", {})).ndjson;
+		expect(entries(full).filter((row) => row.type === "policy")).toHaveLength(1);
+		expect(verifyAudit(full).beforeRangeReferences).toBe(0);
+		const partial = AuditReply.parse(await h.call("audit", { to: 1_790_000_000_000 })).ndjson;
+		expect(entries(partial).filter((row) => row.type === "policy")).toHaveLength(0);
+		expect(entries(partial).filter((row) => row.type === "decision")).toHaveLength(1);
+		expect(verifyAudit(partial)).toMatchObject({ beforeRangeReferences: 0, omittedSigningPolicyReferences: 1 });
+	} finally {
+		await h.close();
+	}
 });
 
 test("seeded demo partial audit exports verify when policy versions and timestamps differ", async () => {
@@ -155,7 +195,7 @@ test("seeded demo partial audit exports verify when policy versions and timestam
 				const partial = AuditReply.parse(await demo.call("audit", input)).ndjson;
 				expect(entries(partial).some((row) => row.type === "policy" && row.version === 1)).toBe(true);
 				expect(entries(partial).some((row) => row.type === "policy" && row.version === 3)).toBe(false);
-				expect(verifyAudit(partial).beforeRangeReferences).toBeGreaterThan(0);
+				expect(verifyAudit(partial).omittedSigningPolicyReferences).toBeGreaterThan(0);
 			}
 		}
 	});
@@ -359,7 +399,7 @@ test("range exports mark actual old version predecessors and decisions, and excl
 		const partial = AuditReply.parse(await h.call("audit", { from: cutoff }));
 		const version = entries(partial.ndjson).find((record) => record.type === "case-version");
 		expect(version).toMatchObject({ version: 2, parent: { scope: "before-range", id: "version:1:1" } });
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
+		expect(verifyAudit(partial.ndjson)).toMatchObject({ beforeRangeReferences: 1, omittedSigningPolicyReferences: 1 });
 		const earlier = AuditReply.parse(await h.call("audit", { to: cutoff }));
 		expect(entries(earlier.ndjson)).toEqual(entries(first.ndjson));
 	} finally {
@@ -510,7 +550,7 @@ test("answers, advice and withdrawals retain their actors, reasons and exact evi
 		expect(entries(partial.ndjson).find((record) => record.type === "decision")).toMatchObject({
 			prior: { scope: "before-range" },
 		});
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
+		expect(verifyAudit(partial.ndjson)).toMatchObject({ beforeRangeReferences: 1, omittedSigningPolicyReferences: 1 });
 	} finally {
 		await h.close();
 	}
@@ -532,7 +572,7 @@ test("policy changes include their adopting decision and a verifiable previous p
 			prior: { scope: "before-range", id: "policy:1" },
 			decision: { scope: "included" },
 		});
-		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(2);
+		expect(verifyAudit(partial.ndjson)).toMatchObject({ beforeRangeReferences: 1, omittedSigningPolicyReferences: 1 });
 	} finally {
 		await h.close();
 	}

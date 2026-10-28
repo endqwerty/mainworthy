@@ -335,7 +335,9 @@ export function verifyAudit(text: string) {
 		if (record.type === "policy" && record.id !== `policy:${record.version}`) fail("policy id mismatch");
 		byId.set(record.id, record);
 	}
+	const fullHistory = header.from === 0 && header.to === header.exportedAt + 1;
 	let beforeRangeReferences = 0;
+	let omittedSigningPolicyReferences = 0;
 	let unavailableDecisionEvidence = 0;
 	for (const [index, record] of records.entries()) {
 		function fail(message: string): never {
@@ -420,8 +422,8 @@ export function verifyAudit(text: string) {
 				const policy = byId.get(id);
 				if (policy?.type === "policy") {
 					if (policy.seq > record.seq) fail(`future signing policy ${id}`);
-				} else if (header.from > 0 && signer.policy >= 1) {
-					beforeRangeReferences++;
+				} else if (!fullHistory && signer.policy >= 1) {
+					omittedSigningPolicyReferences++;
 				} else fail(`unresolved signing policy ${id}`);
 			}
 			const effects = z
@@ -489,6 +491,7 @@ export function verifyAudit(text: string) {
 		records: records.length,
 		sha256: footer.sha256,
 		beforeRangeReferences,
+		omittedSigningPolicyReferences,
 		unavailableDecisionEvidence,
 	};
 }
