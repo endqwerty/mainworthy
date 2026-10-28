@@ -126,6 +126,7 @@ import {
 	mustQuestion,
 	nearestJudgment,
 	noteCarried,
+	openMapQuestionsInFile,
 	openQuestionIds,
 	openQuestionsOn,
 	pendingAnswersOf,
@@ -909,6 +910,13 @@ async function* settleSteps(
 	);
 	const effects = yield* handler.effect(ctx, witness, question, given, { raiseSteps, reconsiderPolicySteps });
 	await setDecisionEffects(ctx, decision.id, effects);
+	if (question.kind === "map" && Array.isArray(effects.linked) && effects.linked.length > 0) {
+		const { file } = json<{ file: string }>(question.subject);
+		for (const other of await openMapQuestionsInFile(ctx.db, ctx.project.id, file)) {
+			const current = await withCurrentFile(ctx, other);
+			if (json<{ count: number }>(current.evidence).count === 0) await dissolve(ctx, current);
+		}
+	}
 	const about = await runsAbout(ctx, question);
 	if (question.kind === "failure" && Array.isArray(effects.reask) && effects.reask.length > 0)
 		await askAgain(ctx, question, effects.reask as number[]);

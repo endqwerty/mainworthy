@@ -36,6 +36,7 @@ async function reportWhilePolling(files: number): Promise<number> {
 			const samples = z.object({ longest: z.number(), samples: z.number(), errors: z.number() }).parse(await polled);
 			expect(samples.errors).toBe(0);
 			expect(samples.samples).toBeGreaterThan(1);
+			await instance.minute();
 			expect(await producer.call("find", { limit: 1 })).toMatchObject({ count: cases });
 			expect(await producer.call("find", { in: "tests", unlinked: true })).toMatchObject({ items: [] });
 			return samples.longest;
