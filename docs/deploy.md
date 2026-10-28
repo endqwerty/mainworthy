@@ -1215,7 +1215,7 @@ recovery link for everybody else.
 ### Upgrading to provider-only sign-in
 
 The first start of the build that made the provider the only way in deletes stored passwords, passkeys,
-authenticators, recovery codes, recovery email addresses and queued mail (migration 7); there is no path to keep
+authenticators, recovery codes, recovery email addresses and queued mail (migration 8); there is no path to keep
 them. A browser signed in with one of those is signed out. Tokens, linked identities and sessions opened with them
 stay. What you do once:
 
@@ -1223,7 +1223,7 @@ stay. What you do once:
   `MAINWORTHY_REQUIRE_ADMIN_MFA` and `MAINWORTHY_OIDC_MFA` from the environment: nothing reads them.
 - Set up the provider, sign in with the owner token and link your identity (above).
 - Make a recovery link for each person who signed in with a password or a passkey. They accept it at the provider.
-- Archives exported before the upgrade (format 43) are refused on import: export again after it.
+- Archives exported before the upgrade (formats 43 and 44) are refused on import: export again after it.
 
 ## Backup and restore
 

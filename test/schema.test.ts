@@ -459,21 +459,12 @@ test("the migration chain upgrades the immutable baseline without replacing its 
 	}
 });
 
-/** A database set back to 5, with migration 6's indexes as `undo` leaves them. */
-async function atSchemaFive(undo: string): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
-	const fixture = await testDatabase();
-	const raw = new SQL(fixture.url, { max: 3, bigint: true });
-	await raw
-		.unsafe(
-			`DROP TABLE report_map_pages; UPDATE meta SET value = '43' WHERE key = 'archive_version'; UPDATE meta SET value = '5' WHERE key = 'schema_version'; ${undo}`,
-		)
-
 /**
- * What migration 7 took away, put back as the baseline had it: the other kinds of credential, the handles passkeys
+ * What migration 8 took away, put back as the baseline had it: the other kinds of credential, the handles passkeys
  * were filed under, recovery email addresses, and the archive format before it.
  */
-const BEFORE_SEVEN = `
-UPDATE meta SET value = '43' WHERE key = 'archive_version';
+const BEFORE_EIGHT = `
+UPDATE meta SET value = '44' WHERE key = 'archive_version';
 ALTER TABLE credentials DROP CONSTRAINT credentials_kind_check;
 ALTER TABLE credentials ADD CONSTRAINT credentials_kind_check CHECK (kind IN ('password', 'passkey', 'oidc', 'totp'));
 CREATE UNIQUE INDEX credentials_password ON credentials (actor) WHERE kind = 'password' AND revoked_at IS NULL;
@@ -483,12 +474,16 @@ CREATE TABLE mail_contacts (actor bigint PRIMARY KEY, email TEXT NOT NULL UNIQUE
 ALTER TABLE mail_contacts ADD FOREIGN KEY (actor) REFERENCES actors (id) DEFERRABLE INITIALLY IMMEDIATE;
 `;
 
-/** A database migrated to 7 and set back to `version`: migration 7 undone, then whatever `undo` does. */
-async function atSchema(version: 5 | 6, undo = ""): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
+/** Undo migration 8, then 7 when needed, before setting migration 6 indexes as `undo` leaves them. */
+async function atSchema(version: 5 | 6 | 7, undo = ""): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
 	const fixture = await testDatabase();
 	const raw = new SQL(fixture.url, { max: 3, bigint: true });
 	await raw
-		.unsafe(`UPDATE meta SET value = '${version}' WHERE key = 'schema_version'; ${BEFORE_SEVEN} ${undo}`)
+		.unsafe(`
+${BEFORE_EIGHT}
+${version < 7 ? "DROP TABLE report_map_pages; UPDATE meta SET value = '43' WHERE key = 'archive_version';" : ""}
+UPDATE meta SET value = '${version}' WHERE key = 'schema_version';
+${undo}`)
 		.simple();
 	return {
 		url: fixture.url,
@@ -607,13 +602,15 @@ test("two instances upgrading to migration 6 at once both start, and build each 
 	}
 }, 60_000);
 
-// People sign in through the identity provider only. Migration 7 deletes every other kind of credential, the
+// People sign in through the identity provider only. Migration 8 deletes every other kind of credential, the
 // sessions that rested on one, and what passkeys and mail kept; an identity at the provider and its session stay.
-test("migration 7 keeps identities at the provider and deletes every other way in, with the sessions on them", async () => {
-	const target = await atSchema(6);
-	const before = await schemaCatalog(target.raw);
-	await target.raw
-		.unsafe(`
+test.each([6, 7] as const)(
+	"migration 8 upgrades schema %i, keeping provider identities and deleting other credentials and their sessions",
+	async (version) => {
+		const target = await atSchema(version);
+		const before = await schemaCatalog(target.raw);
+		await target.raw
+			.unsafe(`
 INSERT INTO orgs(id,name,created_at) VALUES (9001,'migrated',0);
 INSERT INTO actors(id,org,kind,name,created_at) VALUES (9001,9001,'human','robin',0),(9002,9001,'human','sam',0);
 INSERT INTO credentials(id,actor,kind,handle,data,label,created_at) VALUES
@@ -632,32 +629,34 @@ INSERT INTO background_jobs(id,kind,input,accepted_at,effect,max_attempts,next_a
 INSERT INTO identity_limits(key,entry,expires_at,version) VALUES
  ('account:robin','{}',1,1),('totp:9002','{}',1,2),('mail-reset:robin','{}',1,3),('address:192.0.2.1','{}',1,4);
 `)
-		.simple();
-	const database = await Database.open({ url: target.url });
-	try {
-		await migrate(database);
-		expect(await database.read(schemaVersion)).toBe(7);
-		const rows = async (query: string) => await target.raw.unsafe(query);
-		expect(await rows("SELECT id, kind FROM credentials WHERE id >= 9001 ORDER BY id")).toEqual([
-			{ id: 9001n, kind: "oidc" },
-		]);
-		expect(await rows("SELECT id FROM sessions WHERE id >= 9001 ORDER BY id")).toEqual([{ id: 9001n }]);
-		expect(await rows("SELECT id FROM background_jobs ORDER BY id")).toEqual([{ id: "other-1" }]);
-		expect(await rows("SELECT key FROM identity_limits ORDER BY key")).toEqual([{ key: "address:192.0.2.1" }]);
-		expect(await rows("SELECT value FROM meta WHERE key = 'archive_version'")).toEqual([
-			{ value: String(ARCHIVE_VERSION) },
-		]);
-		// The schema it leaves is the one a new database starts with; no other kind of credential can be written.
-		const after = await schemaCatalog(target.raw);
-		expect(after).not.toEqual(before);
-		expect(after).toEqual(await schemaCatalog(db));
-		expect(
-			target.raw.unsafe(
-				"INSERT INTO credentials(actor,kind,data,label,created_at) VALUES (9001,'password','hash','password',0)",
-			),
-		).rejects.toThrow("credentials_kind_check");
-	} finally {
-		await database.close();
-		await target.close();
-	}
-}, 60_000);
+			.simple();
+		const database = await Database.open({ url: target.url });
+		try {
+			await migrate(database);
+			expect(await database.read(schemaVersion)).toBe(8);
+			const rows = async (query: string) => await target.raw.unsafe(query);
+			expect(await rows("SELECT id, kind FROM credentials WHERE id >= 9001 ORDER BY id")).toEqual([
+				{ id: 9001n, kind: "oidc" },
+			]);
+			expect(await rows("SELECT id FROM sessions WHERE id >= 9001 ORDER BY id")).toEqual([{ id: 9001n }]);
+			expect(await rows("SELECT id FROM background_jobs ORDER BY id")).toEqual([{ id: "other-1" }]);
+			expect(await rows("SELECT key FROM identity_limits ORDER BY key")).toEqual([{ key: "address:192.0.2.1" }]);
+			expect(await rows("SELECT value FROM meta WHERE key = 'archive_version'")).toEqual([
+				{ value: String(ARCHIVE_VERSION) },
+			]);
+			// The schema it leaves is the one a new database starts with; no other kind of credential can be written.
+			const after = await schemaCatalog(target.raw);
+			expect(after).not.toEqual(before);
+			expect(after).toEqual(await schemaCatalog(db));
+			expect(
+				target.raw.unsafe(
+					"INSERT INTO credentials(actor,kind,data,label,created_at) VALUES (9001,'password','hash','password',0)",
+				),
+			).rejects.toThrow("credentials_kind_check");
+		} finally {
+			await database.close();
+			await target.close();
+		}
+	},
+	60_000,
+);
