@@ -18,18 +18,30 @@ const Q = {
 	clear: sql("DELETE FROM identity_ceremonies"),
 	lockKind: sql<{ kind: string }>("SELECT pg_advisory_xact_lock(hashtextextended($kind, 602384))"),
 	expire: sql<{ kind: string; now: number }>("DELETE FROM identity_ceremonies WHERE kind = $kind AND deadline <= $now"),
-	// The newest an owner began stay: equal deadlines (one millisecond) fall back to the inserting transaction, since
-	// each ceremony is written in its own.
+	// The newest an owner began stay. `putAfterOwner` gives each of a limited owner's ceremonies a later deadline than
+	// the last, under the kind lock, so their deadlines order them as they were begun.
 	trimOwner: sql<{ kind: string; owner: string; keep: number }>(
 		`DELETE FROM identity_ceremonies WHERE kind = $kind AND owner = $owner AND key NOT IN
-		 (SELECT key FROM identity_ceremonies WHERE kind = $kind AND owner = $owner
-		  ORDER BY deadline DESC, xmin::text::bigint DESC LIMIT $keep)`,
+		 (SELECT key FROM identity_ceremonies WHERE kind = $kind AND owner = $owner ORDER BY deadline DESC LIMIT $keep)`,
 	),
 	count: sql<{ kind: string }, { count: number }>(
 		"SELECT count(*)::integer AS count FROM identity_ceremonies WHERE kind = $kind",
 	),
 	put: sql<{ kind: string; key: string; owner: string; deadline: number; generation: string; payload: string }>(
 		"INSERT INTO identity_ceremonies (kind, key, owner, deadline, generation, payload) VALUES ($kind, $key, $owner, $deadline, $generation, $payload)",
+	),
+	// An owner with a limit: at least a millisecond after its last, so the trim keeps the ones it began last.
+	putAfterOwner: sql<{
+		kind: string;
+		key: string;
+		owner: string;
+		deadline: number;
+		generation: string;
+		payload: string;
+	}>(
+		`INSERT INTO identity_ceremonies (kind, key, owner, deadline, generation, payload) VALUES ($kind, $key, $owner,
+		 GREATEST($deadline, (SELECT max(deadline) + 1 FROM identity_ceremonies WHERE kind = $kind AND owner = $owner)),
+		 $generation, $payload)`,
 	),
 	get: sql<{ kind: string; key: string; now: number }, { payload: string; generation: string }>(
 		"SELECT c.payload, c.generation FROM identity_ceremonies c JOIN identity_ceremony_epoch e ON c.generation = e.generation WHERE c.kind = $kind AND c.key = $key AND c.deadline > $now",
@@ -82,7 +94,7 @@ export class Ceremonies<T extends { readonly deadline: number }> {
 			await db.run(Q.trimOwner, { kind: this.kind, owner: ownerKey(owner), keep: ownerLimit - 1 });
 		await db.run(Q.expire, { kind: this.kind, now });
 		if ((await db.one(Q.count, { kind: this.kind })).count >= 10_000) throw new Busy();
-		await db.run(Q.put, {
+		await db.run(ownerLimit === undefined ? Q.put : Q.putAfterOwner, {
 			kind: this.kind,
 			key,
 			owner: ownerKey(owner),
