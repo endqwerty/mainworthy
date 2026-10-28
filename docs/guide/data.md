@@ -225,6 +225,13 @@ Their `at` must precede `from`. The exporter resolves the original event in the 
 project before creating that marker. Question and evidence context always appear
 inside the file.
 
+A signer's numeric `policy` resolves to `policy:<version>`. A full-history file
+must include that policy. In a partial history, an omitted signing policy counts
+once per signer in `beforeRangeReferences`. Its version must be positive and older
+than every included policy version, if any. The offline verifier cannot confirm
+an omitted policy's existence or date. An included signing policy cannot have a
+later project sequence than its decision.
+
 Recorded evidence is `{ state: "recorded", hash, ref }`. A decision made before
 migration 16 has `{ state: "not-recorded" }` because its exact seen-evidence hash was
 not retained. Its material `basis` remains available. A policy change or case version
