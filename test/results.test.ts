@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { sql } from "../src/server/kernel/db.ts";
+import { jobOp } from "../src/server/ops/jobs.ts";
+import { invokeService } from "../src/server/ops/registry.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 // What a gate counted, test by test (issue #343): every row a commit's gate counts can be read back, and the
@@ -327,6 +329,7 @@ describe("the results behind a gate", () => {
 					test: { ...row.test, key: `tests/file${i}.spec.ts::test ${i}`, file: `tests/file${i}.spec.ts` },
 				})),
 			});
+			await invokeService(k.app, jobOp, { do: "drain" });
 			expect((await k.call<InboxReply>("inbox", { limit: 1 })).counts.open).toBe(1100);
 			const listed: string[] = [];
 			let page = await k.call<InboxReply>("inbox", { limit: 99 });

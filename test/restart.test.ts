@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Envelope } from "../src/core/api.ts";
 import type { CommandFate, GateStatus, ReportReceipt } from "../src/core/ops.ts";
+import { Database } from "../src/server/kernel/db.ts";
 
 const ENTRY = resolve(import.meta.dir, "../src/cli/main.ts");
 
@@ -203,6 +204,15 @@ test("a report accepted when the server is killed is applied in full when it sta
 	// Recovery finished the command the dead process never answered: its reply is the receipt of the applied report.
 	const fate = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
 	expect(fate).toMatchObject({ state: "done", op: "report", reply: { fresh: true, counts: { total, fail: failing } } });
+	const database = await Database.open({ url: await databaseFor(dataDir) });
+	try {
+		while ((await database.read((db) => db.allDynamic("SELECT id FROM report_map_pages"))).length > 0)
+			await new Promise<void>((resolve) => setTimeout(resolve, 20));
+	} finally {
+		await database.close();
+	}
+	const beforeRetry = await send<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
+	if (!beforeRetry.ok) throw new Error("the gate was refused");
 	// The pipeline's retry of the same report under the same id gets that saved reply and adds nothing: no new
 	// sequence number, no second report.
 	const retried = await send<ReportReceipt>(second.url, "report", report);
@@ -211,6 +221,6 @@ test("a report accepted when the server is killed is applied in full when it sta
 	expect(retried.seq).toBe(fate.seq);
 	const after = await send<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
 	if (!after.ok) throw new Error("the gate was refused");
-	expect(after.seq).toBe(fate.seq);
+	expect(after.seq).toBe(beforeRetry.seq);
 	expect(after.result.tally).toEqual(gate.tally);
 }, 120_000);
