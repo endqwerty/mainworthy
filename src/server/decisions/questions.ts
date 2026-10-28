@@ -137,6 +137,9 @@ type ReceiptRoot = { id: number; hash: string; count: number };
 type ReceiptMember = { slot: number; child: number | null; payload: number | null; hash: string; count: number };
 
 const Q = {
+	openMapsInFile: sql<{ project: number; file: string }, StoredQuestionRow>(
+		"SELECT * FROM questions WHERE project=$project AND kind='map' AND state='open' AND subject::jsonb->>'file'=$file ORDER BY id",
+	),
 	receiptDecision: sql<{ id: number }, { answer: string }>(
 		"SELECT (answer::jsonb)->>'is' AS answer FROM decisions WHERE id=$id",
 	),
@@ -1141,3 +1144,6 @@ export async function mergeReceiptPage(
 		cursor: more && last ? `${receipt}.${collection}.${last.ordinal}` : null,
 	};
 }
+
+export const openMapQuestionsInFile = async (db: ReadDb, project: number, file: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.openMapsInFile, { project, file })).map(readQuestion);

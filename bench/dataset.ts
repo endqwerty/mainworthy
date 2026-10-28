@@ -11,12 +11,14 @@ import { type App, type Config, SESSION_LIFETIMES } from "../src/server/kernel/a
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { Database } from "../src/server/kernel/db.ts";
 import { baselineSchema, migrationHash } from "../src/server/kernel/migrate.ts";
+import { jobOp } from "../src/server/ops/jobs.ts";
+import { invokeService } from "../src/server/ops/registry.ts";
 import { testDatabase } from "../test/db.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
 import { publicLog } from "./log.ts";
 
-const GENERATOR = 2;
+const GENERATOR = 3;
 export const Parameters = z
 	.object({
 		cases: z.number().int().min(1_000).default(100_000),
@@ -448,6 +450,7 @@ export async function buildDataset(
 				}
 			},
 		);
+		const batchKeys = new Map<number, Set<string>>();
 		let command = 0;
 		let lastCommit = "";
 		const send = async (results: ResultIn[], target?: TargetIn) => {
@@ -463,9 +466,13 @@ export async function buildDataset(
 			return receipt;
 		};
 		await phase("test registration", parameters.tests, async () => {
-			for (let start = 0; start < parameters.tests; start += 5_000)
-				await send(generatedResults(start, Math.min(5_000, parameters.tests - start), parameters.tests, false));
+			for (let start = 0; start < parameters.tests; start += 5_000) {
+				const results = generatedResults(start, Math.min(5_000, parameters.tests - start), parameters.tests, false);
+				const receipt = await send(results);
+				batchKeys.set(receipt.batch, new Set(results.flatMap((r) => ("key" in r.test ? [r.test.key] : []))));
+			}
 		});
+		ensure((await invokeService(app, jobOp, { do: "drain" })).ok, "deferred registration must finish");
 		const tests: Metadata["tests"] = [];
 		const refs = new Map<string, string>();
 		let cursor: string | null = null;
@@ -494,23 +501,49 @@ export async function buildDataset(
 				pairs.push([test.ref, itemAt(stamps, index % stamps.length).ref]);
 				pairsByFile.set(test.file, pairs);
 			});
-			const queue = await call(app, owner, "inbox", { kind: "map", limit: 500 }, Queue);
-			const all = queue.items.flatMap((question) => {
-				const { file } = z.object({ file: z.string() }).parse(question.evidence);
-				const pairs = pairsByFile.get(file);
-				return pairs ? [{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "link", pairs } }] : [];
-			});
-			if (all.length > 0) {
+			const keysByRef = new Map(tests.map((test) => [test.ref, test.key]));
+			let cursor: string | null = null;
+			const questions: z.infer<typeof Queue>["items"] = [];
+			do {
+				const page: z.infer<typeof Queue> = await call(
+					app,
+					owner,
+					"inbox",
+					{ kind: "map", limit: 500, ...(cursor ? { cursor } : {}) },
+					Queue,
+				);
+				questions.push(...page.items);
+				cursor = page.cursor;
+			} while (cursor !== null);
+			for (const question of questions) {
+				const current = await app.database.read((db) =>
+					db.allDynamic<{ subject: string; evidence_hash: string; state: string }>(
+						"SELECT subject,evidence_hash,state FROM questions WHERE project=(SELECT id FROM projects WHERE key='benchmark') AND no=$1",
+						[Number(question.q.slice(2))],
+					),
+				);
+				const row = current[0];
+				if (row?.state !== "open") continue;
+				const { file, batch } = z
+					.object({ file: z.string(), batch: z.number().optional() })
+					.parse(JSON.parse(row.subject));
+				const pairs = (pairsByFile.get(file) ?? []).filter(
+					([ref]) => batch === undefined || batchKeys.get(batch)?.has(keysByRef.get(ref) ?? ""),
+				);
+				if (pairs.length === 0) continue;
 				const replies = await call(
 					app,
 					owner,
 					"decide",
-					{ all, reason: "Match existing automated journeys to authored cases" },
+					{
+						all: [{ q: question.q, onEvidence: row.evidence_hash, answer: { is: "link", pairs } }],
+						reason: "Match existing automated journeys to authored cases",
+					},
 					Decisions,
 				);
 				ensure(
-					replies.length === all.length && replies.every((reply) => reply.status === "decided"),
-					"bulk map decisions must settle",
+					replies.length === 1 && replies.every((reply) => reply.status === "decided"),
+					"map decisions must settle",
 				);
 			}
 		});

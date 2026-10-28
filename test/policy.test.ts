@@ -11,6 +11,8 @@ import { pendingAnswersOf } from "../src/server/decisions/questions.ts";
 import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
 import { Database, isForeignKeyViolation, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { invalid } from "../src/server/kernel/errors.ts";
+import { jobOp } from "../src/server/ops/jobs.ts";
+import { invokeService } from "../src/server/ops/registry.ts";
 
 import { type CurrentPolicy, currentPolicy, policyAt } from "../src/server/policy/policy.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
@@ -2239,6 +2241,7 @@ describe("unlinked tests", () => {
 				outcome: "pass",
 			})),
 		});
+		await invokeService(h.app, jobOp, { do: "drain" });
 		expect((await queue()).counts.map).toBe(files);
 		expect(await setUnlinked("track")).toMatchObject({ effects: { ruled: files } });
 		expect((await queue()).counts.open).toBe(0);

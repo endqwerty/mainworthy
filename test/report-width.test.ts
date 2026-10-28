@@ -228,3 +228,36 @@ test("migration 7 preserves unfinished mapping jobs from schema 6", async () => 
 		await h.close();
 	}
 }, 60_000);
+
+for (const scope of ["batch", "file"] as const) {
+	test(`settling a ${scope} question refreshes overlapping file questions`, async () => {
+		const h = await harness({ preset: "standard", unlinked: "ask" });
+		try {
+			const input = ciReport({ commit: "overlap-wide", n: 601 });
+			input.results = input.results.map((r, i) => ({
+				...r,
+				test: { ...r.test, file: i < 100 ? `f-${i}.ts` : "deep.ts" },
+			}));
+			await h.call("report", input);
+			await invokeService(h.app, jobOp, { do: "drain" });
+			await h.call("report", ciReport({ commit: "overlap-later", n: 1, file: "deep.ts" }));
+			const open = async () =>
+				(
+					await h.call<{ items: { q: string; evidenceHash: string; title: string; evidence: { count: number } }[] }>(
+						"inbox",
+						{ kind: "map", limit: 500 },
+					)
+				).items.filter((q) => q.title.includes("deep.ts"));
+			const question = (await open()).find((q) => q.evidence.count === (scope === "batch" ? 501 : 502));
+			if (!question) throw new Error("missing overlapping question");
+			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "create" } });
+			expect((await open()).map((q) => q.evidence.count)).toEqual(scope === "batch" ? [1] : []);
+			const remaining = (await open())[0];
+			if (remaining)
+				await h.call("decide", { q: remaining.q, onEvidence: remaining.evidenceHash, answer: { is: "create" } });
+			expect(await open()).toEqual([]);
+		} finally {
+			await h.close();
+		}
+	}, 60_000);
+}
