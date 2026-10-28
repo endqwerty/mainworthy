@@ -220,7 +220,8 @@ describe("the module map", () => {
 				const resolved = new URL(path, `file:///${file}`).pathname.slice(1);
 				// Bundled documentation and licence text outside src are assets, not runtime layers.
 				if (!resolved.startsWith("src/") && !/\.tsx?$/.test(resolved)) continue;
-				if (file === "src/cli/test-support.ts" && resolved === "test/db.ts") continue;
+				// The CLI test harness shares the test fixtures and budget policy.
+				if (file === "src/cli/test-support.ts" && ["test/db.ts", "scripts/budget.ts"].includes(resolved)) continue;
 				const target = layerOf(resolved);
 				if (target === layer || target === "core" || may.includes(target) || exceptions[file]?.includes(target))
 					continue;

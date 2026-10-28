@@ -631,26 +631,20 @@ test("a shard that ran again is read from its newest attempt, and the others fro
 
 test("the newest attempt of a shard is its report also when it failed, or left an artifact with no report in it", async () => {
 	const check = gateVariants();
-	const failedAgain = await check(
-		[
-			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
-			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
-			{ name: "tests-2", files: { "test/c.test.ts": "expected 1, got 2" }, attempt: 2 },
-		],
-		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
-	);
+	const failedAgain = await check([
+		...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
+		{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
+		{ name: "tests-2", files: { "test/c.test.ts": "expected 1, got 2" }, attempt: 2 },
+	]);
 	expect(failedAgain.output).toMatch(/mainworthy gate\s+blocked/);
 	expect(failedAgain.code).toBe(2);
 	// An older attempt that passed does not stand in for a newer one that says nothing.
-	const empty = await check(
-		[
-			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
-			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
-			{ name: "tests-2", files: {}, xml: "", attempt: 2 },
-		],
-		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
-	);
-	expect(empty.output).toMatch(/^Started a Mainworthy for this job: /m);
+	const empty = await check([
+		...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
+		{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
+		{ name: "tests-2", files: {}, xml: "", attempt: 2 },
+	]);
+	expect(empty.output).toContain("Reported to the deployed Mainworthy");
 	expect(empty.left).toEqual([]);
 	expect(empty.output).toContain(
 		"::error::tests-2: no report (test-results/results-tests-2-attempt-2/tests-2.xml is missing or empty)",
