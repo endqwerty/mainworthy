@@ -17,6 +17,14 @@ const top = z.number().int().min(1).max(200).default(20).describe("How many rows
 
 export const StatsInput = z.discriminatedUnion("of", [
 	z.object({
+		of: z
+			.literal("manual-effort")
+			.describe("Manual executions ranked by known reported time, including cases with automation."),
+		days,
+		limit: top,
+		cursor,
+	}),
+	z.object({
 		of: z.literal("pass-rate").describe("Per day: the results that passed, failed, were skipped or blocked."),
 		days,
 		zone: z

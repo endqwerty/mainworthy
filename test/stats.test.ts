@@ -779,3 +779,45 @@ test("all limited reports page beyond their maximum limit without losing rows or
 		expect(empty.of === "automation" ? empty.backlog : empty.items).toEqual([]);
 	}
 });
+
+test("manual effort ranks known cost and counts corrections in the original execution window", async () => {
+	h = await harness({ unlinked: "create" });
+	await h.call("report", ciReport({ commit: "aaaa0001", n: 1 }));
+	await h.call("propose", {
+		edits: ["Short", "Unknown", "Zero"].map((title) => ({ op: "create", body: { title, methods: ["human"] } })),
+	});
+	const report = async (ref: string, durationMs?: number, corrects?: number) =>
+		await h.call("report", {
+			target: { session: "effort" },
+			results: [{ test: { case: ref }, outcome: "pass", durationMs, corrects }],
+		});
+	await report("C-1", 9000);
+	const original = await lastResult("T-2");
+	h.advance(2 * DAY);
+	await report("C-1", 6000, original);
+	await report("C-1", 5000, await lastResult("T-2"));
+	await report("C-1");
+	for (const duration of [100, 200, 300]) await report("C-2", duration);
+	await report("C-3");
+	await report("C-4", 0);
+	const result = await h.call<StatsOf<"manual-effort">>("stats", { of: "manual-effort", days: 7, limit: 2 });
+	expect(result).toMatchObject({
+		total: 4,
+		cursor: 2,
+		items: [
+			{ case: "C-1", automated: true, runs: 2, timed: 1, untimed: 1, timeMs: 5000, averageMs: 5000 },
+			{ case: "C-2", automated: false, runs: 3, timed: 3, untimed: 0, timeMs: 600, averageMs: 200 },
+		],
+	});
+	expect(
+		(await h.call<StatsOf<"manual-effort">>("stats", { of: "manual-effort", days: 7, cursor: 2 })).items,
+	).toMatchObject([
+		{ case: "C-4", timeMs: 0, averageMs: 0 },
+		{ case: "C-3", timeMs: null, averageMs: null },
+	]);
+	expect(
+		(await h.call<StatsOf<"manual-effort">>("stats", { of: "manual-effort", days: 1 })).items.find(
+			(r) => r.case === "C-1",
+		),
+	).toMatchObject({ runs: 1, timed: 0, untimed: 1, timeMs: null });
+});

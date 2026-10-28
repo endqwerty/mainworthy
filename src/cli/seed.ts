@@ -479,6 +479,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 						const last = steps.at(-1)?.id;
 						return {
 							test: { case: refOf(result.case) },
+							...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
 							outcome: result.failed ? "fail" : "pass",
 							steps: steps.map((step) => ({
 								step: step.id,

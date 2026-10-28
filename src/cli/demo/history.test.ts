@@ -12,6 +12,13 @@ const of = <K extends HistoryEvent["kind"]>(events: HistoryEvent[], kind: K) =>
 	events.filter((event): event is Extract<HistoryEvent, { kind: K }> => event.kind === kind);
 
 describe("the demo's history", () => {
+	test("manual effort has known and missing timings, including work on automated cases", () => {
+		const results = of(history(), "execute").flatMap((event) => event.results);
+		expect(results.some((result) => result.durationMs !== undefined)).toBe(true);
+		expect(results.some((result) => result.durationMs === undefined)).toBe(true);
+		expect(results.some((result) => result.durationMs !== undefined && suite[result.case]?.test)).toBe(true);
+	});
+
 	test("today's review change selects enough existing checkout cases to show impact continuation", () => {
 		const checkout = suite.flatMap((item) => (item.folder.startsWith("Checkout") && item.test ? [item.test] : []));
 		expect(checkout.length).toBeGreaterThan(200);

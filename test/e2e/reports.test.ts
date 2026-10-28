@@ -184,3 +184,49 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 	},
 	60_000,
 );
+
+// The browser owns the partial/unknown labels and automation marker; numbers are covered in stats.test.ts.
+(browserAvailable ? test : test.skip)(
+	"manual effort shows timing completeness and automation in the selected period",
+	async () => {
+		const server = await startServer({ preset: "loose", unlinked: "create" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("report", ciReport({ commit: "aaaa0001", n: 1 }));
+			await server.api("propose", { edits: [{ op: "create", outline: "Untimed task" }] });
+			for (const durationMs of [60000, undefined])
+				await server.api("report", {
+					target: { session: "manual" },
+					results: [{ test: { case: "C-1" }, outcome: "pass", ...(durationMs === undefined ? {} : { durationMs }) }],
+				});
+			await server.api("report", {
+				target: { session: "manual" },
+				results: [{ test: { case: "C-2" }, outcome: "pass" }],
+			});
+			view = await openPage(server, { path: "/p/scratch/reports/manual-effort" });
+			const page = view.page;
+			await page.locator("#detail tbody tr").first().waitFor();
+			expect(await page.locator("#detail tbody tr").first().innerText()).toContain("has automation");
+			expect(await page.locator("#detail tbody tr").first().locator("td").allTextContents()).toEqual([
+				"2",
+				"1",
+				"1",
+				"1 min (partial)",
+				"1 min",
+			]);
+			expect(await page.locator("#detail tbody tr").last().locator("td").allTextContents()).toEqual([
+				"1",
+				"0",
+				"1",
+				"Unknown",
+				"Unknown",
+			]);
+			await page.getByLabel("Days to read").selectOption("7");
+			await page.locator("#detail .phead").getByText("last 7 days").waitFor();
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60000,
+);

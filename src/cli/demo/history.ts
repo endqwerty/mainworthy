@@ -93,7 +93,7 @@ export type HistoryEvent = Base &
 		| {
 				kind: "execute";
 				run: string;
-				results: { case: number; failed?: { message: string; note: string } }[];
+				results: { case: number; durationMs?: number; failed?: { message: string; note: string } }[];
 		  }
 		/** A step added to the end of a case. */
 		| { kind: "edit"; case: number; add: { action: string; expected: string }; reason: string }
@@ -438,7 +438,11 @@ export function demoHistory(options: {
 				at: start + offset + index * MINUTE,
 				step: `${step}x${sitting}`,
 				run: run.name,
-				results: batch.map((item) => (item === bad ? { case: item, failed } : { case: item })),
+				results: batch.map((item, index) => ({
+					case: item,
+					...(item === bad ? { failed } : {}),
+					...((item + index) % 4 === 0 ? {} : { durationMs: (1 + (item % 12)) * MINUTE }),
+				})),
 			});
 			if (batch.includes(bad ?? -1))
 				events.push({

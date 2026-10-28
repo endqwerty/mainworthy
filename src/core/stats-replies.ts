@@ -84,6 +84,24 @@ export const AutomationReply = z.object({
 		}),
 	),
 });
+export const ManualEffortReply = z.object({
+	...page,
+	of: z.literal("manual-effort"),
+	from: schemaNumber,
+	to: schemaNumber,
+	items: z.array(
+		z.object({
+			case: schemaText,
+			title: schemaText,
+			automated: schemaFlag,
+			runs: whole,
+			timed: whole,
+			untimed: whole,
+			timeMs: whole.nullable(),
+			averageMs: schemaNumber.min(0).nullable(),
+		}),
+	),
+});
 export const CoverageReply = z.object({
 	...page,
 	of: z.literal("coverage"),
@@ -109,6 +127,7 @@ export const StatsReply = z.discriminatedUnion("of", [
 	RerunsReply,
 	AutomationReply,
 	CoverageReply,
+	ManualEffortReply,
 ]);
 export type StatsReply = z.infer<typeof StatsReply>;
 export type StatsOf<K extends StatsKind> = Extract<StatsReply, { of: K }>;

@@ -16,6 +16,7 @@ const REPORTS: readonly { of: StatsKind; label: string }[] = [
 	{ of: "flaky", label: "Flaky tests" },
 	{ of: "reruns", label: "Time lost to reruns" },
 	{ of: "automation", label: "Automation" },
+	{ of: "manual-effort", label: "Manual effort" },
 	{ of: "coverage", label: "Coverage by requirement" },
 ];
 const WINDOWS = [7, 14, 30, 90] as const;
@@ -38,6 +39,7 @@ function inputOf(of: StatsKind, days: number, method: MethodKind | null = null):
 		case "flaky":
 		case "reruns":
 		case "automation":
+		case "manual-effort":
 		case "coverage":
 			return { of, days };
 	}
@@ -179,7 +181,9 @@ function Headline({ of, days }: { of: StatsKind; days: number }) {
 						: `${spent(data.lostMs)} in ${count(data.reruns, "rerun")}`
 					: data.of === "automation"
 						? `${percent(data.rate)} of what can be automated`
-						: `${data.covered} of ${data.requirements} requirements covered`;
+						: data.of === "manual-effort"
+							? `${count(data.total, "case")} with human work`
+							: `${data.covered} of ${data.requirements} requirements covered`;
 	return <span className="dim">{text}</span>;
 }
 
@@ -193,6 +197,8 @@ function Detail({ of, days }: { of: StatsKind; days: number }) {
 			return <Reruns key={days} days={days} />;
 		case "automation":
 			return <Automation key={days} days={days} />;
+		case "manual-effort":
+			return <ManualEffort key={days} days={days} />;
 		case "coverage":
 			return <Coverage key={days} days={days} />;
 	}
@@ -488,6 +494,64 @@ function Automation({ days }: { days: number }) {
 								</th>
 								<td>{item.runs}</td>
 								<td>{item.timeMs === null ? "" : spent(item.timeMs)}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			)}
+		</>
+	);
+}
+
+function ManualEffort({ days }: { days: number }) {
+	const { read, paging } = usePagedReport("manual-effort", days);
+	const data = read.data?.of === "manual-effort" ? read.data : undefined;
+	const go = useGo();
+	if (!data)
+		return (
+			<Unread read={read} what="manual effort">
+				{paging}
+			</Unread>
+		);
+	return (
+		<>
+			<p>Most known manual time first. Active cases with human work, including those with automation.</p>
+			<p className="dim">
+				{new Date(data.from).toLocaleString()} to {new Date(data.to).toLocaleString()}. Partial totals omit untimed
+				executions; averages use timed executions only.
+			</p>
+			{paging}
+			{data.items.length === 0 ? (
+				<p className="dim">No human work in this period.</p>
+			) : (
+				<table className="report-table">
+					<thead>
+						<tr>
+							<th scope="col">Case</th>
+							<th scope="col">Runs by hand</th>
+							<th scope="col">Timed</th>
+							<th scope="col">Untimed</th>
+							<th scope="col">Known total</th>
+							<th scope="col">Timed average</th>
+						</tr>
+					</thead>
+					<tbody>
+						{data.items.map((item) => (
+							<tr key={item.case}>
+								<th scope="row">
+									<a className="ref" {...go(item.case)}>
+										{item.case}
+									</a>{" "}
+									{item.title}
+									{item.automated && <span className="report-tag">has automation</span>}
+								</th>
+								<td>{item.runs}</td>
+								<td>{item.timed}</td>
+								<td>{item.untimed}</td>
+								<td>
+									{item.timeMs === null ? "Unknown" : `${spent(item.timeMs)}${item.untimed > 0 ? " (partial)" : ""}`}
+								</td>
+								<td>{item.averageMs === null ? "Unknown" : spent(Math.round(item.averageMs))}</td>
 							</tr>
 						))}
 					</tbody>

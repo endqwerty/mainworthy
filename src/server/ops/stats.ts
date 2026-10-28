@@ -146,6 +146,38 @@ async function automation(
 	};
 }
 
+async function manualEffort(
+	ctx: Ctx<ReadDb>,
+	input: Extract<StatsInput, { of: "manual-effort" }>,
+): Promise<StatsOf<"manual-effort">> {
+	const from = ctx.now - input.days * DAY;
+	const cases = new Map((await automationOfCases(ctx.db, ctx.project.id)).map((row) => [row.id, row]));
+	const automated = await automatedCases(ctx.db, ctx.project.id);
+	const rows = (await runsByHand(ctx.db, ctx.project.id, from, ctx.now))
+		.filter((row) => cases.has(row.case_id))
+		.sort((a, b) => (b.time ?? -1) - (a.time ?? -1) || b.runs - a.runs || a.case_id - b.case_id);
+	return {
+		of: "manual-effort",
+		from,
+		to: ctx.now,
+		...page(rows.length, input),
+		items: rows.slice(input.cursor, input.cursor + input.limit).map((row) => {
+			const c = cases.get(row.case_id);
+			if (!c) throw new Error("manual effort case disappeared");
+			return {
+				case: caseRef(c),
+				title: c.title,
+				automated: automated.has(c.id),
+				runs: row.runs,
+				timed: row.timed,
+				untimed: row.runs - row.timed,
+				timeMs: row.time,
+				averageMs: row.average,
+			};
+		}),
+	};
+}
+
 async function coverage(
 	ctx: Ctx<ReadDb>,
 	input: Extract<StatsInput, { of: "coverage" }>,
@@ -173,6 +205,8 @@ async function coverage(
 
 export async function stats(ctx: Ctx<ReadDb>, input: StatsInput): Promise<StatsReply> {
 	switch (input.of) {
+		case "manual-effort":
+			return await manualEffort(ctx, input);
 		case "pass-rate":
 			return await passRate(ctx, input);
 		case "flaky":
@@ -190,7 +224,7 @@ export const statsOp = defineOp({
 	name: "stats",
 	output: REPLIES.stats,
 	summary:
-		"Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, coverage by requirement.",
+		"Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, manual effort, coverage by requirement.",
 	input: StatsInput,
 	needs: "read",
 	scope: "project",

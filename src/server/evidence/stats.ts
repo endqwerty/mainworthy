@@ -132,15 +132,33 @@ const Q = {
 	automated: sql<{ project: number }, { case_id: number }>(
 		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND kind = 'auto' AND case_id IS NOT NULL",
 	),
-	byHand: sql<{ project: number; since: number }, { case_id: number; runs: number; time: number | null }>(`
-		SELECT t.case_id, count(*) AS runs,
-		       CASE WHEN count(r.duration_ms) = 0 THEN NULL
-		            ELSE greatest(0, least(coalesce(sum(r.duration_ms), 0), ${Number.MAX_SAFE_INTEGER}))::bigint END AS time
-		FROM results r JOIN tests t ON t.id = r.test
-		WHERE r.project = $project AND r.at >= $since AND r.method = 'human' AND t.case_id IS NOT NULL
-		  AND ${uncorrectedResults("r.id")}
-		GROUP BY t.case_id
-	`),
+	byHand: sql<
+		{ project: number; since: number; until: number },
+		{ case_id: number; runs: number; timed: number; time: number | null; average: number | null }
+	>(`
+        WITH RECURSIVE executions AS (
+          SELECT r.id, t.case_id FROM results r JOIN tests t ON t.id = r.test
+          WHERE r.project = $project AND r.at >= $since AND r.at <= $until
+            AND r.method = 'human' AND t.case_id IS NOT NULL AND r.corrects IS NULL
+        ), chain(root, id, outcome, duration_ms, seq, ord) AS (
+          SELECT e.id, r.id, r.outcome, r.duration_ms, r.seq, r.ord FROM executions e JOIN results r ON r.id = e.id
+          UNION ALL
+          SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord FROM chain k JOIN results c ON c.corrects = k.id
+        ), standing AS (
+          SELECT e.case_id, k.duration_ms, row_number() OVER (
+            PARTITION BY k.root ORDER BY
+              CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+              k.seq DESC, k.ord DESC
+          ) AS rank
+          FROM executions e JOIN chain k ON k.root = e.id WHERE ${uncorrectedResults("k.id")}
+        )
+        SELECT case_id, count(*) AS runs, count(duration_ms) AS timed,
+          CASE WHEN count(duration_ms) = 0 THEN NULL
+            ELSE greatest(0, least(sum(duration_ms), ${Number.MAX_SAFE_INTEGER}))::bigint END AS time,
+          CASE WHEN count(duration_ms) = 0 THEN NULL
+            ELSE greatest(0, least(avg(duration_ms), ${Number.MAX_SAFE_INTEGER}))::double precision END AS average
+        FROM standing WHERE rank = 1 GROUP BY case_id
+    `),
 	// `+r.at` keeps each test's read on `results_test`, newest first, which stops at its first match; on
 	// `results_at` it would read the whole window once for every test.
 	latest: sql<
@@ -227,8 +245,8 @@ export const rerunsByTest = async (db: ReadDb, project: number, since: number) =
 export const automatedCases = async (db: ReadDb, project: number): Promise<Set<number>> =>
 	new Set((await db.all(Q.automated, { project })).map((row) => row.case_id));
 /** Per case, the results a person recorded since a moment, and the time of those that said it. */
-export const runsByHand = async (db: ReadDb, project: number, since: number) =>
-	await db.all(Q.byHand, { project, since });
+export const runsByHand = async (db: ReadDb, project: number, since: number, until = Number.MAX_SAFE_INTEGER) =>
+	await db.all(Q.byHand, { project, since, until });
 
 export type CaseOutcome = "passed" | "failed" | "other" | "notRun";
 /**
