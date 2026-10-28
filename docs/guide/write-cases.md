@@ -103,6 +103,8 @@ Current and proposed tags classify the whole proposal for policy review.
 This includes requirement-link changes, even when one proposal adds many links to the same case.
 While review is pending, none of those changes is current. Rejecting it leaves the case unchanged.
 A conflict or failed save keeps your text and metadata on this device.
+If the save succeeds but reading its recorded version fails, saving again finishes that read
+without creating another case. Reloading asks the server what became of the stored command first.
 
 The editor records a step once the step has an action.
 A step with an expected result but no action stays in your draft on this device, including after a reload.

@@ -172,7 +172,7 @@ test.skipIf(!browserAvailable)(
 );
 
 // Issue #381. The create was accepted, then the read of the recorded version failed. That is not a refusal of the
-// write: the next save asks what the server recorded (`command`) and does not create the case again.
+// write: the next save reads back its known success and does not create the case again.
 test.skipIf(!browserAvailable)(
 	"a failed read after a case was created does not make the next save create it again",
 	async () => {
@@ -215,7 +215,7 @@ test.skipIf(!browserAvailable)(
 			expect(page.url()).toEndWith("/suite/c/1");
 			expect((await server.api("find", { in: "cases" })).items.length).toBe(1);
 			expect(new Set(commands).size).toBe(1);
-			expect(lookups).toEqual([commands[0] ?? ""]);
+			expect(lookups).toEqual([]);
 		} finally {
 			await browser.close();
 			await server.stop();
