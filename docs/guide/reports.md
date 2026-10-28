@@ -131,3 +131,5 @@ Reports with new tests in more than 100 files finish asking about those files in
 The first 100 files are handled with the report; the rest follow after its results have committed.
 Each page uses the project's current policy, so **Create** cases and **Ask** questions may appear
 shortly after the report receipt. Interrupted pages retry without duplicating their decisions.
+
+Deferred file mapping survives both project and instance export. After import, background jobs finish those pages under the restored policy. Archive version 44 includes pending pages; archives from earlier versions must be exported again with this version before importing.

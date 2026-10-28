@@ -278,6 +278,7 @@ describe("the module map", () => {
 			"covers",
 		],
 		"server/evidence": [
+			"report_map_pages",
 			"assertion_seen",
 			"assertion_spreads",
 			"assertion_roots",

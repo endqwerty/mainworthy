@@ -8,6 +8,7 @@ import { ResultIn, resultDuration } from "../../core/ops.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
 import { readSubject } from "../decisions/questions.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
+import { restoreReportMapJobs } from "../evidence/report-maps.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import { retiredDemos } from "../kernel/ctx.ts";
 import { arrayLiteral, isConstraintViolation, type ReadDb, type SqlValue, sql, type WriteDb } from "../kernel/db.ts";
@@ -666,6 +667,7 @@ export async function importArchive(
 				if (problem) throw invalid(`archive policy of project ${row.key} is refused: ${problem}`);
 			}
 			await rebuildAssertionIndexes(db, true);
+			await restoreReportMapJobs(db);
 			await db.exec("SET CONSTRAINTS ALL IMMEDIATE");
 			for (const table of await discoverTables(db, false))
 				for (const column of table.identities) {

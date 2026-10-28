@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { jobOp } from "../src/server/ops/jobs.ts";
 import { invokeService } from "../src/server/ops/registry.ts";
+import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
 import { ciReport, harness } from "./helpers.ts";
 
 test("wide reports commit before mapping all files, then durable pages finish them", async () => {
@@ -30,10 +31,10 @@ for (const unlinked of ["ask", "track"] as const) {
 			await h.call("report", input);
 			const pages = await h.app.database.read((db) =>
 				db.allDynamic<{ id: string; input: string }>(
-					"SELECT id,input FROM background_jobs WHERE kind='report-maps' ORDER BY queue_order",
+					"SELECT j.id,p.files AS input FROM background_jobs j JOIN report_map_pages p ON p.id=j.input::jsonb->>'page' WHERE j.kind='report-maps' ORDER BY j.queue_order",
 				),
 			);
-			expect(pages.map((p) => JSON.parse(p.input).files.length)).toEqual([100, 5]);
+			expect(pages.map((p) => JSON.parse(p.input).length)).toEqual([100, 5]);
 			const first = pages[0];
 			if (!first) throw new Error("missing page");
 			const count = () =>
@@ -100,6 +101,83 @@ test("a later report may finish a deferred file before its page arrives", async 
 			before,
 		);
 		expect((await h.call<{ items: unknown[] }>("find", { in: "cases", limit: 500 })).items).toHaveLength(102);
+	} finally {
+		await h.close();
+	}
+}, 60_000);
+
+for (const project of [undefined, "scratch"]) {
+	for (const unlinked of ["create", "ask", "track"] as const) {
+		test(`restore deferred report maps: ${project ?? "instance"}, ${unlinked}`, async () => {
+			const from = await harness({ unlinked });
+			const to = await harness();
+			try {
+				const input = ciReport({ commit: "restore-wide", n: 101 });
+				input.results = input.results.map((r, i) => ({ ...r, test: { ...r.test, file: `restore-${i}.ts` } }));
+				await from.call("report", input);
+				const chunks: string[] = [];
+				await from.app.database.read((db) =>
+					exportArchive(
+						db,
+						(chunk) => {
+							chunks.push(chunk);
+						},
+						project === undefined ? {} : { project },
+					),
+				);
+				await to.app.database.write((db) =>
+					db.transaction(async () => {
+						await db.exec("DELETE FROM commands");
+						await removeBootstrap(db);
+						await importArchive(db, linesOf(chunks.join("")));
+					}),
+				);
+				await invokeService(to.app, jobOp, { do: "drain" });
+				const counts = () =>
+					to.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*)::int AS n FROM questions WHERE kind='map'"),
+					);
+				expect(await counts()).toEqual([{ n: 101 }]);
+				if (unlinked === "create")
+					expect(
+						await to.app.database.read((db) =>
+							db.allDynamic("SELECT count(DISTINCT case_id)::int AS n FROM tests WHERE case_id IS NOT NULL"),
+						),
+					).toEqual([{ n: 101 }]);
+				await invokeService(to.app, jobOp, { do: "drain" });
+				expect(await counts()).toEqual([{ n: 101 }]);
+				expect(
+					await to.app.database.read((db) => db.allDynamic("SELECT count(*)::int AS n FROM report_map_pages")),
+				).toEqual([{ n: 0 }]);
+			} finally {
+				await from.close();
+				await to.close();
+			}
+		}, 60_000);
+	}
+}
+
+test("migration 7 preserves unfinished mapping jobs from schema 6", async () => {
+	const h = await harness({ unlinked: "create" });
+	try {
+		const input = ciReport({ commit: "upgrade-wide", n: 101 });
+		input.results = input.results.map((r, i) => ({ ...r, test: { ...r.test, file: `upgrade-${i}.ts` } }));
+		await h.call("report", input);
+		await h.app.database.write((db) =>
+			db.transaction(async () => {
+				await db.exec(`UPDATE background_jobs j SET input=jsonb_build_object('project',p.project,'producer',p.producer,'files',p.files::jsonb)::text FROM report_map_pages p WHERE j.input::jsonb->>'page'=p.id;
+    DROP TABLE report_map_pages;
+    UPDATE meta SET value='6' WHERE key='schema_version';
+    UPDATE meta SET value='43' WHERE key='archive_version';`);
+			}),
+		);
+		await (await import("../src/server/kernel/migrate.ts")).migrate(h.app.database);
+		await invokeService(h.app, jobOp, { do: "drain" });
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT count(DISTINCT case_id)::int AS n FROM tests WHERE case_id IS NOT NULL"),
+			),
+		).toEqual([{ n: 101 }]);
 	} finally {
 		await h.close();
 	}
