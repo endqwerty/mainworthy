@@ -7,25 +7,27 @@ moves, and what we would do differently from day 1.
 The raw research is in [research/strategy-2026-10-27/](research/strategy-2026-10-27/): one file per slice, every claim
 with a link and "verified 2026-10-27" (read on the vendor's own page) or "reported" (search snippet or third party).
 The four research files were gathered by Claude Sonnet 5.5 workers; this page, the drift numbers and the spot checks are
-Claude Opus 5.5's. [competitive-analysis.md](competitive-analysis.md) is the 2026-10-10 baseline; section 3.4 lists its
-corrections.
+Claude Opus 5.5's. GPT 6.1 Sol checked the claims independently and found eight wrong; this version carries its
+corrections (the [pull request](https://github.com/endqwerty/mainworthy/pull/1024) lists them).
+[competitive-analysis.md](competitive-analysis.md) is the 2026-10-10 baseline; section 3.4 lists its corrections.
 
 ## The conclusion first
 
-Mainworthy built what the plan asked for, and built far more around it, for no one in particular. The parts it set out
-to make different (case versions pinned to results, one stream for manual and automated results, agents as users with
-their own identity) are still different. The parts that look like differentiators on a feature grid (an MCP server,
-flaky detection, quarantine) were matched or given away by others in the last year. The largest risk is not a
-competitor. It is the view, the most common one in the user voice we collected, that a team does not need a test case
-manager at all.
+Mainworthy built what the plan asked for, and built far more around it, for no one in particular. Feature for feature
+it now looks much like Qase or Testmo: manual cases and CI results in one place, history, an MCP server that writes,
+flaky detection, quarantine. Each of those exists elsewhere, and flaky detection is free from CI tools. What we found
+nowhere else is narrower: a modern test case manager that is open source and self-hostable with nothing held back by
+tier, and agents recorded as their own actors in case history (not found in the vendors checked, which is not proof of
+absence). The largest risk is not a competitor. It is the view, the most common one in the user voice we collected,
+that a team does not need a test case manager at all.
 
 The owner's three biggest decisions, each open:
 
 1. **Who is it for?** Decision 0005 says "teams in general". Section 5 proposes three narrower customers and recommends
    one. Every other choice below depends on this one.
 2. **Is the headline "tests a person or an agent runs, with the evidence"?** ThePrimeagen's Oligarchy (section 3.3)
-   shows a team building exactly that record for its own agents in a month, without a test management tool. That is
-   both the best opening found and proof that the data model alone is no moat.
+   shows a team building its own record of exactly that within a month. That is both the best opening found and proof
+   that the data model alone is no moat.
 3. **What to stop.** The native iPhone app, passkeys and SSO, teams (M8) and the loose-to-regulated policy spectrum
    all serve customers no one has yet. Freezing some of them until a user asks is the cheapest way to get back on
    track. Which ones is the owner's call; section 6 says what each costs.
@@ -47,11 +49,13 @@ All counts are from `origin/main` at `4091fde9`. The commands are in [Reproduce]
 Every priority and core capability has shipped in some form:
 
 - one operation registry behind HTTP, OpenAPI, the CLI, MCP and the web client (`src/server/ops/index.ts`);
-- append-only case versions, with runs and results pinned to the version they ran;
+- append-only case versions; a linked result records the version it ran as exact or assumed, and a CI result with no
+  case has none until it is linked (`docs/guide/report-results.md`, "exact", "assumed", "unresolved");
 - CI ingestion of JUnit XML, Playwright, Jest, Vitest, pytest and TRX (`docs/guide/report-results.md`);
-- flaky detection from same-code flips (decision 0045), one CI rerun to tell a flake from a broken commit (0128) and
-  quarantine with an explicit exit rule (0085);
-- agent tokens, edit scopes (0044) and the model named on each agent result (0116).
+- flaky detection from same-code flips (decision 0045) and quarantine with an explicit exit rule (0085); the one CI
+  rerun of decision 0128 is this repository's own workflow, not a product feature;
+- agent tokens, edit scopes (0044), the model an agent reports on each result (0116, optional and not verified), and a
+  step trail with screenshots per step (0117).
 
 That is a lot for 18 days. The drift is in what was built around it.
 
@@ -61,11 +65,11 @@ That is a lot for 18 days. The drift is in what was built around it.
 | --- | --- | --- |
 | Commits on `main` | 1,489 in 18 days | Building speed is real |
 | Commits that touch no product code (`src/`, `ios/`) | 621 (42%) | Process, docs, CI and deploy work took almost half of the commits |
-| Lines of tests / lines of `src/` | 106,559 / 97,593 | More test code than product code, for a product with no outside user |
-| Decision records | 142 files, dated 2026-10-09 to 2026-10-27 | About eight a day; 7 say they were superseded |
-| Lines in `docs/diagrams/` | 143,063 | Larger than all of `src/` |
+| Lines in `test/`, `src/`, `ios/` | 107,110 / 99,075 / 27,425 | `test/` is larger than `src/`, for a product with no documented outside user. Line counts include fixtures; they show size, not wasted effort |
+| Decision records | 142 files, dated 2026-10-09 to 2026-10-26 | About eight a day; 2 mark themselves superseded |
+| Lines in `docs/diagrams/` | 138,606 | Larger than `src/` |
 | Native iPhone app | 27,425 lines, 180 commits, started on day 4 | A second client before a first user |
-| Identity work | 0017, 0029, 0062, 0067, 0072, 0086, 0093, 0096, 0121, 0122, 0140, 0145 | Passwords, recovery, second factor, mail, SSO, passkeys and native sign-in, all before anyone outside signed in |
+| Identity work | 0017, 0029, 0062, 0067, 0072, 0086, 0093, 0096, 0121, 0122, 0140, 0145 | Passwords, recovery, second factor, mail, SSO, passkeys and native sign-in, with no documented outside user |
 | Store | SQLite chosen 2026-10-12 (0010), PostgreSQL landed 2026-10-24 (#901), Cloud Run planned | The arena measured single-node speed; the deciding force was deployment shape |
 | Phase 0 | not done (roadmap: "no hands-on audit ... and no measured baselines against the incumbents") | No measured comparison with any rival exists |
 | "The owner's notes" in `competitors.md` | empty | The most authoritative input was never written down |
@@ -122,11 +126,15 @@ No list prices changed. Agent access did:
 | TestRail, Testmo, Xray | closed betas | unknown | OAuth (TestRail, Testmo) |
 | qTest, Zephyr | official, tool lists unpublished | reported yes | bearer token (qTest) |
 
-What is still missing everywhere: agent identity as a first-class actor in case history. Qase records agent changes in
-its audit trail as the person the agent acts for and lists "agent traces" as planned. No vendor separates the agent
-from the person in history, scopes an agent to one project's authoring, or measures what an agent job costs in tokens.
-Mainworthy does all three. Versioned case history is still behind a paid or top tier in six tools (TestRail, Xray,
-Testomat.io, PractiTest, Testiny from Starter, Qase by retention).
+What others already have: scoping an agent to one project (Testiny's project keys and roles, Qase's project scopes,
+Azure DevOps' tool filtering) and human review of agent edits (Qase's MCP creates reviews; approval stays a person's).
+What we did not find in any vendor checked: an agent recorded as its own actor in case history. Qase records agent
+changes as the person the agent acts for and lists "agent traces" as planned. Closed betas (TestRail, Testmo, Xray)
+publish nothing, so this is a hypothesis to test, not a proven gap. Mainworthy's token measurement is of its own tool
+definitions and scripted sessions (decision 0006), not a meter of what an agent job costs.
+
+Versioned case history is limited by tier in six tools: Enterprise only in TestRail, Xray and Testomat.io, Corporate
+in PractiTest, paid plans from Starter in Testiny, and retention by plan in Qase (30 days free, 2 years on Teams).
 
 Ownership is consolidating: TestRail, Testmo and Xray are one company (Sembi, owned by Idera) and ship the same kind
 of closed-beta MCP. SmartBear owns Zephyr and QMetry.
@@ -137,12 +145,12 @@ of closed-beta MCP. SmartBear owns Zephyr and QMetry.
 
 | Vendor | Product | Manual cases | Flaky detection | Quarantine | Agent access | Free tier | Lock-in |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Buildkite | Test Engine | no | yes, several methods | yes; automatic rules on Enterprise | MCP `list_tests` | 250k executions/month, 24 h history | low: JUnit upload from any CI |
+| Buildkite | Test Engine | no | yes, from Pro ($30/active user) | yes; automatic rules on Enterprise | MCP `list_tests` | 250k executions/month, 24 h history, no flaky workflows | low: JUnit upload from any CI |
 | CircleCI | Test Insights, Smarter Testing | no | same commit pass and fail within 14 days | none found | MCP `find_flaky_tests` | flaky detection capped at 5 tests | high |
 | Datadog | Test Optimization | no | Early Flake Detection | yes, by policy | MCP flaky tools | none found; $20/committer/month | low, but the best features need its SDKs |
 | Azure DevOps | Test Plans + Pipelines | yes, full | in Pipelines results | suppress from summary | remote MCP with write | 5 Basic users | Test Plans $52/user/month |
 | Sentry | (Codecov) | no | n/a | n/a | Sentry MCP has no test tools | n/a | sold Codecov to Harness on 2026-06-02 |
-| GitHub | Actions, Copilot | no | none native | none | MCP reads logs only | n/a | n/a |
+| GitHub | Actions, Copilot | no | none found | none found | MCP reads logs only | n/a | n/a |
 
 Others that meet the inclusion rule ([candidates.md](research/strategy-2026-10-27/candidates.md)): Trunk Flaky Tests
 (free up to 5 committers, MCP, autofix agent), Mergify (free up to 5 contributors, JUnit path, quarantine), Currents
@@ -150,13 +158,15 @@ Others that meet the inclusion rule ([candidates.md](research/strategy-2026-10-2
 without its device cloud), Gradle Develocity and CloudBees Smart Tests (enterprise, JVM-leaning), ReportPortal (the
 open-source, self-hosted results store).
 
-Two readings. First, a team that only automates can get flaky detection and quarantine free or cheap from a tool it
-already uses, so Mainworthy cannot lead with them. Second, only Azure DevOps joins manual cases to CI results, and it
-costs $52 a user a month and pulls the team into Azure. Joining the two is still open ground.
+Two readings. First, a small team that only automates can get flaky detection and quarantine free from Trunk or
+Mergify, or cheaply from Buildkite, so Mainworthy cannot lead with them. Second, among CI vendors only Azure DevOps
+joins manual cases to CI results. That is not an opening: test management tools already do it (Qase, Testmo, Allure
+TestOps and BrowserStack all take CI results beside manual runs).
 
-Vendor churn is itself a fact to use: Sentry sold Codecov to Harness, Microsoft retired Playwright
-Testing (reported, 2026-03-08), and Octomind shut down (reported; sources disagree on 2025 or 2026). A team burned by
-that has a reason to want something it can host.
+Vendor churn is a smaller point than it first looks. Sentry sold Codecov to Harness, which keeps the product.
+Microsoft retired Playwright Testing on 2026-03-08 in favour of Playwright Workspaces, a migration rather than an
+abandonment. Octomind shut down (reported; sources disagree on 2025 or 2026). Some teams will still want a tool they
+host themselves, but churn alone will not move many.
 
 ### 3.3 AI testing platforms, and Oligarchy
 
@@ -187,10 +197,11 @@ What it is, from its own docs:
 - Each result is a Linear ticket. The store is PostgreSQL. The stack is Bun, Effect and Cloudflare.
 
 This matters for Mainworthy in two ways. It is the plainest example yet of a manual test case whose tester is an agent:
-instruction, expected proof, recorded evidence, a verdict and an independent check of the verdict. Mainworthy's case
-model, result stream and agent identity fit that shape closely. And it is a team that needed that record, did not
-reach for any test management tool, and built a ten-table version in a month with agents. The data model is not a
-moat.
+instruction, expected proof, recorded evidence, a verdict and an independent check of the verdict. Mainworthy already
+has much of that shape: versioned cases, a result stream, screenshots per step (0117) and agent results. Not checked:
+whether a case has a "proof" field and whether a second agent's audit of a verdict, with a controlled cause list, maps
+onto Mainworthy's failure causes (0147). And it is a team that needed that record and built its own, 17 tables in
+PostgreSQL, within a month with agents. We do not know which tools they considered. The data model is not a moat.
 
 ### 3.4 Corrections to competitive-analysis.md
 
@@ -233,7 +244,8 @@ The strongest of them:
   ([Ministry of Testing, 2026-05-07](https://club.ministryoftesting.com/t/where-would-you-trust-an-ai-to-write-your-tests-and-where-absolutely-not/87298))
 
 The people who keep a tool keep it for proof: regulation, visibility across a fast-moving team, a record that outlives
-the person who ran the test. Nobody keeps one for flaky detection.
+the person who ran the test. None of the collected quotes keeps one for flaky detection. The sample is small and from
+a few threads, so treat this as a lead.
 
 ## 5. Jobs, positioning and the customer
 
@@ -241,35 +253,38 @@ the person who ran the test. Nobody keeps one for flaky detection.
 
 | Job | Who does it today, and at what cost | Where Mainworthy stands |
 | --- | --- | --- |
-| Author and keep manual cases | TestRail, Qase, Testiny and others, $15 to $78 a seat; markdown in the repo, free | Built; history not gated; our vocabulary is unfamiliar |
-| See automated results and history across CI | Buildkite, Datadog, Currents, Mergify, free to cheap | Built; not a reason to switch |
-| Find and quarantine flaky tests | Buildkite, Trunk, Mergify free at small scale; Datadog paid | Built; given away by others |
-| Decide a release is ready from both kinds of evidence | Azure Test Plans ($52/seat); spreadsheets | Built (the gate, policy, sign-off); rare elsewhere |
-| Prove later what was tested, on which version, by whom | TestRail Enterprise, Xray Enterprise, PractiTest Corporate | Built (verifiable audit export, pinned versions); top-tier-only elsewhere |
-| Let an agent author or run tests, with its work reviewable | QA Wolf, Momentic, TestMu AI as services; Oligarchy built its own | Built in parts (scopes, model per result, proposals); no evidence capture like screenshots per step yet (0117 keeps a step trail) |
+| Author and keep manual cases | TestRail, Qase, Testiny and others, $15 to $78 a seat; markdown in the repo, free | Built; history not limited by tier; our vocabulary is unfamiliar |
+| See automated results and history across CI | Buildkite, Datadog, Currents, Mergify, free to cheap; Qase, Testmo beside manual runs | Built; not a reason to switch |
+| Find and quarantine flaky tests | Trunk, Mergify free at small scale; Buildkite from Pro; Datadog paid | Built; given away by others |
+| Decide a release is ready from both kinds of evidence | Qase's release-readiness views, Testmo, Azure Test Plans ($52/seat); spreadsheets | Built (the gate, policy, sign-off); not compared hands-on |
+| Prove later what was tested, on which version, by whom | full history: TestRail Enterprise, Xray Enterprise, PractiTest Corporate; Testiny from Starter; Qase 2 years on Teams | Built (verifiable audit export; exact or assumed versions); whether rivals' exports can be verified was not checked |
+| Let an agent author or run tests, with its work reviewable | QA Wolf, Momentic, TestMu AI as services; Qase's MCP with reviews; Oligarchy built its own | Built in parts (scopes, model per result, proposals, screenshots per step); agent as its own actor not found elsewhere |
 
 ### 5.2 Three possible customers
 
 These are proposals. Choosing among them is the owner's decision.
 
 - **A. Release-gated teams with mixed manual and automated testing**, who must show what was tested (fintech, health,
-  B2B vendors with enterprise customers). Alternatives: TestRail or Xray at the top tier, Azure Test Plans. We win on
-  history in every tier, results pinned to versions, the gate and self-hosting. We lose on maturity, integrations and
-  the vocabulary.
+  B2B vendors with enterprise customers). Alternatives: TestRail or Xray at the top tier, Qase or Testmo, Azure Test
+  Plans. We may win on full history without an enterprise price, self-hosting and an open licence. We lose on
+  maturity, integrations and the vocabulary. Feature for feature, Qase is close.
 - **B. Teams whose testers are partly agents**, the Oligarchy shape: natural-language cases an agent runs, evidence,
-  an independent verdict, a failure taxonomy. Alternatives: build it yourself, QA Wolf or Momentic as a service. We win
-  on agent identity, scopes, review of agent edits, self-hosting and an open licence. The market is new and small.
+  an independent verdict, a failure taxonomy. Alternatives: build it yourself, QA Wolf or Momentic as a service, Qase
+  through its MCP. We may win on agents as their own actors in history, self-hosting and an open licence. The market
+  is new and small.
 - **C. Automation-heavy developer teams who want flaky handling and a gate.** Alternatives: Buildkite, Trunk,
   Mergify, Currents, mostly free at their size. We have no clear win. Not recommended.
 
-Recommendation: **A as the buyer, B as the headline.** A pays and already believes in keeping cases; B is what makes
-Mainworthy different from TestRail in 2027. A positioning statement in April Dunford's order, for the owner to accept,
-edit or reject:
+Recommendation: **A as the buyer, B as the headline.** A pays and already believes in keeping cases; B is what could
+make Mainworthy different from Qase in 2027. Neither win is proven: both rest on vendor pages, and the agent-identity
+gap may close (prediction 2). A positioning statement in April Dunford's order, for the owner to accept, edit or
+reject:
 
 > For teams that must show what was tested before a release, and who test with people, scripts and now agents,
-> Mainworthy is a self-hostable test case manager that keeps every case version, ties every result (a person's, a
-> CI job's or an agent's) to the version it ran, and records who decided the release was ready. Unlike TestRail or
-> Xray, the history and audit trail are in every tier and agents are first-class users with their own identity.
+> Mainworthy is an open-source test case manager you can host yourself. It keeps every case version, records which
+> version each result (a person's, a CI job's or an agent's) ran against, and records who decided the release was
+> ready. Unlike TestRail or Xray, the full history is not an enterprise tier, and an agent's work is recorded as the
+> agent's, not as the person who gave it a token.
 
 ### 5.3 What is commodity and what is not
 
@@ -277,8 +292,9 @@ edit or reject:
 | --- | --- | --- |
 | Storing results, JUnit ingestion, pass-rate charts | commodity | accept every format, add CTRF; spend nothing on differentiation |
 | Flaky detection and quarantine | commodity, given away | keep, do not lead with it |
-| MCP server | becoming commodity | lead with what others lack: identity, scopes, review, token cost |
-| Case versions pinned to results, history in every tier | sold as an enterprise feature | lead with it for customer A |
+| MCP server, project scopes, review of agent edits | commodity among test management tools | match it; lead only with the agent as its own actor, if that gap holds |
+| Manual and CI results in one place | common among test management tools | table stakes |
+| Full case history and a verifiable audit trail | full history sold as an enterprise feature | lead with it for customer A, priced or free as open source |
 | Agent-run cases with evidence and an independent verdict | new | the headline for customer B |
 | Capture UX (moving knowledge out of a head) | still hard everywhere | priority 3 from the vision; no measured comparison exists |
 
@@ -286,8 +302,8 @@ edit or reject:
 
 | | Opportunities | Threats |
 | --- | --- | --- |
-| | O1 agent identity in history exists nowhere else; O2 agent-run cases need a record keeper (Oligarchy); O3 regulated teams pay for history and audit, gated elsewhere; O4 vendor churn and consolidation (Sembi, Harness) make self-hosting attractive | T1 "don't need a TCM": tests in code, markdown with an agent; T2 CI vendors give flaky detection and history away; T3 every major TCM has write-capable MCP; T4 a team can build its own record in a month with agents |
-| **Strengths:** S1 one model for manual, CI and agent results pinned to case versions; S2 agents as users with scopes, identity and measured token cost; S3 Apache-2.0 and self-hostable; S4 audit export and gate; S5 build speed | **Use S to take O.** Make agent-run cases first-class: an instruction and a proof on a case, screenshots and logs per step on a result, a second agent's diagnosis with a controlled cause list (S1, S2 → O2). Sell history and audit in every tier to customer A (S1, S4 → O3). Publish a self-host story aimed at teams leaving a sold or retired tool (S3 → O4) | **Use S to blunt T.** Keep cases in the repository as files Mainworthy reads and versions, so "tests are the documentation" is an import path, not a lost sale (S1 → T1). Ingest from the CI vendors instead of competing with them (S1 → T2). Lead agent claims with identity and review, which no MCP server has (S2 → T3) |
+| | O1 an agent as its own actor in history was not found elsewhere; O2 agent-run cases need a record keeper (Oligarchy); O3 regulated teams pay for full history and audit, sold as enterprise tiers; O4 consolidation (Sembi) and churn give some teams a reason to host their own | T1 "don't need a TCM": tests in code, markdown with an agent; T2 CI tools give flaky detection away (Trunk, Mergify free at small scale); T3 most test management tools offer or are testing an MCP server, many with writes, scopes and reviews; T4 a team can build its own record in a month with agents |
+| **Strengths:** S1 one model for manual, CI and agent results with the case version each ran against; S2 agents as their own actors, with scopes; S3 Apache-2.0 and self-hostable, nothing held back by tier; S4 verifiable audit export and gate; S5 build speed | **Use S to take O.** Make agent-run cases first-class: check whether a case can carry an instruction and a proof, and whether a second agent's diagnosis with a controlled cause list fits the failure causes we have (S1, S2 → O2). Sell full history and audit to customer A without an enterprise price (S3, S4 → O3). Say plainly that self-hosting is the whole product, not a tier (S3 → O4) | **Use S to blunt T.** Keep cases in the repository as files Mainworthy reads and versions, so "tests are the documentation" is an import path, not a lost sale (S1 → T1). Ingest from the CI vendors instead of competing with them (S1 → T2). Lead agent claims with the agent as its own actor, since scopes and reviews are matched (S2 → T3) |
 | **Weaknesses:** W1 no customer; W2 scope sprawl (iOS, identity, teams); W3 invented vocabulary; W4 no measured comparison with rivals; W5 process cost; W6 one maintainer | **Fix W to reach O.** Pick a customer and freeze work that does not serve it (W1, W2). Rename toward market words where meaning allows: plan, run, test case, flaky (W3). Run the comparison phase 0 asked for, with this repository's CI output (W4) | **Avoid the worst case.** A broad product that no one picks against free CI tools and markdown files. Cut scope to one customer's workflow, keep the process light, and make adopting it cost less than one afternoon (W1, W2, W5 → T1, T2) |
 
 What each freeze candidate would save, as a starting point for the owner's choice in decision 3:
@@ -323,7 +339,8 @@ model behind the gate, dogfooding this repository's CI on the instance, and the 
 Each is dated so a later reader can check it.
 
 1. By 2027-04-27, none of Buildkite, CircleCI, Datadog or GitHub ships authoring of manual test cases. If one does,
-   the joined manual-and-CI opening in section 3.2 closes.
+   a team can keep manual cases where its CI already is, and customer A has one more reason not to adopt a separate
+   tool.
 2. By 2027-04-27, at least one of TestRail, Qase or Testmo records an agent as its own actor in case history. If that
    happens, S2 stops being unique and the headline needs another basis.
 3. By 2027-01-31, Oligarchy is either public under a licence or its record (definitions, results, diagnoses) moves into
@@ -361,9 +378,11 @@ Run from the repository root at `4091fde9`.
 
 ```sh
 # Commits touching product code (src/, ios/) against those that do not
-git log origin/main --format='format:@@%h' --name-only | awk '/^@@/{if(h!=""){ if(s) a++; else b++ } h=$0; s=0; next} /^(src|ios)\//{s=1} END{if(s)a++; else b++; print a, b}'
-# Lines in an area
-git ls-files test | xargs cat | wc -l
-# Vocabulary in the guide
+git log 4091fde9 --format='format:@@%h' --name-only | awk '/^@@/{if(h!=""){ if(s) a++; else b++ } h=$0; s=0; next} /^(src|ios)\//{s=1} END{if(s)a++; else b++; print a, b}'
+# Lines in an area (test, src, ios, docs/diagrams), without images, JSON, lock files or generated code
+git ls-tree -r -z --name-only 4091fde9 -- test | grep -zvE '\.(png|jpg|svg|json|lock)$|/Generated/' | xargs -0 -I{} git show 4091fde9:{} | wc -l
+# Decision records that mark themselves superseded
+grep -l 'Status: superseded' docs/decisions/*.md
+# Vocabulary in the guide (substring counts, so "slots" counts as "slot")
 grep -rio slot docs/guide | wc -l
 ```
