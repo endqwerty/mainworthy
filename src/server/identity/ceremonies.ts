@@ -18,8 +18,9 @@ const Q = {
 	clear: sql("DELETE FROM identity_ceremonies"),
 	lockKind: sql<{ kind: string }>("SELECT pg_advisory_xact_lock(hashtextextended($kind, 602384))"),
 	expire: sql<{ kind: string; now: number }>("DELETE FROM identity_ceremonies WHERE kind = $kind AND deadline <= $now"),
-	dropOwner: sql<{ kind: string; owner: string }>(
-		"DELETE FROM identity_ceremonies WHERE kind = $kind AND owner = $owner",
+	trimOwner: sql<{ kind: string; owner: string; keep: number }>(
+		`DELETE FROM identity_ceremonies WHERE kind = $kind AND owner = $owner AND key NOT IN
+		 (SELECT key FROM identity_ceremonies WHERE kind = $kind AND owner = $owner ORDER BY deadline DESC, key LIMIT $keep)`,
 	),
 	count: sql<{ kind: string }, { count: number }>(
 		"SELECT count(*)::integer AS count FROM identity_ceremonies WHERE kind = $kind",
@@ -67,14 +68,15 @@ export class Ceremonies<T extends { readonly deadline: number }> {
 	) {}
 
 	/**
-	 * Stores a ceremony under `owner`. With `replaceOwner`, the owner's earlier ceremonies of this kind end first, so
-	 * one owner (a signed-in session, an invitation) holds at most one place in the shared capacity.
+	 * Stores a ceremony under `owner`. With `ownerLimit`, the owner's oldest ceremonies of this kind end first so that
+	 * it holds at most that many places in the shared capacity, this one included.
 	 */
-	async put(db: WriteDb, key: string, value: T, owner: string, now: number, replaceOwner = false): Promise<void> {
+	async put(db: WriteDb, key: string, value: T, owner: string, now: number, ownerLimit?: number): Promise<void> {
 		await db.run(Q.ensure, { generation: randomUUID() });
 		const epoch = await db.one(Q.lockEpoch);
 		await db.all(Q.lockKind, { kind: this.kind });
-		if (replaceOwner) await db.run(Q.dropOwner, { kind: this.kind, owner: ownerKey(owner) });
+		if (ownerLimit !== undefined)
+			await db.run(Q.trimOwner, { kind: this.kind, owner: ownerKey(owner), keep: ownerLimit - 1 });
 		await db.run(Q.expire, { kind: this.kind, now });
 		if ((await db.one(Q.count, { kind: this.kind })).count >= 10_000) throw new Busy();
 		await db.run(Q.put, {
