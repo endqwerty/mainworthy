@@ -366,7 +366,7 @@ The provider says who signed in. Mainworthy decides which person that is here, a
 
 An identity belongs to one person at a time. Linking one that somebody already has is refused. **Your sign-in** lists each identity with the provider's name and the email the provider gave. A person can link more than one, for example a second account at the same provider. Removing one, or forgetting the person, erases the identity, and it can be linked again later. The last identity stays: link another first.
 
-Linking your first identity needs no proof. Linking another, and removing one, needs [recent proof](#confirm-it-is-you).
+Linking an identity, your first included, and removing one need [recent proof](#confirm-it-is-you). Signing in with a token gives a first link that proof.
 
 An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
 
