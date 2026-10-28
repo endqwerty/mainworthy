@@ -1,6 +1,7 @@
 // One immutable baseline template per cluster; each caller gets a disposable clone.
 import { afterAll } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
+import { FAIL_MULTIPLE } from "../scripts/budget.ts";
 import { cluster } from "../scripts/pg.ts";
 import {
 	databaseCreated,
@@ -121,11 +122,22 @@ export async function drainDatabaseDrops(): Promise<void> {
 	await Promise.allSettled([...pendingDrops]);
 	if (dropErrors.length) throw new AggregateError(dropErrors.splice(0), "test database cleanup failed");
 }
+const databaseCleanups = new Set<() => Promise<void>>();
+/** Starts alongside fixture cleanup, so a slow or failed drain cannot skip another database owner. */
+export function onDatabaseCleanup(cleanup: () => Promise<void>): void {
+	databaseCleanups.add(cleanup);
+}
+onDatabaseCleanup(async () => {
+	if (!managed) {
+		await Promise.all([...fixtures].map((fixture) => fixture.close()));
+		await drainDatabaseDrops();
+	}
+});
 try {
 	afterAll(async () => {
-		if (!managed) {
-			await Promise.all([...fixtures].map((fixture) => fixture.close()));
-			await drainDatabaseDrops();
-		}
-	});
+		const results = await Promise.allSettled([...databaseCleanups].map(async (cleanup) => await cleanup()));
+		const errors: unknown[] = [];
+		for (const result of results) if (result.status === "rejected") errors.push(result.reason);
+		if (errors.length) throw new AggregateError(errors, "test database cleanup failed");
+	}, FAIL_MULTIPLE * 20_000);
 } catch {}

@@ -66,6 +66,69 @@ for (const managed of [false, true])
 		}
 	});
 
+test("gate databases are dropped even when direct fixture cleanup exceeds the default hook timeout", async () => {
+	const root = make("gate-slow-database-cleanup");
+	symlinkSync(join(process.cwd(), "scripts"), join(root, "scripts"), "dir");
+	const { recoverTestDatabases } = await import("../scripts/work/test-databases.ts");
+	writeFileSync(
+		join(root, "bunfig.toml"),
+		`[test]\npreload = [${JSON.stringify(join(process.cwd(), "test/preflight.ts"))}]\n`,
+	);
+	writeFileSync(
+		join(root, "probe.test.ts"),
+		`
+ import {test} from "bun:test";
+ import ${JSON.stringify(join(process.cwd(), "test/ci-gate.test.ts"))};
+ import {testDatabase} from ${JSON.stringify(join(process.cwd(), "test/db.ts"))};
+ test("slow direct fixture cleanup",async()=>{
+  const database=await testDatabase({schema:"empty"});
+  await Bun.write(${JSON.stringify(join(root, "database.url"))},database.url);
+  const close=database.close;
+  database.close=async()=>{await Bun.sleep(21_000);await close();};
+ });
+ `,
+	);
+	try {
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				"test",
+				"probe.test.ts",
+				"--test-name-pattern",
+				"slow direct fixture cleanup|a shard that left no report",
+			],
+			{
+				cwd: root,
+				env: { ...process.env, MAINWORTHY_TEST_DATABASES: "", MAINWORTHY_TEST_CHILDREN: "" },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		const [out, err, rc] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		const remaining = await recoverTestDatabases(root);
+		expect(remaining, out + err).toBe(0);
+		expect(rc, out + err).toBe(0);
+		expect(err).toContain("2 pass");
+	} finally {
+		await recoverTestDatabases(root);
+		const fixtureUrl = join(root, "database.url");
+		if (existsSync(fixtureUrl)) {
+			const url = new URL(readFileSync(fixtureUrl, "utf8"));
+			const name = url.pathname.slice(1);
+			url.pathname = "/postgres";
+			const { databaseAdmin } = await import("../src/server/kernel/db.ts");
+			await databaseAdmin(url.toString(), (admin) =>
+				admin.exec(`DROP DATABASE IF EXISTS "${name.replaceAll('"', '""')}" WITH (FORCE)`),
+			);
+		}
+		remove(root);
+	}
+}, 200_000);
+
 test("a browser supervisor leaves its database cleanup to the managed runner", async () => {
 	const root = make("browser-database-cleanup");
 	const records = join(root, "records");
