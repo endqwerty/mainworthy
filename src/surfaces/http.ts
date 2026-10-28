@@ -115,8 +115,8 @@ function sameOrigin(req: Request): boolean {
  */
 const SESSION_COOKIE = "mainworthy_sid";
 /**
- * What ties a passkey sign-in to the browser that asked for its challenge. Nobody is signed in then, so the
- * reply that carries the challenge sets this cookie, and the answer is taken only with it (`signin.ts`).
+ * What ties the identity provider's answer to the browser that began the ceremony. Nobody may be signed in then,
+ * so the reply that begins it sets this cookie, and the answer is taken only with it (`signin.ts`).
  */
 const CEREMONY_COOKIE = "mainworthy_ceremony";
 /**
@@ -492,7 +492,7 @@ export async function handleOp(
 			...(session.reference ? { reference: session.reference() } : {}),
 			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
 			...(session.id ? { session: session.id } : {}),
-			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).
+			// Where the caller is signed in, for an operation that another request finishes (a link to the identity provider).
 			...(session.context ? { context: session.context } : {}),
 			...(at === undefined ? {} : { at }),
 		}),
@@ -615,7 +615,7 @@ async function login(
 	req: Request,
 	server: Listener,
 	patience: Patience,
-	/** Signs in with a body that is not a token: a person's password, passkey or invitation (`signin.ts`). */
+	/** Signs in with a body that is not a token: the identity provider's answer (`signin.ts`). */
 	otherwise: (req: Request, server: Listener, input: unknown) => Promise<Response>,
 ): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();

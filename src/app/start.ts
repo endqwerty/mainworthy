@@ -1,12 +1,5 @@
 import { stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
-import {
-	bootstrap,
-	flushUses,
-	lockActors,
-	stopMail,
-	validateBootstrap,
-	waitMail,
-} from "../server/identity/identity.ts";
+import { bootstrap, flushUses, lockActors, validateBootstrap } from "../server/identity/identity.ts";
 import { type App, type Config, openApp } from "../server/kernel/app.ts";
 import { type Actor, allProjects, lockProjectKey } from "../server/kernel/ctx.ts";
 import { createProject } from "../server/ops/admin.ts";
@@ -164,8 +157,6 @@ async function startInstance(
 				const stoppedServer = server.stop();
 				await minuteWork;
 				await stoppedServer;
-				stopMail(app);
-				await waitMail(app);
 				await waitTrackerRequests(app);
 				await waitHandoffs(app);
 				await waitTrackerPolls(app);

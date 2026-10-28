@@ -16,9 +16,6 @@ const Q = {
 		"UPDATE identity_ceremony_epoch SET generation = $generation WHERE singleton",
 	),
 	clear: sql("DELETE FROM identity_ceremonies"),
-	lockOwner: sql<{ kind: string; owner: string }>(
-		"SELECT pg_advisory_xact_lock(hashtextextended($kind || $owner, 602385))",
-	),
 	lockKind: sql<{ kind: string }>("SELECT pg_advisory_xact_lock(hashtextextended($kind, 602384))"),
 	expire: sql<{ kind: string; now: number }>("DELETE FROM identity_ceremonies WHERE kind = $kind AND deadline <= $now"),
 	count: sql<{ kind: string }, { count: number }>(
@@ -30,14 +27,8 @@ const Q = {
 	get: sql<{ kind: string; key: string; now: number }, { payload: string; generation: string }>(
 		"SELECT c.payload, c.generation FROM identity_ceremonies c JOIN identity_ceremony_epoch e ON c.generation = e.generation WHERE c.kind = $kind AND c.key = $key AND c.deadline > $now",
 	),
-	owner: sql<{ kind: string; owner: string; now: number }, { payload: string }>(
-		"SELECT c.payload FROM identity_ceremonies c JOIN identity_ceremony_epoch e ON c.generation = e.generation WHERE c.kind = $kind AND c.owner = $owner AND c.deadline > $now ORDER BY c.deadline DESC",
-	),
 	take: sql<{ kind: string; key: string; now: number }>(
 		"DELETE FROM identity_ceremonies WHERE kind = $kind AND key = $key AND deadline > $now AND generation = (SELECT generation FROM identity_ceremony_epoch WHERE singleton)",
-	),
-	dropOwner: sql<{ kind: string; owner: string }>(
-		"DELETE FROM identity_ceremonies WHERE kind = $kind AND owner = $owner",
 	),
 };
 
@@ -60,6 +51,11 @@ export async function ceremonyWrite<T>(
 	return db ? await work(db) : await app.database.admission((lease) => lease.transaction(work));
 }
 
+/** Ends every ceremony under way, as an import does: what was begun before it finishes nowhere. */
+export async function clearChallenges(app: App, db?: WriteDb): Promise<void> {
+	await ceremonyWrite(app, db, clearCeremonies);
+}
+
 /** Each domain parses its payload; lifecycle, capacity and atomic consumption are shared. */
 export class Ceremonies<T extends { readonly deadline: number }> {
 	constructor(
@@ -67,17 +63,10 @@ export class Ceremonies<T extends { readonly deadline: number }> {
 		private readonly parse: (value: unknown) => T,
 	) {}
 
-	/** Reuse and issuance for one owner share a transaction, including the initial concurrent lookup. */
-	async forOwner<R>(db: WriteDb, owner: string, work: () => Promise<R>): Promise<R> {
-		await db.all(Q.lockOwner, { kind: this.kind, owner: ownerKey(owner) });
-		return await work();
-	}
-
-	async put(db: WriteDb, key: string, value: T, owner: string, now: number, replaceOwner = false): Promise<void> {
+	async put(db: WriteDb, key: string, value: T, owner: string, now: number): Promise<void> {
 		await db.run(Q.ensure, { generation: randomUUID() });
 		const epoch = await db.one(Q.lockEpoch);
 		await db.all(Q.lockKind, { kind: this.kind });
-		if (replaceOwner) await this.clearOwner(db, owner);
 		await db.run(Q.expire, { kind: this.kind, now });
 		if ((await db.one(Q.count, { kind: this.kind })).count >= 10_000) throw new Busy();
 		await db.run(Q.put, {
@@ -93,18 +82,10 @@ export class Ceremonies<T extends { readonly deadline: number }> {
 		const row = await db.get(Q.get, { kind: this.kind, key, now });
 		return row ? { ...this.parse(JSON.parse(row.payload)), generation: row.generation } : null;
 	}
-	async owned(db: ReadDb, owner: string, now: number): Promise<T[]> {
-		return (await db.all(Q.owner, { kind: this.kind, owner: ownerKey(owner), now })).map((row) =>
-			this.parse(JSON.parse(row.payload)),
-		);
-	}
 	async take(db: WriteDb, key: string, now: number): Promise<boolean> {
 		const generation = await ceremonyGeneration(db);
 		if (generation === null || !(await holdCeremonyGeneration(db, generation))) return false;
 		return (await db.run(Q.take, { kind: this.kind, key, now })).changes === 1;
-	}
-	async clearOwner(db: WriteDb, owner: string): Promise<void> {
-		await db.run(Q.dropOwner, { kind: this.kind, owner: ownerKey(owner) });
 	}
 }
 
