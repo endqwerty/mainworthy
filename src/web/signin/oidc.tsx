@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type Back, finishOidc, refusalOf } from "../lib/signin.ts";
+import { type Back, type Finished, finishOidc, refusalOf } from "../lib/signin.ts";
 import "./signin.css";
 
 /** Where the identity provider sends the browser back to, with a code and a state in the query. */
@@ -9,15 +9,15 @@ export const OIDC_PATH = "/signin/oidc";
  * The provider's answer, handed over once per page load. React runs an effect twice in development, and the
  * server takes an answer only once, so the second run waits for the first instead of sending it again.
  */
-let handing: { query: string; done: Promise<{ linked: boolean; back: Back | null }> } | null = null;
+let handing: { query: string; done: Promise<{ finished: Finished; back: Back | null }> } | null = null;
 
 /**
  * The page the identity provider sends the browser back to. It hands the provider's answer to the server from
  * this origin, which is how the browser's cookies go with it, and then opens the app: signed in, or back where
- * a person was when they linked the provider. The app asks who is signed in only once `onDone` is called. The
- * query leaves the address bar at once.
+ * a person was when they linked an identity or confirmed it is them. The app asks who is signed in only once
+ * `onDone` is called. The query leaves the address bar at once.
  */
-export function OidcReturn({ onDone }: { onDone: (to: Back) => void }) {
+export function OidcReturn({ onDone }: { onDone: (to: Back, finished: Finished) => void }) {
 	const [problem, setProblem] = useState<string | null>(null);
 	// The app's callback may be a new function on each render; the answer is handed over once all the same.
 	const done = useRef(onDone);
@@ -32,8 +32,8 @@ export function OidcReturn({ onDone }: { onDone: (to: Back) => void }) {
 		if (handing?.query !== query) handing = { query, done: finishOidc(query) };
 		let shown = true;
 		handing.done.then(
-			({ linked, back }) => {
-				if (shown) done.current(linked && back ? back : { path: "/", section: null });
+			({ finished, back }) => {
+				if (shown) done.current(finished !== "signed-in" && back ? back : { path: "/", section: null }, finished);
 			},
 			(error: unknown) => {
 				if (shown) setProblem(refusalOf(error, "That did not sign you in. Start again from the sign-in page."));

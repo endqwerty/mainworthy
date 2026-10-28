@@ -1,20 +1,7 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { whyNotPassword } from "../../core/people-replies.ts";
+import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../lib/api.ts";
-import { browserName } from "../lib/browser.ts";
-import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts";
 import { dateTime } from "../lib/people.ts";
-import {
-	type Acceptance,
-	acceptInvitation,
-	NO_ANSWER,
-	refusalOf,
-	type ShownInvitation,
-	showInvitation,
-	signInMethods,
-	startOidc,
-} from "../lib/signin.ts";
-import { PASSWORD_RULES, PasswordCount } from "../ui/index.tsx";
+import { NO_ANSWER, refusalOf, type ShownInvitation, showInvitation, signInMethods, startOidc } from "../lib/signin.ts";
 import "./signin.css";
 
 /** Where the page of an invitation is. The link is this path with the code after a `#`. */
@@ -31,20 +18,9 @@ function takeCode(): string {
 	return code;
 }
 
-/**
- * An invitation may reuse its passkey challenge. Ask again with less than a minute remaining, and send an
- * already-made passkey only before the deadline the server supplied.
- */
-const CHALLENGE_MARGIN_MS = 60_000;
-
 const GONE = "This invitation does not work any more. Ask whoever sent it for a new one.";
 const NOT_ACCEPTED =
 	"That did not work. The invitation may have been used or have run out. Open the link again to check.";
-/** The request went and no reply came back: the server may have accepted, and a second acceptance is refused. */
-const MAYBE_ACCEPTED =
-	"No answer came back, so the page cannot tell whether the invitation was accepted. Before you try again, go to the sign-in page and sign in with what you chose here.";
-const PASSKEY_RAN_OUT =
-	'The passkey was made too long ago to be taken now. Press "Accept and sign in" to make it again.';
 
 /**
  * Who this browser is signed in as, as far as the app has found out: somebody, nobody (`name` null), still
@@ -93,12 +69,13 @@ type Stage =
 	| { kind: "looking" }
 	| { kind: "gone" }
 	| { kind: "unreachable"; message: string }
-	| { kind: "shown"; shown: ShownInvitation };
+	/** `provider` is the instance's identity provider, by its name; null on an instance with none. */
+	| { kind: "shown"; shown: ShownInvitation; provider: string | null };
 
 /**
  * The page an invitation link opens. It renders with nobody signed in and changes nothing by being opened: it
- * asks the server who the invitation is for, and the person then sets a password, makes a passkey, or both,
- * which accepts the invitation and signs them in.
+ * asks the server who the invitation is for, and the person then accepts it by signing in through the
+ * instance's identity provider, which links that identity to them and signs them in.
  *
  * `holder` is who this browser is signed in as already, as far as the app knows, and `askAgain` asks the
  * server once more. `onDone` leaves the page for the app, as whoever the browser is signed in as by then.
@@ -133,9 +110,10 @@ export function Invitation({
 		}
 		let current = true;
 		setStage({ kind: "looking" });
-		void showInvitation(asked.code).then(
-			(shown) => {
-				if (current) setStage(shown ? { kind: "shown", shown } : { kind: "gone" });
+		void Promise.all([showInvitation(asked.code), signInMethods()]).then(
+			([shown, methods]) => {
+				if (current)
+					setStage(shown ? { kind: "shown", shown, provider: methods.oidc?.name ?? null } : { kind: "gone" });
 			},
 			(error: unknown) => {
 				if (current) setStage({ kind: "unreachable", message: error instanceof ApiError ? error.message : NO_ANSWER });
@@ -149,14 +127,13 @@ export function Invitation({
 	if (stage.kind === "shown")
 		return (
 			<Accept
-				// A form belongs to one invitation: another link starts with empty fields.
+				// A question answered belongs to one invitation: another link starts without it.
 				key={code}
 				code={code}
 				shown={stage.shown}
+				provider={stage.provider}
 				who={who}
 				onDone={onDone}
-				onGone={() => setStage({ kind: "gone" })}
-				onShown={(shown) => setStage({ kind: "shown", shown })}
 			/>
 		);
 	return (
@@ -184,167 +161,71 @@ export function Invitation({
 	);
 }
 
-type Problem = { at: "password" | "again" | "passkey" | "form" | "provider"; message: string };
-
 function Accept({
 	code,
 	shown,
+	provider,
 	who,
 	onDone,
-	onGone,
-	onShown,
 }: {
 	code: string;
 	shown: ShownInvitation;
+	provider: string | null;
 	who: Who;
 	onDone: () => Promise<void>;
-	onGone: () => void;
-	onShown: (shown: ShownInvitation) => void;
 }) {
 	const { name, purpose, expiresAt } = shown.invitation;
-	const challengeExpiresAt = shown.passkeyExpiresAt;
-	const [password, setPassword] = useState("");
-	const [again, setAgain] = useState("");
-	const [wantPasskey, setWantPasskey] = useState(false);
-	const [label, setLabel] = useState(() => browserName(navigator.userAgent));
 	const [busy, setBusy] = useState(false);
-	const [problem, setProblem] = useState<Problem | null>(null);
-	// Who the server said holds this browser when it refused an acceptance, what was sent, and the deadline
-	// of any passkey challenge it answers.
-	const [refusedFor, setRefusedFor] = useState<{
-		signedInAs: string;
-		sent: Acceptance;
-		expiresAt: number;
-	} | null>(null);
+	const [problem, setProblem] = useState("");
+	// Who the server said holds this browser when it refused to begin an acceptance.
+	const [refusedFor, setRefusedFor] = useState<string | null>(null);
 	// The person the question was answered for with "Continue": the one whose session in this browser may end.
 	// It is the only name an acceptance ever carries, and it is a name that was on the page when the answer
 	// was given. The server reads who holds the browser when it accepts, and refuses if it is anybody else.
 	const [confirmed, setConfirmed] = useState<string | null>(null);
-	const passwordRef = useRef<HTMLInputElement>(null);
-	const passkeyOffered = shown.passkey !== null && passkeysAvailable();
-	// The identity provider, when the instance has one: accepting through it needs no password or passkey here.
-	const [provider, setProvider] = useState<string | null>(null);
-	useEffect(() => {
-		let shown = true;
-		void signInMethods().then(
-			(offered) => {
-				if (shown) setProvider(offered.oidc?.name ?? null);
-			},
-			() => {},
-		);
-		return () => {
-			shown = false;
-		};
-	}, []);
 	// Not known who is signed in here, because the answer is on its way or did not come: the page may be about
 	// to sign somebody out, and cannot ask about them. A refusal that named the holder is an answer too.
 	const waiting = who.state !== "known" && refusedFor === null;
 	const signedInAs = who.state === "known" ? who.name : null;
-	const other = refusedFor?.signedInAs ?? (signedInAs && signedInAs !== name ? signedInAs : null);
+	const other = refusedFor ?? (signedInAs && signedInAs !== name ? signedInAs : null);
 	// Somebody else is signed in here, and the person has not said that this person's session may end. An
 	// answer about one person is no answer about another.
 	const asking = other !== null && confirmed !== other;
 	const held = waiting || asking;
+	const acceptRef = useRef<HTMLButtonElement>(null);
 	useEffect(() => {
-		// The fields are where typing starts: once the page knows who is signed in and has no question, and
-		// again when a question is answered.
-		if (!held) passwordRef.current?.focus();
+		// The button is where the keys go: once the page knows who is signed in and has no question, and again
+		// when a question is answered.
+		if (!held) acceptRef.current?.focus();
 	}, [held]);
-	const said = (at: Problem["at"]): string => (problem?.at === at ? problem.message : "");
 
-	/**
-	 * Sends an acceptance. What comes back decides: the app, the question about whoever holds the browser, or a
-	 * refusal. `expiresAt` is the conservative local deadline of the passkey challenge.
-	 */
-	async function send(acceptance: Acceptance, expiresAt: number): Promise<void> {
-		try {
-			await acceptInvitation(acceptance);
-		} catch (error) {
-			const holder = error instanceof ApiError && error.code === "conflict" ? error.details.signedInAs : null;
-			if (typeof holder === "string") {
-				// Nothing was changed and the invitation still works. The page asks about the person the server
-				// named, and sends nothing until that question is answered. What was typed, and a passkey that
-				// was made, are kept for then: a challenge is spent only by an acceptance that went through.
-				setRefusedFor({ signedInAs: holder, sent: acceptance, expiresAt });
-				return;
-			}
-			setProblem({ at: "form", message: error instanceof ApiError ? refusalOf(error, NOT_ACCEPTED) : MAYBE_ACCEPTED });
-			return;
-		}
-		await onDone();
+	/** One request at a time, and whatever fails is said on the page. */
+	function run(work: () => Promise<void>): void {
+		if (busy) return;
+		setBusy(true);
+		setProblem("");
+		void work()
+			.catch((error: unknown) => setProblem(refusalOf(error, NOT_ACCEPTED)))
+			.finally(() => setBusy(false));
 	}
 
-	/** "Continue": the person on the page may be signed out of this browser. What waited for the answer goes now. */
+	/**
+	 * Sends the browser to the provider to accept, naming `replace` as the person who may be signed out here.
+	 * A refusal that names who holds the browser changes nothing: the page asks about them first.
+	 */
+	const accept = (replace: string | null): Promise<void> =>
+		startOidc({ invitation: code, ...(replace === null ? {} : { replace }) }).catch((error: unknown) => {
+			const holder = error instanceof ApiError && error.code === "conflict" ? error.details.signedInAs : null;
+			if (typeof holder !== "string") throw error;
+			setRefusedFor(holder);
+		});
+
+	/** "Continue": the person on the page may be signed out of this browser. An acceptance that waited goes now. */
 	function answer(about: string): void {
 		if (busy) return;
 		setConfirmed(about);
-		const refused = refusedFor;
-		// Asked before anything was sent: the form is next, and its acceptance will carry the name.
-		if (!refused || refused.signedInAs !== about) return;
-		if (refused.sent.passkey && Date.now() >= refused.expiresAt) {
-			// The passkey's challenge ran out while the question stood. The form is open again to make another.
-			setProblem({ at: "passkey", message: PASSKEY_RAN_OUT });
-			return;
-		}
-		run(() => send({ ...refused.sent, replace: about }, refused.expiresAt), "form");
+		if (refusedFor === about) run(() => accept(about));
 	}
-
-	const typed = password !== "" || again !== "";
-	/** What is wrong with the form as it stands, checked in the page before anything is sent. */
-	function unfit(): Problem | null {
-		if (!typed && !wantPasskey)
-			return {
-				at: "password",
-				message: passkeyOffered ? "Choose a password, a passkey, or both." : "Choose a password.",
-			};
-		const why = typed ? whyNotPassword(password) : null;
-		if (why) return { at: "password", message: why };
-		if (typed && password !== again) return { at: "again", message: "The two passwords differ." };
-		if (wantPasskey && !label.trim())
-			return { at: "passkey", message: "Give the passkey a name, such as the device it is on." };
-		return null;
-	}
-
-	async function accept(): Promise<void> {
-		let passkey: Acceptance["passkey"] = null;
-		let expiresAt = challengeExpiresAt;
-		if (wantPasskey) {
-			let offered = shown.passkey;
-			if (challengeExpiresAt - Date.now() <= CHALLENGE_MARGIN_MS) {
-				// Asked again with the same code: a passkey for an invitation is finished with the code it began with.
-				const fresh = await showInvitation(code);
-				if (!fresh) {
-					onGone();
-					return;
-				}
-				onShown(fresh);
-				offered = fresh.passkey;
-				expiresAt = fresh.passkeyExpiresAt;
-			}
-			if (!offered) throw new PasskeyError("This instance has no passkeys.");
-			passkey = { made: await makePasskey(offered), label: label.trim() };
-		}
-		await send({ code, password: typed ? password : null, passkey, replace: confirmed }, expiresAt);
-	}
-
-	/** One request at a time, and whatever fails is said on the page. */
-	function run(work: () => Promise<void>, at: Problem["at"]): void {
-		if (busy) return;
-		setBusy(true);
-		setProblem(null);
-		void work()
-			.catch((error: unknown) =>
-				setProblem({ at, message: error instanceof PasskeyError ? error.message : refusalOf(error, NOT_ACCEPTED) }),
-			)
-			.finally(() => setBusy(false));
-	}
-	const submit = (event: FormEvent): void => {
-		event.preventDefault();
-		if (held || busy) return;
-		const wrong = unfit();
-		if (wrong) setProblem(wrong);
-		else run(accept, wantPasskey ? "passkey" : "form");
-	};
 
 	return (
 		<div className="signin">
@@ -353,137 +234,73 @@ function Accept({
 				<p className="dim">This link works once, until {dateTime(expiresAt)}.</p>
 				{purpose === "recover" && (
 					<p>
-						Accepting replaces every password and passkey, revokes all your tokens, and signs you out everywhere else.
+						Accepting replaces the identities you sign in with, revokes all your tokens, and signs you out everywhere
+						else.
 					</p>
 				)}
-				{asking && (
-					<div className="signin-ask">
-						<p>
-							You are signed in as {other}. This invitation is for {name}. Sign {other} out of this browser and
-							continue?
-						</p>
-						<div>
-							<button
-								type="button"
-								// biome-ignore lint/a11y/noAutofocus: the question stops the page until it is answered, so the answer is where the keys go.
-								autoFocus
-								aria-disabled={busy}
-								onClick={() => answer(other)}
-							>
-								Continue as {name}
-							</button>
-							<button type="button" className="plain" aria-disabled={busy} onClick={() => run(onDone, "form")}>
-								Stay signed in as {other}
-							</button>
-						</div>
-					</div>
-				)}
-				{waiting && who.state === "asking" && (
-					<p className="dim" role="status">
-						Checking who is signed in to this browser…
+				{provider === null ? (
+					<p role="status">
+						This instance has no identity provider, so an invitation cannot be accepted here. Ask whoever runs it.
 					</p>
-				)}
-				{waiting && who.state === "unknown" && (
-					<div className="signin-ask">
-						<p role="status">
-							The page could not find out whether somebody is signed in to this browser, so it cannot tell whether
-							accepting would sign them out.
-						</p>
-						<div>
-							<button type="button" onClick={who.retry}>
-								Try again
-							</button>
-						</div>
-					</div>
-				)}
-				<form onSubmit={submit}>
-					<fieldset disabled={held}>
-						{/* For a password manager: the name this password is saved under. */}
-						<input type="text" name="username" autoComplete="username" value={name} readOnly hidden />
-						<label htmlFor="invite-password">Password</label>
-						<input
-							id="invite-password"
-							name="password"
-							type="password"
-							autoComplete="new-password"
-							{...PASSWORD_RULES}
-							aria-describedby="invite-count"
-							ref={passwordRef}
-							value={password}
-							onChange={(event) => setPassword(event.target.value)}
-						/>
-						<PasswordCount id="invite-count" className="signin-count" text={password} />
-						<div className="signin-problem" role="status">
-							{said("password")}
-						</div>
-						<label htmlFor="invite-password-again">Password again</label>
-						<input
-							id="invite-password-again"
-							name="password-again"
-							type="password"
-							autoComplete="new-password"
-							{...PASSWORD_RULES}
-							value={again}
-							onChange={(event) => setAgain(event.target.value)}
-						/>
-						<div className="signin-problem" role="status">
-							{said("again")}
-						</div>
-						{passkeyOffered && (
-							<>
-								<label className="signin-check">
-									<input
-										type="checkbox"
-										checked={wantPasskey}
-										onChange={(event) => setWantPasskey(event.target.checked)}
-									/>
-									Make a passkey on this device
-								</label>
-								{wantPasskey && (
-									<>
-										<label htmlFor="invite-passkey-name">Passkey name</label>
-										<input
-											id="invite-passkey-name"
-											maxLength={60}
-											value={label}
-											onChange={(event) => setLabel(event.target.value)}
-										/>
-									</>
-								)}
-								<div className="signin-problem" role="status">
-									{said("passkey")}
+				) : (
+					<>
+						{asking && (
+							<div className="signin-ask">
+								<p>
+									You are signed in as {other}. This invitation is for {name}. Sign {other} out of this browser and
+									continue?
+								</p>
+								<div>
+									<button
+										type="button"
+										// biome-ignore lint/a11y/noAutofocus: the question stops the page until it is answered, so the answer is where the keys go.
+										autoFocus
+										aria-disabled={busy}
+										onClick={() => answer(other)}
+									>
+										Continue as {name}
+									</button>
+									<button type="button" className="plain" aria-disabled={busy} onClick={() => run(onDone)}>
+										Stay signed in as {other}
+									</button>
 								</div>
-							</>
+							</div>
 						)}
-						<div className="signin-problem" role="status">
-							{said("form")}
-						</div>
+						{waiting && who.state === "asking" && (
+							<p className="dim" role="status">
+								Checking who is signed in to this browser…
+							</p>
+						)}
+						{waiting && who.state === "unknown" && (
+							<div className="signin-ask">
+								<p role="status">
+									The page could not find out whether somebody is signed in to this browser, so it cannot tell whether
+									accepting would sign them out.
+								</p>
+								<div>
+									<button type="button" onClick={who.retry}>
+										Try again
+									</button>
+								</div>
+							</div>
+						)}
+						<p>Accept by signing in with {provider}. That identity is the one you sign in with from then on.</p>
 						{/* Busy, it keeps the focus and takes no second press: `run` lets one request through. */}
-						<button type="submit" aria-disabled={busy}>
-							{busy ? "Accepting…" : "Accept and sign in"}
-						</button>
-					</fieldset>
-				</form>
-				{provider && (
-					<div className="signin-way">
 						<button
+							ref={acceptRef}
 							type="button"
-							className="plain"
 							disabled={held}
 							aria-disabled={busy}
-							onClick={() =>
-								run(
-									() => startOidc({ invitation: code, ...(confirmed === null ? {} : { replace: confirmed }) }),
-									"provider",
-								)
-							}
+							onClick={() => {
+								if (!held) run(() => accept(confirmed));
+							}}
 						>
-							Accept with {provider}
+							{busy ? `Opening ${provider}…` : `Accept with ${provider}`}
 						</button>
 						<div className="signin-problem" role="status">
-							{said("provider")}
+							{problem}
 						</div>
-					</div>
+					</>
 				)}
 			</main>
 		</div>

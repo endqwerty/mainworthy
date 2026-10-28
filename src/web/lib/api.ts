@@ -44,7 +44,7 @@ const Session = z.object({
 	mode: z.enum(["local", "server"]),
 	via: z.enum(["token", "cookie", "local"]),
 	session: schemaNullableNumber,
-	credentials: z.object({ password: schemaFlag, passkeys: schemaNumber }).nullable(),
+	credentials: z.object({ identities: schemaNumber }).nullable(),
 	owner: schemaFlag,
 	version: schemaText,
 	projects: z.array(
@@ -190,8 +190,8 @@ function waitSentence(response: Response): string {
 	return `Too many attempts. Try again ${wait}.`;
 }
 /**
- * One of the routes that are not operations: signing in and out, and setting a password (`signin.ts` has a
- * function for each). With a body it is a POST. `signedIn` says the page asks as the person it is signed in as:
+ * One of the routes that are not operations: signing in and out (`signin.ts` has a function for each). With a
+ * body it is a POST. `signedIn` says the page asks as the person it is signed in as:
  * the request names them, so the server refuses it when the cookie has become somebody else's, and a 401 means
  * the session ended, as it does for an operation. Without it nobody is signed in yet, and a 401 is a refusal
  * for the caller to show.
@@ -214,8 +214,8 @@ export async function exchange(
 			publishAuthentication();
 		return envelope.result;
 	}
-	// Every one of these routes may be answered `limited`: a wrong token, password, passkey or invitation code
-	// too often, or a wrong current password. The sentence is the same wherever it is shown.
+	// Every one of these routes may be answered `limited`: a wrong token, provider answer or invitation code too
+	// often. The sentence is the same wherever it is shown.
 	const error =
 		envelope.error.code === "limited" ? { ...envelope.error, message: waitSentence(response) } : envelope.error;
 	if (signedIn) refuse(error, response.status);

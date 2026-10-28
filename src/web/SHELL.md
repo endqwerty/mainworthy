@@ -31,11 +31,12 @@ is typed from core `Api`. The instance's operations (`INSTANCE_OPS` in core `api
 `admin`, `session`, `credential`, `invitation`) use `/api/<op>`; others use the project.
 A failure throws `ApiError` with the server's `code`, `message`, `details` and HTTP `status`;
 `unauthenticated` returns to sign-in. Keep input on device.
-The routes that are not operations are in `lib/signin.ts`, one function each: sign-in in
-its four forms, the passkey challenge, the instance's methods, the password, sign-out.
+The routes that are not operations are in `lib/signin.ts`, one function each: sign-in with
+a token, the instance's methods, an invitation's look-up, the identity provider's start
+(`startOidc`: sign in, accept, link, confirm) and finish (`finishOidc`), sign-out.
 They go through `exchange` in `lib/api.ts`, which words a `limited` reply as the wait its
 `Retry-After` names ("Too many attempts. Try again in N seconds."), so every form says it alike.
-`lib/passkey.ts` runs the two passkey ceremonies. `lib/people.ts` reads the replies of
+`lib/people.ts` reads the replies of
 `session`, `credential` and `invitation` into the core's row types.
 `useQueryOp({project, op, input, enabled?})` from `lib/data.ts` returns the
 TanStack query, including `data`, `error`, `refetch`, `isPending`.
@@ -103,17 +104,17 @@ Settings has three sections about signing in, each its own file in `settings/`: 
 sign-in" (`signin.tsx`, a person only), "Your sessions" (`sessions.tsx`) and "People"
 (`people.tsx`, an instance admin who is a person). Their lists use `useList` from
 `settings/list.ts`, which reads again each time the section opens. `n` goes to the
-section's first field: the new password, the invited person's name. A section's key is
+section's first field: the invited person's name. A section's key is
 registered only for a caller who has the section.
 
 On these pages and sections a control whose request is under way is marked `aria-disabled`
-and not disabled, so it keeps the focus; its handler lets one request through. A proof (a password, a token, a
-passkey's answer, an invitation) and a change are sent once for each press and never again
+and not disabled, so it keeps the focus; its handler lets one request through. A proof (a token, the
+provider's answer, an invitation) and a change are sent once for each press and never again
 by the page itself. What the page does ask again by itself is what only reads: a list after
 something in it may have changed, and `/api/session` after a sign-out that got no reply.
-When accepting an invitation, making a link or changing a password gets no reply, the page
+When making a link or a token gets no reply, the page
 says what may have happened (`saidOfWrite` in `settings/list.ts`) and not "try again".
-Ending a session, removing a way of signing in and revoking an invitation may be pressed
+Ending a session, removing an identity and revoking an invitation may be pressed
 again safely: they say that Mainworthy did not answer, and read their list again.
 
 ## Device draft ownership
@@ -247,12 +248,11 @@ A screen that gains a section links to the page that explains it.
 ## Real-page test support
 
 `test/e2e/support.ts` exports `browserAvailable`, `startServer({cases?, mode?,
-preset?, seed?, passkeys?})`, `openPage(server, {path?, signedIn?, as?, ready?, browser?})`,
+preset?, seed?})`, `openPage(server, {path?, signedIn?, as?, ready?, browser?})`,
 `launchBrowser()`, `paste(page,text)`, `keyCount(page)`, `eventually(read, accepts)`.
-`as: {name, password}` signs a person in instead of the owner. `ready` is the selector
+`as: {name}` signs a person in through the fake identity provider instead of the owner. `ready` is the selector
 that shows a page is up when it is neither the app nor the sign-in page (`/invite`).
-`addAuthenticator(harness)` gives the page a virtual authenticator for passkeys; the
-server needs `passkeys: true` and the page `localhost`. `advanceClock(server, ms)` moves
+`advanceClock(server, ms)` moves
 the server's clock forward.
 Server has `url`, `project`, `token`, `seeded`, `api(op,input,{token?})`, `stop()`.
 Page helper has `page`, `context`, `errors`, `dialogs`, `loads()`, `keys()`, `close()`.

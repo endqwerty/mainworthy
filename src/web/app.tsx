@@ -37,7 +37,6 @@ import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
 import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
-import { MailEntry } from "./signin/mail.tsx";
 import { OIDC_PATH, OidcReturn } from "./signin/oidc.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { TestsScreen } from "./tests/index.tsx";
@@ -156,7 +155,6 @@ export function App() {
 		| { kind: "error"; message: string }
 	>({ kind: "loading" });
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
-	const [mailEntry, setMailEntry] = useState(() => location.pathname === "/reset" || location.pathname === "/email");
 	const [returning, setReturning] = useState(() => location.pathname === OIDC_PATH);
 	const person = useRef<number | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
@@ -208,10 +206,7 @@ export function App() {
 					history.replaceState(null, "", home.url);
 					if (home.missing) homeStatus = missingHomeStatus;
 				}
-			} else if (
-				!location.pathname.startsWith("/p/") &&
-				![INVITE_PATH, OIDC_PATH, "/reset", "/email"].includes(location.pathname)
-			) {
+			} else if (!location.pathname.startsWith("/p/") && ![INVITE_PATH, OIDC_PATH].includes(location.pathname)) {
 				const first = info.projects[0];
 				if (first) history.replaceState(null, "", routeUrl({ project: first.key, screen: "suite" }));
 			}
@@ -266,29 +261,24 @@ export function App() {
 		media.addEventListener("change", changed);
 		return () => media.removeEventListener("change", changed);
 	}, []);
-	// The page of an invitation is shown whoever is or is not signed in: it is how somebody gets in at all, and
-	// a browser signed in as another person is asked there before anything is replaced.
-	if (mailEntry)
-		return (
-			<MailEntry
-				onDone={async () => {
-					history.replaceState(null, "", "/");
-					await refreshSession();
-					setMailEntry(false);
-				}}
-			/>
-		);
 	// The identity provider sent the browser back: its answer is handed to the server before anything else.
 	if (returning)
 		return (
 			<OidcReturn
-				onDone={(to) => {
-					// Settings opens at the section the person linked the provider from (`settingsSection`).
-					history.replaceState(to.section ? { settingsSection: to.section } : null, "", to.path);
+				onDone={(to, finished) => {
+					// Settings opens at the section the person left for the provider (`settingsSection`), and says
+					// when they came back confirmed (`proven`).
+					history.replaceState(
+						to.section ? { settingsSection: to.section, ...(finished === "proven" ? { proven: true } : {}) } : null,
+						"",
+						to.path,
+					);
 					setReturning(false);
 				}}
 			/>
 		);
+	// The page of an invitation is shown whoever is or is not signed in: it is how somebody gets in at all, and
+	// a browser signed in as another person is asked there before anything is replaced.
 	if (inviting)
 		return (
 			<Invitation

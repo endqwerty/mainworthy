@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
 	Capability,
@@ -37,8 +37,8 @@ type PolicyChange =
 
 /**
  * The sections a caller is shown, in the order of the list. "People" is for an admin of the instance who is a
- * person, which is who the server lets invite. "Your sign-in" is for a person: nobody else has a password or a
- * passkey. "Your sessions" is for whoever can have a browser session, which a pipeline cannot.
+ * person, which is who the server lets invite. "Your sign-in" is for a person: nobody else links an identity.
+ * "Your sessions" is for whoever can have a browser session, which a pipeline cannot.
  */
 const sectionsFor = (caller: { kind: string; instanceAdmin: boolean }): string[] => [
 	"Policy",
@@ -127,6 +127,15 @@ function SettingsWorkbench() {
 		const back = (history.state as { settingsSection?: unknown } | null)?.settingsSection;
 		return typeof back === "string" ? back : "Policy";
 	});
+	// The page's history entry holds the section, for the way back from the provider (`useRecentProof`) and
+	// from another screen. Whether the person came back confirmed is read once, and said.
+	const [proven] = useState(() => (history.state as { proven?: unknown } | null)?.proven === true);
+	useEffect(() => {
+		history.replaceState({ settingsSection: section }, "", location.href);
+	}, [section]);
+	useEffect(() => {
+		if (proven) setStatus("Confirmed it is you. Repeat the change within ten minutes.");
+	}, [proven, setStatus]);
 	// The policy edit on its way to a proposal and accepting decision.
 	const [switching, setSwitching] = useState<PolicyChange | null>(null);
 	const policyAttempt = useRef<{ key: string; propose: string; decide: string } | null>(null);
@@ -156,7 +165,6 @@ function SettingsWorkbench() {
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
 	const inviteRef = useRef<HTMLInputElement>(null);
-	const passwordRef = useRef<HTMLInputElement>(null);
 	const sections = sectionsFor({ kind: session.kind, instanceAdmin });
 	useBindings([
 		{
@@ -184,16 +192,6 @@ function SettingsWorkbench() {
 						label: "New invitation",
 						applies: () => section === "People",
 						handler: () => focusInto(inviteRef.current),
-					},
-				]
-			: []),
-		...(sections.includes("Your sign-in") && session.via === "cookie"
-			? [
-					{
-						key: "n",
-						label: "New password",
-						applies: () => section === "Your sign-in",
-						handler: () => focusInto(passwordRef.current),
 					},
 				]
 			: []),
@@ -476,7 +474,7 @@ function SettingsWorkbench() {
 							<EmptyState>An admin creates and revokes tokens.</EmptyState>
 						))}
 					{section === "People" && <People nameRef={inviteRef} />}
-					{section === "Your sign-in" && <YourSignIn passwordRef={passwordRef} />}
+					{section === "Your sign-in" && <YourSignIn />}
 					{section === "Your sessions" && <YourSessions />}
 					{section === "Projects" && <ProjectSettings inputRef={projectRef} />}
 					{section === "Connect" && (

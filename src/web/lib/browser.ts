@@ -1,6 +1,6 @@
 // A short name for a browser, read from what it calls itself (`User-Agent`). It names a session in "Your
-// sessions", where the text is what the server recorded at sign-in, and it is the label a new passkey starts
-// with, where the text is this browser's own. Nothing checks the text: a client writes what it likes there.
+// sessions", where the text is what the server recorded at sign-in. Nothing checks the text: a client writes
+// what it likes there.
 
 const BROWSERS: readonly [RegExp, string][] = [
 	// The order matters: Edge and Opera also say Chrome, and Chrome also says Safari.
