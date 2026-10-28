@@ -28,9 +28,9 @@ agents and pipelines.
   Recovery is a new invitation for the same person, which links the identity they sign in with next.
 - **Recent proof** (0145) is a fresh sign-in at the provider: the server asks with `max_age=0` and asks for
   `auth_time` as an essential claim, and takes the proof only when the ID token says the person signed in there
-  within the last ten minutes. An answer without `auth_time` proves nothing: it would be a silent single sign-on
+  after the ceremony began, dating the proof from that sign-in. An answer without `auth_time` proves nothing: it would be a silent single sign-on
   from whoever sits at the browser (the security audit of #1048 found this; an earlier draft of this record
-  accepted it). Google gives `auth_time` only when a request asks for it and the client's settings enable it
+  accepted it), and so does a sign-in from before the ceremony, which a provider ignoring `max_age=0` would send (its second audit). Google gives `auth_time` only when a request asks for it and the client's settings enable it
   (read 2026-10-27), so the hosted instance's client must have it enabled. A browser session opened by typing a token has proof
   for ten minutes, unlike under 0145: a token already speaks for its person over the API, so the browser gains
   nothing the token lacked. Proof still guards linking a second identity and unlinking one, creating a token or
