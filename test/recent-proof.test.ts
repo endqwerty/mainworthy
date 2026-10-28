@@ -224,12 +224,26 @@ test("the ceremony of proof is begun from this server's page, for one purpose, a
 
 // ── Linking and unlinking ──────────────────────────────────────────────────────────────────────────────────
 
-test("the first identity is linked without proof; a second needs it", async () => {
+test("even the first identity is linked only with proof; a second needs it too", async () => {
 	const w = await world();
 	const cookie = await tokenSession(w);
+	// An unattended token session with no identity yet cannot be given someone else's.
 	stale(w);
-	expect(must(await viaProvider(w, { subject: subjectOf(OWNER) }, { link: true }, cookie))).toEqual({ linked: true });
 	refused(await w.post("/api/login/oidc", { link: true }, jar(cookie)));
+	const fresh = await tokenSession(w);
+	// Proof lapsing between the start and the provider's answer, within the ceremony's five minutes, stops the link
+	// at its end too.
+	w.clock.advance(PROOF_MS - 60_000);
+	const begun = await begin(w, { link: true }, jar(fresh));
+	const query = await authorize(w, begun, { subject: subjectOf(OWNER) });
+	w.clock.advance(120_000);
+	refused(await finish(w, query, jar(fresh, begun.ceremony)));
+	expect(must(await viaProvider(w, { subject: subjectOf(OWNER) }, { link: true }, await tokenSession(w)))).toEqual({
+		linked: true,
+	});
+	const cookie2 = await tokenSession(w);
+	stale(w);
+	refused(await w.post("/api/login/oidc", { link: true }, jar(cookie2)));
 	// Now that an identity is linked, the token's session proves with it like any other.
 	expect(must(await prove(w, cookie, OWNER))).toEqual({ proven: true });
 	expect(must(await viaProvider(w, { subject: "alt-kim" }, { link: true }, cookie))).toEqual({ linked: true });

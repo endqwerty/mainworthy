@@ -503,13 +503,12 @@ export async function beginOidcSignIn(app: App, start: OidcStart, address: strin
 			async (db) =>
 				await db.transaction(
 					async () =>
-						// A person with no identity yet links their first one without proof, as with a first credential before.
-						await requireRecentProof(
-							app,
-							db,
-							{ actor: start.actor, context: CONTEXT.session(hashOf(start.browser)) },
-							true,
-						),
+						// Even a first identity needs proof: it becomes a lasting way in, and a token's session has proof
+						// for ten minutes from signing in with the token.
+						await requireRecentProof(app, db, {
+							actor: start.actor,
+							context: CONTEXT.session(hashOf(start.browser)),
+						}),
 				),
 		);
 		purpose = { purpose: "link", actor: start.actor, session: hashOf(start.browser) };
@@ -573,7 +572,7 @@ export async function finishOidcSignIn(
 			const held = input.browser === null ? null : await findSession(app, hashOf(input.browser), { db: db });
 			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
 				return no("context");
-			await requireRecentProof(app, db, { actor: linking.actor, context: CONTEXT.session(linking.session) }, true);
+			await requireRecentProof(app, db, { actor: linking.actor, context: CONTEXT.session(linking.session) });
 			if (await oidcByHandle(db, handle)) return { ok: false, why: "linked-already" };
 			await insertOidc(db, { actor: linking.actor, handle, label, at: app.now() });
 			return { ok: true, linked: true };
