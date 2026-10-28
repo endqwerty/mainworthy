@@ -3,17 +3,23 @@
 // a pattern, a directory nobody made with `make` and another place are refused, so cleaning up cannot remove
 // another agent's files.
 import {
+	closeSync,
+	constants,
 	existsSync,
+	fstatSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	openSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
+	readSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 /** The file `make` leaves in a directory; `remove` deletes only a directory that has it. */
@@ -32,9 +38,40 @@ export function make(name: string, root = defaultRoot()): string {
 	return directory;
 }
 
+// Markers contain only a path or a handful of owner identities, never more than 4 KiB.
+function readMarker(path: string): string {
+	const stat = lstatSync(path);
+	if (!stat.isFile() || stat.size > 4096) throw new Error("not a bounded regular marker");
+	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	try {
+		const opened = fstatSync(fd);
+		if (!opened.isFile() || opened.size > 4096) throw new Error("not a bounded regular marker");
+		const bytes = Buffer.alloc(4097);
+		const length = readSync(fd, bytes, 0, bytes.length, 0);
+		if (length > 4096) throw new Error("marker grew beyond its bound");
+		return bytes.subarray(0, length).toString("utf8");
+	} finally {
+		closeSync(fd);
+	}
+}
+const localIdentity = (): string => {
+	const optional = (read: () => string): string => {
+		try {
+			return read();
+		} catch {
+			return "";
+		}
+	};
+	return JSON.stringify([
+		hostname(),
+		optional(() => readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()),
+		optional(() => readlinkSync("/proc/self/ns/pid")),
+	]);
+};
+
 const hasOwnMarker = (real: string): boolean => {
 	try {
-		return readFileSync(join(real, MARKER), "utf8").trim() === real;
+		return readMarker(join(real, MARKER)).trim() === real;
 	} catch {
 		return false;
 	}
@@ -85,7 +122,7 @@ export function remove(given: string, root = defaultRoot()): string {
 export function markOwned(directory: string, pids: readonly number[] = [process.pid]): void {
 	const real = realpathSync(directory);
 	writeFileSync(join(real, MARKER), `${real}\n`);
-	writeFileSync(join(real, `${MARKER}-owner`), `${pids.join("\n")}\n`);
+	writeFileSync(join(real, `${MARKER}-owner`), `${localIdentity()}\n${pids.join("\n")}\n`);
 }
 
 /** Recover only marked run directories. An unknown process state is treated as alive. */
@@ -94,11 +131,14 @@ export function sweepOwned(root: string, prefix: "mainworthy-check-" | "mainwort
 		if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
 		const directory = join(realpathSync(root), entry.name);
 		try {
+			const stat = lstatSync(directory);
+			if (!stat.isDirectory() || stat.uid !== process.getuid?.()) continue;
 			if (!hasOwnMarker(directory)) continue;
-			const pids = readFileSync(join(directory, `${MARKER}-owner`), "utf8")
+			const [identity, ...owners] = readMarker(join(directory, `${MARKER}-owner`))
 				.trim()
-				.split("\n")
-				.map(Number);
+				.split("\n");
+			if (identity !== localIdentity()) continue;
+			const pids = owners.map(Number);
 			if (!pids.length || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) continue;
 			const namePid = prefix === "mainworthy-e2e-" ? Number(/^mainworthy-e2e-(\d+)-/.exec(entry.name)?.[1]) : undefined;
 			if (namePid !== undefined) {
@@ -117,8 +157,8 @@ export function sweepOwned(root: string, prefix: "mainworthy-check-" | "mainwort
 			)
 				continue;
 			rmSync(directory, { recursive: true, force: true });
-		} catch (error) {
-			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+		} catch {
+			// A shared temp entry may be unreadable or change while it is inspected. Leave it alone.
 		}
 	}
 }
