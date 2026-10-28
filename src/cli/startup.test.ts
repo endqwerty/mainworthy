@@ -203,7 +203,7 @@ for (const options of [
 				);
 				expect(stdout).toContain(
 					options.mode === "server"
-						? 'project "scratch" · owner robin · sign in with a token, a password or a passkey · policy: loose'
+						? 'project "scratch" · owner robin · sign in with a token · policy: loose'
 						: 'project "scratch" · you are robin@this-machine · policy: loose',
 				);
 				const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];

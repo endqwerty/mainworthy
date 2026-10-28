@@ -287,10 +287,6 @@ column invitations.id: bigint NOT NULL IDENTITY d
 column invitations.purpose: text NOT NULL
 column invitations.revoked_at: bigint NULL
 column invitations.used_at: bigint NULL
-column mail_contacts.actor: bigint NOT NULL
-column mail_contacts.email: text NOT NULL
-column mail_contacts.revision: text NOT NULL
-column mail_contacts.verified_at: bigint NULL
 column merge_receipt_dirty.bucket: bigint NOT NULL
 column merge_receipt_dirty.run: bigint NOT NULL
 column merge_receipt_heads.project: bigint NOT NULL
@@ -329,9 +325,6 @@ column meta.value: text NOT NULL
 column orgs.created_at: bigint NOT NULL
 column orgs.id: bigint NOT NULL IDENTITY d
 column orgs.name: text NOT NULL
-column passkey_users.actor: bigint NOT NULL
-column passkey_users.created_at: bigint NOT NULL
-column passkey_users.handle: text NOT NULL
 column placements.actor: bigint NOT NULL
 column placements.after: text NOT NULL
 column placements.at: bigint NOT NULL
@@ -880,7 +873,7 @@ constraint credentials.credentials_actor_not_null: NOT NULL actor
 constraint credentials.credentials_created_at_not_null: NOT NULL created_at
 constraint credentials.credentials_data_not_null: NOT NULL data
 constraint credentials.credentials_id_not_null: NOT NULL id
-constraint credentials.credentials_kind_check: CHECK ((kind = ANY (ARRAY['password'::text, 'passkey'::text, 'oidc'::text, 'totp'::text])))
+constraint credentials.credentials_kind_check: CHECK ((kind = 'oidc'::text))
 constraint credentials.credentials_kind_not_null: NOT NULL kind
 constraint credentials.credentials_label_not_null: NOT NULL label
 constraint credentials.credentials_pkey: PRIMARY KEY (id)
@@ -1014,12 +1007,6 @@ constraint invitations.invitations_id_not_null: NOT NULL id
 constraint invitations.invitations_pkey: PRIMARY KEY (id)
 constraint invitations.invitations_purpose_check: CHECK ((purpose = ANY (ARRAY['join'::text, 'recover'::text])))
 constraint invitations.invitations_purpose_not_null: NOT NULL purpose
-constraint mail_contacts.mail_contacts_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
-constraint mail_contacts.mail_contacts_actor_not_null: NOT NULL actor
-constraint mail_contacts.mail_contacts_email_key: UNIQUE (email)
-constraint mail_contacts.mail_contacts_email_not_null: NOT NULL email
-constraint mail_contacts.mail_contacts_pkey: PRIMARY KEY (actor)
-constraint mail_contacts.mail_contacts_revision_not_null: NOT NULL revision
 constraint merge_receipt_dirty.merge_receipt_dirty_bucket_not_null: NOT NULL bucket
 constraint merge_receipt_dirty.merge_receipt_dirty_pkey: PRIMARY KEY (run, bucket)
 constraint merge_receipt_dirty.merge_receipt_dirty_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) ON DELETE CASCADE DEFERRABLE
@@ -1087,12 +1074,6 @@ constraint orgs.orgs_created_at_not_null: NOT NULL created_at
 constraint orgs.orgs_id_not_null: NOT NULL id
 constraint orgs.orgs_name_not_null: NOT NULL name
 constraint orgs.orgs_pkey: PRIMARY KEY (id)
-constraint passkey_users.passkey_users_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
-constraint passkey_users.passkey_users_actor_not_null: NOT NULL actor
-constraint passkey_users.passkey_users_created_at_not_null: NOT NULL created_at
-constraint passkey_users.passkey_users_handle_key: UNIQUE (handle)
-constraint passkey_users.passkey_users_handle_not_null: NOT NULL handle
-constraint passkey_users.passkey_users_pkey: PRIMARY KEY (actor)
 constraint placements.placements_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
 constraint placements.placements_actor_not_null: NOT NULL actor
 constraint placements.placements_after_not_null: NOT NULL after
@@ -1921,7 +1902,6 @@ index covers_decision_reset: CREATE INDEX covers_decision_reset ON public.covers
 index covers_pkey: CREATE UNIQUE INDEX covers_pkey ON public.covers USING btree (requirement, case_id)
 index credentials_actor: CREATE INDEX credentials_actor ON public.credentials USING btree (actor, revoked_at)
 index credentials_handle: CREATE UNIQUE INDEX credentials_handle ON public.credentials USING btree (kind, handle) WHERE (handle IS NOT NULL)
-index credentials_password: CREATE UNIQUE INDEX credentials_password ON public.credentials USING btree (actor) WHERE ((kind = 'password'::text) AND (revoked_at IS NULL))
 index credentials_pkey: CREATE UNIQUE INDEX credentials_pkey ON public.credentials USING btree (id)
 index decisions_expiry: CREATE INDEX decisions_expiry ON public.decisions USING btree (project, expires_at) WHERE (expires_at IS NOT NULL)
 index decisions_pkey: CREATE UNIQUE INDEX decisions_pkey ON public.decisions USING btree (id)
@@ -1967,8 +1947,6 @@ index identity_starts_pkey: CREATE UNIQUE INDEX identity_starts_pkey ON public.i
 index invitations_actor: CREATE INDEX invitations_actor ON public.invitations USING btree (actor)
 index invitations_hash_key: CREATE UNIQUE INDEX invitations_hash_key ON public.invitations USING btree (hash)
 index invitations_pkey: CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
-index mail_contacts_email_key: CREATE UNIQUE INDEX mail_contacts_email_key ON public.mail_contacts USING btree (email)
-index mail_contacts_pkey: CREATE UNIQUE INDEX mail_contacts_pkey ON public.mail_contacts USING btree (actor)
 index merge_receipt_dirty_pkey: CREATE UNIQUE INDEX merge_receipt_dirty_pkey ON public.merge_receipt_dirty USING btree (run, bucket)
 index merge_receipt_heads_pkey: CREATE UNIQUE INDEX merge_receipt_heads_pkey ON public.merge_receipt_heads USING btree (run)
 index merge_receipt_heads_project: CREATE INDEX merge_receipt_heads_project ON public.merge_receipt_heads USING btree (project)
@@ -1991,8 +1969,6 @@ index merge_receipts_pkey: CREATE UNIQUE INDEX merge_receipts_pkey ON public.mer
 index merge_receipts_project: CREATE INDEX merge_receipts_project ON public.merge_receipts USING btree (project, seq)
 index meta_pkey: CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)
 index orgs_pkey: CREATE UNIQUE INDEX orgs_pkey ON public.orgs USING btree (id)
-index passkey_users_handle_key: CREATE UNIQUE INDEX passkey_users_handle_key ON public.passkey_users USING btree (handle)
-index passkey_users_pkey: CREATE UNIQUE INDEX passkey_users_pkey ON public.passkey_users USING btree (actor)
 index placements_case: CREATE INDEX placements_case ON public.placements USING btree (case_id, seq)
 index placements_decision_reset: CREATE INDEX placements_decision_reset ON public.placements USING btree (decision)
 index placements_pkey: CREATE UNIQUE INDEX placements_pkey ON public.placements USING btree (id)
@@ -2158,7 +2134,6 @@ table identity_ceremony_epoch:
 table identity_limits:
 table identity_starts:
 table invitations:
-table mail_contacts:
 table merge_receipt_dirty:
 table merge_receipt_heads:
 table merge_receipt_members:
@@ -2168,7 +2143,6 @@ table merge_receipt_snapshots:
 table merge_receipts:
 table meta:
 table orgs:
-table passkey_users:
 table placements:
 table policies:
 table projects:

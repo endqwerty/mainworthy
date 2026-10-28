@@ -1,66 +1,70 @@
+// The begins of a sign-in through the provider are limited by where they come from: each address, and each IPv6
+// network it is part of, gets 300 a minute, counted on this App and in the database every instance shares. A
+// begin that was refused, or never made a ceremony, costs nothing; a ceremony of an invitation, of linking or of
+// proof is never an anonymous begin; and a pending ceremony survives a flood of other people's begins.
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { localStarts } from "../src/server/identity/attempts.ts";
 import { startAddressKey } from "../src/server/identity/limiter.ts";
-import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
-import { provider, stopProviders } from "./oidc-support.ts";
+import { provider } from "./oidc-support.ts";
 import {
-	authenticator,
+	authorize,
+	begin,
 	cleanUp,
+	finish,
 	from,
 	invite,
+	jar,
 	joined,
-	must,
-	PUBLIC,
+	prove,
+	type Sent,
 	said,
 	sha256,
-	signIn,
+	subjectOf,
+	TOKEN,
 	type World,
 	world,
 } from "./people-support.ts";
 
 afterEach(async () => {
-	stopProviders();
 	await cleanUp();
 });
 
-const starts = [
-	{ name: "web OIDC", path: "/api/login/oidc", body: {} },
-	{
-		name: "native OIDC",
-		path: "/api/login/oidc/native",
-		body: {
-			challenge: "a".repeat(43),
-			state: "b".repeat(43),
-			callback: "com.mainworthy.app://signin/oidc",
-			instance: PUBLIC,
-		},
-	},
-	{ name: "web passkey", path: "/api/login/challenge", body: {} },
-	{ name: "native passkey", path: "/api/login/challenge", body: { native: true } },
-];
+const starts = [{ name: "provider", path: "/api/login/oidc", body: {} }];
 const CLIENT = "203.0.113.10";
 const client = from(CLIENT);
 const other = from("203.0.113.11");
-const PASSWORD = "correct horse battery staple";
 
-test("unavailable passkey options do not charge a source that later has working options", async () => {
-	for (const native of [false, true]) {
-		const w = await world({ proxied: true, publicUrl: native ? "http://localhost" : null });
-		const body = native ? { native: true } : {};
-		await used(w, CLIENT, 299);
-		for (let count = 0; count < 3; count++)
-			expect((await w.post("/api/login/challenge", body, client)).status).toBe(400);
-		expect(await stored(w, CLIENT)).toBe(299);
-		w.instance.app.config.publicUrl = PUBLIC;
-		expect(said(await w.post("/api/login/challenge", body, client))).toBe("200");
-		expect(said(await w.post("/api/login/challenge", body, client))).toBe("429 limited, retry after 60");
-	}
+/** Signs in through the provider as `name`, every request from where `headers` say. */
+async function signInFrom(w: World, name: string, headers: Sent) {
+	const begun = await begin(w, {}, headers);
+	const query = await authorize(w, begun, { subject: subjectOf(name) });
+	return finish(w, query, { ...headers, ...jar(begun.ceremony) });
+}
+
+/** A ceremony begun from `other` and answered at the provider: what finishes it, and nothing sent yet. */
+async function pending(w: World, body: Record<string, unknown>, name: string) {
+	const begun = await begin(w, body, other);
+	const query = await authorize(w, begun, { subject: subjectOf(name) });
+	return () => finish(w, query, { ...other, ...jar(begun.ceremony) });
+}
+
+/** The token's sign-in from `headers`: the way in that a start block leaves open. */
+const tokenFrom = (w: World, headers: Sent) => w.post("/api/login", { token: TOKEN }, headers);
+
+test("begins on an instance with no provider do not charge a source that later has one", async () => {
+	const w = await world({ idp: null, proxied: true });
+	await used(w, CLIENT, 299);
+	for (let count = 0; count < 3; count++) expect((await w.post("/api/login/oidc", {}, client)).status).toBe(400);
+	expect(await stored(w, CLIENT)).toBe(299);
+	w.instance.app.config.oidc = (await provider()).config();
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("429 limited, retry after 60");
 });
 
-test("unreachable providers do not charge starts, and proven linking and invitations bypass anonymous limits", async () => {
+test("unreachable providers do not charge starts, and invitations, linking and proof bypass anonymous limits", async () => {
 	const stopped = await provider();
 	stopped.stop();
-	const w = await world({ oidc: stopped.config(), proxied: true });
+	const w = await world({ idp: stopped, proxied: true });
 	await used(w, CLIENT, 299);
 	const warning = spyOn(console, "warn").mockImplementation(() => {});
 	try {
@@ -70,27 +74,29 @@ test("unreachable providers do not charge starts, and proven linking and invitat
 	}
 	expect(await stored(w, CLIENT)).toBe(299);
 	const live = await provider();
+	w.idp = live;
 	w.instance.app.config.oidc = live.config();
 	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
-	const cookie = await joined(w, "robin", PASSWORD);
+	const cookie = await joined(w, "robin");
 	expect((await w.post("/api/login/oidc", {}, client)).status).toBe(429);
-	expect(said(await w.post("/api/login/oidc", { link: true }, { ...client, cookie }))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", { proof: true }, { ...client, ...jar(cookie) }))).toBe("200");
+	expect(said(await prove(w, cookie, "robin"))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", { link: true }, { ...client, ...jar(cookie) }))).toBe("200");
 	const { code } = await invite(w, { name: "sam" });
 	expect(said(await w.post("/api/login/oidc", { invitation: code }, client))).toBe("200");
 });
 
-test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protocol", async () => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
+test("G3: a subscriber's /58 burst cannot refuse unrelated starts", async () => {
+	const w = await world({ proxied: true });
 	const { code } = await invite(w, { name: "robin" });
 	const subscriber = (net: number) => from(`2001:db8:0:${net.toString(16)}::1`);
-	// The subscriber's first 290 begins this minute and everyone else's ceremonies leave 20 of the 10,000 passkey
-	// slots, so a burst that each /64 could take 300 of would fill them and refuse the next person.
-	expect(said(await w.post("/api/login/challenge", { native: true }, subscriber(0)))).toBe("200");
-	await padded(w, "passkey", 9_980);
+	// The subscriber's first 290 begins this minute and everyone else's ceremonies leave 20 of the 10,000
+	// provider slots, so a burst that each /64 could take 300 of would fill them and refuse the next person.
+	expect(said(await w.post("/api/login/oidc", {}, subscriber(0)))).toBe("200");
+	await padded(w, "oidc", 9_980);
 	await used(w, "2001:db8:0:0::1", 289);
 	const burst = await Promise.all(
-		Array.from({ length: 34 }, (_, net) => w.post("/api/login/challenge", { native: true }, subscriber(net))),
+		Array.from({ length: 34 }, (_, net) => w.post("/api/login/oidc", {}, subscriber(net))),
 	);
 	expect(burst.filter((reply) => reply.status === 200)).toHaveLength(10);
 	expect(burst.filter((reply) => reply.status !== 200).map(said)).toEqual(
@@ -101,8 +107,7 @@ test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protoco
 });
 
 test("G4: four /64s refilling every minute cannot deny another person's starts for ten minutes", async () => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
+	const w = await world({ proxied: true });
 	const subscriber = (net: number) => from(`2001:db8:0:${net}::1`);
 	const owner = sha256(startAddressKey("2001:db8:0:0::1") ?? "");
 	const held: number[] = [];
@@ -110,7 +115,7 @@ test("G4: four /64s refilling every minute cannot deny another person's starts f
 	for (let minute = 0; minute < 10; minute++) {
 		// One begin opens the /56's window and makes a real ceremony. Copies of that ceremony and the window's count
 		// stand for the other 299 begins it is allowed this minute, which the fixed-window tests admit one by one.
-		expect(said(await w.post("/api/login/challenge", { native: true }, subscriber(minute % 4)))).toBe("200");
+		expect(said(await w.post("/api/login/oidc", {}, subscriber(minute % 4)))).toBe("200");
 		await w.instance.app.database.write((db) =>
 			db.transaction(() =>
 				db.runDynamic(
@@ -123,9 +128,7 @@ CROSS JOIN generate_series(1,299) n`,
 			),
 		);
 		await used(w, "2001:db8:0:0::1", 299);
-		const refused = await Promise.all(
-			[0, 1, 2, 3].map((net) => w.post("/api/login/challenge", { native: true }, subscriber(net))),
-		);
+		const refused = await Promise.all([0, 1, 2, 3].map((net) => w.post("/api/login/oidc", {}, subscriber(net))));
 		expect(refused.map(said)).toEqual(Array(4).fill("429 limited, retry after 60"));
 		for (const start of starts) outcomes.push(said(await w.post(start.path, start.body, other)));
 		held.push(
@@ -142,95 +145,42 @@ CROSS JOIN generate_series(1,299) n`,
 	expect(outcomes).toEqual(Array(10 * starts.length).fill("200"));
 });
 
-test.each(["passkey", "provider"])(
-	"G1: the shared %s cap refuses new ceremonies and preserves pending proofs",
-	async (kind) => {
-		const idp = await provider();
-		const w = await world({ oidc: idp.config(), proxied: true });
-		const { code } = await invite(w, { name: "robin" });
-		const complete = await (async () => {
-			if (kind === "passkey") {
-				const device = authenticator();
-				const registration = must(
-					await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, other),
-				);
-				await w.post("/api/login", { invitation: code, passkey: device.register(registration.passkey) }, other);
-				const pending = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, other);
-				return () =>
-					w.post("/api/login", { passkey: device.assert(must(pending).passkey) }, { ...other, cookie: pending.cookie });
-			}
-			const pending = await w.post<{ url: string }>("/api/login/oidc", { invitation: code }, other);
-			idp.next({ subject: "sub-robin" });
-			const authorized = await fetch(must(pending).url, { redirect: "manual" });
-			const query = new URL(authorized.headers.get("location") ?? "").search;
-			await authorized.text();
-			return () => w.post("/api/login", { oidc: query }, { ...other, cookie: pending.cookie });
-		})();
-		// Fill existing pending state directly; HTTP contenders exercise the exact admission boundary.
-		await w.instance.app.database.write((db) =>
-			db.transaction(() =>
-				db.runDynamic(
-					`INSERT INTO identity_ceremonies (kind,key,owner,deadline,generation,payload)
+test("G1: the shared provider cap refuses new ceremonies and preserves pending ones", async () => {
+	const w = await world({ proxied: true });
+	const { code } = await invite(w, { name: "robin" });
+	const complete = await pending(w, { invitation: code }, "robin");
+	// Fill existing pending state directly; HTTP contenders exercise the exact admission boundary.
+	await w.instance.app.database.write((db) =>
+		db.transaction(() =>
+			db.runDynamic(
+				`INSERT INTO identity_ceremonies (kind,key,owner,deadline,generation,payload)
 SELECT kind,'fixture-' || n,owner,deadline,generation,payload
 FROM identity_ceremonies CROSS JOIN generate_series(1,9998) n`,
-				),
 			),
-		);
-		const replies = await Promise.all(
-			Array.from({ length: 30 }, (_, prefix) =>
-				w.post(
-					kind === "passkey" ? "/api/login/challenge" : "/api/login/oidc",
-					kind === "passkey" ? { native: true } : {},
-					from(`2001:db8:${prefix.toString(16)}::1`),
-				),
-			),
-		);
-		expect(replies.filter((reply) => reply.status === 200)).toHaveLength(1);
-		expect(replies.filter((reply) => reply.status === 503)).toHaveLength(29);
-		for (const start of starts) {
-			const full = kind === "passkey" ? start.path.includes("challenge") : start.path.includes("oidc");
-			expect(said(await w.post(start.path, start.body, other))).toBe(full ? "503 busy" : "200");
-		}
-		w.clock.advance(10_000);
-		expect(said(await complete())).toBe("200");
-		expect(said(await w.post(kind === "passkey" ? "/api/login/challenge" : "/api/login/oidc", {}, other))).toBe("200");
-	},
-	20_000,
-);
+		),
+	);
+	const replies = await Promise.all(
+		Array.from({ length: 30 }, (_, prefix) =>
+			w.post("/api/login/oidc", {}, from(`2001:db8:${prefix.toString(16)}::1`)),
+		),
+	);
+	expect(replies.filter((reply) => reply.status === 200)).toHaveLength(1);
+	expect(replies.filter((reply) => reply.status === 503)).toHaveLength(29);
+	for (const start of starts) expect(said(await w.post(start.path, start.body, other))).toBe("503 busy");
+	w.clock.advance(10_000);
+	expect(said(await complete())).toBe("200");
+	expect(said(await w.post("/api/login/oidc", {}, other))).toBe("200");
+}, 20_000);
 
-test.each(["passkey", "provider"])("one client's IPv6 /58 spread cannot evict a pending %s ceremony", async (kind) => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
+test("one client's IPv6 /58 spread cannot evict a pending provider ceremony", async () => {
+	const w = await world({ proxied: true });
 	const { code } = await invite(w, { name: "robin" });
-	const complete = await (async () => {
-		if (kind === "passkey") {
-			const device = authenticator();
-			const registration = must(
-				await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, other),
-			);
-			expect(
-				said(await w.post("/api/login", { invitation: code, passkey: device.register(registration.passkey) }, other)),
-			).toBe("200");
-			const pending = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, other);
-			return () =>
-				w.post("/api/login", { passkey: device.assert(must(pending).passkey) }, { ...other, cookie: pending.cookie });
-		}
-		const pending = await w.post<{ url: string }>("/api/login/oidc", { invitation: code }, other);
-		idp.next({ subject: "sub-robin" });
-		const authorized = await fetch(must(pending).url, { redirect: "manual" });
-		const query = new URL(authorized.headers.get("location") ?? "").search;
-		await authorized.text();
-		return () => w.post("/api/login", { oidc: query }, { ...other, cookie: pending.cookie });
-	})();
+	const complete = await pending(w, { invitation: code }, "robin");
 	// The /56 has 10 begins left this minute; one from each of 34 /64s in it share them.
 	await used(w, "2001:db8:0:1::1", 290);
 	const replies = await Promise.all(
 		Array.from({ length: 34 }, (_, net) =>
-			w.post(
-				kind === "passkey" ? "/api/login/challenge" : "/api/login/oidc",
-				kind === "passkey" ? { native: true } : {},
-				from(`2001:db8:0:${(net + 1).toString(16)}::1`),
-			),
+			w.post("/api/login/oidc", {}, from(`2001:db8:0:${(net + 1).toString(16)}::1`)),
 		),
 	);
 	expect(said(await complete())).toBe("200");
@@ -243,8 +193,8 @@ test.each(["passkey", "provider"])("one client's IPv6 /58 spread cannot evict a 
 test("a start block reports attempts without claiming that authentication failed", async () => {
 	const w = await world({ proxied: true });
 	await used(w, CLIENT, 299);
-	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("200");
-	const blocked = await w.post("/api/login/challenge", {}, client);
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
+	const blocked = await w.post("/api/login/oidc", {}, client);
 	expect(blocked.body).toEqual({
 		ok: false,
 		error: { code: "limited", message: "too many attempts; try again in 60 seconds" },
@@ -256,25 +206,23 @@ test("a start block reports attempts without claiming that authentication failed
 test("begins another instance admitted count against the same source here", async () => {
 	const w = await world({ proxied: true });
 	await usedElsewhere(w, CLIENT, 300);
-	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("429 limited, retry after 60");
-	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("429 limited, retry after 60");
+	expect(said(await w.post("/api/login/oidc", {}, other))).toBe("200");
 });
 
-test("one source cannot exhaust another source's allowance, including unknown peers", async () => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
-	await joined(w, "robin", PASSWORD);
+test("one source cannot exhaust another source's allowance, including unknown peers, nor stop a token", async () => {
+	const w = await world({ proxied: true });
 	await used(w, CLIENT, 300);
 	for (const start of starts) {
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
 		expect(said(await w.post(start.path, start.body, other))).toBe("200");
 		expect(said(await w.post(start.path, start.body))).toBe("200");
 	}
-	expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
+	expect(said(await tokenFrom(w, client))).toBe("200");
 	w.clock.advance(30_000);
-	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("429 limited, retry after 30");
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("429 limited, retry after 30");
 	w.clock.advance(30_000);
-	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
 });
 
 test("provider discovery cannot extend an admitted ceremony beyond its original lifetime", async () => {
@@ -300,12 +248,12 @@ test("provider discovery cannot extend an admitted ceremony beyond its original 
 		},
 	});
 	try {
-		const w = await world({ oidc: idp.config({ issuer: `http://127.0.0.1:${proxy.port}` }), proxied: true });
-		const pending = w.post("/api/login/oidc", {}, client);
+		const w = await world({ idp, oidc: { issuer: `http://127.0.0.1:${proxy.port}` }, proxied: true });
+		const waiting = w.post("/api/login/oidc", {}, client);
 		await discovery;
 		w.clock.advance(300_000);
 		release();
-		const expired = await pending;
+		const expired = await waiting;
 		expect(expired.status).toBe(409);
 		expect(expired.setCookies).toEqual([]);
 		expect((await w.post("/api/login/oidc", {}, client)).status).toBe(200);
@@ -315,17 +263,16 @@ test("provider discovery cannot extend an admitted ceremony beyond its original 
 	}
 });
 
-test("ordinary use A: five cancelled passkey prompts never block the right password", async () => {
+test("ordinary use A: five abandoned begins never block a sign-in through the provider", async () => {
 	const w = await world({ proxied: true });
-	await joined(w, "robin", PASSWORD);
-	for (let n = 0; n < 5; n++) expect(said(await w.post("/api/login/challenge", {}, client))).toBe("200");
-	expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
+	await joined(w, "robin");
+	for (let n = 0; n < 5; n++) expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
+	expect(said(await signInFrom(w, "robin", client))).toBe("200");
 });
 
-test("ordinary use B: 20 office colleagues starting 45 seconds apart never wait or block a password", async () => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
-	await joined(w, "robin", PASSWORD);
+test("ordinary use B: 20 office colleagues starting 45 seconds apart never wait or block a sign-in", async () => {
+	const w = await world({ proxied: true });
+	await joined(w, "robin");
 	const waits: number[] = [];
 	for (let person = 0; person < 20; person++) {
 		let reply = await w.post("/api/login/oidc", {}, client);
@@ -342,75 +289,23 @@ test("ordinary use B: 20 office colleagues starting 45 seconds apart never wait 
 		w.clock.advance(45_000);
 	}
 	expect(waits).toEqual(Array(20).fill(0));
-	expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
+	expect(said(await signInFrom(w, "robin", client))).toBe("200");
 });
 
-test("invitation page stays reachable with password and passkey acceptance during an anonymous-start block", async () => {
-	const w = await world({ proxied: true });
-	const passwordInvite = await invite(w, { name: "robin" });
-	const passkeyInvite = await invite(w, { name: "sam" });
-	await used(w, CLIENT, 300);
-	expect((await w.post("/api/login/challenge", {}, client)).status).toBe(429);
-	const passwordPage = await w.post("/api/login/challenge", { invitation: passwordInvite.code }, client);
-	expect(said(passwordPage)).toBe("200");
-	expect(said(await w.post("/api/login", { invitation: passwordInvite.code, password: PASSWORD }, client))).toBe("200");
-	const passkeyPage = await w.post<{ passkey: RegistrationOptions }>(
-		"/api/login/challenge",
-		{ invitation: passkeyInvite.code },
-		client,
-	);
-	expect(said(passkeyPage)).toBe("200");
-	expect(
-		said(
-			await w.post(
-				"/api/login",
-				{ invitation: passkeyInvite.code, passkey: authenticator().register(must(passkeyPage).passkey) },
-				client,
-			),
-		),
-	).toBe("200");
-});
-
-test("invitation reuse reports remaining lifetime and a successor preserves each tab's original deadline", async () => {
+test("an invitation's page and its acceptance stay reachable during an anonymous-start block", async () => {
 	const w = await world({ proxied: true });
 	const { code } = await invite(w, { name: "robin" });
-	const page = async () =>
-		must(await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client)).passkey;
-	const first = await page();
-	w.clock.advance(180_000);
-	const reused = await page();
-	expect(reused.challenge).toBe(first.challenge);
-	expect(reused.timeout).toBe(120_000);
-	w.clock.advance(60_000);
-	const successor = await page();
-	expect(successor.challenge).not.toBe(first.challenge);
-	expect(successor.timeout).toBe(300_000);
-	expect(said(await w.post("/api/login", { invitation: code, passkey: authenticator().register(first) }, client))).toBe(
-		"200",
-	);
-
-	const second = await invite(w, { name: "sam" });
-	const offer = async () =>
-		must(await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: second.code }, client))
-			.passkey;
-	const expired = await offer();
-	w.clock.advance(240_000);
-	const fresh = await offer();
-	w.clock.advance(60_000);
-	expect(
-		said(await w.post("/api/login", { invitation: second.code, passkey: authenticator().register(expired) }, client)),
-	).toBe("401 unauthenticated");
-	expect(
-		said(await w.post("/api/login", { invitation: second.code, passkey: authenticator().register(fresh) }, client)),
-	).toBe("200");
+	await used(w, CLIENT, 300);
+	expect((await w.post("/api/login/oidc", {}, client)).status).toBe(429);
+	expect(said(await w.post("/api/login/invitation", { invitation: code }, client))).toBe("200");
+	const begun = await begin(w, { invitation: code }, client);
+	const query = await authorize(w, begun, { subject: subjectOf("robin") });
+	expect(said(await finish(w, query, { ...client, ...jar(begun.ceremony) }))).toBe("200");
 });
 
-test.each(starts)(
-	"$name begins share a fixed allocation window independent of failed authentication",
-	async (start) => {
-		const idp = await provider();
-		const w = await world({ oidc: idp.config(), proxied: true });
-		await joined(w, "robin", PASSWORD);
+test("begins share a fixed allocation window independent of failed authentication", async () => {
+	for (const start of starts) {
+		const w = await world({ proxied: true });
 		await used(w, CLIENT, 290);
 		const replies = await Promise.all(Array.from({ length: 13 }, () => w.post(start.path, start.body, client)));
 		expect(replies.filter((reply) => reply.status === 200)).toHaveLength(10);
@@ -423,7 +318,7 @@ test.each(starts)(
 		expect(said(await w.get("/api/session", { ...client, authorization: "Bearer not-a-token" }))).toBe(
 			"401 unauthenticated",
 		);
-		expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
+		expect(said(await tokenFrom(w, client))).toBe("200");
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 30");
 		expect(said(await w.post(start.path, start.body, other))).toBe("200");
 		w.clock.advance(30_000);
@@ -433,8 +328,8 @@ test.each(starts)(
 		await used(w, CLIENT, 298);
 		expect(said(await w.post(start.path, start.body, client))).toBe("200");
 		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
-	},
-);
+	}
+});
 
 /**
  * Adds `count` begins to `address`'s start window now, in both places a real begin is counted: the App's own
@@ -501,69 +396,28 @@ async function flood(w: World, kind: string, path: string, body: Record<string, 
 }
 
 test("a pending provider ceremony survives another address's flood of begins", async () => {
-	const idp = await provider();
-	const w = await world({ oidc: idp.config(), proxied: true });
+	const w = await world({ proxied: true });
 	const { code } = await invite(w, { name: "robin", project: "scratch", can: ["read"] });
-	const pending = await w.post<{ url: string }>("/api/login/oidc", { invitation: code }, other);
-	idp.next({ subject: "sub-robin" });
-	const authorized = await fetch(must(pending).url, { redirect: "manual" });
-	const query = new URL(authorized.headers.get("location") ?? "").search;
-	await authorized.text();
+	const complete = await pending(w, { invitation: code }, "robin");
 	const statuses = await flood(w, "oidc", "/api/login/oidc", {});
-	expect(said(await w.post("/api/login", { oidc: query }, { ...other, cookie: pending.cookie }))).toBe("200");
+	expect(said(await complete())).toBe("200");
 	expect(statuses).toEqual(new Set([200, 429]));
 });
 
-test("a pending passkey challenge survives another address's flood of challenges", async () => {
+test("an invitation's page needs no ceremony slot or start allowance, and untrusted headers create no counts", async () => {
 	const w = await world({ proxied: true });
 	const { code } = await invite(w, { name: "robin", project: "scratch", can: ["read"] });
-	const device = authenticator();
-	const registration = must(
-		await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, other),
-	);
-	expect(
-		said(await w.post("/api/login", { invitation: code, passkey: device.register(registration.passkey) }, other)),
-	).toBe("200");
-	const pending = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, other);
-	const statuses = await flood(w, "passkey", "/api/login/challenge", { native: true });
-	expect(
-		said(
-			await w.post(
-				"/api/login",
-				{ passkey: device.assert(must(pending).passkey) },
-				{ ...other, cookie: pending.cookie },
-			),
-		),
-	).toBe("200");
-	expect(statuses).toEqual(new Set([200, 429]));
-});
-
-test("valid invitation reloads reuse their challenge at full capacity and untrusted headers do not create counts", async () => {
-	const w = await world({ proxied: true });
-	const { code } = await invite(w, { name: "robin", project: "scratch", can: ["read"] });
-	const first = must(
-		await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
-	);
-	await w.instance.app.database.write((db) =>
-		db.transaction(() =>
-			db.runDynamic(`INSERT INTO identity_ceremonies (kind,key,owner,deadline,generation,payload)
-SELECT kind,'fixture-' || n,'unrelated-owner',deadline,generation,payload
-FROM identity_ceremonies CROSS JOIN generate_series(1,9999) n`),
-		),
-	);
+	expect(said(await w.post("/api/login/oidc", {}, other))).toBe("200");
+	await padded(w, "oidc", 10_000);
 	// Past the anonymous start allowance while no ceremony slot remains to hide an allocation.
 	await used(w, CLIENT, 300);
 	const replies = await Promise.all(
-		Array.from({ length: 32 }, () =>
-			w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
-		),
+		Array.from({ length: 32 }, () => w.post("/api/login/invitation", { invitation: code }, client)),
 	);
-	for (const reply of replies) expect(must(reply).passkey.challenge).toBe(first.passkey.challenge);
+	expect(replies.map(said)).toEqual(Array(32).fill("200"));
 	expect(await w.rows("SELECT count(*)::integer AS count FROM identity_ceremonies")).toEqual([{ count: 10_000 }]);
-	expect(said(await w.post("/api/login/challenge", { invitation: code }, other))).toBe("200");
 	// Without a named proxy the header is a stranger's claim: every begin is the server's own peer, never counted.
 	const direct = await world();
-	for (let count = 0; count < 3; count++)
-		expect(said(await direct.post("/api/login/challenge", {}, client))).toBe("200");
+	for (let count = 0; count < 3; count++) expect(said(await direct.post("/api/login/oidc", {}, client))).toBe("200");
 	expect(await direct.rows("SELECT count(*)::integer AS count FROM identity_starts")).toEqual([{ count: 0 }]);
 });

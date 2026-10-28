@@ -467,6 +467,28 @@ async function atSchemaFive(undo: string): Promise<{ url: string; raw: SQL; clos
 		.unsafe(
 			`DROP TABLE report_map_pages; UPDATE meta SET value = '43' WHERE key = 'archive_version'; UPDATE meta SET value = '5' WHERE key = 'schema_version'; ${undo}`,
 		)
+
+/**
+ * What migration 7 took away, put back as the baseline had it: the other kinds of credential, the handles passkeys
+ * were filed under, recovery email addresses, and the archive format before it.
+ */
+const BEFORE_SEVEN = `
+UPDATE meta SET value = '43' WHERE key = 'archive_version';
+ALTER TABLE credentials DROP CONSTRAINT credentials_kind_check;
+ALTER TABLE credentials ADD CONSTRAINT credentials_kind_check CHECK (kind IN ('password', 'passkey', 'oidc', 'totp'));
+CREATE UNIQUE INDEX credentials_password ON credentials (actor) WHERE kind = 'password' AND revoked_at IS NULL;
+CREATE TABLE passkey_users (actor bigint PRIMARY KEY, handle TEXT NOT NULL UNIQUE, created_at bigint NOT NULL);
+ALTER TABLE passkey_users ADD FOREIGN KEY (actor) REFERENCES actors (id) DEFERRABLE INITIALLY IMMEDIATE;
+CREATE TABLE mail_contacts (actor bigint PRIMARY KEY, email TEXT NOT NULL UNIQUE, verified_at bigint, revision TEXT NOT NULL);
+ALTER TABLE mail_contacts ADD FOREIGN KEY (actor) REFERENCES actors (id) DEFERRABLE INITIALLY IMMEDIATE;
+`;
+
+/** A database migrated to 7 and set back to `version`: migration 7 undone, then whatever `undo` does. */
+async function atSchema(version: 5 | 6, undo = ""): Promise<{ url: string; raw: SQL; close: () => Promise<void> }> {
+	const fixture = await testDatabase();
+	const raw = new SQL(fixture.url, { max: 3, bigint: true });
+	await raw
+		.unsafe(`UPDATE meta SET value = '${version}' WHERE key = 'schema_version'; ${BEFORE_SEVEN} ${undo}`)
 		.simple();
 	return {
 		url: fixture.url,
@@ -497,7 +519,8 @@ const removalIndexes = [
 // A start that Cloud Run cut off in the middle of migration 6 leaves some indexes built, one invalid and the rest
 // missing; the next start finishes them and only then moves the ledger.
 test("the next start finishes an interrupted build of migration 6 and leaves no index invalid", async () => {
-	const target = await atSchemaFive(
+	const target = await atSchema(
+		5,
 		"DROP INDEX runs_project_id; DROP INDEX slots_run_id; UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'cases_project_id'::regclass",
 	);
 	const database = await Database.open({ url: target.url });
@@ -523,7 +546,7 @@ test("the next start finishes an interrupted build of migration 6 and leaves no 
 // took no writes until the last index and the ledger committed. A transaction of the serving instance that holds a
 // late table (`runs`) open keeps the build waiting; a write to an earlier table (`search_docs`) must not wait with it.
 test("writes to a table go on while migration 6 builds the indexes after it", async () => {
-	const target = await atSchemaFive(removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
+	const target = await atSchema(5, removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
 	const database = await Database.open({ url: target.url });
 	const holder = await target.raw.reserve();
 	const writer = await target.raw.reserve();
@@ -567,7 +590,7 @@ test("writes to a table go on while migration 6 builds the indexes after it", as
 // Two instances starting together: the second asks for the migration lock again and again rather than waiting in one
 // statement, whose snapshot the first one's concurrent build would wait for while the second waits for its lock.
 test("two instances upgrading to migration 6 at once both start, and build each index once", async () => {
-	const target = await atSchemaFive(removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
+	const target = await atSchema(5, removalIndexes.map((name) => `DROP INDEX ${name};`).join(" "));
 	const [first, second] = await Promise.all([Database.open({ url: target.url }), Database.open({ url: target.url })]);
 	try {
 		await Promise.all([migrate(first), migrate(second)]);
@@ -580,6 +603,61 @@ test("two instances upgrading to migration 6 at once both start, and build each 
 	} finally {
 		await first.close();
 		await second.close();
+		await target.close();
+	}
+}, 60_000);
+
+// People sign in through the identity provider only. Migration 7 deletes every other kind of credential, the
+// sessions that rested on one, and what passkeys and mail kept; an identity at the provider and its session stay.
+test("migration 7 keeps identities at the provider and deletes every other way in, with the sessions on them", async () => {
+	const target = await atSchema(6);
+	const before = await schemaCatalog(target.raw);
+	await target.raw
+		.unsafe(`
+INSERT INTO orgs(id,name,created_at) VALUES (9001,'migrated',0);
+INSERT INTO actors(id,org,kind,name,created_at) VALUES (9001,9001,'human','robin',0),(9002,9001,'human','sam',0);
+INSERT INTO credentials(id,actor,kind,handle,data,label,created_at) VALUES
+ (9001,9001,'oidc','issuer|sub-robin','{}','Example ID',0),
+ (9002,9001,'password',NULL,'hash','password',0),
+ (9003,9002,'passkey','credential-id','{}','laptop',0),
+ (9004,9002,'totp',NULL,'{}','authenticator',0);
+INSERT INTO sessions(id,actor,hash,credential,created_at,last_seen_at,expires_at) VALUES
+ (9001,9001,'by-identity',9001,0,0,1),
+ (9002,9001,'by-password',9002,0,0,1),
+ (9003,9002,'by-passkey',9003,0,0,1);
+INSERT INTO passkey_users(actor,handle,created_at) VALUES (9002,'handle',0);
+INSERT INTO mail_contacts(actor,email,revision) VALUES (9001,'robin@example.com','r1');
+INSERT INTO background_jobs(id,kind,input,accepted_at,effect,max_attempts,next_at) VALUES
+ ('mail-1','mail','{}',0,'uncertain',3,0),('other-1','other','{}',0,'repeatable',3,0);
+INSERT INTO identity_limits(key,entry,expires_at,version) VALUES
+ ('account:robin','{}',1,1),('totp:9002','{}',1,2),('mail-reset:robin','{}',1,3),('address:192.0.2.1','{}',1,4);
+`)
+		.simple();
+	const database = await Database.open({ url: target.url });
+	try {
+		await migrate(database);
+		expect(await database.read(schemaVersion)).toBe(7);
+		const rows = async (query: string) => await target.raw.unsafe(query);
+		expect(await rows("SELECT id, kind FROM credentials WHERE id >= 9001 ORDER BY id")).toEqual([
+			{ id: 9001n, kind: "oidc" },
+		]);
+		expect(await rows("SELECT id FROM sessions WHERE id >= 9001 ORDER BY id")).toEqual([{ id: 9001n }]);
+		expect(await rows("SELECT id FROM background_jobs ORDER BY id")).toEqual([{ id: "other-1" }]);
+		expect(await rows("SELECT key FROM identity_limits ORDER BY key")).toEqual([{ key: "address:192.0.2.1" }]);
+		expect(await rows("SELECT value FROM meta WHERE key = 'archive_version'")).toEqual([
+			{ value: String(ARCHIVE_VERSION) },
+		]);
+		// The schema it leaves is the one a new database starts with; no other kind of credential can be written.
+		const after = await schemaCatalog(target.raw);
+		expect(after).not.toEqual(before);
+		expect(after).toEqual(await schemaCatalog(db));
+		expect(
+			target.raw.unsafe(
+				"INSERT INTO credentials(actor,kind,data,label,created_at) VALUES (9001,'password','hash','password',0)",
+			),
+		).rejects.toThrow("credentials_kind_check");
+	} finally {
+		await database.close();
 		await target.close();
 	}
 }, 60_000);

@@ -1,12 +1,22 @@
 // The page an invitation link opens, where the link does not simply work: a link that accepts nothing, a
-// browser that is signed in as somebody else, and a link that replaces what a person signs in with.
+// browser that is signed in as somebody else, and a link that replaces the identities a person signs in with.
+// Accepting sends the browser to the identity provider and back.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
-import { advanceClock, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
+import {
+	acceptInvitation,
+	advanceClock,
+	browserAvailable,
+	openPage,
+	type PageHarness,
+	type Server,
+	startServer,
+	subjectOf,
+} from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
-	if (browserAvailable) server = await startServer({ mode: "server" });
+	if (browserAvailable) server = await startServer({ mode: "server", provider: true });
 });
 afterAll(async () => {
 	await server?.stop();
@@ -14,33 +24,48 @@ afterAll(async () => {
 
 const NOT_FOUND = "Failed to load resource: the server responded with a status of 404 (Not Found)";
 const GONE = "This invitation does not work any more. Ask whoever sent it for a new one.";
-const PASSWORD = "a long enough password";
 
 async function invite(name: string, expires?: string): Promise<string> {
 	const made = await server.api("invitation", { do: "create", name, ...(expires ? { expires } : {}) });
 	if (!("code" in made)) throw new Error("no invitation was made");
 	return made.code;
 }
-/** The body of the next acceptance the page sends. */
+/** The body of the next acceptance the page begins with the provider. */
 const nextAcceptance = (page: Page): Promise<unknown> =>
 	page
-		.waitForRequest((request) => request.url().endsWith("/api/login") && request.method() === "POST")
+		.waitForRequest((request) => request.url().endsWith("/api/login/oidc") && request.method() === "POST")
 		.then((request) => request.postDataJSON());
-/** Accepts an invitation as a script would, with no page. */
-async function accept(code: string, password = PASSWORD): Promise<void> {
-	const reply = await fetch(`${server.url}/api/login`, {
+/** Accepts an invitation as a script would, with no page, signing in at the provider as `name`. */
+const accept = (code: string, name: string): Promise<string> =>
+	acceptInvitation(server, code, { subject: subjectOf(name) });
+/** The provider signs in `name` at the next request: what the next press of "Accept with Example ID" brings. */
+const atProvider = (name: string): void => server.idp?.next({ subject: subjectOf(name) });
+/** Signs in at the provider as `subject` with no page: the status of the answer's reply. */
+async function signInByScript(subject: string): Promise<number> {
+	const begun = await fetch(`${server.url}/api/login/oidc`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ invitation: code, password }),
+		body: "{}",
 	});
-	if (!reply.ok) throw new Error(`the invitation was not accepted: ${reply.status}`);
+	const ceremony = begun.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+	server.idp?.next({ subject });
+	const answered = await fetch(((await begun.json()) as { result: { url: string } }).result.url, {
+		redirect: "manual",
+	});
+	const reply = await fetch(`${server.url}/api/login`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie: ceremony },
+		body: JSON.stringify({ oidc: new URL(answered.headers.get("location") ?? "").search }),
+	});
+	return reply.status;
 }
+const ACCEPT = "Accept with Example ID";
 
 test.skipIf(!browserAvailable)(
 	"a wrong, a used and an expired link each say the invitation no longer works, and no code stays in the address bar",
 	async () => {
 		const used = await invite("uma");
-		await accept(used);
+		await accept(used, "uma");
 		const expired = await invite("eve", "1h");
 		let browser: PageHarness | null = null;
 		try {
@@ -59,7 +84,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("heading", { name: "You are invited as ora" }).waitFor();
 			expect(page.url()).toBe(`${server.url}/invite`);
 			const refusedAgain = () =>
-				page.waitForResponse((reply) => reply.url().endsWith("/api/login/challenge") && reply.status() === 404);
+				page.waitForResponse((reply) => reply.url().endsWith("/api/login/invitation") && reply.status() === 404);
 			let refused = refusedAgain();
 			await page.goto(`${server.url}/invite#${used}`);
 			await refused;
@@ -68,7 +93,7 @@ test.skipIf(!browserAvailable)(
 
 			// One that has run out: it worked, the instance's clock is moved two hours on, and it works no more.
 			// Nobody waits an hour.
-			const shows = await fetch(`${server.url}/api/login/challenge`, {
+			const shows = await fetch(`${server.url}/api/login/invitation`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({ invitation: expired }),
@@ -104,19 +129,17 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			await page.getByRole("heading", { name: "You are invited as kai" }).waitFor();
 			await page.getByText("You are signed in as robin. This invitation is for kai.", { exact: false }).waitFor();
-			// Nothing is accepted before the answer: the fields wait.
-			expect(await page.locator("#invite-password").isDisabled()).toBe(true);
+			// Nothing is accepted before the answer: the button waits.
+			expect(await page.getByRole("button", { name: ACCEPT }).isDisabled()).toBe(true);
 			expect(await server.api("session", { do: "list" })).toHaveLength(1);
 
 			await page.getByRole("button", { name: "Continue as kai" }).click();
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-password");
-			await page.keyboard.type(PASSWORD);
-			await page.keyboard.press("Tab");
-			await page.keyboard.type(PASSWORD);
+			await page.waitForFunction((name) => document.activeElement?.textContent === name, ACCEPT);
+			atProvider("kai");
 			const sent = nextAcceptance(page);
 			await page.keyboard.press("Enter");
 			// What is sent names the person the question was about, and nobody else.
-			expect(await sent).toEqual({ invitation: code, password: PASSWORD, replace: "robin" });
+			expect(await sent).toEqual({ invitation: code, replace: "robin" });
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("kai");
 			// The owner's session in this browser ended with it.
@@ -130,7 +153,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"somebody who signs in elsewhere while the page is open is asked when they accept, and what they typed stays",
+	"somebody who signs in elsewhere while the page is open is asked when they accept, and nothing is accepted before",
 	async () => {
 		const code = await invite("lou");
 		let browser: PageHarness | null = null;
@@ -138,25 +161,24 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { signedIn: false, path: `/invite#${code}`, ready: "h1" });
 			const { page } = browser;
 			await page.getByRole("heading", { name: "You are invited as lou" }).waitFor();
-			await page.locator("#invite-password").fill(PASSWORD);
-			await page.locator("#invite-password-again").fill(PASSWORD);
+			await page.waitForFunction((name) => document.activeElement?.textContent === name, ACCEPT);
 			// Another tab of this browser signs the owner in meanwhile.
 			await browser.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
 			const first = nextAcceptance(page);
 			await page.keyboard.press("Enter");
 			// The page knew of nobody signed in, so it named nobody to sign out.
-			expect(await first).toEqual({ invitation: code, password: PASSWORD });
+			expect(await first).toEqual({ invitation: code });
 			await page.getByText("You are signed in as robin. This invitation is for lou.", { exact: false }).waitFor();
-			// Nothing was accepted, and nothing typed is gone.
-			expect(await page.locator("#invite-password").inputValue()).toBe(PASSWORD);
-			expect(await page.locator("#invite-password-again").inputValue()).toBe(PASSWORD);
+			// Nothing was accepted, and the browser never left for the provider.
+			expect(page.url()).toBe(`${server.url}/invite`);
 			expect(await server.api("session", { do: "list" })).toHaveLength(1);
 
-			// "Stay" would leave lou's invitation as it is. "Continue" sends what was typed again, naming the
-			// person the question was about.
+			// "Stay" would leave lou's invitation as it is. "Continue" begins again, naming the person the
+			// question was about.
+			atProvider("lou");
 			const second = nextAcceptance(page);
 			await page.getByRole("button", { name: "Continue as lou" }).click();
-			expect(await second).toEqual({ invitation: code, password: PASSWORD, replace: "robin" });
+			expect(await second).toEqual({ invitation: code, replace: "robin" });
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("lou");
 			expect(browser.errors).toEqual(["Failed to load resource: the server responded with a status of 409 (Conflict)"]);
@@ -168,9 +190,9 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"a recovery link says what accepting replaces, and the password before it stops working",
+	"a recovery link says what accepting replaces, and the identity before it stops working",
 	async () => {
-		await accept(await invite("pat"), "the password pat had");
+		await accept(await invite("pat"), "pat");
 		const code = await invite("pat");
 		let browser: PageHarness | null = null;
 		try {
@@ -179,22 +201,17 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("heading", { name: "You are invited as pat" }).waitFor();
 			await page
 				.getByText(
-					"Accepting replaces every password and passkey, revokes all your tokens, and signs you out everywhere else.",
+					"Accepting replaces the identities you sign in with, revokes all your tokens, and signs you out everywhere else.",
 					{ exact: true },
 				)
 				.waitFor();
-			await page.locator("#invite-password").fill(PASSWORD);
-			await page.locator("#invite-password-again").fill(PASSWORD);
-			await page.getByRole("button", { name: "Accept and sign in" }).click();
+			// pat lost the identity they had, and accepts with another one.
+			server.idp?.next({ subject: "sub-pat-new" });
+			await page.getByRole("button", { name: ACCEPT }).click();
 			await page.locator("#app").waitFor();
-			const signIn = (password: string) =>
-				fetch(`${server.url}/api/login`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ name: "pat", password }),
-				}).then((reply) => reply.status);
-			expect(await signIn("the password pat had")).toBe(401);
-			expect(await signIn(PASSWORD)).toBe(200);
+			expect(await page.locator(".sfoot .me").textContent()).toContain("pat");
+			expect(await signInByScript(subjectOf("pat"))).toBe(401);
+			expect(await signInByScript("sub-pat-new")).toBe(200);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser?.close();
@@ -204,7 +221,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"the invitation page says how long to wait when too many attempts failed, and keeps what was typed",
+	"the invitation page says how long to wait when too many attempts failed, and keeps the keys on its button",
 	async () => {
 		const code = await invite("quin");
 		let browser: PageHarness | null = null;
@@ -222,29 +239,25 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			// Looking at the invitation is refused: the page says the wait and offers to ask again, with the code
 			// still in its memory though it has left the address.
-			await page.route("**/api/login/challenge", (route) => route.fulfill(wait(3)));
+			await page.route("**/api/login/invitation", (route) => route.fulfill(wait(3)));
 			await page.goto(`${server.url}/invite#${code}`);
 			await page.getByRole("status").filter({ hasText: "Too many attempts. Try again in 3 seconds." }).waitFor();
 			expect(page.url()).toBe(`${server.url}/invite`);
-			await page.unroute("**/api/login/challenge");
+			await page.unroute("**/api/login/invitation");
 			await page.getByRole("button", { name: "Try again" }).click();
 			await page.getByRole("heading", { name: "You are invited as quin" }).waitFor();
 
-			// Accepting is refused: the wait is under the form and the passwords are still in it.
-			await page.route("**/api/login", (route) => route.fulfill(wait(1)));
-			await page.locator("#invite-password").fill(PASSWORD);
-			await page.locator("#invite-password-again").fill(PASSWORD);
-			// Sent from the button, by the keyboard. The keys stay on the button through the request and after
-			// the refusal, so the next Enter is the next attempt.
-			await page.keyboard.press("Tab");
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Accept and sign in");
+			// Beginning is refused: the wait is under the button. Sent from the button, by the keyboard. The keys
+			// stay on the button through the request and after the refusal, so the next Enter is the next attempt.
+			await page.route("**/api/login/oidc", (route) => route.fulfill(wait(1)));
+			await page.waitForFunction((name) => document.activeElement?.textContent === name, ACCEPT);
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "Too many attempts. Try again in 1 second." }).waitFor();
-			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Accept and sign in");
-			expect(await page.locator("#invite-password").inputValue()).toBe(PASSWORD);
-			expect(await page.locator("#invite-password-again").inputValue()).toBe(PASSWORD);
-			await page.unroute("**/api/login");
-			await page.getByRole("button", { name: "Accept and sign in" }).click();
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe(ACCEPT);
+			expect(page.url()).toBe(`${server.url}/invite`);
+			await page.unroute("**/api/login/oidc");
+			atProvider("quin");
+			await page.keyboard.press("Enter");
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("quin");
 			const refused = "Failed to load resource: the server responded with a status of 429 (Too Many Requests)";
@@ -259,7 +272,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"an answer about one person signs nobody else out: whoever signed in from another tab meanwhile is asked about by name",
 	async () => {
-		await accept(await invite("tom"));
+		await accept(await invite("tom"), "tom");
 		const code = await invite("vera");
 		const signedInAs = async (context: PageHarness["context"]): Promise<unknown> => {
 			const reply = await context.request.get(`${server.url}/api/session`);
@@ -278,27 +291,23 @@ test.skipIf(!browserAvailable)(
 			await tab.goto(`${server.url}/p/scratch/suite`);
 			await tab.getByRole("button", { name: "Sign out" }).click();
 			await tab.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
-			await tab.locator("#signin-name").fill("tom");
-			await tab.locator("#signin-password").fill(PASSWORD);
-			await tab.keyboard.press("Enter");
+			atProvider("tom");
+			await tab.getByRole("button", { name: "Sign in with Example ID", exact: true }).click();
 			await tab.locator("#app").waitFor();
 			expect(await signedInAs(context)).toBe("tom");
 
-			// Back in the first tab the form is filled in and sent. The answer given was about robin, and that is
-			// the name that goes with it.
+			// Back in the first tab the invitation is accepted. The answer given was about robin, and that is the
+			// name that goes with it.
 			await page.bringToFront();
-			await page.locator("#invite-password").fill(PASSWORD);
-			await page.locator("#invite-password-again").fill(PASSWORD);
 			const first = nextAcceptance(page);
-			await page.locator("#invite-password-again").press("Enter");
-			expect(await first).toEqual({ invitation: code, password: PASSWORD, replace: "robin" });
+			await page.getByRole("button", { name: ACCEPT }).click();
+			expect(await first).toEqual({ invitation: code, replace: "robin" });
 
-			// The browser is tom's now. Nobody said tom may be signed out, so nothing was accepted: the page asks
-			// again, about tom, with what was typed kept, and tom is still signed in.
+			// The browser is tom's now. Nobody said tom may be signed out, so nothing was begun: the page asks
+			// again, about tom, and tom is still signed in.
 			await page.getByText("You are signed in as tom. This invitation is for vera.", { exact: false }).waitFor();
 			expect(await page.getByText("You are signed in as robin", { exact: false }).count()).toBe(0);
-			expect(await page.locator("#invite-password").isDisabled()).toBe(true);
-			expect(await page.locator("#invite-password").inputValue()).toBe(PASSWORD);
+			expect(await page.getByRole("button", { name: ACCEPT }).isDisabled()).toBe(true);
 			expect(await signedInAs(context)).toBe("tom");
 			// (tom has two sessions: this browser's, and the script's that accepted tom's own invitation.)
 			expect(await server.api("session", { do: "list", actor: "tom" })).toHaveLength(2);
@@ -307,9 +316,10 @@ test.skipIf(!browserAvailable)(
 			expect(await tab.locator(".sfoot .me").textContent()).toContain("tom");
 
 			// The answer about tom goes with tom's name, and then the invitation is accepted.
+			atProvider("vera");
 			const second = nextAcceptance(page);
 			await page.getByRole("button", { name: "Continue as vera" }).click();
-			expect(await second).toEqual({ invitation: code, password: PASSWORD, replace: "tom" });
+			expect(await second).toEqual({ invitation: code, replace: "tom" });
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("vera");
 			expect(await signedInAs(context)).toBe("vera");
@@ -324,7 +334,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"the fields of an invitation wait until the page knows who is signed in, and then for the answer about them",
+	"the button of an invitation waits until the page knows who is signed in, and then for the answer about them",
 	async () => {
 		const code = await invite("wren");
 		let browser: PageHarness | null = null;
@@ -346,17 +356,16 @@ test.skipIf(!browserAvailable)(
 			// whether somebody would be signed out.
 			await page.getByRole("heading", { name: "You are invited as wren" }).waitFor();
 			await page.getByText("Checking who is signed in to this browser", { exact: false }).waitFor();
-			expect(await page.locator("#invite-password").isDisabled()).toBe(true);
-			expect(await page.getByRole("button", { name: "Accept and sign in" }).isDisabled()).toBe(true);
+			expect(await page.getByRole("button", { name: ACCEPT }).isDisabled()).toBe(true);
 			expect(await page.getByRole("button", { name: /^Continue as / }).count()).toBe(0);
 
-			// Told that it is robin, the page asks, and the fields go on waiting for the answer.
+			// Told that it is robin, the page asks, and the button goes on waiting for the answer.
 			release();
 			await page.getByText("You are signed in as robin. This invitation is for wren.", { exact: false }).waitFor();
-			expect(await page.locator("#invite-password").isDisabled()).toBe(true);
+			expect(await page.getByRole("button", { name: ACCEPT }).isDisabled()).toBe(true);
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Continue as wren");
 			await page.keyboard.press("Enter");
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-password");
+			await page.waitForFunction((name) => document.activeElement?.textContent === name, ACCEPT);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser?.close();
@@ -367,7 +376,7 @@ test.skipIf(!browserAvailable)(
 
 for (const failure of ["is refused by the network", "never arrives"] as const)
 	test.skipIf(!browserAvailable)(
-		`when the answer to who is signed in ${failure}, the page says it could not find out, keeps the fields closed and offers to ask again`,
+		`when the answer to who is signed in ${failure}, the page says it could not find out, keeps the button closed and offers to ask again`,
 		async () => {
 			const code = await invite(failure === "never arrives" ? "xan" : "yul");
 			let browser: PageHarness | null = null;
@@ -400,8 +409,7 @@ for (const failure of ["is refused by the network", "never arrives"] as const)
 					.filter({ hasText: "The page could not find out whether somebody is signed in to this browser" })
 					.waitFor();
 				// Nothing can be typed or sent: accepting might sign somebody out who was never asked about.
-				expect(await page.locator("#invite-password").isDisabled()).toBe(true);
-				expect(await page.getByRole("button", { name: "Accept and sign in" }).isDisabled()).toBe(true);
+				expect(await page.getByRole("button", { name: ACCEPT }).isDisabled()).toBe(true);
 				expect(await page.getByRole("button", { name: /^Continue as / }).count()).toBe(0);
 				expect(asked).toBe(1);
 
@@ -411,9 +419,8 @@ for (const failure of ["is refused by the network", "never arrives"] as const)
 				expect(asked).toBe(2);
 				expect(page.url()).toBe(`${server.url}/invite`);
 				await page.getByRole("button", { name: `Continue as ${name}` }).click();
-				await page.locator("#invite-password").fill(PASSWORD);
-				await page.locator("#invite-password-again").fill(PASSWORD);
-				await page.keyboard.press("Enter");
+				atProvider(name);
+				await page.getByRole("button", { name: ACCEPT }).click();
 				await page.locator("#app").waitFor();
 				expect(await page.locator(".sfoot .me").textContent()).toContain(name);
 				expect(browser.errors).toEqual(failure === "never arrives" ? [] : ["Failed to load resource: net::ERR_FAILED"]);

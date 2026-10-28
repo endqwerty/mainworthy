@@ -8,14 +8,7 @@ import { z } from "zod";
 import { type Instance, start } from "../src/app/start.ts";
 import { COMMIT, outputWith, RED_XML, withInstance } from "../src/cli/test-support.ts";
 import type { Envelope } from "../src/core/api.ts";
-import {
-	admit,
-	authenticate,
-	bootstrap,
-	hasAdminGrant,
-	hashToken,
-	listActors,
-} from "../src/server/identity/identity.ts";
+import { admit, authenticate, bootstrap, hashToken, listActors } from "../src/server/identity/identity.ts";
 import type { Config } from "../src/server/kernel/app.ts";
 import { Database, sql } from "../src/server/kernel/db.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
@@ -324,16 +317,15 @@ test("all-project admin checks and actor listings retain grants on other project
 	const actor = await authenticate(instance.app, sam.token, 0);
 	if (!actor) throw new Error("token did not authenticate");
 	expect(actor.can).toEqual([]);
-	expect(await await instance.app.database.read(async (db) => await hasAdminGrant(db, actor.id))).toBe(true);
-	expect(
-		(await await instance.app.database.read(async (db) => await listActors(db))).find((listed) => listed.name === "sam")
-			?.grants,
-	).toEqual([
+	const grantsOfSam = async () =>
+		(await instance.app.database.read(async (db) => await listActors(db))).find((listed) => listed.name === "sam")
+			?.grants;
+	expect(await grantsOfSam()).toEqual([
 		{ project: 1, can: ["read"], roles: [] },
 		{ project: 2, can: ["admin"], roles: ["lead"] },
 	]);
 	expect((await admin(instance, { do: "grant.remove", actor: "sam", project: "other" })).status).toBe(200);
-	expect(await await instance.app.database.read(async (db) => await hasAdminGrant(db, actor.id))).toBe(false);
+	expect(await grantsOfSam()).toEqual([{ project: 1, can: ["read"], roles: [] }]);
 	expect((await authenticate(instance.app, sam.token, 1))?.can).toEqual(["read"]);
 });
 
@@ -1227,5 +1219,8 @@ test("bootstrap joins the writer that a local import already holds", async () =>
 	const instance = await boot({ mode: "local" });
 	const result = await withWrite(instance.app, async (db) => await bootstrap(instance.app, db));
 	expect(result.owner).toEqual(instance.owner);
-	expect(await instance.app.database.read(async (db) => await hasAdminGrant(db, result.owner.id))).toBe(true);
+	const owner = (await instance.app.database.read(async (db) => await listActors(db))).find(
+		(listed) => listed.name === result.owner.name,
+	);
+	expect(owner?.grants).toContainEqual(expect.objectContaining({ project: 0, can: expect.arrayContaining(["admin"]) }));
 });

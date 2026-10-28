@@ -1,56 +1,41 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
-	addAuthenticator,
+	advanceClock,
 	browserAvailable,
+	confirmWithProvider,
 	eventually,
+	joinPerson,
+	linkIdentity,
 	openPage,
 	type PageHarness,
+	proveIdentity,
 	type Server,
 	startServer,
 } from "./support.ts";
 
-let started: Server;
 let server: Server;
-const PASSWORD = "a password for this test";
 beforeAll(async () => {
 	if (!browserAvailable) return;
-	started = await startServer({ mode: "server", passkeys: true });
-	server = { ...started, url: started.url.replace("127.0.0.1", "localhost") };
+	server = await startServer({ mode: "server", provider: true });
 });
 afterAll(async () => {
-	await started?.stop();
+	await server?.stop();
 });
 
-async function person(name: string, admin = false): Promise<void> {
-	const made = await server.api("invitation", { do: "create", name, ...(admin ? {} : { can: ["read"] }) });
-	if (!("code" in made)) throw new Error("no invitation was made");
-	const accepted = await fetch(`${server.url}/api/login`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ invitation: made.code, password: PASSWORD }),
-	});
-	expect(accepted.status).toBe(200);
-	const cookie = accepted.headers.getSetCookie()[0]?.split(";")[0] ?? "";
-	await fetch(`${server.url}/api/logout`, {
-		method: "POST",
-		headers: { "content-type": "application/json", cookie },
-		body: "{}",
-	});
-}
+const person = (name: string, admin = false): Promise<void> => joinPerson(server, name, admin ? {} : { can: ["read"] });
 
-async function passkey(browser: PageHarness, label: string): Promise<void> {
-	await addAuthenticator(browser);
-	await browser.page.getByRole("option", { name: "Your sign-in", exact: true }).click();
-	await browser.page.locator("#passkey-label").fill(label);
-	await browser.page.getByRole("button", { name: "Add a passkey", exact: true }).click();
-	await browser.page
-		.getByRole("status")
-		.filter({ hasText: `${label} was added.` })
-		.waitFor();
+/**
+ * The person signed in on `browser` links a second identity, `<name>-key` at the provider, after confirming with
+ * the one they joined with: "Example ID (<name>-key@example.com)".
+ */
+async function secondIdentity(browser: PageHarness, name: string): Promise<string> {
+	await proveIdentity(browser.context, server, name);
+	await linkIdentity(browser.context, server, name, { subject: `sub-${name}-key`, email: `${name}-key@example.com` });
+	return `Example ID (${name}-key@example.com)`;
 }
 
 test.skipIf(!browserAvailable)(
-	"People lets a human admin inspect each person's sign-in, end sessions, remove passkeys and audit token use",
+	"People lets a human admin inspect each person's sign-in, end sessions, remove identities and audit token use",
 	async () => {
 		await person("sam");
 		await person("ada", true);
@@ -61,35 +46,42 @@ test.skipIf(!browserAvailable)(
 			label: "sam laptop token",
 		});
 		if (!("token" in token)) throw new Error("no token was made");
-		const used = await fetch(`${started.url}/api/session`, {
+		const used = await fetch(`${server.url.replace("localhost", "127.0.0.1")}/api/session`, {
 			method: "POST",
 			headers: { "content-type": "application/json", authorization: `Bearer ${token.token}` },
 			body: JSON.stringify({ do: "list" }),
 		});
 		expect(used.status).toBe(200);
-		const sam = await openPage(server, { as: { name: "sam", password: PASSWORD }, path: "/p/scratch/settings" });
-		const admin = await openPage(server, { as: { name: "ada", password: PASSWORD }, path: "/p/scratch/settings" });
+		const sam = await openPage(server, { as: { name: "sam" }, path: "/p/scratch/settings" });
+		const admin = await openPage(server, { as: { name: "ada" }, path: "/p/scratch/settings" });
 		try {
-			await passkey(sam, "Sam security key");
+			const label = await secondIdentity(sam, "sam");
+			// ada confirmed it is her at the provider a moment ago, so removing somebody's identity asks no more.
+			await proveIdentity(admin.context, server, "ada");
 			const { page } = admin;
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			await page.getByRole("button", { name: "Sign-in details for sam", exact: true }).click();
 			const details = page.getByRole("region", { name: "Sign-in details for sam", exact: true });
-			await details.getByText("Password set", { exact: true }).waitFor();
-			const key = details.locator(".settings-row").filter({ hasText: "Sam security key" });
+			const key = details.locator(".settings-row").filter({ hasText: label });
 			await key.waitFor();
 			expect(await key.innerText()).toContain("never used");
+			const first = details
+				.locator(".settings-row")
+				.filter({ has: page.getByRole("button", { name: "Remove Example ID (sam@example.com)", exact: true }) });
+			expect(await first.innerText()).toContain("last used");
 			const sessions = details.getByRole("region", { name: "Sessions for sam", exact: true });
 			await sessions.getByRole("button", { name: /^End the session/ }).waitFor();
-			expect(await sessions.innerText()).toContain("opened with the password from");
+			expect(await sessions.innerText()).toContain("opened with Example ID (sam@example.com) from");
 			expect(await sessions.innerText()).toContain("last used");
 			expect(await sessions.innerText()).not.toContain("this browser");
 
 			await page.getByRole("button", { name: "Sign-in details for ada", exact: true }).click();
 			const ada = page.getByRole("region", { name: "Sign-in details for ada", exact: true });
 			await ada.getByText("this browser", { exact: true }).waitFor();
-			expect(await ada.innerText()).not.toContain("Sam security key");
-			expect(await ada.getByRole("button", { name: "Remove the password", exact: true }).isDisabled()).toBe(true);
+			expect(await ada.innerText()).not.toContain(label);
+			expect(
+				await ada.getByRole("button", { name: "Remove Example ID (ada@example.com)", exact: true }).isDisabled(),
+			).toBe(true);
 			await sessions.getByRole("button", { name: /^End the session/ }).click();
 			await sessions.getByText("sam must sign in again in that browser.", { exact: true }).waitFor();
 			expect(await server.api("session", { do: "list", actor: "sam" })).toHaveLength(1);
@@ -99,25 +91,32 @@ test.skipIf(!browserAvailable)(
 			await sessions.getByRole("button", { name: "End this session", exact: true }).click();
 			await sessions.getByText("No browser is signed in.", { exact: true }).waitFor();
 			await sam.page.reload();
-			await sam.page.locator("#signin-name").waitFor();
+			await sam.page.locator("#token").waitFor();
 
 			await page.route("**/api/credential", async (route) => {
 				if (route.request().postDataJSON().do !== "remove") return route.continue();
 				await route.fetch();
 				await route.abort();
 			});
-			await key.getByRole("button", { name: "Remove Sam security key", exact: true }).click();
-			await key.getByText("sam cannot use this passkey again. Sessions opened with it end.", { exact: true }).waitFor();
+			await key.getByRole("button", { name: `Remove ${label}`, exact: true }).click();
+			await key
+				.getByText("sam cannot sign in with this identity again. Sessions opened with it end.", { exact: true })
+				.waitFor();
 			expect(await server.api("credential", { do: "list", actor: "sam" })).toHaveLength(2);
 			await key.getByRole("button", { name: "Cancel", exact: true }).click();
 			expect(await server.api("credential", { do: "list", actor: "sam" })).toHaveLength(2);
-			await key.getByRole("button", { name: "Remove Sam security key", exact: true }).click();
-			await key.getByRole("button", { name: "Remove this sign-in method", exact: true }).click();
-			await details.getByRole("status").filter({ hasText: "cannot tell whether the credential was removed" }).waitFor();
+			await key.getByRole("button", { name: `Remove ${label}`, exact: true }).click();
+			await key.getByRole("button", { name: "Remove this identity", exact: true }).click();
+			await details.getByRole("status").filter({ hasText: "cannot tell whether the identity was removed" }).waitFor();
 			await key.waitFor({ state: "detached" });
 			await page.unroute("**/api/credential");
-			expect(await details.getByRole("button", { name: "Remove the password", exact: true }).isDisabled()).toBe(true);
-			expect(await server.api("credential", { do: "list", actor: "sam" })).toMatchObject([{ kind: "password" }]);
+			// The identity sam joined with is the last one, and stays.
+			expect(
+				await details.getByRole("button", { name: "Remove Example ID (sam@example.com)", exact: true }).isDisabled(),
+			).toBe(true);
+			expect(await server.api("credential", { do: "list", actor: "sam" })).toMatchObject([
+				{ kind: "oidc", label: "Example ID (sam@example.com)" },
+			]);
 
 			const issued = page.locator(".settings-token").filter({ hasText: "sam laptop token" });
 			await issued.waitFor();
@@ -143,7 +142,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"People on a phone removes another person's password, keeps their last passkey and fits the screen",
+	"People on a phone removes the identity another person signed in with after confirming, keeps their last and fits the screen",
 	async () => {
 		await person("phone-person");
 		await server.api("admin", {
@@ -152,41 +151,44 @@ test.skipIf(!browserAvailable)(
 			kind: "agent",
 			label: "unused-device-".repeat(8),
 		});
-		const other = await openPage(server, {
-			as: { name: "phone-person", password: PASSWORD },
+		const other = await openPage(server, { as: { name: "phone-person" }, path: "/p/scratch/settings" });
+		// The owner, by token, with an identity to confirm with once the token's sign-in proof has run out.
+		const admin = await openPage(server, {
 			path: "/p/scratch/settings",
+			device: "phone",
+			setup: (_, context) => linkIdentity(context, server, "robin"),
 		});
-		const admin = await openPage(server, { path: "/p/scratch/settings", device: "phone" });
 		try {
-			await passkey(other, "Phone security key");
-			expect(
-				(await admin.page.request.post(`${server.url}/api/account/password`, { data: { next: PASSWORD } })).status(),
-			).toBe(200);
+			const kept = await secondIdentity(other, "phone-person");
+			await advanceClock(server, 10 * 60_000 + 1);
 			const { page } = admin;
-			await page.getByRole("option", { name: "People", exact: true }).tap();
-			await page.getByRole("button", { name: "Sign-in details for phone-person", exact: true }).tap();
 			const details = page.getByRole("region", { name: "Sign-in details for phone-person", exact: true });
-			await details.getByText("Password set", { exact: true }).waitFor();
-			expect(
-				(await details.getByRole("button", { name: "Remove the password", exact: true }).boundingBox())?.height,
-			).toBeGreaterThanOrEqual(44);
-			await details.getByRole("button", { name: "Remove the password", exact: true }).tap();
-			await details
-				.getByText("phone-person cannot use this password again. Sessions opened with it end.", { exact: true })
-				.waitFor();
-			expect(await server.api("credential", { do: "list", actor: "phone-person" })).toHaveLength(2);
-			await details.getByRole("button", { name: "Remove this sign-in method", exact: true }).tap();
-			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
-			await proof.getByLabel("Password", { exact: true }).fill(PASSWORD);
-			await proof.getByRole("button", { name: "Confirm credential", exact: true }).tap();
-			await details.getByText("No password set", { exact: true }).waitFor();
+			const remove = details.getByRole("button", { name: "Remove Example ID (phone-person@example.com)", exact: true });
+			const open = async () => {
+				await page.getByRole("option", { name: "People", exact: true }).tap();
+				await page.getByRole("button", { name: "Sign-in details for phone-person", exact: true }).tap();
+				await remove.waitFor();
+				expect((await remove.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+				await remove.tap();
+				await details
+					.getByText("phone-person cannot sign in with this identity again. Sessions opened with it end.", {
+						exact: true,
+					})
+					.waitFor();
+				expect(await server.api("credential", { do: "list", actor: "phone-person" })).toHaveLength(2);
+				await details.getByRole("button", { name: "Remove this identity", exact: true }).tap();
+			};
+			await open();
+			await confirmWithProvider(page, server, "robin");
+			// The page came back from the provider; the removal is made again.
+			await open();
+			await remove.waitFor({ state: "detached" });
+			// The session phone-person opened with that identity ended with it.
 			await eventually(
 				() => server.api("session", { do: "list", actor: "phone-person" }),
 				(rows) => Array.isArray(rows) && rows.length === 0,
 			);
-			expect(await details.getByRole("button", { name: "Remove Phone security key", exact: true }).isDisabled()).toBe(
-				true,
-			);
+			expect(await details.getByRole("button", { name: `Remove ${kept}`, exact: true }).isDisabled()).toBe(true);
 			await page
 				.locator(".settings-token")
 				.filter({ hasText: "unused-device-" })
@@ -194,7 +196,7 @@ test.skipIf(!browserAvailable)(
 				.waitFor();
 			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 			await other.page.reload();
-			await other.page.locator("#signin-name").waitFor();
+			await other.page.locator("#token").waitFor();
 			expect(admin.errors).toEqual(["Failed to load resource: the server responded with a status of 403 (Forbidden)"]);
 			expect(other.errors).toEqual([]);
 		} finally {
@@ -211,10 +213,10 @@ for (const device of ["desktop", "phone"] as const) {
 		async () => {
 			const actor = `confirmation-${device}`;
 			await person(actor);
-			const other = await openPage(server, { as: { name: actor, password: PASSWORD }, path: "/p/scratch/settings" });
+			const other = await openPage(server, { as: { name: actor }, path: "/p/scratch/settings" });
 			const admin = await openPage(server, { path: "/p/scratch/settings", device });
 			try {
-				await passkey(other, `${actor} key`);
+				const label = await secondIdentity(other, actor);
 				const { page } = admin;
 				await page.getByRole("option", { name: "People", exact: true }).click();
 				await page.getByRole("button", { name: `Sign-in details for ${actor}`, exact: true }).click();
@@ -228,12 +230,12 @@ for (const device of ["desktop", "phone"] as const) {
 				});
 				for (const action of [
 					{
-						trigger: details.getByRole("button", { name: "Remove the password", exact: true }),
-						confirm: "Remove this sign-in method",
+						trigger: details.getByRole("button", { name: `Remove Example ID (${actor}@example.com)`, exact: true }),
+						confirm: "Remove this identity",
 					},
 					{
-						trigger: details.getByRole("button", { name: `Remove ${actor} key`, exact: true }),
-						confirm: "Remove this sign-in method",
+						trigger: details.getByRole("button", { name: `Remove ${label}`, exact: true }),
+						confirm: "Remove this identity",
 					},
 					{ trigger: sessions.getByRole("button", { name: /^End the session/ }), confirm: "End this session" },
 				]) {

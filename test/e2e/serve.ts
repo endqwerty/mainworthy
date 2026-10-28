@@ -23,13 +23,9 @@ const instance = await start(
 		commit: null,
 		...SESSION_LIFETIMES,
 		proxy: null,
-		mail: defaultConfig(process.env).mail,
 		jobKey: defaultConfig(process.env).jobKey,
 		...(defaultConfig(process.env).oidc ? { oidc: defaultConfig(process.env).oidc } : {}),
 		...(defaultConfig(process.env).handoff ? { handoff: defaultConfig(process.env).handoff } : {}),
-		// The browser tests hash a password for every person they make and every sign-in. At what the build
-		// ships with, that is most of their time; the hashing itself is tested where it is written.
-		passwordCost: { memoryCost: 8, timeCost: 1 },
 		...(process.env.MAINWORTHY_PUBLIC_URL ? { publicUrl: process.env.MAINWORTHY_PUBLIC_URL } : {}),
 	},
 	(app, owner) => ({

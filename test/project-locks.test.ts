@@ -1238,10 +1238,30 @@ test("a second command applying an accepted batch completes the accepting comman
 
 import { CredentialInput } from "../src/core/people.ts";
 import { insertOidc, oidcHandle } from "../src/server/identity/credentials.ts";
-import { acceptInvitation, beginOidcSignIn, finishOidcSignIn } from "../src/server/identity/people.ts";
+import { beginOidcSignIn, finishOidcSignIn } from "../src/server/identity/people.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { sqlState } from "../src/server/kernel/db.ts";
-import { provider } from "./oidc-support.ts";
+import { type Provider, provider } from "./oidc-support.ts";
+
+/**
+ * Tells the harness's instance of an identity provider, as an invitation needs: `idp`, or one nobody reaches for
+ * a test that only makes invitations.
+ */
+function withProvider(idp?: Provider): void {
+	h.app.config.publicUrl = "https://mainworthy.example";
+	h.app.config.oidc = idp
+		? idp.config()
+		: { issuer: "https://identity.example", clientId: "example", clientSecret: "example", name: "Example ID" };
+}
+
+/** Begins `start` with the provider and signs in there as `subject`: the query the provider sends back. */
+async function throughProvider(idp: Provider, start: Parameters<typeof beginOidcSignIn>[1], subject: string) {
+	const begun = await beginOidcSignIn(h.app, start, null);
+	if (!begun.ok) throw new Error(`OIDC ceremony refused: ${begun.why}`);
+	idp.next({ subject });
+	const authorized = await fetch(begun.url, { redirect: "manual" });
+	return { query: new URL(authorized.headers.get("location") ?? "").search, ceremony: begun.ceremony };
+}
 
 for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant.remove"] as const) {
 	test(`identity creation finishes before ${action} discovers actors and waits for its project`, async () => {
@@ -1349,6 +1369,7 @@ for (const action of ["grant.set", "grant.remove", "team.grant.set", "team.grant
 for (const op of ["admin", "invitation"] as const) {
 	test(`new actors wait for identity before taking the project for ${op}`, async () => {
 		h = await harness();
+		withProvider();
 		const ready = barrier();
 		const release = barrier();
 		const holding = h.app.database.write((db) =>
@@ -1411,57 +1432,63 @@ function pauseNextBegin() {
 
 test("invitation acceptance retries a lower session actor discovered inside commit", async () => {
 	h = await harness();
-	const invited = await invoke(h.app, OPS, {
-		op: "invitation",
-		project: null,
-		input: { do: "create", name: "joining" },
-		actor: async () => h.owner,
-	});
-	if (!invited.ok) throw new Error("invitation refused");
-	const { code } = z.object({ code: z.string() }).parse(invited.result);
-	const token = await createToken(h.app, { actor: h.owner.name, kind: "human", can: [], project: 0, label: "browser" });
-	const browser = "session-that-appears-after-discovery";
-	const paused = pauseNextBegin();
-	const accepting = acceptInvitation(
-		h.app,
-		{
-			code,
-			password: "correct horse battery staple",
-			passkey: undefined,
-			label: undefined,
-			replace: h.owner.name,
-			browser,
-		},
-		{ userAgent: null, address: null },
-	);
-	// Keep rejection observed while the other connection commits the new session.
-	const outcome = accepting.then(
-		(value) => ({ value, error: null }),
-		(error: unknown) => ({ value: null, error }),
-	);
+	const idp = await provider();
+	withProvider(idp);
 	try {
-		await paused.reached;
-		await h.app.database.write((db) =>
-			db.transaction(async () => {
-				await openSession(h.app, db, {
-					tokenHash: hashToken(token.secret),
-					sessionHash: hashToken(browser),
-					userAgent: null,
-					address: null,
-				});
-			}),
+		const invited = await invoke(h.app, OPS, {
+			op: "invitation",
+			project: null,
+			input: { do: "create", name: "joining" },
+			actor: async () => h.owner,
+		});
+		if (!invited.ok) throw new Error("invitation refused");
+		const { code } = z.object({ code: z.string() }).parse(invited.result);
+		const token = await createToken(h.app, {
+			actor: h.owner.name,
+			kind: "human",
+			can: [],
+			project: 0,
+			label: "browser",
+		});
+		const browser = "session-that-appears-after-discovery";
+		const answer = await throughProvider(idp, { purpose: "join", code, replace: h.owner.name, browser }, "sub-joining");
+		const paused = pauseNextBegin();
+		const accepting = finishOidcSignIn(
+			h.app,
+			{ query: answer.query, ceremony: answer.ceremony, browser },
+			{ userAgent: null, address: null },
 		);
+		// Keep rejection observed while the other connection commits the new session.
+		const outcome = accepting.then(
+			(value) => ({ value, error: null }),
+			(error: unknown) => ({ value: null, error }),
+		);
+		try {
+			await paused.reached;
+			await h.app.database.write((db) =>
+				db.transaction(async () => {
+					await openSession(h.app, db, {
+						tokenHash: hashToken(token.secret),
+						sessionHash: hashToken(browser),
+						userAgent: null,
+						address: null,
+					});
+				}),
+			);
+		} finally {
+			paused.release();
+			paused.restore();
+		}
+		const result = await outcome;
+		expect(result.error).toBeInstanceOf(Busy);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT used_at FROM invitations"))).toEqual([
+			{ used_at: null },
+		]);
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT id FROM credentials"))).toEqual([]);
+		expect(await findSession(h.app, hashToken(browser))).not.toBeNull();
 	} finally {
-		paused.release();
-		paused.restore();
+		idp.stop();
 	}
-	const result = await outcome;
-	expect(result.error).toBeInstanceOf(Busy);
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT used_at FROM invitations"))).toEqual([
-		{ used_at: null },
-	]);
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT id FROM credentials"))).toEqual([]);
-	expect(await findSession(h.app, hashToken(browser))).not.toBeNull();
 });
 
 test("OIDC sign-in retries an actor first discovered inside commit", async () => {
@@ -1507,7 +1534,7 @@ test("OIDC sign-in retries an actor first discovered inside commit", async () =>
 	}
 });
 
-test("credential locks follow parsed passkey input at their final strength", async () => {
+test("credential locks follow parsed input at their final strength", async () => {
 	h = await harness();
 	const unrelated = await h.actor("unrelated", "human", []);
 	const credential = defineInstanceOp({
@@ -1545,7 +1572,8 @@ test("credential locks follow parsed passkey input at their final strength", asy
 		{
 			op: "credential",
 			project: null,
-			input: { do: "passkey.add", passkey: {}, label: "key", actor: "unrelated" },
+			// `remove` names no actor: the one smuggled in is dropped by the parse, and only the caller is locked.
+			input: { do: "remove", id: 999_999, actor: "unrelated" },
 			actor: async () => h.owner,
 		},
 	);
@@ -1553,163 +1581,64 @@ test("credential locks follow parsed passkey input at their final strength", asy
 });
 
 import { CONTEXT } from "../src/server/identity/contexts.ts";
-import { insertPassword, insertTotp } from "../src/server/identity/credentials.ts";
-import { hashPassword } from "../src/server/identity/passwords.ts";
-import {
-	passkeySignInOptions,
-	showInvitation,
-	signInWithPasskey,
-	signInWithPassword,
-	signInWithTotp,
-} from "../src/server/identity/people.ts";
-import { issueTotp, newTotpSecret, secretHash, totpCode } from "../src/server/identity/totp.ts";
-import { authenticator } from "./people-support.ts";
 
-for (const method of ["password", "totp"] as const) {
-	test(
-		method === "password"
-			? "password sign-in retries when a name resolves to an unlocked actor inside commit"
-			: "TOTP sign-in refuses credentials moved away from its bound actor inside commit",
-		async () => {
-			h = await harness();
-			const person = await h.actor("signer", "human", []);
-			const password = "correct horse battery staple";
-			const hash = await hashPassword(password, { memoryCost: 1024, timeCost: 1 });
-			h.app.config.passwordCost = { memoryCost: 1024, timeCost: 1 };
-			const secret = newTotpSecret();
-			const factor = await h.app.database.write((db) =>
+test("OIDC sign-in retries when the identity resolves to an unlocked actor inside commit", async () => {
+	h = await harness();
+	const idp = await provider();
+	withProvider(idp);
+	try {
+		const invited = await invoke(h.app, OPS, {
+			op: "invitation",
+			project: null,
+			input: { do: "create", name: "signer" },
+			actor: async () => h.owner,
+		});
+		if (!invited.ok) throw new Error("invitation refused");
+		const { code } = z.object({ code: z.string() }).parse(invited.result);
+		const joining = await throughProvider(idp, { purpose: "join", code, replace: null, browser: null }, "sub-signer");
+		const accepted = await finishOidcSignIn(
+			h.app,
+			{ query: joining.query, ceremony: joining.ceremony, browser: null },
+			{ userAgent: null, address: null },
+		);
+		if (!accepted.ok) throw new Error("invitation refused at the provider");
+		const person = await h.app.database.read((db) => actorByName(db, "signer", 0));
+		if (!person) throw new Error("no signer");
+		const signing = await throughProvider(idp, { purpose: "sign-in" }, "sub-signer");
+		const paused = pauseNextBegin();
+		const pending = finishOidcSignIn(
+			h.app,
+			{ query: signing.query, ceremony: signing.ceremony, browser: null },
+			{ userAgent: null, address: null },
+		);
+		const outcome = pending.then(
+			(value) => ({ value, error: null }),
+			(error: unknown) => ({ value: null, error }),
+		);
+		try {
+			await paused.reached;
+			// An instance restore can replace the actor behind an identity while keeping the identity.
+			await h.app.database.write((db) =>
 				db.transaction(async () => {
-					await insertPassword(db, { actor: person.id, hash, at: h.app.now() });
-					return await insertTotp(db, {
-						actor: person.id,
-						data: JSON.stringify({ secret, lastStep: -1, recovery: [] }),
-						at: h.app.now(),
+					await lockActors(db, [h.owner.id, person.id], true);
+					await db.run(sql<{ from: number; to: number }>("UPDATE credentials SET actor = $to WHERE actor = $from"), {
+						from: person.id,
+						to: h.owner.id,
 					});
 				}),
 			);
-			const ceremony = "totp-browser";
-			const challenge = await issueTotp(h.app, {
-				kind: "sign-in",
-				actor: person.id,
-				password: hash,
-				factor,
-				context: CONTEXT.browser(secretHash(ceremony)),
-			});
-			// Password sign-in must reach its password branch rather than start a second-factor ceremony.
-			if (method === "password")
-				await h.app.database.write((db) =>
-					db.transaction(async () => {
-						await db.run(sql<{ id: number }>("DELETE FROM credentials WHERE id = $id"), { id: factor });
-					}),
-				);
-			const paused = pauseNextBegin();
-			const pending =
-				method === "password"
-					? signInWithPassword(h.app, { name: person.name, password }, { userAgent: null, address: null })
-					: signInWithTotp(
-							h.app,
-							{ challenge: challenge.challenge, ceremony, code: totpCode(secret, Math.floor(h.app.now() / 30_000)) },
-							{ userAgent: null, address: null },
-						);
-			const outcome = pending.then(
-				(value) => ({ value, error: null }),
-				(error: unknown) => ({ value: null, error }),
-			);
-			try {
-				await paused.reached;
-				// An instance restore can replace the actor behind a name while preserving credential data.
-				await h.app.database.write((db) =>
-					db.transaction(async () => {
-						await lockActors(db, [h.owner.id, person.id], true);
-						await db.run(sql<{ id: number }>("UPDATE actors SET name = 'former-signer' WHERE id = $id"), {
-							id: person.id,
-						});
-						await db.run(sql<{ id: number }>("UPDATE actors SET name = 'signer' WHERE id = $id"), { id: h.owner.id });
-						await db.run(sql<{ from: number; to: number }>("UPDATE credentials SET actor = $to WHERE actor = $from"), {
-							from: person.id,
-							to: h.owner.id,
-						});
-					}),
-				);
-			} finally {
-				paused.release();
-				paused.restore();
-			}
-			const result = await outcome;
-			if (method === "password") expect(result.error).toBeInstanceOf(Busy);
-			else {
-				expect(result.error).toBeNull();
-				expect(result.value).toEqual({ ok: false, why: "changed-meanwhile" });
-			}
-			expect(await h.app.database.read((db) => db.allDynamic("SELECT id FROM sessions"))).toEqual([]);
-		},
-	);
-}
-
-test("passkey sign-in retries when the credential resolves to an unlocked actor inside commit", async () => {
-	h = await harness();
-	h.app.config.publicUrl = "https://mainworthy.example";
-	const invited = await invoke(h.app, OPS, {
-		op: "invitation",
-		project: null,
-		input: { do: "create", name: "signer" },
-		actor: async () => h.owner,
-	});
-	if (!invited.ok) throw new Error("invitation refused");
-	const { code } = z.object({ code: z.string() }).parse(invited.result);
-	const shown = await showInvitation(h.app, code, null);
-	if (!shown.ok || !shown.shown.passkey) throw new Error("passkey registration unavailable");
-	const device = authenticator();
-	const accepted = await acceptInvitation(
-		h.app,
-		{
-			code,
-			password: undefined,
-			passkey: device.register(shown.shown.passkey),
-			label: "key",
-			replace: null,
-			browser: null,
-		},
-		{ userAgent: null, address: null },
-	);
-	if (!accepted.ok) throw new Error("passkey invitation refused");
-	const person = await h.app.database.read((db) => actorByName(db, "signer", 0));
-	if (!person) throw new Error("no signer");
-	const begun = await passkeySignInOptions(h.app, null);
-	if (!begun || !("options" in begun)) throw new Error("passkey sign-in unavailable");
-	const paused = pauseNextBegin();
-	const pending = signInWithPasskey(
-		h.app,
-		{ answer: device.assert(begun.options), ceremony: begun.ceremony },
-		{ userAgent: null, address: null },
-	);
-	const outcome = pending.then(
-		(value) => ({ value, error: null }),
-		(error: unknown) => ({ value: null, error }),
-	);
-	try {
-		await paused.reached;
-		await h.app.database.write((db) =>
-			db.transaction(async () => {
-				await lockActors(db, [h.owner.id, person.id], true);
-				await db.run(sql<{ from: number; to: number }>("UPDATE credentials SET actor = $to WHERE actor = $from"), {
-					from: person.id,
-					to: h.owner.id,
-				});
-				await db.run(sql<{ from: number; to: number }>("UPDATE passkey_users SET actor = $to WHERE actor = $from"), {
-					from: person.id,
-					to: h.owner.id,
-				});
-			}),
-		);
+		} finally {
+			paused.release();
+			paused.restore();
+		}
+		expect((await outcome).error).toBeInstanceOf(Busy);
+		// The session the acceptance opened, and no other.
+		expect(await h.app.database.read((db) => db.allDynamic("SELECT actor FROM sessions"))).toEqual([
+			{ actor: person.id },
+		]);
 	} finally {
-		paused.release();
-		paused.restore();
+		idp.stop();
 	}
-	expect((await outcome).error).toBeInstanceOf(Busy);
-	expect(await h.app.database.read((db) => db.allDynamic("SELECT actor FROM sessions"))).toEqual([
-		{ actor: person.id },
-	]);
 });
 
 import { adminOp } from "../src/server/ops/admin.ts";
@@ -1807,6 +1736,7 @@ function pauseIdentityOp<I, O>(
 for (const op of ["admin", "invitation"] as const) {
 	test(`a name forgotten during discovery cannot invert org and project locks for ${op}`, async () => {
 		h = await harness();
+		withProvider();
 		await h.actor("vanishing", "human", []);
 		const errors = observeLockErrors();
 		const forgotten = barrier();
@@ -1869,7 +1799,14 @@ for (const kind of ["token", "credential"] as const) {
 		const owner = h.owner;
 		if (kind === "credential")
 			await h.app.database.write((db) =>
-				db.transaction(() => insertPassword(db, { actor: owner.id, hash: "unused", at: h.app.now() })),
+				db.transaction(() =>
+					insertOidc(db, {
+						actor: owner.id,
+						handle: "https://provider.example#first",
+						label: "first",
+						at: h.app.now(),
+					}),
+				),
 			);
 		const table = kind === "token" ? "tokens" : "credentials";
 		const next = await h.app.database.read((db) =>
@@ -2196,142 +2133,61 @@ for (const ownSession of [false, true]) {
 	});
 }
 
-for (const method of ["password", "legacy password", "totp", "passkey", "oidc"] as const) {
-	test(`${method} sign-in commits outside an unrelated waiting grant's identity lock`, async () => {
-		h = await harness();
-		h.app.config.publicUrl = "https://mainworthy.example";
-		h.app.config.passwordCost = { memoryCost: 1024, timeCost: 1 };
-		const signer = await h.actor("signer", "human", []);
-		await h.actor("grant-target", "human", ["read"]);
-		const idp = method === "oidc" ? await provider({ subject: "signer" }) : null;
-		let signIn: () => Promise<unknown>;
-		try {
-			if (method === "passkey") {
-				const invitation = await invoke(h.app, OPS, {
-					op: "invitation",
-					project: null,
-					input: { do: "create", name: signer.name },
-					actor: async () => h.owner,
-				});
-				if (!invitation.ok) throw new Error("invitation refused");
-				const invited = z.object({ code: z.string() }).parse(invitation.result);
-				const shown = await showInvitation(h.app, invited.code, null);
-				if (!shown.ok || !shown.shown.passkey) throw new Error("registration unavailable");
-				const device = authenticator();
-				const joined = await acceptInvitation(
-					h.app,
-					{
-						code: invited.code,
-						password: undefined,
-						passkey: device.register(shown.shown.passkey),
-						label: "key",
-						replace: null,
-						browser: null,
-					},
-					{ userAgent: null, address: null },
-				);
-				if (!joined.ok) throw new Error("registration refused");
-				const begun = await passkeySignInOptions(h.app, null);
-				if (!begun || !("options" in begun)) throw new Error("sign-in unavailable");
-				signIn = () =>
-					signInWithPasskey(
-						h.app,
-						{ answer: device.assert(begun.options), ceremony: begun.ceremony },
-						{ userAgent: null, address: null },
-					);
-			} else if (idp) {
-				h.app.config.oidc = idp.config();
-				await h.app.database.write((db) =>
-					db.transaction(() =>
-						insertOidc(db, {
-							actor: signer.id,
-							handle: oidcHandle({ issuer: idp.issuer, subject: "signer" }),
-							label: "provider",
-							at: h.app.now(),
-						}),
-					),
-				);
-				const begun = await beginOidcSignIn(h.app, { purpose: "sign-in" }, null);
-				if (!begun.ok) throw new Error("OIDC unavailable");
-				const authorized = await fetch(begun.url, { redirect: "manual" });
-				const query = new URL(authorized.headers.get("location") ?? "").search;
-				signIn = () =>
-					finishOidcSignIn(
-						h.app,
-						{ query, ceremony: begun.ceremony, browser: null },
-						{ userAgent: null, address: null },
-					);
-			} else {
-				const password =
-					method === "legacy password" ? "Cafe\u0301 correct horse battery staple" : "correct horse battery staple";
-				const hash =
-					method === "legacy password"
-						? await Bun.password.hash(password, { algorithm: "argon2id", ...h.app.config.passwordCost })
-						: await hashPassword(password, h.app.config.passwordCost);
-				await h.app.database.write((db) =>
-					db.transaction(() => insertPassword(db, { actor: signer.id, hash, at: h.app.now() })),
-				);
-				if (method === "totp") {
-					const secret = newTotpSecret();
-					const factor = await h.app.database.write((db) =>
-						db.transaction(() =>
-							insertTotp(db, {
-								actor: signer.id,
-								data: JSON.stringify({ secret, lastStep: -1, recovery: [] }),
-								at: h.app.now(),
-							}),
-						),
-					);
-					const ceremony = "sign-in-browser";
-					const challenge = await issueTotp(h.app, {
-						kind: "sign-in",
-						actor: signer.id,
-						password: hash,
-						factor,
-						context: CONTEXT.browser(secretHash(ceremony)),
-					});
-					signIn = () =>
-						signInWithTotp(
-							h.app,
-							{ challenge: challenge.challenge, code: totpCode(secret, Math.floor(h.app.now() / 30_000)), ceremony },
-							{ userAgent: null, address: null },
-						);
-				} else
-					signIn = () => signInWithPassword(h.app, { name: signer.name, password }, { userAgent: null, address: null });
-			}
-			const reached = barrier();
-			const resume = barrier();
-			const holding = h.app.database.write((db) =>
-				db.transaction(async () => {
-					await lockProject(db, 1);
-					reached.resolve();
-					await resume.promise;
+test("OIDC sign-in commits outside an unrelated waiting grant's identity lock", async () => {
+	h = await harness();
+	const signer = await h.actor("signer", "human", []);
+	await h.actor("grant-target", "human", ["read"]);
+	const idp = await provider({ subject: "signer" });
+	withProvider(idp);
+	try {
+		await h.app.database.write((db) =>
+			db.transaction(() =>
+				insertOidc(db, {
+					actor: signer.id,
+					handle: oidcHandle({ issuer: idp.issuer, subject: "signer" }),
+					label: "provider",
+					at: h.app.now(),
 				}),
-			);
-			await reached.promise;
-			const changing = h.raw("admin", { do: "grant.set", actor: "grant-target", project: "scratch", can: ["read"] });
-			await blocked();
-			const signingIn = signIn();
-			try {
-				const result = await Promise.race([
-					signingIn,
-					new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
-				]);
-				expect(result).toMatchObject({ ok: true, signedIn: { cookie: expect.any(String) } });
-			} finally {
-				resume.resolve();
-				await Promise.all([holding, changing, signingIn]);
-			}
-			expect(
-				await h.app.database.read((db) =>
-					db.allDynamic("SELECT count(*) AS n FROM sessions WHERE actor = $1", [signer.id]),
-				),
-			).toEqual([{ n: method === "passkey" ? 2 : 1 }]);
+			),
+		);
+		const begun = await beginOidcSignIn(h.app, { purpose: "sign-in" }, null);
+		if (!begun.ok) throw new Error("OIDC unavailable");
+		const authorized = await fetch(begun.url, { redirect: "manual" });
+		const query = new URL(authorized.headers.get("location") ?? "").search;
+		const signIn = () =>
+			finishOidcSignIn(h.app, { query, ceremony: begun.ceremony, browser: null }, { userAgent: null, address: null });
+		const reached = barrier();
+		const resume = barrier();
+		const holding = h.app.database.write((db) =>
+			db.transaction(async () => {
+				await lockProject(db, 1);
+				reached.resolve();
+				await resume.promise;
+			}),
+		);
+		await reached.promise;
+		const changing = h.raw("admin", { do: "grant.set", actor: "grant-target", project: "scratch", can: ["read"] });
+		await blocked();
+		const signingIn = signIn();
+		try {
+			const result = await Promise.race([
+				signingIn,
+				new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+			]);
+			expect(result).toMatchObject({ ok: true, signedIn: { cookie: expect.any(String) } });
 		} finally {
-			idp?.stop();
+			resume.resolve();
+			await Promise.all([holding, changing, signingIn]);
 		}
-	});
-}
+		expect(
+			await h.app.database.read((db) =>
+				db.allDynamic("SELECT count(*) AS n FROM sessions WHERE actor = $1", [signer.id]),
+			),
+		).toEqual([{ n: 1 }]);
+	} finally {
+		idp.stop();
+	}
+});
 
 test("busy during report application rolls back partial results and leaves acceptance for recovery", async () => {
 	h = await harness();
