@@ -31,9 +31,9 @@ import { failureSignature, fileSignature, type SignatureRow, signaturesByHashes 
 
 export { type SignatureRow, signatureById } from "./signatures.ts";
 
-/** SQL predicate for result id expressions: a correction withdraws what it names, whatever its own outcome. */
-export const uncorrectedResults = (id: string, ...others: string[]): string =>
-	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.corrects ${others.length === 0 ? `= ${id}` : `IN (${[id, ...others].join(", ")})`})`;
+/** SQL predicate for result id expressions: only a correction in their project withdraws them. */
+export const uncorrectedResults = (project: string, id: string, ...others: string[]): string =>
+	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.project = ${project} AND correction.corrects ${others.length === 0 ? `= ${id}` : `IN (${[id, ...others].join(", ")})`})`;
 
 export type TestRow = {
 	id: number;
@@ -227,7 +227,7 @@ export const UNLINKED_PAGE = 500;
 const Q = {
 	anyTest: sql<{ project: number }, { id: number }>("SELECT id FROM tests WHERE project = $project LIMIT 1"),
 	caseResultsOnTargets: sql<{ caseId: number; targets: readonly number[] }, ResultRow>(`
- SELECT r.* FROM results r WHERE r.basis_case=$caseId AND r.target=ANY($targets::bigint[]) AND ${uncorrectedResults("r.id")} ORDER BY r.seq,r.ord`),
+ SELECT r.* FROM results r WHERE r.basis_case=$caseId AND r.target=ANY($targets::bigint[]) AND ${uncorrectedResults("r.project", "r.id")} ORDER BY r.seq,r.ord`),
 
 	correctedIds: sql<{ ids: readonly number[] }, { id: number }>(
 		"SELECT DISTINCT corrects AS id FROM results WHERE corrects=ANY($ids::bigint[])",
@@ -255,7 +255,7 @@ const Q = {
 		"SELECT * FROM tests WHERE project=$project AND key=ANY($keys::text[])",
 	),
 	resultsByIds: sql<{ ids: readonly number[] }, ResultRow & { job: string; standing: boolean }>(
-		`SELECT r.*,b.job,${uncorrectedResults("r.id")} AS standing FROM results r JOIN batches b ON b.id=r.batch WHERE r.id=ANY($ids::bigint[])`,
+		`SELECT r.*,b.job,${uncorrectedResults("r.project", "r.id")} AS standing FROM results r JOIN batches b ON b.id=r.batch WHERE r.id=ANY($ids::bigint[])`,
 	),
 	sliceHistory: sql<
 		{
@@ -272,7 +272,7 @@ const Q = {
  CROSS JOIN LATERAL (
  SELECT r.id,r.test,r.method,r.outcome,r.attempt FROM results r JOIN batches b ON b.id=r.batch
  WHERE r.target=$target AND r.actor=$actor AND b.job=$job AND r.test=lane.test AND r.method=lane.method
- AND r.outcome IN ('pass','fail','error') AND NOT(r.id=ANY($corrects::bigint[])) AND ${uncorrectedResults("r.id")}
+ AND r.outcome IN ('pass','fail','error') AND NOT(r.id=ANY($corrects::bigint[])) AND ${uncorrectedResults("r.project", "r.id")}
  ORDER BY r.attempt DESC,CASE WHEN r.outcome='pass' THEN 0 ELSE 1 END DESC,r.id DESC LIMIT 1
  ) previous`),
 
@@ -492,7 +492,7 @@ const Q = {
 	processedJobs: sql<{ target: number }, { job: string }>(
 		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'
 		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.method = 'auto'
-		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.id")})`,
+		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.project", "r.id")})`,
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
 	pendingCorrections: sql<{ project: number; actor: number }, { result: number }>(
@@ -535,7 +535,7 @@ const Q = {
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
 		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
-		   AND ${uncorrectedResults("r.id")}
+		   AND ${uncorrectedResults("r.project", "r.id")}
 		 ORDER BY r.seq, r.ord`,
 	),
 	producedOn: sql<{ project: number; signature: number; actor: number }, { target: number; run: number | null }>(
@@ -563,7 +563,7 @@ const Q = {
 	// happened (issue #630).
 	flipCount: sql<{ project: number; test: number }, { n: number }>(
 		`SELECT count(*) AS n FROM flips f WHERE f.project = $project AND f.test = $test
-		   AND ${uncorrectedResults("f.first_result", "f.second_result")}`,
+		   AND ${uncorrectedResults("f.project", "f.first_result", "f.second_result")}`,
 	),
 	// Of these results, those in a lane with a flip on their target that no correction withdrew. The flips are read
 	// test by test (`flips_test`), however many the project has.
@@ -576,7 +576,7 @@ const Q = {
 		JOIN results s ON s.id = f.second_result
 		JOIN batches sb ON sb.id = s.batch
 		WHERE f.target = c.target AND s.actor = c.actor AND s.method = c.method AND sb.job = cb.job
-		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
+		  AND ${uncorrectedResults("f.project", "f.first_result", "f.second_result")}
 	`),
 	// Of these results, each failure a later attempt of its lane passed: the first attempt that passed. A flip is
 	// recorded between the last failure and the pass, so a failure before it is matched by its lane and attempt, not
@@ -598,7 +598,7 @@ const Q = {
 		  AND a.outcome IN ('fail', 'error') AND coalesce(pt.outcome, p.outcome) IN ('fail', 'error')
 		  AND s.outcome = 'pass'
 		  AND p.attempt >= a.attempt AND s.attempt > a.attempt
-		  AND ${uncorrectedResults("a.id", "f.first_result", "f.second_result")}
+		  AND ${uncorrectedResults("a.project", "a.id", "f.first_result", "f.second_result")}
 		GROUP BY a.id
 	`),
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(

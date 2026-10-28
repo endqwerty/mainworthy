@@ -30,7 +30,7 @@ const Q = {
 		         ) AS rank
 		  FROM results r JOIN batches b ON b.id = r.batch
 		  WHERE r.project = $project AND r.at >= $from AND r.at < $to AND ($method::text IS NULL OR r.method = $method)
-		    AND ${uncorrectedResults("r.id")}
+		    AND ${uncorrectedResults("r.project", "r.id")}
 		)
 		SELECT k.at / ${SLOT} AS slot, k.outcome, k.quarantined, count(*) AS n
 		FROM ranked k WHERE k.rank = 1
@@ -42,7 +42,7 @@ const Q = {
 		SELECT f.test, count(*) AS flips, max(r.at) AS last_at
 		FROM flips f JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
 		WHERE f.project = $project AND r.at >= $since AND t.kind = 'auto'
-		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
+		  AND ${uncorrectedResults("f.project", "f.first_result", "f.second_result")}
 		GROUP BY f.test ORDER BY flips DESC, last_at DESC, f.test
 	`),
 	// The same flips, for the tests asked about: what a gate's list says of each row.
@@ -50,7 +50,7 @@ const Q = {
 		SELECT f.test, count(*) AS flips
 		FROM unnest($tests::bigint[]) AS asked(value) JOIN flips f ON f.project = $project AND f.test = asked.value
 		JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
-		WHERE r.at >= $since AND t.kind = 'auto' AND ${uncorrectedResults("f.first_result", "f.second_result")}
+		WHERE r.at >= $since AND t.kind = 'auto' AND ${uncorrectedResults("f.project", "f.first_result", "f.second_result")}
 		GROUP BY f.test
 	`),
 	// Automated is what the test is, whoever reported it: an agent can report an automated test too.
@@ -67,66 +67,57 @@ const Q = {
 	// Playwright already sums its executions. Untimed tries remain unknown: Surefire times only one execution.
 	// Legacy/imported durations can exceed today's input limit: sum(bigint) avoids integer overflow, and returned time
 	// stays between zero and the wire format's largest safe integer.
-	// A try on a correction makes its original lane eligible; every duplicate execution of that lane must still compete.
+	// Walk at most 64 links; any unresolved branch outranks resolved leaves and contributes unknown time.
+	// Start at every execution so a runner try beyond the bound cannot silently hide its lane.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
-		WITH RECURSIVE tried(result) AS (
-		  SELECT r.id FROM results r
-		  WHERE r.project = $project AND r.at >= $since
-		    AND EXISTS (SELECT 1 FROM result_tries t WHERE t.result = r.id)
-		  UNION
-		  SELECT r.corrects FROM tried t JOIN results r ON r.id = t.result WHERE r.corrects IS NOT NULL
-		),
-		tried_lanes AS MATERIALIZED (
-		  SELECT DISTINCT r.target, r.test, r.actor, r.method, b.job, r.attempt
-		  FROM tried t JOIN results r ON r.id = t.result JOIN batches b ON b.id = r.batch
-		  WHERE r.corrects IS NULL
-		),
-		executions AS (
-		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord,
+		WITH RECURSIVE executions AS (
+		  SELECT r.id, r.test, r.target, r.actor, r.method, r.run, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord,
 		    EXISTS (
 		      SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
-		      WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
+		      WHERE n.project = $project AND n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
 		        AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
 		    ) AS repeated
 		  FROM results r JOIN batches b ON b.id = r.batch
+		  JOIN tests t ON t.id = r.test AND t.project = $project
 		  WHERE r.project = $project AND r.at >= $since AND r.corrects IS NULL
-		    AND (EXISTS (
-      SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
-      WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
-        AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
-    ) OR EXISTS (
-		      SELECT 1 FROM tried_lanes t
-		      WHERE t.target = r.target AND t.test = r.test AND t.actor = r.actor AND t.method = r.method
-		        AND t.job = b.job AND t.attempt = r.attempt
-		    ))
 		),
-		chain(root, id, outcome, duration_ms, seq, ord) AS (
-		  SELECT e.id, e.id, e.outcome, e.duration_ms, e.seq, e.ord FROM executions e
+		chain(root, id, test, actor, target, run, outcome, duration_ms, seq, ord, depth) AS (
+		  SELECT e.id, e.id, e.test, e.actor, e.target, e.run, e.outcome, e.duration_ms, e.seq, e.ord, 0 FROM executions e
 		  UNION ALL
-		  SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord FROM chain k JOIN results c ON c.corrects = k.id
+		  SELECT k.root, c.id, c.test, c.actor, c.target, c.run, c.outcome, c.duration_ms, c.seq, c.ord, k.depth + 1
+		  FROM chain k JOIN results c ON c.corrects = k.id AND c.project = $project AND c.test = k.test
+		    AND c.actor = k.actor AND c.target IS NOT DISTINCT FROM k.target AND c.run IS NOT DISTINCT FROM k.run
+		  WHERE k.depth < 64
+		),
+		leaves AS MATERIALIZED (
+		  SELECT k.*, EXISTS (
+		    SELECT 1 FROM results c WHERE c.corrects = k.id AND c.project = $project AND c.test = k.test
+		      AND c.actor = k.actor AND c.target IS NOT DISTINCT FROM k.target AND c.run IS NOT DISTINCT FROM k.run
+		  ) AS corrected FROM chain k
 		),
 		attempts AS (
-		  SELECT e.test, k.id, k.duration_ms, e.repeated,
+		  SELECT e.test, k.id, CASE WHEN k.corrected THEN NULL ELSE k.duration_ms END AS duration_ms,
+		         e.repeated, k.corrected AS unresolved,
 		         row_number() OVER (
 		           PARTITION BY e.target, e.test, e.actor, e.method, e.job, e.attempt
-		           ORDER BY CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+		           ORDER BY k.corrected DESC, CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
 		                    k.seq DESC, k.ord DESC
 		         ) AS rank
-		  FROM executions e JOIN chain k ON k.root = e.id
-		  WHERE ${uncorrectedResults("k.id")}
+		  FROM executions e JOIN leaves k ON k.root = e.id
+		  WHERE k.depth = 64 OR NOT k.corrected
 		),
 		costs AS (
-		  SELECT a.test, a.repeated, a.duration_ms, count(t.id) AS tries,
+		  SELECT a.test, a.repeated, a.duration_ms, a.unresolved, count(t.id) AS tries,
 		         coalesce(sum(t.duration_ms), 0) AS tried_ms,
 		         count(t.id) - count(t.duration_ms) AS untimed_tries
-		  FROM attempts a LEFT JOIN result_tries t ON t.result = a.id
+		  FROM attempts a LEFT JOIN result_tries t ON t.result = a.id AND NOT a.unresolved
 		  WHERE a.rank = 1
-		  GROUP BY a.id, a.test, a.repeated, a.duration_ms
+		  GROUP BY a.id, a.test, a.repeated, a.duration_ms, a.unresolved
 		)
-		SELECT a.test, sum(a.repeated::integer + a.tries)::bigint AS reruns,
+		SELECT a.test, sum(greatest(a.unresolved::integer, a.repeated::integer + a.tries))::bigint AS reruns,
 		       greatest(0, least(coalesce(sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END), 0), ${Number.MAX_SAFE_INTEGER}))::bigint AS lost,
-		       sum(a.untimed_tries + (a.repeated AND a.duration_ms IS NULL)::integer)::bigint AS unknown
-		FROM costs a WHERE a.repeated OR a.tries > 0
+		       sum(a.untimed_tries + ((a.repeated AND a.duration_ms IS NULL) OR a.unresolved)::integer)::bigint AS unknown
+		FROM costs a WHERE a.repeated OR a.tries > 0 OR a.unresolved
 		GROUP BY a.test
 	`),
 	automated: sql<{ project: number }, { case_id: number }>(
@@ -181,7 +172,7 @@ const Q = {
 		SELECT t.case_id, (
 		  SELECT r.outcome FROM results r
 		  WHERE r.project = t.project AND r.test = t.id AND +r.at >= $since
-		    AND ${uncorrectedResults("r.id")}
+		    AND ${uncorrectedResults("r.project", "r.id")}
 		  ORDER BY r.seq DESC, r.ord DESC LIMIT 1
 		) AS outcome
 		FROM tests t WHERE t.project = $project AND t.case_id = ANY($cases::bigint[])

@@ -516,6 +516,99 @@ describe("flaky tests and time lost to reruns", () => {
 	});
 });
 
+describe("bounded, project-local rerun corrections", () => {
+	const fixture = async () => {
+		h = await harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 2, fail: { 0: "broken" } });
+		await h.call("report", { ...one, results: one.results.map((r) => ({ ...r, durationMs: 10 })) });
+		const root = await lastResult("T-1");
+		await h.call("report", {
+			...one,
+			attempt: 2,
+			results: [{ ...one.results[0], outcome: "pass", failure: undefined }],
+		});
+		return root;
+	};
+	const change = async (text: string) =>
+		await h.app.database.write(async (db) => await db.transaction(async () => await db.exec(text)));
+
+	test("a 64-link correction resolves, longer chains stay unknown and their query work is bounded", async () => {
+		const root = await fixture();
+		for (const depth of [64, 65, 130]) {
+			await change(`
+DELETE FROM results WHERE corrects IS NOT NULL;
+DO $$ DECLARE parent bigint := ${root}; BEGIN
+FOR n IN 1..${depth} LOOP
+INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,outcome,attempt,duration_ms,at,corrects,run)
+SELECT project,test,seq,ord+n,batch,target,method,actor,basis,'pass',attempt,999,at,parent,run
+FROM results WHERE id = ${root} RETURNING id INTO parent;
+END LOOP; END $$;
+`);
+			expect(await stats({ of: "reruns", days: 1 })).toMatchObject(
+				depth === 64 ? { reruns: 1, lostMs: 999, unknown: 0 } : { reruns: 1, lostMs: 0, unknown: 1 },
+			);
+			const query = declaredSql().find((q) => q.text.includes("AS untimed_tries"));
+			if (!query?.names) throw new Error("missing reruns query");
+			const original = await h.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly number[], { project: number }>("SELECT project FROM results WHERE id = $1"), [
+						root,
+					]),
+			);
+			if (!original) throw new Error("missing root");
+			const params = query.names.map((name) => (name === "project" ? original.project : 0));
+			type Plan = { "Node Type": string; "Actual Loops": number; Plans?: Plan[] };
+			const rows = await h.app.database.read(
+				async (db) =>
+					await db.allDynamic<{ "QUERY PLAN": { Plan: Plan }[] }>(
+						`EXPLAIN (ANALYZE, FORMAT JSON) ${query.text}`,
+						params,
+					),
+			);
+			const unions: Plan[] = [];
+			const collect = (plan: Plan) => {
+				if (plan["Node Type"] === "Recursive Union") unions.push(plan);
+				for (const child of plan.Plans ?? []) collect(child);
+			};
+			for (const row of rows) for (const plan of row["QUERY PLAN"]) collect(plan.Plan);
+			expect(unions).toHaveLength(1);
+			for (const union of unions) expect(union.Plans?.[1]?.["Actual Loops"]).toBeLessThanOrEqual(65);
+			if (depth === 130) {
+				await change("UPDATE results SET duration_ms = 0 WHERE corrects IS NOT NULL");
+				expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 0, unknown: 1 });
+				// A resolved failure branch cannot make the unresolved branch's time known.
+				await change(`
+INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,outcome,attempt,duration_ms,at,corrects,run)
+SELECT project,test,seq,ord+999,batch,target,method,actor,basis,'fail',attempt,555,at,${root},run
+FROM results WHERE id = ${root};
+`);
+				expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 0, unknown: 1 });
+				await change("UPDATE results SET attempt = 1 WHERE attempt = 2");
+				expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 0, unknown: 1 });
+			}
+		}
+	});
+
+	for (const mismatch of ["project", "test"] as const) {
+		test(`a correction with a different ${mismatch} cannot change rerun time`, async () => {
+			const root = await fixture();
+			expect(await stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 1 });
+			if (mismatch === "project") await h.call("admin", { do: "project.create", key: "other" });
+			await change(`
+INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,outcome,attempt,duration_ms,at,corrects,run)
+SELECT ${mismatch === "project" ? "(SELECT id FROM projects WHERE key = 'other')" : "project"},
+${mismatch === "test" ? "(SELECT max(id) FROM tests)" : "test"},seq,ord+100,batch,
+target,method,
+actor,basis,'fail',attempt,999,at,${root},
+run
+FROM results r WHERE id = ${root};
+`);
+			expect(await stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 10, unknown: 0 });
+			if (mismatch === "project") expect(await stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 1 });
+		});
+	}
+});
+
 describe("what a flip and a rerun are (review of #461)", () => {
 	test("a flip whose failure its producer corrected is not flaky", async () => {
 		h = await harness({ unlinked: "track" });
