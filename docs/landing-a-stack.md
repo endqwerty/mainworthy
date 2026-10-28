@@ -33,8 +33,10 @@ a time, and looking at the next request between landings. Its other gates hold.
   branches. The extension checks that a layer is open and not a draft; `main` has neither branch protection nor a
   ruleset requiring `gate`, so only you stop a layer whose check failed. When `gate` is a required check on
   `main`, GitHub stops it and this sentence goes.
-- Each layer's head and base are the pair the Daybreak audit read, with no issue left unaddressed
-  ([security-audit.md](security-audit.md)). A layer whose head or base changed is audited again before the command.
+- Each layer's head and base are the pair the Daybreak audit read, or, for a stack audited as one, the top layer's
+  head and `main` are the pair its round read through a pull request from the top branch to `main`
+  ([security-audit.md](security-audit.md) says when a stack may be). No issue is left unaddressed. A changed layer or
+  base is audited again before the command.
 - Pass `--rebase`. Without it the command picks the method: the one the account used last or the repository's
   default. The repository allows rebase only, but pass it anyway. A merge queue on `main` would ignore the flag and
   could land the layers apart; there is none, and with one, do not use this command.
