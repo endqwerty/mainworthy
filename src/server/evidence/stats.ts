@@ -134,6 +134,8 @@ const Q = {
 	),
 	// Follow at most 64 correction links. An unresolved branch makes the execution untimed: its final
 	// outcome could outrank every resolved branch, so using a prefix's duration would claim a time we do not know.
+	// A correction counts only as the report writer allows one: the same project, test, producer, target and run.
+	// An imported archive is checked only by foreign keys, so this keeps another test's time off a case.
 	byHand: sql<
 		{ project: number; since: number; until: number },
 		{ case_id: number; runs: number; timed: number; time: number | null; average: number | null }
@@ -142,14 +144,18 @@ const Q = {
           SELECT r.id, t.case_id FROM results r JOIN tests t ON t.id = r.test AND t.project = $project
           WHERE r.project = $project AND r.at >= $since AND r.at <= $until
             AND r.method = 'human' AND t.case_id IS NOT NULL AND r.corrects IS NULL
-        ), chain(root, id, outcome, duration_ms, seq, ord, depth) AS (
-          SELECT e.id, r.id, r.outcome, r.duration_ms, r.seq, r.ord, 0 FROM executions e JOIN results r ON r.id = e.id AND r.project = $project
+        ), chain(root, id, test, actor, target, run, outcome, duration_ms, seq, ord, depth) AS (
+          SELECT e.id, r.id, r.test, r.actor, r.target, r.run, r.outcome, r.duration_ms, r.seq, r.ord, 0
+          FROM executions e JOIN results r ON r.id = e.id AND r.project = $project
           UNION ALL
-          SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord, k.depth + 1 FROM chain k
-          JOIN results c ON c.corrects = k.id AND c.project = $project WHERE k.depth < 64
+          SELECT k.root, c.id, c.test, c.actor, c.target, c.run, c.outcome, c.duration_ms, c.seq, c.ord, k.depth + 1
+          FROM chain k JOIN results c ON c.corrects = k.id AND c.project = $project AND c.test = k.test
+            AND c.actor = k.actor AND c.target IS NOT DISTINCT FROM k.target AND c.run IS NOT DISTINCT FROM k.run
+          WHERE k.depth < 64
         ), leaves AS MATERIALIZED (
           SELECT k.*, EXISTS (
-            SELECT 1 FROM results c WHERE c.corrects = k.id AND c.project = $project
+            SELECT 1 FROM results c WHERE c.corrects = k.id AND c.project = $project AND c.test = k.test
+              AND c.actor = k.actor AND c.target IS NOT DISTINCT FROM k.target AND c.run IS NOT DISTINCT FROM k.run
           ) AS corrected FROM chain k
         ), standing AS (
           SELECT e.case_id, CASE WHEN k.corrected THEN NULL ELSE k.duration_ms END AS duration_ms, row_number() OVER (

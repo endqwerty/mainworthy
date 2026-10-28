@@ -875,6 +875,40 @@ test("manual effort bounds correction traversal and keeps truncated executions u
 	]);
 });
 
+test("manual effort ignores an imported correction of another test in the same project", async () => {
+	h = await harness();
+	await h.call("propose", {
+		edits: [
+			{ op: "create", body: { title: "Local timing", methods: ["human"] } },
+			{ op: "create", body: { title: "Other case", methods: ["human"] } },
+		],
+	});
+	await h.call("report", {
+		target: { session: "local" },
+		results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 10 }],
+	});
+	await h.call("report", {
+		target: { session: "local" },
+		results: [{ test: { case: "C-2" }, outcome: "pass", durationMs: 20 }],
+	});
+	// What a crafted archive can hold and the report writer refuses: C-2's test correcting C-1's result.
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.exec(`
+  INSERT INTO results (project,test,seq,ord,batch,target,method,actor,basis,basis_case,basis_version,basis_claim,outcome,attempt,duration_ms,at,corrects)
+  SELECT b.project,b.test,b.seq,b.ord+1,b.batch,b.target,b.method,b.actor,b.basis,b.basis_case,b.basis_version,b.basis_claim,b.outcome,b.attempt,999,b.at,a.id
+  FROM (SELECT * FROM results ORDER BY id LIMIT 1) a, (SELECT * FROM results ORDER BY id DESC LIMIT 1) b;
+ `),
+			),
+	);
+	expect((await stats({ of: "manual-effort", days: 1 })).items).toMatchObject([
+		{ case: "C-2", runs: 1, timed: 1, timeMs: 20 },
+		{ case: "C-1", runs: 1, timed: 1, timeMs: 10, averageMs: 10 },
+	]);
+});
+
 test("manual effort ignores cross-project corrections in traversal and standing lookup", async () => {
 	h = await harness();
 	await h.call("propose", { edits: [{ op: "create", body: { title: "Local timing", methods: ["human"] } }] });
