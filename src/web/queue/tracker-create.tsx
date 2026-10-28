@@ -44,7 +44,7 @@ export function TrackerCreate({ question, active }: { question: QuestionItem; ac
 	useBindings([
 		{
 			key: "alt+g",
-			label: `${label} for ${question.q}`,
+			label,
 			handler: () => {
 				void preview.refetch();
 				setReview(true);
