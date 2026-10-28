@@ -66,6 +66,16 @@ const Q = {
 		`SELECT p.key, o.preset, o.clauses, o.settings FROM projects p
  JOIN policies o ON o.project = p.id AND o.version = (SELECT max(version) FROM policies WHERE project = p.id)`,
 	),
+	missingSlotVersion: sql<readonly [], { id: number; case_id: number; version: number }>(
+		`SELECT s.id, s.case_id, s.version FROM slots s
+ LEFT JOIN versions v ON v.case_id = s.case_id AND v.no = s.version
+ WHERE v.case_id IS NULL LIMIT 1`,
+	),
+	invalidCorrection: sql<readonly [], { id: number; corrects: number }>(
+		`SELECT r.id, r.corrects FROM results r LEFT JOIN results earlier ON earlier.id = r.corrects
+ WHERE r.corrects IS NOT NULL AND (earlier.id IS NULL OR earlier.project <> r.project
+ OR earlier.test <> r.test OR earlier.actor <> r.actor) LIMIT 1`,
+	),
 	heads: sql<readonly [], { id: number; project: number; tags: string; body: string | null }>(
 		`SELECT c.id, c.project, c.tags, v.body FROM cases c
  LEFT JOIN versions v ON v.case_id = c.id AND v.no = c.head ORDER BY c.id`,
@@ -561,6 +571,15 @@ export async function importArchive(
 				for (const column of table.columns) {
 					if (!entry.r.has(column) && !table.nullable.has(column)) throw invalid(`missing column ${entry.t}.${column}`);
 				}
+				if (entry.t === "versions") {
+					try {
+						CaseBody.parse(JSON.parse(z.string().parse(entry.r.get("body"))));
+					} catch {
+						throw invalid(
+							`invalid archive versions.body for row (case_id ${entry.r.get("case_id")}, no ${entry.r.get("no")}) on line ${position}: expected a valid CaseBody`,
+						);
+					}
+				}
 				const duration = entry.r.get("duration_ms");
 				if (
 					(entry.t === "results" || entry.t === "result_tries") &&
@@ -610,6 +629,16 @@ export async function importArchive(
 			}
 			if (!ended) throw invalid("truncated archive: footer is missing");
 			for (const table of metadata) await flushRows(table);
+			const missingPin = await db.get(Q.missingSlotVersion);
+			if (missingPin)
+				throw invalid(
+					`invalid archive slots for row ${missingPin.id}: case_id ${missingPin.case_id}, version ${missingPin.version} has no matching versions row`,
+				);
+			const correction = await db.get(Q.invalidCorrection);
+			if (correction)
+				throw invalid(
+					`invalid archive results.corrects for row ${correction.id}: result ${correction.corrects} must exist with the same project, test and actor`,
+				);
 			await rebuildSearch(db);
 			// Earlier versions are history; the policy in force is what the next report is asked under.
 			const current = await db.all(Q.policy);
