@@ -100,6 +100,7 @@ import { enrollCommitStatus } from "../statuses/statuses.ts";
 import { selectCases } from "../suite/read.ts";
 import { type CaseRow, caseRef, mustCase, sealSteps } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
+import { MAP_FILES_PER_PAGE } from "./report-maps.ts";
 
 export const announceOp = defineOp({
 	name: "announce",
@@ -323,8 +324,19 @@ export async function* processBatchSteps(
 		if (result.fresh && result.test.kind === "auto" && result.test.case_id === null)
 			files.add(result.test.file ?? NO_FILE);
 	}
-	for (const file of files) {
+	const orderedFiles = [...files];
+	for (const file of orderedFiles.slice(0, MAP_FILES_PER_PAGE)) {
 		yield* raiseMapSteps(ctx, raiseSteps, file, producer);
+		yield;
+	}
+	for (let offset = MAP_FILES_PER_PAGE; offset < orderedFiles.length; offset += MAP_FILES_PER_PAGE) {
+		await enqueueJob(ctx.db, {
+			kind: "report-maps",
+			key: `${batch.id}:${offset}`,
+			input: { project: ctx.project.id, producer, files: orderedFiles.slice(offset, offset + MAP_FILES_PER_PAGE) },
+			actor: batch.actor,
+			acceptedAt: ctx.now,
+		});
 		yield;
 	}
 
