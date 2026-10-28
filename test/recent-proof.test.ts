@@ -4,6 +4,7 @@
 // ceremony of proof). A token sent as a bearer, and the local owner, need none.
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
+import { Ceremonies, ceremonyWrite } from "../src/server/identity/ceremonies.ts";
 import * as identity from "../src/server/identity/identity.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { pgRow, pgRun } from "./identity-db.ts";
@@ -193,6 +194,21 @@ test("an invitation holds at most three acceptance ceremonies, so starting many 
 	expect(await ceremonies()).toBe(before + 3);
 	const query = await authorize(w, last, { subject: subjectOf("sam"), email: "sam@example.com" });
 	expect(must(await finish(w, query, jar(null, last.ceremony)))).toEqual({ signedIn: true });
+});
+
+test("ordering an owner's ceremonies never keeps one past the deadline it began with", async () => {
+	const w = await world();
+	const app = w.instance.app;
+	const store = new Ceremonies("ordering-probe", (value) => value as { deadline: number });
+	const now = w.clock.now();
+	// B is begun later but stored first; A, slow to reach the store, gets a stored deadline after B's to keep the order.
+	await ceremonyWrite(app, undefined, (db) => store.put(db, "b", { deadline: now + 20_000 }, "actor 1", now, 3));
+	await ceremonyWrite(app, undefined, (db) => store.put(db, "a", { deadline: now }, "actor 1", now - 1, 3));
+	const read = (key: string, at: number) => ceremonyWrite(app, undefined, (db) => store.get(db, key, at));
+	expect(await read("a", now - 1)).toMatchObject({ deadline: now });
+	expect(await read("a", now)).toBeNull();
+	expect(await ceremonyWrite(app, undefined, (db) => store.take(db, "a", now))).toBe(false);
+	expect(await read("b", now)).toMatchObject({ deadline: now + 20_000 });
 });
 
 test("proof is of the person's own identity: another person's, or one nobody linked, proves nothing", async () => {

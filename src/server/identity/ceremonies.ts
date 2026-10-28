@@ -30,7 +30,8 @@ const Q = {
 	put: sql<{ kind: string; key: string; owner: string; deadline: number; generation: string; payload: string }>(
 		"INSERT INTO identity_ceremonies (kind, key, owner, deadline, generation, payload) VALUES ($kind, $key, $owner, $deadline, $generation, $payload)",
 	),
-	// An owner with a limit: at least a millisecond after its last, so the trim keeps the ones it began last.
+	// An owner with a limit: at least a millisecond after its last, so the trim keeps the ones it began last. The
+	// column only orders them: `get` and `take` also hold a ceremony to the deadline its payload was begun with.
 	putAfterOwner: sql<{
 		kind: string;
 		key: string;
@@ -44,10 +45,12 @@ const Q = {
 		 $generation, $payload)`,
 	),
 	get: sql<{ kind: string; key: string; now: number }, { payload: string; generation: string }>(
-		"SELECT c.payload, c.generation FROM identity_ceremonies c JOIN identity_ceremony_epoch e ON c.generation = e.generation WHERE c.kind = $kind AND c.key = $key AND c.deadline > $now",
+		`SELECT c.payload, c.generation FROM identity_ceremonies c JOIN identity_ceremony_epoch e ON c.generation = e.generation
+		 WHERE c.kind = $kind AND c.key = $key AND c.deadline > $now AND (c.payload::jsonb->>'deadline')::bigint > $now`,
 	),
 	take: sql<{ kind: string; key: string; now: number }>(
-		"DELETE FROM identity_ceremonies WHERE kind = $kind AND key = $key AND deadline > $now AND generation = (SELECT generation FROM identity_ceremony_epoch WHERE singleton)",
+		`DELETE FROM identity_ceremonies WHERE kind = $kind AND key = $key AND deadline > $now
+		 AND (payload::jsonb->>'deadline')::bigint > $now AND generation = (SELECT generation FROM identity_ceremony_epoch WHERE singleton)`,
 	),
 };
 
