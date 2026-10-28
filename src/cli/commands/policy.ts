@@ -14,7 +14,7 @@ export function printPolicy(policy: Policy): void {
 		...policy.clauses.map((clause) => [
 			clause.kind,
 			clause.when.join(" & "),
-			`${clause.ask.who}${clause.ask.notProducer ? ", not producer" : ""}${clause.ask.reason === "required" ? ", reason required" : ""}`,
+			`${clause.ask.who}${(clause.ask.approvals ?? 1) > 1 ? `, ${clause.ask.approvals} distinct approvals` : ""}${clause.ask.notProducer ? ", not producer" : ""}${clause.ask.reason === "required" ? ", reason required" : ""}`,
 			clause.ask.agents === "answer" ? "counts" : clause.ask.agents === "advise" ? "advice" : "refused",
 			clause.blocks,
 			clause.answer === undefined ? "" : JSON.stringify(clause.answer),

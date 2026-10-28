@@ -610,3 +610,18 @@ The question says whom it needs. Your token's capabilities and the project's pol
 both matter. An agent's answer can count, remain advice, or be refused.
 A pipeline cannot answer. Some failure decisions require a person who did not
 produce the evidence. Read [policy](./policy.md) before changing those rules.
+
+### Approve with another person
+
+When policy requires multiple sign-off approvals, your first approval returns `pending`
+and leaves the run and question open. The queue shows the recorded approvals. Repeating
+your answer cannot fill another person's place. Once enough distinct eligible people
+approve the current evidence, the run closes and the decision records all signers.
+
+`mainworthy get Q-12`, the API and MCP return pending approvals in `approvals` and the
+final decision's full attribution in `decision.signers`: each identity, reason, clause
+and policy version. The web queue shows those same records. Read the question's
+`evidenceHash` again after evidence changes; approvals on the old evidence no longer count.
+A policy change also requires fresh approvals. Rejecting settles the question without
+closing the run. Withdraw that rejection before starting a fresh approval round. Withdrawing the completed
+approval reopens the run and also requires a fresh quorum.

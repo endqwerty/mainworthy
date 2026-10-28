@@ -7,6 +7,7 @@ import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { ANSWER_KEYS, type Kind } from "../../src/core/kinds.ts";
+import { PRESETS } from "../../src/core/presets.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
 import { jiraPort } from "../../src/server/trackers/jira.ts";
 import ui from "../../src/web/index.html";
@@ -1672,3 +1673,54 @@ check("failure tracker creation is absent without a configured tracker", async (
 		await server.stop();
 	}
 });
+	"a pending sign-off stays in the queue and shows its recorded approval",
+	async () => {
+		const server = await startServer({ preset: "loose" });
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			await cases(server, 1);
+			const clauses = PRESETS.loose.clauses
+				.filter((c) => c.id !== "signoff-passed")
+				.map((c) => (c.kind === "signoff" ? { ...c, ask: { ...c.ask, approvals: 2 } } : c));
+			const currentPolicy = await server.api("admin", { do: "policy.show", project: "scratch" });
+			const version = z.object({ version: z.number() }).parse(currentPolicy).version;
+			const proposal = await server.api("propose", { edits: [{ op: "policy", base: version, clauses }] });
+			const policy = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposal.question);
+			if (!policy) throw new Error("missing policy question");
+			await server.api("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+			const run = await server.api("plan", {
+				name: "Two approvals",
+				select: { cases: ["C-1"] },
+				accepts: { commit: "twoapprovals" },
+			});
+			await server.api("report", {
+				run: run.run,
+				target: { commit: "twoapprovals", branch: "main" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			});
+			const q = (await server.api("inbox", { kind: "signoff" })).items[0];
+			if (!q) throw new Error("missing signoff");
+			await h.page.reload();
+			await h.page.locator(`[data-current-question="${q.q}"]`).waitFor();
+			await h.page.keyboard.press("a");
+			await h.page.getByText("Approval recorded.", { exact: false }).first().waitFor();
+			expect(await qref(h.page)).toBe(q.q);
+			await h.page.reload();
+			await h.page.getByText("approved:", { exact: false }).first().waitFor();
+			const token = await grant(server, "second-approver");
+			await server.api(
+				"decide",
+				{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "approve" }, reason: "Ready for release" },
+				{ token },
+			);
+			await h.page.getByRole("button", { name: "Settled", exact: true }).click();
+			await h.page.locator(`[data-question="${q.q}"]`).click();
+			await h.page.getByText("second-approver: Ready for release.", { exact: false }).waitFor();
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

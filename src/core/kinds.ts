@@ -342,6 +342,7 @@ export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): strin
  * - `author`: the author of the proposal the question is about (a conflict only its author can resolve).
  */
 export const Ask = z.object({
+	approvals: z.number().int().min(1).optional(),
 	who: z.union([
 		z.enum(["rule", "member", "admin", "author"]),
 		z.templateLiteral(["role:", Role]).meta({ "x-mcp-hidden": true }),
@@ -407,6 +408,18 @@ export const Clause = z
 		blocks: Blocks,
 	})
 	.superRefine((clause, ctx) => {
+		if (
+			(clause.ask.approvals ?? 1) > 1 &&
+			(clause.kind !== "signoff" ||
+				clause.ask.who === "rule" ||
+				clause.ask.who === "author" ||
+				clause.ask.agents !== "none")
+		)
+			ctx.addIssue({
+				code: "custom",
+				path: ["ask", "approvals"],
+				message: "Multiple approvals require a sign-off clause asking people, with agents: none",
+			});
 		for (const [index, predicate] of clause.when.entries()) {
 			const normalised = normalisedPredicate(predicate);
 			const valid = predicate.startsWith("folder:")
@@ -557,7 +570,9 @@ export function describeAsk(ask: Ask): string {
 	if (ask.notProducer) parts.push("who did not produce the evidence");
 	if (ask.agents === "none") parts.push("who is not an agent");
 	if (ask.reason === "required") parts.push("with a reason");
-	return parts.join(" ");
+	return (ask.approvals ?? 1) > 1
+		? `${ask.approvals} distinct people; each must be ${parts.join(" ").replace(/^one member/, "a member")}`
+		: parts.join(" ");
 }
 
 /** The most answers or withdrawals one `decide` request carries, and so the Queue selection limit. */

@@ -53,6 +53,7 @@ import {
 	restoreFailures,
 	runById,
 	runRef,
+	slotsPage,
 } from "../runs/runs.ts";
 import {
 	adoptSteps,
@@ -773,7 +774,18 @@ const signoffHandler: Handler<"signoff"> = {
 	},
 	holds: ({ question }) => untilBasisChanges(question),
 	isAuthor: async () => false,
-	isProducer: async () => false,
+	async isProducer(ctx, question) {
+		const run = json<{ run: number }>(question.subject).run;
+		let after = -1;
+		for (;;) {
+			const slots = await slotsPage(ctx.db, run, after, 200);
+			if (!slots.length) return false;
+			for (const slot of slots) {
+				if ((await fillsOf(ctx.db, slot.id)).some((fill) => fill.actor === ctx.actor.id)) return true;
+				after = slot.id;
+			}
+		}
+	},
 	undoable: true,
 	undoHint: "",
 };

@@ -88,7 +88,7 @@ test("a demo archive imports with readable open and settled failure questions", 
 	});
 });
 
-test("a seeded project holds a suite in folders, a fortnight of history and six questions for today", async () => {
+test("a seeded project holds a suite in folders, a fortnight of history and seven questions for today", async () => {
 	await withInstance(async ({ client, instance }) => {
 		const before = Date.now();
 		let evidenceReads = 0;
@@ -173,7 +173,9 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 			"failure",
 			"finding",
 			"map",
+			"signoff",
 		]);
+		expect(open.items.find((item) => item.kind === "signoff")?.needs).toContain("2 distinct people");
 		const large = open.items.find((item) => item.kind === "adopt" && item.evidence.count === 120);
 		expect(large?.evidence.edits).toHaveLength(20);
 		const full = await demo.call("get", { refs: [String(large?.evidence.proposal)] });
@@ -268,7 +270,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 		expect(Project.parse(await client.call("admin", { do: "project.list" })).find((row) => row.key === "demo")).toEqual(
 			{
 				key: "demo",
-				policy: "standard",
+				policy: "custom",
 			},
 		);
 	});
@@ -283,11 +285,11 @@ test("the same seed writes the same suite, another seed another, and no days lea
 		expect(await titlesOf(on(client, "two"))).toEqual(one);
 		expect(await titlesOf(on(client, "three"))).not.toEqual(one);
 
-		// With no days there is today's run and no other, and the six questions all the same.
+		// With no days there is today's run and no other, and the seven questions all the same.
 		const today = on(client, "two");
 		const runs = z.array(Run).parse((await today.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
 		expect(runs.map((run) => run.name)).toEqual(["Agent checkout check", "Checkout regression"]);
-		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(6);
+		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(7);
 		const inherited = (await today.call("inbox", { on: "pr:482", kind: "failure" })).items;
 		expect(inherited).toHaveLength(1);
 		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });
@@ -343,7 +345,7 @@ test("seed fills the project an instance starts with while nothing was written t
 	});
 	await withInstance(async ({ client }) => {
 		const seeded = await seed(client, { project: "scratch", cases: 3, days: 0 });
-		expect(seeded.questions).toHaveLength(5);
+		expect(seeded.questions).toHaveLength(6);
 	});
 });
 

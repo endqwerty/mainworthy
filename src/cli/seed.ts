@@ -24,7 +24,7 @@ import {
 	todayAt,
 } from "./demo/history.ts";
 import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
-import { DEMO_WORK } from "./demo/work.ts";
+import { DEMO_CLAUSES, DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 
 export type SeedResult = z.infer<typeof DemoSeed>;
@@ -575,6 +575,22 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			}
 		}
 	}
+
+	const quorumAt = todayAt(since, 5 * HOUR);
+	const quorumReceipt = await owner.call("command", { cmd: id("release-approval-policy") });
+	let quorumPolicy: z.infer<typeof Proposed>;
+	if (quorumReceipt.state === "done") quorumPolicy = Proposed.parse(quorumReceipt.reply);
+	else {
+		const current = PolicyShown.parse(await owner.call("admin", { do: "policy.show", project }));
+		quorumPolicy = await write(owner, "propose", "release-approval-policy", quorumAt, {
+			edits: [{ op: "policy", base: current.version, clauses: DEMO_CLAUSES }],
+		});
+	}
+	if (quorumPolicy.question)
+		await answer([quorumPolicy.question], "release-approval-policy-yes", quorumAt, {
+			answer: { is: "accept" },
+			reason: "Require independent release approvals",
+		});
 
 	// ── Today: `main` went red an hour and a half after it was green, and a pull request inherits the failure. ──
 	const today = random(seedNumber ^ 0x5bd1e995);
