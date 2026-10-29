@@ -284,8 +284,8 @@ type Lease = {
 	tracing: Tracing;
 	statements: () => void;
 	/**
-	 * The caller's signal: once it aborts, the next statement is refused and the transaction does not commit. A
-	 * statement already sent runs to its end, also one waiting for a lock.
+	 * The caller's signal: once it aborts, the statement in flight is cancelled, also one waiting for a lock, the next
+	 * is refused, and the transaction does not commit.
 	 */
 	signal?: AbortSignal | undefined;
 };
@@ -331,10 +331,22 @@ async function statement<R>(
 	if (!control) lease.signal?.throwIfAborted();
 	const values = params.map(encode);
 	lease.statements();
+	const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
+	// A cancel can arrive after the statement ended and stop the connection's next one instead, so a connection that
+	// sent one is closed, not reused.
+	const signal = control ? undefined : lease.signal;
+	const cancel = () => {
+		lease.poisoned = true;
+		pending.cancel();
+	};
+	signal?.addEventListener("abort", cancel, { once: true });
 	try {
-		const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
 		return await (simple ? pending.simple() : pending);
 	} catch (error) {
+		if (signal?.aborted && sqlState(error) === "57014") {
+			if (lease.tx && !lease.tx.aborted) lease.tx.aborted = { error: signal.reason };
+			throw signal.reason;
+		}
 		if (lost(error) || ["25P03", "25P04"].includes(sqlState(error) ?? "")) {
 			lease.poisoned = true;
 			lease.lost = error instanceof ConnectionLost ? error : new ConnectionLost(error);
@@ -342,6 +354,8 @@ async function statement<R>(
 		}
 		if (lease.tx && !lease.tx.aborted) lease.tx.aborted = { error };
 		throw error;
+	} finally {
+		signal?.removeEventListener("abort", cancel);
 	}
 }
 

@@ -657,7 +657,7 @@ test("a slow write logs its name, the time it waited for a connection and the ti
 	}
 });
 
-test("closing returns once an exclusive callback has settled, and the callback's write waiting for a lock does not commit", async () => {
+test("closing cancels an exclusive callback's write waiting for a lock, which does not commit, and returns once the callback has settled", async () => {
 	const closing = await Database.open({ url: fixture.url, writePool: 1 });
 	const entered = barrier();
 	const finish = barrier();
@@ -696,16 +696,13 @@ test("closing returns once an exclusive callback has settled, and the callback's
 				),
 			);
 		}
-		// Closing aborts the callback's signal, but the statement already waiting for the lock waits on, and so does
-		// `close`, until the lock is released. The write then stops before its commit.
-		const closed = closing.close().then(() => order.push("closed"));
-		await Bun.sleep(300);
-		expect(order).toEqual([]);
-		finish.release();
-		await holding;
-		await closed;
+		// Closing aborts the callback's signal, which cancels the statement waiting for the lock: `close` returns while
+		// the other writer still holds it.
+		await closing.close().then(() => order.push("closed"));
 		await expect(work).rejects.toThrow("database is closed");
 		expect(order).toEqual(["callback settled", "closed"]);
+		finish.release();
+		await holding;
 		expect(await database.read((db) => db.get(Q.select, { id: 9_142 }))).toBeNull();
 	} finally {
 		finish.release();

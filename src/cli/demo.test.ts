@@ -766,14 +766,14 @@ async function holdWriter(app: App, take: (db: WriteDb) => Promise<unknown>) {
 
 /**
  * Starts `serve` on the instance's database and waits for the line it prints just before it handles SIGTERM, then
- * for `ready`. Then it sends SIGTERM and says how the process ended. Like Cloud Run, it sends SIGKILL ten seconds
- * after SIGTERM.
+ * for `ready`, which is given the server's address. Then it sends SIGTERM and says how the process ended. Like Cloud
+ * Run, it sends SIGKILL ten seconds after SIGTERM.
  */
 async function stopServe(
 	instance: Instance,
 	env: Record<string, string>,
-	ready: () => Promise<void>,
-): Promise<{ killed: boolean; code: number; stderr: string; ms: number }> {
+	ready: (url: string) => Promise<void>,
+): Promise<{ killed: boolean; code: number; stderr: string }> {
 	const home = await mkdtemp(join(tmpdir(), "mainworthy-serve-stop-"));
 	const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
 		cwd: home,
@@ -805,15 +805,16 @@ async function stopServe(
 		}
 		reader.releaseLock();
 		void child.stdout.pipeTo(new WritableStream()).catch(() => {});
-		await ready();
-		const began = performance.now();
+		const url = /(http:\/\/\S+)\n/.exec(printed)?.[1];
+		if (!url) throw new Error(`serve printed no address: ${printed}`);
+		await ready(url);
 		child.kill("SIGTERM");
 		timer = setTimeout(() => {
 			killed = true;
 			child.kill("SIGKILL");
 		}, 10_000);
 		const code = await child.exited;
-		return { killed, code, stderr: await stderr, ms: Math.round(performance.now() - began) };
+		return { killed, code, stderr: await stderr };
 	} finally {
 		clearTimeout(timer);
 		child.kill("SIGKILL");
@@ -872,9 +873,9 @@ test("a demo work renewal aborted while it waits for a writer comes back as the 
 			);
 			await waitingFor(app, "INSERT INTO slot_leases", 10_000);
 			controller.abort(reason);
-			// The insert already sent waits for the writer; once it has run, the operation stops before committing.
-			await writer.release();
+			// The abort cancels the insert where it waits: the renewal settles while the writer still holds its lock.
 			expect(await renewing).toBe(reason);
+			await writer.release();
 			expect(await leases()).toBe(before);
 			expect(logged).toEqual([]);
 		} finally {
@@ -887,22 +888,30 @@ test("a demo work renewal aborted while it waits for a writer comes back as the 
 /** Waits until no statement containing `text` waits for a lock any more, and says whether that happened in time. */
 async function stoppedWaiting(app: App, text: string, ms: number): Promise<boolean> {
 	const end = performance.now() + ms;
-	while (performance.now() < end) {
+	for (;;) {
 		const rows = await app.database.read((db) =>
 			db.allDynamic<{ query: string }>(
 				"SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
 			),
 		);
 		if (!rows.some((row) => row.query.includes(text))) return true;
+		if (performance.now() >= end) return false;
 		await Bun.sleep(50);
 	}
-	return false;
 }
 
 /** The line a stopping `serve` prints when its deadline cuts `step` off. */
 const cutOff = (step: string) => `mainworthy: stopping took longer than 7 s; exiting with ${step} still running`;
 
-test("serve exits at its deadline after SIGTERM while its cleanup waits for a project writer", async () => {
+/** How a stopping `serve` ends when its abort stopped everything before the deadline. */
+const prompt = { killed: false, code: 0, cut: false };
+const ending = (ended: { killed: boolean; code: number; stderr: string }) => ({
+	killed: ended.killed,
+	code: ended.code,
+	cut: ended.stderr.includes("stopping took longer"),
+});
+
+test("SIGTERM cancels serve's retired demo cleanup waiting for a project writer, and serve exits at once", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
@@ -916,10 +925,9 @@ test("serve exits at its deadline after SIGTERM while its cleanup waits for a pr
 		const writer = await holdWriter(app, (db) => lockProject(db, retired.id));
 		try {
 			const ended = await stopServe(instance, {}, () => waitingFor(app, slice, 20_000));
-			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
-			expect(ended.stderr).toContain(cutOff("retired demo cleanup"));
-			// The writer still holds its lock, but the slice's backend sees that serve has gone, and rolls back.
-			expect(await stoppedWaiting(app, slice, 5_000)).toBe(true);
+			expect(ending(ended)).toEqual(prompt);
+			// The writer still holds its lock: the slice no longer waits for it because it was cancelled.
+			expect(await stoppedWaiting(app, slice, 0)).toBe(true);
 		} finally {
 			await writer.release();
 		}
@@ -927,7 +935,7 @@ test("serve exits at its deadline after SIGTERM while its cleanup waits for a pr
 	});
 }, 60_000);
 
-test("serve exits at its deadline after SIGTERM while renewing a same-revision demo's work waits for a writer", async () => {
+test("SIGTERM cancels serve's renewal of a same-revision demo's work waiting for a writer, and serve exits at once", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		app.config.commit = A;
@@ -938,15 +946,14 @@ test("serve exits at its deadline after SIGTERM while renewing a same-revision d
 			const ended = await stopServe(instance, { MAINWORTHY_DEMO: "demo", MAINWORTHY_COMMIT: A }, () =>
 				waitingFor(app, "INSERT INTO slot_leases", 20_000),
 			);
-			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
-			expect(ended.stderr).toContain(cutOff("demo work renewal"));
+			expect(ending(ended)).toEqual(prompt);
 		} finally {
 			await writer.release();
 		}
 	});
 }, 60_000);
 
-test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits for a writer", async () => {
+test("SIGTERM cancels serve's demo seed request waiting for a writer, and serve exits at once", async () => {
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		app.config.commit = A;
@@ -962,11 +969,35 @@ test("serve exits before Cloud Run's SIGKILL while a demo seed's request waits f
 					revision: B,
 				});
 			});
-			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
-			// The seed's write, in the server's process, waits for the cases lock past the deadline.
-			expect(ended.stderr).toContain(cutOff("the demo refresh"));
+			expect(ending(ended)).toEqual(prompt);
 		} finally {
 			await writer.release();
 		}
+	});
+}, 60_000);
+
+test("serve exits at its deadline after SIGTERM while a request it serves waits for a writer", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app } = instance;
+		// A request carries no signal, so stopping waits for it, and the deadline ends the wait.
+		const insert = "INSERT INTO projects";
+		const writer = await holdWriter(app, (db) => db.exec("LOCK TABLE projects IN SHARE ROW EXCLUSIVE MODE"));
+		try {
+			const ended = await stopServe(instance, {}, async (url) => {
+				void fetch(`${url}/api/admin`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ do: "project.create", key: "held" }),
+				}).catch(() => {});
+				await waitingFor(app, insert, 20_000);
+			});
+			expect({ killed: ended.killed, code: ended.code }).toEqual({ killed: false, code: 4 });
+			expect(ended.stderr).toContain(cutOff("the server's own shutdown"));
+			// The writer still holds its lock, but the insert's backend sees that serve has gone, and rolls back.
+			expect(await stoppedWaiting(app, insert, 5_000)).toBe(true);
+		} finally {
+			await writer.release();
+		}
+		expect(await app.database.read((db) => findProject(db, "held"))).toBeNull();
 	});
 }, 60_000);
