@@ -797,8 +797,8 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 		expect(readFileSync(".github/workflows/check.yml", "utf8")).toContain(
 			`if: ${expression(
 				job === "image"
-					? "(github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true'"
-					: `needs.scope.outputs.${job} == 'true'`,
+					? "success() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true')"
+					: `success() && needs.scope.outputs.${job} == 'true'`,
 			)}`,
 		);
 	}
@@ -930,7 +930,7 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(publish.needs).toEqual(["gate", "image"]);
 	expect(gate.needs).not.toContain("publish");
 	// Even a prose-only main commit needs its own embedded revision and image tag.
-	expect(image.if).toBe(expression(`(${main}) || needs.scope.outputs.image == 'true'`));
+	expect(image.if).toBe(expression(`success() && ((${main}) || needs.scope.outputs.image == 'true')`));
 	expect(workflow.permissions).toEqual({ contents: "read" });
 	expect(
 		Object.entries(workflow.jobs)
