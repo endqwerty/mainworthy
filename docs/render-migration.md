@@ -30,8 +30,9 @@ The seed project goes last because it holds the existing Terraform backend and d
 audit-history export is required for this disposable environment. Check each project reaches `DELETE_REQUESTED`.
 Delayed usage charges can appear after shutdown.
 
-Preserve the Google organization, Cloud Identity accounts, domain verification, mail configuration, Cloudflare zone
-and billing account. These are separate from the three dedicated application projects. Keep the Git source and
+Retire the dedicated Google billing account, Cloud Identity tenant and organization too. Close billing before
+deleting the Google admin identity. The domain and mail routing are on Cloudflare and remain available for Render.
+Remove obsolete Google application address and verification records from Cloudflare. Keep the Git source and
 published GHCR image, which already exist outside GCP.
 
 The documented agent Google account is read-only. The administrator performs project shutdown in Cloud Shell.
