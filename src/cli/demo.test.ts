@@ -637,6 +637,7 @@ test("behind a proxy secret, a refresh seeds the demo in this process and sends 
 
 // The removal of a retired demo reads each table once, so nothing may write to it after it is retired (#914).
 test("a retired demo refuses every write, to its records and to who may use it, and can still be read", async () => {
+	const settings = { env: { MAINWORTHY_JOB_RUNNER: "0" } };
 	await withInstance(async ({ instance, client }) => {
 		const { app } = instance;
 		const tiny = { cases: 1, unlinkedFiles: 0, days: 0 };
@@ -670,7 +671,7 @@ test("a retired demo refuses every write, to its records and to who may use it, 
 		expect(refusals).toEqual(Array(4).fill(`${retired.key} is a retired demo being removed, and takes no more writes`));
 		expect(await snapshot(app)).toEqual(before);
 		expect((await old.call("find", { in: "cases", limit: 5 })).items.length).toBeGreaterThan(0);
-	});
+	}, settings);
 }, 60_000);
 
 // The refusal is told only to a caller who may use the retired demo: one with no grant there learns of it nothing a

@@ -81,7 +81,7 @@ jobs:
 
   static:
     needs: scope
-    if: ${{ needs.scope.outputs.static == 'true' }}
+    if: ${{ success() && needs.scope.outputs.static == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -106,7 +106,7 @@ jobs:
 
   image:
     needs: scope
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true' }}
+    if: ${{ success() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -190,6 +190,7 @@ jobs:
   tests:
     name: ${{ matrix.name }}
     needs: scope
+    if: ${{ success() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
