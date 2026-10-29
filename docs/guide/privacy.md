@@ -2,7 +2,7 @@
 
 This policy explains what Mainworthy keeps, why we keep it, how we handle it and your rights over your data. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
-*Last updated: October 27, 2026*
+*Last updated: October 29, 2026*
 
 This policy covers the instance at `mainworthy.com`. The owner of the Mainworthy project runs it. "We" and "us" refer to that owner. Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there. Ask that person about their policy. Most of this page describes what the software itself keeps on every instance.
 
@@ -58,7 +58,9 @@ Your personal home is stored separately for each signed-in name and project. It 
 
 ### Logs
 
-The server writes no log of requests. It logs when it starts and when something fails. A failed sign-in is logged as a reason code, without the token, the identity or the address.
+The server's own log names no request. It logs when it starts and when something fails. A failed sign-in is logged as a reason code, without the token, the identity or the address.
+
+So we can find what is slow or failing, the server sends Sentry (see [below](#when-we-access-or-disclose-your-information)) a trace of each request except health checks, and of each background job. A trace holds the method, the route's pattern (`/api/p/:project/:op`, not the project's key), the operation's or job's name, the status, the server's own database statements and how long each step took. It holds nothing you typed, no network address and nothing that names you.
 
 ### Voluntary correspondence
 
@@ -72,13 +74,16 @@ We keep your account, your sessions and your content because you asked us to pro
 
 **To provide the service.** We use a few providers to run `mainworthy.com`:
 
-- **Cloudflare** carries every request to `mainworthy.com`. It provides the domain's DNS, the encrypted connection and the tunnel to our server.
+- **Cloudflare** carries every request to `mainworthy.com`. It provides the domain's DNS and the encrypted connection, and passes requests on to Render.
   Cloudflare sees your network address and the requests you make. See [Cloudflare's privacy policy](https://www.cloudflare.com/privacypolicy/).
+- **Render** runs the server and its PostgreSQL database in Oregon, in the United States, so everything the server
+  stores is on Render's machines. See [Render's privacy policy](https://render.com/privacy).
 - **Google** is the identity provider of `mainworthy.com`. When you sign in, Google checks who you are and tells us
   your account's subject, and the email address and name you allow it to share. Your Google account is under
   [Google's privacy policy](https://policies.google.com/privacy).
-
-The server and its database are ours, not a cloud provider's.
+- **Sentry** receives the traces described under [logs](#logs) in the United States, and keeps them for its plan's
+  retention period.
+  They hold none of your content or personal information. See [Sentry's privacy policy](https://sentry.io/privacy/).
 
 **No human looks at your content** except for limited purposes: to fix an error that needs a person, with your permission to help you with a problem you asked about, or when the law requires it.
 

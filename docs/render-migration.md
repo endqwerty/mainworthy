@@ -82,12 +82,15 @@ one consistent recovery point. Backup uploads count toward source egress even wh
 Tracing is off until the service has an OTLP endpoint
 ([configuration](guide/configuration.md#send-traces-to-an-opentelemetry-collector)). To send to Sentry's free plan:
 
-1. Create a Sentry project. In its settings, **Client Keys (DSN)**, then **OpenTelemetry (OTLP)**, copy the traces
-   endpoint and the `x-sentry-auth` header value.
-2. In the Render service's environment, set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to that endpoint and
-   `OTEL_EXPORTER_OTLP_TRACES_HEADERS` to `x-sentry-auth=sentry sentry_key=<public key>`, as Sentry writes it. Keep
-   it in Render's private settings, never in this file. Optionally add
-   `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production`.
+1. Create a Sentry project. In its settings, **Client Keys (DSN)**, copy the OTLP endpoint and the `x-sentry-auth`
+   header value. The endpoint Sentry shows ends in `/integration/otlp`; the traces endpoint adds `/v1/traces`:
+   `https://o<org id>.ingest.<region>.sentry.io/api/<project id>/integration/otlp/v1/traces`. Without an OTLP panel,
+   build both from the DSN, `https://<public key>@o<org id>.ingest.<region>.sentry.io/<project id>`.
+2. In the Render service's environment, set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to the traces endpoint, ending in
+   `/v1/traces`; Mainworthy sends to it as written. Set `OTEL_EXPORTER_OTLP_TRACES_HEADERS` to
+   `x-sentry-auth=sentry sentry_key=<public key>`, without quotes. Keep both in Render's private settings, never in
+   this file. Optionally add `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production`. Sentry answered
+   `200 {}` to one OTLP JSON span sent with these settings on 2026-10-29.
 3. After the restart, the log says `traces go to https://o<id>.ingest.<region>.sentry.io`. Open the site, then find
    the request's trace in Sentry's trace explorer; its `service.version` is the deployed commit.
 4. Add Sentry to the processors in [the privacy policy](guide/privacy.md) before `mainworthy.com` sends to it.
