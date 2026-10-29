@@ -3038,6 +3038,12 @@ describe("the surface", () => {
 		await using instance = await boot("local");
 		const logged = spyOn(console, "error").mockImplementation(() => {});
 		const read = spyOn(instance.app.database, "read");
+		// Hold PostgreSQL wakes so the injected read failure belongs to the first stream.
+		const wakes = new Set<() => void>();
+		const subscriptions = spyOn(instance.app, "subscribeChanges").mockImplementation((wake) => {
+			wakes.add(wake);
+			return () => wakes.delete(wake);
+		});
 		let failNext = true;
 		const unsubscribe = instance.app.subscribe(() => {
 			if (!failNext) return;
@@ -3045,24 +3051,28 @@ describe("the surface", () => {
 			read.mockImplementationOnce(() => {
 				throw new Error("stream-private-detail");
 			});
+			for (const wake of wakes) wake();
 		});
-		const response = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
-		const healthy = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("no stream");
+		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+		let watcher: ReadableStreamDefaultReader<Uint8Array> | undefined;
 		try {
+			const response = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
+			reader = response.body?.getReader();
+			if (!reader) throw new Error("no stream");
+			const healthy = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
+			watcher = healthy.body?.getReader();
+			if (!watcher) throw new Error("no healthy stream");
 			expect(new TextDecoder().decode((await reader.read()).value)).toBe("retry: 2000\n\n");
+			expect(new TextDecoder().decode((await watcher.read()).value)).toBe("retry: 2000\n\n");
 			const reply = await post(instance, "/api/p/scratch/propose", {
 				edits: [{ op: "create", outline: "Recovered" }],
 			});
 			expect(reply.status).toBe(200);
 			expect(reply.body).toMatchObject({ ok: true, seq: 2, result: { status: "adopted" } });
 			expect((await reader.read()).done).toBe(true);
-			const watcher = healthy.body?.getReader();
-			if (!watcher) throw new Error("no healthy stream");
 			try {
 				let text = "";
-				while (!text.includes("data:")) {
+				while (!text.includes("data:") || !text.includes("\n\n", text.indexOf("data:"))) {
 					const { value, done } = await watcher.read();
 					if (done) break;
 					text += new TextDecoder().decode(value);
@@ -3081,9 +3091,10 @@ describe("the surface", () => {
 			}
 			expect(logged.mock.calls).toEqual([["[mainworthy] change stream authorization failed"]]);
 		} finally {
-			await reader.cancel().catch(() => {});
-			await healthy.body?.cancel().catch(() => {});
+			await reader?.cancel().catch(() => {});
+			await watcher?.cancel().catch(() => {});
 			unsubscribe();
+			subscriptions.mockRestore();
 			read.mockRestore();
 			logged.mockRestore();
 		}
