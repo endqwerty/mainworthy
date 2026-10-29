@@ -272,10 +272,10 @@ const folderChain = (length: number) => async (db: WriteDb) => {
 // A row another row of its own table refers to (a folder's parent) waited until nothing referred to it. In a chain only
 // the leaf qualified, and a slice read the whole chain to find it, then the whole chain less one, and so on (#914).
 test("a slice of a table that refers to itself examines a bounded number of rows however long the chain", async () => {
-	const small = await largestSlice(folderChain(64), ["folders"], 16);
-	const large = await largestSlice(folderChain(640), ["folders"], 16);
+	const small = await largestSlice(folderChain(500), ["folders"]);
+	const large = await largestSlice(folderChain(5_000), ["folders"]);
 	console.log(
-		`folder chain: largest slice ${small.largest} and total ${small.total} rows and index entries for 64 folders (${small.slices} slices), ${large.largest} and ${large.total} for 640 (${large.slices} slices)`,
+		`folder chain: largest slice ${small.largest} and total ${small.total} rows and index entries for 500 folders (${small.slices} slices), ${large.largest} and ${large.total} for 5000 (${large.slices} slices)`,
 	);
 	expect(large.largest).toBeLessThan(small.largest * 1.5);
 	expect(large.largest).toBeLessThan(5_000);
