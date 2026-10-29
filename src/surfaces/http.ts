@@ -31,7 +31,7 @@ import { changeStream } from "./events.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { type Relay, uiSurface } from "./ui.ts";
-import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
+import { inRequestSpan, keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
 export { VERSION } from "../core/version.ts";
 
@@ -985,12 +985,22 @@ export function serve(
 			}),
 			...withHeadersOnEvery(routes, refuseProxy),
 			...keepingPolicyOnEvery(extra.open ?? {}, refuseProxy),
-			...(ui ? { "/*": (req: Request, server: Bun.Server<Relay>) => refuseProxy(req) ?? ui.route(req, server) } : {}),
+			...(ui
+				? {
+						"/*": (req: Request, server: Bun.Server<Relay>) =>
+							inRequestSpan(req, "/*", () => refuseProxy(req) ?? ui.route(req, server)),
+					}
+				: {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		} as any,
 		fetch: (req: Request) =>
-			refuseProxy(req) ??
-			withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
+			inRequestSpan(
+				req,
+				null,
+				() =>
+					refuseProxy(req) ??
+					withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
+			),
 		error(error: Error) {
 			if (isBusy(error))
 				return withHeaders(

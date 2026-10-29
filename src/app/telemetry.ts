@@ -1,6 +1,7 @@
 // Sends the spans of `src/server/kernel/telemetry.ts` to an OpenTelemetry collector or vendor over OTLP. Off unless
 // the operator names an endpoint with the standard variables; the code that makes spans does not know either way.
 import { randomUUID } from "node:crypto";
+import { validateHeaderName, validateHeaderValue } from "node:http";
 import { context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -34,14 +35,14 @@ const ratio = (env: Env): number => {
 };
 
 /** The standard sampler names. Spans start only in this process, so a parent-based one acts as its root sampler. */
-const SAMPLERS: Record<string, (env: Env) => Sampler> = {
-	always_on: () => new AlwaysOnSampler(),
-	always_off: () => new AlwaysOffSampler(),
-	traceidratio: (env) => new TraceIdRatioBasedSampler(ratio(env)),
-	parentbased_always_on: () => new ParentBasedSampler({ root: new AlwaysOnSampler() }),
-	parentbased_always_off: () => new ParentBasedSampler({ root: new AlwaysOffSampler() }),
-	parentbased_traceidratio: (env) => new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(ratio(env)) }),
-};
+const SAMPLERS = new Map<string, (env: Env) => Sampler>([
+	["always_on", () => new AlwaysOnSampler()],
+	["always_off", () => new AlwaysOffSampler()],
+	["traceidratio", (env) => new TraceIdRatioBasedSampler(ratio(env))],
+	["parentbased_always_on", () => new ParentBasedSampler({ root: new AlwaysOnSampler() })],
+	["parentbased_always_off", () => new ParentBasedSampler({ root: new AlwaysOffSampler() })],
+	["parentbased_traceidratio", (env) => new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(ratio(env)) })],
+]);
 
 /** The health probe asks every few seconds and its answer is fixed; a trace of each would bury the rest. */
 const withoutProbe = (inner: Sampler): Sampler => ({
@@ -76,29 +77,42 @@ export function telemetrySettings(env: Env): TelemetrySettings {
 	if (url.protocol !== "https:" && url.protocol !== "http:")
 		throw new Error("the OTLP endpoint must be an http or https URL");
 	const samplerName = env.OTEL_TRACES_SAMPLER?.trim().toLowerCase() || "parentbased_always_on";
-	const sampler = SAMPLERS[samplerName];
-	if (!sampler) throw new Error(`OTEL_TRACES_SAMPLER must be one of ${Object.keys(SAMPLERS).join(", ")}`);
+	const sampler = SAMPLERS.get(samplerName);
+	if (!sampler) throw new Error(`OTEL_TRACES_SAMPLER must be one of ${[...SAMPLERS.keys()].join(", ")}`);
 	return {
 		kind: "traces",
 		url,
-		headers: { ...headers(env.OTEL_EXPORTER_OTLP_HEADERS), ...headers(env.OTEL_EXPORTER_OTLP_TRACES_HEADERS) },
+		headers: {
+			...headers("OTEL_EXPORTER_OTLP_HEADERS", env.OTEL_EXPORTER_OTLP_HEADERS),
+			...headers("OTEL_EXPORTER_OTLP_TRACES_HEADERS", env.OTEL_EXPORTER_OTLP_TRACES_HEADERS),
+		},
 		sampler: withoutProbe(sampler(env)),
 	};
 }
 
-/** `key=value` pairs separated by commas, each value percent-encoded, as the specification writes them. */
-function headers(text: string | undefined): Record<string, string> {
+/**
+ * `key=value` pairs separated by commas, each value percent-encoded, as the specification writes them. A header
+ * HTTP cannot send stops the start here, not every batch later; the message names it without its value.
+ */
+function headers(variable: string, text: string | undefined): Record<string, string> {
 	const pairs: Record<string, string> = {};
 	for (const pair of (text ?? "").split(",")) {
 		if (!pair.trim()) continue;
 		const at = pair.indexOf("=");
 		const key = at > 0 ? pair.slice(0, at).trim() : "";
-		if (!key) throw new Error("OTLP headers must be key=value pairs separated by commas");
 		try {
-			pairs[key] = decodeURIComponent(pair.slice(at + 1).trim());
+			validateHeaderName(key);
 		} catch {
-			throw new Error(`the OTLP header ${key} is not percent-encoded`);
+			throw new Error(`${variable} must be name=value pairs separated by commas, each name a valid header name`);
 		}
+		let value: string;
+		try {
+			value = decodeURIComponent(pair.slice(at + 1).trim());
+			validateHeaderValue(key, value);
+		} catch {
+			throw new Error(`${variable}: the value of ${key} is not a valid header value once percent-decoded`);
+		}
+		pairs[key] = value;
 	}
 	return pairs;
 }

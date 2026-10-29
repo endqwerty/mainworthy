@@ -88,6 +88,11 @@ export function markFailed(span: Span, type: string): void {
 	span.setStatus({ code: SpanStatusCode.ERROR });
 }
 
+/** Sets attributes on the running span, for what is learnt after it started. */
+export function noteOnSpan(attributes: Attributes): void {
+	trace.getSpan(context.active())?.setAttributes(attributes);
+}
+
 /** The running trace, for a log line, or null when nothing is traced. */
 export function currentTrace(): string | null {
 	const span = trace.getSpan(context.active());

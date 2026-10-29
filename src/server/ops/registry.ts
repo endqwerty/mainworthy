@@ -31,7 +31,7 @@ import {
 } from "../kernel/ctx.ts";
 import { Busy, isBusy, json, type ReadDb, type WriteDb } from "../kernel/db.ts";
 import { AcceptedRefusal, type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
-import { markFailed, traceNote, withSpan } from "../kernel/telemetry.ts";
+import { markFailed, noteOnSpan, traceNote, withSpan } from "../kernel/telemetry.ts";
 
 type Base<I, O> = {
 	name: string;
@@ -589,19 +589,21 @@ async function traced(name: string | null, effect: string, run: () => Promise<Re
 /** Runs writes with actor and project transaction locks, and reads in repeatable snapshots. */
 export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const known = Object.hasOwn(ops, call.op) ? call.op : null;
-	return await traced(known, ops[call.op]?.effect ?? "none", () => dispatch(app, ops, call));
+	return await traced(known, (known && ops[known]?.effect) || "none", () => dispatch(app, ops, call));
 }
 
 async function dispatch(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const operation = ops[call.op];
 	if (operation?.scope === "project" && operation.effect === "write" && operation.read) {
 		const parsed = operation.input.safeParse(call.input ?? {});
-		if (parsed.success && operation.read.when(parsed.data))
+		if (parsed.success && operation.read.when(parsed.data)) {
+			noteOnSpan({ "mainworthy.operation.effect": "read" });
 			return await dispatch(
 				app,
 				{ ...ops, [call.op]: { ...operation, effect: "read", run: operation.read.run } },
 				call,
 			);
+		}
 	}
 	if (ops[call.op]?.effect === "service")
 		return fail("forbidden", "this operation is only available to the job service");
