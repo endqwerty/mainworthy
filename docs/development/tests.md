@@ -154,6 +154,70 @@ files open a browser is listed in `scripts/browser-tests.ts`; `test/browser-test
 file opens. The count reads code only: a test written into a string or a fixture is not one. A test added to a
 browser file counts even when it opens no browser, because such a test belongs in a cheaper file.
 
+### Estimate the recurring CI cost
+
+The owner said on 2026-10-28: "the agents shouldn't be so liberal in making tests. They have a tangible dollar
+cost per second added to a CI run." Before adding coverage, name the reachable failure and check whether an
+existing test already catches it. Extend that test when possible. Do not add tests that repeat implementation
+details or cover a state nothing can reach.
+
+For added or expanded CI work, give the PR a short estimate of the added runner time and monthly cost, with
+the measurement or assumption behind it. Explain why the failure needs checking on every change, nightly,
+or only in a targeted local check. Keeping a useful test does not require running it on every push. Moving
+coverage out of CI needs an explicit command and trigger in the same change, with the affected gate updated.
+Required safety and regression coverage still needs evidence. Cost is a reason to choose the cheapest layer
+and frequency, not to describe an untested change as verified.
+
+The planning baseline below was checked on 2026-10-28. It assumes a private repository using standard Linux
+x64 runners and keeping the recent full CI/CD frequency. It is not the public repository's bill.
+
+- GitHub charges [$0.006 per runner-minute](https://docs.github.com/en/billing/reference/actions-runner-pricing),
+  or $0.0001 per runner-second before rounding.
+- The GitHub API reported 1,057 `check.yml` runs in the seven days ending 2026-10-28 06:25 UTC.
+  Extrapolating that frequency to 30 days gives 4,530 runs. The count includes selective and cancelled runs.
+  The estimate assumes the added work executes once on every run. Use a smaller execution count when scope
+  selection or cancellation avoids it, and add executions for retries.
+- At that frequency, **one extra runner-second per run is approximately $0.45/month**.
+  Ten seconds is $4.53/month, one minute is $27.18/month, and five minutes is $135.90/month.
+  These are gross compute costs before the account's included allowance, excluding storage and deployment.
+
+Use this formula for a different frequency or runner price:
+
+```text
+monthly cost = added runner-seconds per execution / 60 × price per minute × executions per month
+```
+
+Runner time means the increase in occupied job time summed across affected jobs, including setup and teardown.
+It is not the workflow's elapsed time or the sum of individual test durations when tests overlap inside a job.
+A test running in one shard counts once, not fourteen times. If it runs in several jobs, count each execution.
+Measure on the intended runner when practical. Label local timings as a proxy: standard private Ubuntu runners
+have [2 CPUs and 8 GB RAM, versus 4 CPUs and 16 GB for public runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+GitHub rounds each job up to a whole minute. The per-second estimate spreads that rounding over many runs;
+an actual extra second may cost nothing or cross a minute boundary. For a known job duration, calculate the
+exact increase as `ceil(after_seconds / 60) - ceil(before_seconds / 60)`, multiplied by the rate and executions.
+A new job incurs at least one billable minute plus its setup. Avoid a new job just to isolate a cheap check.
+
+For example, a test that adds ten seconds to one job on every run is about $4.53/month at this baseline.
+Running it once nightly is about $0.03/month before rounding and setup. Record the failure it detects alongside
+that saving so a reviewer can judge the trade-off. These numbers are estimates, not automatic pass/fail limits.
+Refresh them when the runner, price, frequency or test-selection policy changes, especially after the Render migration.
+
+Reproduce the historical run count with this read-only command:
+
+```sh
+gh api --method GET repos/endqwerty/mainworthy/actions/workflows/check.yml/runs \
+	-f 'created=2026-10-21T06:25:00Z..2026-10-28T06:25:00Z' -f per_page=1 --jq .total_count
+```
+
+The owner also asked on 2026-10-28 to use stacked PRs to save CI cost, assuming CI can run on the tip.
+Prefer stacks for related changes and batch local commits before pushing. The current workflow runs on PR
+events and pushes to `main`, not separately for each commit in a single push. Stacking alone does not reduce
+those triggers. Full CI on only the stack tip needs explicit workflow and [landing-policy](../landing-a-stack.md)
+support: test the combined change against `main`, record the exact tip and base, and refresh evidence when
+either changes. Lower layers must not land independently on evidence that only covers the combined stack.
+Until that support exists, every layer still needs its current required checks. Do not claim stack savings yet.
+
 ## Run sequence tests
 
 Every pull request and `bun run check` runs seeds 1–8 in both sequence generators under all three policy presets.
