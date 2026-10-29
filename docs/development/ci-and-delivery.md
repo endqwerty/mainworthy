@@ -61,12 +61,12 @@ layers draft and use one ready combined PR against `main`: [landing a stack](../
 
 | Job | Runs when | What it does |
 | --- | --- | --- |
-| `scope` | always | compares the changed paths with `scripts/ci-scope.ts` and decides which jobs and test files run |
+| `scope` | ready PRs and main pushes | compares the changed paths with `scripts/ci-scope.ts` and decides which jobs and test files run |
 | `static` | code, scripts or configuration changed | `bun run typecheck`, `bun run lint` and `bun scripts/async-port.ts --check` |
-| `tests` | always, in a matrix from `scope` | 14 shards of functional tests and one runner for the serial performance phase. Each shard uploads its JUnit report as `results-<shard>-attempt-<n>`. |
+| `tests` | ready PRs and main pushes, in a matrix from `scope` | 14 shards of functional tests and one runner for the serial performance phase. Each shard uploads its JUnit report as `results-<shard>-attempt-<n>`. |
 | `image` | a file the Dockerfile copies changed | builds the container, starts it, and checks `/health`, the docs, a diagram, a screenshot and the skill archive |
 | `description` | every pull request | `bun scripts/work.ts pr-body <number>`. After you fix a description or a milestone, run this job again. |
-| `gate` | after the others, even when they fail | reports every shard's results to Mainworthy and reads the verdict |
+| `gate` | ready PRs and main pushes, after the others even when they fail | reports every shard's results to Mainworthy and reads the verdict |
 
 A change that touches only prose or another workflow runs fewer tests: one shard named `tests`
 runs the test files that read those paths, plus the tests that read the whole tree (decision 0090). A change to

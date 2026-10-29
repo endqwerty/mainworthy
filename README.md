@@ -136,7 +136,8 @@ edits back to their authors. The web UI compares the presets in Settings, under 
 $ docker compose up -d           # PostgreSQL 18 and the app; sign in with the owner token (see compose.yaml)
 ```
 
-Coolify on a home server: [docs/deploy.md](docs/deploy.md).
+Render setup starts on its free tier: [docs/render-migration.md](docs/render-migration.md).
+Container hosting and configuration: [docs/deploy.md](docs/deploy.md).
 
 ## Leave whenever you like
 
