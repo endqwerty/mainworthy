@@ -77,6 +77,23 @@ Before using the Blueprint:
 The mounted disk requires a single service instance and allows deployment downtime. Database and file backups need
 one consistent recovery point. Backup uploads count toward source egress even when customer traffic is zero.
 
+## Send traces
+
+Tracing is off until the service has an OTLP endpoint
+([configuration](guide/configuration.md#send-traces-to-an-opentelemetry-collector)). To send to Sentry's free plan:
+
+1. Create a Sentry project. In its settings, **Client Keys (DSN)**, then **OpenTelemetry (OTLP)**, copy the traces
+   endpoint and the `x-sentry-auth` header value.
+2. In the Render service's environment, set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to that endpoint and
+   `OTEL_EXPORTER_OTLP_TRACES_HEADERS` to `x-sentry-auth=sentry sentry_key=<public key>`, as Sentry writes it. Keep
+   it in Render's private settings, never in this file. Optionally add
+   `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production`.
+3. After the restart, the log says `traces go to https://o<id>.ingest.<region>.sentry.io`. Open the site, then find
+   the request's trace in Sentry's trace explorer; its `service.version` is the deployed commit.
+4. Add Sentry to the processors in [the privacy policy](guide/privacy.md) before `mainworthy.com` sends to it.
+
+A failing collector does not affect requests. The log says once that sending failed.
+
 ## Release less often
 
 Use tested immutable image digests for manual or nightly releases. Image-backed Render services do not deploy

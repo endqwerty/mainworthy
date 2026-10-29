@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { Span } from "@opentelemetry/api";
 import { z } from "zod";
 import type { App } from "./app.ts";
 import { json, type ReadDb, sql, type WriteDb } from "./db.ts";
 import { openJobInput, PrivateJobInputError, sealJobInput } from "./job-input.ts";
+import { errorType, markFailed, traceNote, withSpan } from "./telemetry.ts";
 
 export type JobInput = z.infer<ReturnType<typeof z.json>>;
 export type Job = {
@@ -187,6 +189,17 @@ export async function runJob(
 ): Promise<boolean> {
 	const claim = await claimJob(app, owner, id, kind);
 	if (!claim) return false;
+	// A job is its own trace: what enqueued it is not kept with it.
+	await withSpan(
+		`job ${claim.kind}`,
+		{ "mainworthy.job.kind": claim.kind },
+		(span) => work(app, claim, handler, span),
+		"root",
+	);
+	return true;
+}
+
+async function work(app: App, claim: JobClaim, handler: JobHandler, span: Span): Promise<void> {
 	try {
 		await app.database.jobWrite((db) =>
 			db.transaction(async () => {
@@ -200,10 +213,11 @@ export async function runJob(
 		await handler(claim, z.json().parse(json<unknown>(input)));
 		await finishJob(app, claim, false);
 	} catch (error) {
-		if (!(error instanceof LostJobClaim)) console.error("[mainworthy] job failed", { id: claim.id, kind: claim.kind });
+		markFailed(span, errorType(error));
+		if (!(error instanceof LostJobClaim))
+			console.error(`[mainworthy] job failed${traceNote()}`, { id: claim.id, kind: claim.kind });
 		await finishJob(app, claim, true, error instanceof PrivateJobInputError ? error.message : undefined);
 	}
-	return true;
 }
 
 const running = new WeakMap<App, Map<string, Set<Promise<number>>>>();

@@ -9,6 +9,7 @@ import { Database, type WriteDb } from "./db.ts";
 import type { JobService } from "./job-auth.ts";
 import { jobKeyOf } from "./job-input.ts";
 import { migrate } from "./migrate.ts";
+import { databaseTracing } from "./telemetry.ts";
 
 export type Config = {
 	jobKey?: string | undefined;
@@ -108,7 +109,7 @@ export const defaultDataDir = (env: Record<string, string | undefined>): string 
 
 export async function openApp(config: Config, options: { memory?: boolean; now?: () => number } = {}): Promise<App> {
 	if (!config.databaseUrl) throw new Error("MAINWORTHY_DATABASE_URL is required; see compose.yaml");
-	const database = await Database.open({ url: config.databaseUrl });
+	const database = await Database.open({ url: config.databaseUrl, tracing: databaseTracing });
 	try {
 		await migrate(database);
 		if (!options.memory) await enrollBlobs(database, await diskBlobHashes(config.dataDir), (options.now ?? Date.now)());

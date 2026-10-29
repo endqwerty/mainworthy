@@ -31,6 +31,7 @@ import {
 } from "../kernel/ctx.ts";
 import { Busy, isBusy, json, type ReadDb, type WriteDb } from "../kernel/db.ts";
 import { AcceptedRefusal, type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
+import { markFailed, traceNote, withSpan } from "../kernel/telemetry.ts";
 
 type Base<I, O> = {
 	name: string;
@@ -107,13 +108,15 @@ export const defineServiceOp = <I, O>(op: ServiceOp<I, O>): ServiceOp<I, O> => o
 
 /** Trusted in-process callers and authenticated service HTTP requests share this execution path. */
 export async function invokeService<I, O>(app: App, op: ServiceOp<I, O>, input: unknown): Promise<Reply> {
-	const parsed = op.input.safeParse(input);
-	if (!parsed.success) return fail("invalid", "invalid job request");
-	try {
-		return { ok: true, result: await op.run(app, parsed.data), seq: null };
-	} catch (error) {
-		return failure(op.name, error);
-	}
+	return await traced(op.name, op.effect, async () => {
+		const parsed = op.input.safeParse(input);
+		if (!parsed.success) return fail("invalid", "invalid job request");
+		try {
+			return { ok: true, result: await op.run(app, parsed.data), seq: null };
+		} catch (error) {
+			return failure(op.name, error);
+		}
+	});
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry holds operations of every input and output type; each is typed where it is declared.
@@ -512,7 +515,7 @@ async function executeInSnapshot(
 function failure(op: string, error: unknown): Reply {
 	if (isBusy(error)) return fail("busy", "the writer is busy; retry the same request with the same command id");
 	if (error instanceof OpError) return fail(error.code, error.message, error.details);
-	console.error(`[mainworthy] ${op} failed:`, error);
+	console.error(`[mainworthy] ${op} failed${traceNote()}:`, error);
 	return fail("internal", INTERNAL_ERROR);
 }
 
@@ -567,13 +570,38 @@ async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call, 
 	);
 }
 
+/** A span for each operation, named from the registry and never from the caller's text, with its outcome's code. */
+async function traced(name: string | null, effect: string, run: () => Promise<Reply>): Promise<Reply> {
+	return await withSpan(
+		name ?? "unknown operation",
+		{ "mainworthy.operation.name": name ?? "unknown", "mainworthy.operation.effect": effect },
+		async (span) => {
+			const reply = await run();
+			if (!reply.ok) {
+				span.setAttribute("error.type", reply.error.code);
+				if (reply.error.code === "internal") markFailed(span, "internal");
+			}
+			return reply;
+		},
+	);
+}
+
 /** Runs writes with actor and project transaction locks, and reads in repeatable snapshots. */
 export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	const known = Object.hasOwn(ops, call.op) ? call.op : null;
+	return await traced(known, ops[call.op]?.effect ?? "none", () => dispatch(app, ops, call));
+}
+
+async function dispatch(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const operation = ops[call.op];
 	if (operation?.scope === "project" && operation.effect === "write" && operation.read) {
 		const parsed = operation.input.safeParse(call.input ?? {});
 		if (parsed.success && operation.read.when(parsed.data))
-			return await invoke(app, { ...ops, [call.op]: { ...operation, effect: "read", run: operation.read.run } }, call);
+			return await dispatch(
+				app,
+				{ ...ops, [call.op]: { ...operation, effect: "read", run: operation.read.run } },
+				call,
+			);
 	}
 	if (ops[call.op]?.effect === "service")
 		return fail("forbidden", "this operation is only available to the job service");

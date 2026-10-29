@@ -1,5 +1,7 @@
-// Puts the policy of `headers.ts` on replies. The HTTP surface passes its whole route table through here, so a
-// route that is added later carries the headers without knowing of them.
+// Puts the policy of `headers.ts` on replies and a span around each. The HTTP surface passes its whole route table
+// through here, so a route that is added later carries the headers and is traced without knowing of either.
+import type { Span } from "@opentelemetry/api";
+import { markFailed, withSpan } from "../server/kernel/telemetry.ts";
 import { type Content, type RequestFacts, securityHeaders } from "./headers.ts";
 
 /** A request the listener received, or null where Bun gives none (its error handler). */
@@ -33,18 +35,40 @@ export function withHeadersKeepingPolicy(req: Request | null, reply: Response): 
 type Handler = (req: Request, server: unknown) => Response | Promise<Response>;
 const isHandler = (value: unknown): value is Handler => typeof value === "function";
 
-/** A handler whose reply carries the headers. One that answers at once still answers at once. */
+const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"]);
+const answered = (span: Span, reply: Response): Response => {
+	span.setAttribute("http.response.status_code", reply.status);
+	if (reply.status >= 500) markFailed(span, String(reply.status));
+	return reply;
+};
+
+/**
+ * A handler whose reply carries the headers, in a span named by the route's pattern and never by the path asked,
+ * which names a project. One that answers at once still answers at once.
+ */
 const wrapped =
 	(
+		route: string,
 		handler: Handler,
 		put: (req: Request, reply: Response) => Response = withHeaders,
 		before?: (req: Request) => Response | null,
 	): Handler =>
 	(req, server) => {
-		const refused = before?.(req);
-		if (refused) return refused;
-		const reply = handler(req, server);
-		return reply instanceof Promise ? reply.then((settled) => put(req, settled)) : put(req, reply);
+		const method = METHODS.has(req.method) ? req.method : "_OTHER";
+		return withSpan(
+			`${method === "_OTHER" ? "HTTP" : method} ${route}`,
+			{ "http.request.method": method, "http.route": route },
+			(span) => {
+				const refused = before?.(req);
+				if (refused) return answered(span, refused);
+				const reply = handler(req, server);
+				return reply instanceof Promise
+					? reply.then((settled) => answered(span, put(req, settled)))
+					: answered(span, put(req, reply));
+			},
+			"root",
+			"server",
+		);
 	};
 
 /** The routes that answer without a session, each reply with the headers and with the policy its route wrote. */
@@ -53,7 +77,7 @@ export function keepingPolicyOnEvery(
 	before?: (req: Request) => Response | null,
 ): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.entries(routes).map(([path, handler]) => [path, wrapped(handler, withHeadersKeepingPolicy, before)]),
+		Object.entries(routes).map(([path, handler]) => [path, wrapped(path, handler, withHeadersKeepingPolicy, before)]),
 	);
 }
 
@@ -67,15 +91,17 @@ export function withHeadersOnEvery(
 	routes: Readonly<Record<string, unknown>>,
 	before?: (req: Request) => Response | null,
 ): Record<string, unknown> {
-	const handlerOf = (path: string, value: unknown): Handler => {
-		if (isHandler(value)) return wrapped(value, withHeaders, before);
-		throw new Error(`the route ${path} is not a handler, so its replies could not carry the headers`);
+	const handlerOf = (path: string, value: unknown, method?: string): Handler => {
+		if (isHandler(value)) return wrapped(path, value, withHeaders, before);
+		throw new Error(
+			`the route ${method ? `${method} ` : ""}${path} is not a handler, so its replies could not carry the headers`,
+		);
 	};
 	const route = (path: string, value: unknown): unknown => {
 		if (typeof value !== "object" || value === null || Object.getPrototypeOf(value) !== Object.prototype)
 			return handlerOf(path, value);
 		return Object.fromEntries(
-			Object.entries(value).map(([method, handler]) => [method, handlerOf(`${method} ${path}`, handler)]),
+			Object.entries(value).map(([method, handler]) => [method, handlerOf(path, handler, method)]),
 		);
 	};
 	return Object.fromEntries(Object.entries(routes).map(([path, value]) => [path, route(path, value)]));

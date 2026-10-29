@@ -19,6 +19,8 @@ export type Statement<P extends Params, R> = {
 	readonly __row?: R;
 };
 const declarations: { text: string; names: readonly string[] | null }[] = [];
+/** Statement texts written in the source, after rewriting. Only these are sent with a span: other text may hold a value. */
+const declaredTexts = new Set<string>();
 
 /** PostgreSQL lexical parameter scan, including nested block comments and tagged dollar quotes. */
 export function rewriteNamed(source: string): { text: string; names: readonly string[] | null; slots: number } {
@@ -89,6 +91,7 @@ export function rewriteNamed(source: string): { text: string; names: readonly st
 export function sql<P extends Params = readonly [], R = never>(text: string): Statement<P, R> {
 	const statement = Object.freeze(rewriteNamed(text));
 	declarations.push(statement);
+	declaredTexts.add(statement.text);
 	return statement;
 }
 export const declaredSql = (): readonly { text: string; names: readonly string[] | null }[] => [...declarations];
@@ -278,6 +281,7 @@ type Lease = {
 	lost: ConnectionLost | null;
 	poisoned: boolean;
 	tx: Transaction | null;
+	tracing: Tracing;
 	statements: () => void;
 	/**
 	 * The caller's signal: once it aborts, the next statement is refused and the transaction does not commit. A
@@ -291,6 +295,34 @@ async function query<R>(
 	params: readonly SqlValue[] = [],
 	control = false,
 	simple = false,
+): Promise<R[] & { count: number }> {
+	const operation = /^\s*([A-Za-z]+)/.exec(text)?.[1]?.toUpperCase() ?? "SQL";
+	return await lease.tracing.span(
+		operation,
+		{
+			"db.system.name": "postgresql",
+			"db.operation.name": operation,
+			...(declaredTexts.has(text) ? { "db.query.text": text } : {}),
+		},
+		async (span) => {
+			try {
+				return await statement<R>(lease, text, params, control, simple);
+			} catch (error) {
+				const state = sqlState(error);
+				if (state) span.setAttribute("db.response.status_code", state);
+				throw error;
+			}
+		},
+		"under-parent",
+		"client",
+	);
+}
+async function statement<R>(
+	lease: Lease,
+	text: string,
+	params: readonly SqlValue[],
+	control: boolean,
+	simple: boolean,
 ): Promise<R[] & { count: number }> {
 	if (!lease.alive) throw new Error("database scope has ended");
 	if (lease.lost) throw lease.lost;
@@ -545,8 +577,25 @@ function poolSize(value: number | string | undefined, fallback: number): number 
 		throw new Error("database pool size must be an integer from 1 to 64");
 	return count;
 }
+/**
+ * Spans for statements and connection waits, and the trace a log line names: `kernel/telemetry.ts`, given by the
+ * app. This file imports nothing installed, because cleanup loads it where packages may be gone
+ * (`scripts/work/test-databases.ts`); a database opened without tracing makes no spans.
+ */
+export type Tracing = {
+	span<T>(
+		name: string,
+		attributes: Readonly<Record<string, string>>,
+		fn: (span: { setAttribute(key: string, value: string): unknown }) => Promise<T>,
+		placement: "under-parent",
+		kind?: "client",
+	): Promise<T>;
+	note(): string;
+};
+const UNTRACED: Tracing = { span: (_name, _attributes, fn) => fn({ setAttribute: () => undefined }), note: () => "" };
 export type OpenOptions = {
 	url: string;
+	tracing?: Tracing;
 	readPool?: number;
 	writePool?: number;
 	acquireTimeoutMs?: number;
@@ -627,13 +676,20 @@ export class Database {
 		]);
 	}
 	private async lease(pool: SQL, signal?: AbortSignal): Promise<Lease> {
-		const conn = await pool.reserve({ signal: this.signal(signal) });
+		const tracing = this.options.tracing ?? UNTRACED;
+		const conn = await tracing.span(
+			"acquire connection",
+			{ "db.system.name": "postgresql" },
+			() => pool.reserve({ signal: this.signal(signal) }),
+			"under-parent",
+		);
 		return {
 			conn,
 			alive: true,
 			lost: null,
 			poisoned: false,
 			tx: null,
+			tracing,
 			statements: () => {
 				this.count++;
 			},
@@ -753,7 +809,7 @@ export class Database {
 				const held = Math.round(performance.now() - leased);
 				if (waited + held >= (this.options.slowWriteMs ?? SLOW_WRITE_MS))
 					console.warn(
-						`[mainworthy] slow write: ${options.name ?? "a write"} took ${waited + held} ms: ${waited} ms waiting for a connection, ${held} ms holding it`,
+						`[mainworthy] slow write: ${options.name ?? "a write"} took ${waited + held} ms: ${waited} ms waiting for a connection, ${held} ms holding it${lease.tracing.note()}`,
 					);
 			}
 		}
@@ -887,7 +943,15 @@ export type DatabaseAdmin = {
 export async function databaseAdmin<T>(url: string, fn: (admin: DatabaseAdmin) => Promise<T>): Promise<T> {
 	const pool = new SQL(url, { max: 1, bigint: true });
 	const conn = await pool.reserve({ signal: AbortSignal.timeout(30_000) });
-	const lease: Lease = { conn, alive: true, lost: null, poisoned: false, tx: null, statements: () => {} };
+	const lease: Lease = {
+		conn,
+		alive: true,
+		lost: null,
+		poisoned: false,
+		tx: null,
+		tracing: UNTRACED,
+		statements: () => {},
+	};
 	try {
 		return await fn({
 			async all<R>(text: string, params: readonly SqlValue[] = []): Promise<R[]> {
