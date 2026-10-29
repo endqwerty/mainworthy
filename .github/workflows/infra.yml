@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   terraform:
-    if: github.ref == 'refs/heads/main' && vars.GCP_INFRA_ENABLED == 'true'
+    if: ${{ false }}
     permissions:
       contents: read
       id-token: write
