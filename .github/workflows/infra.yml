@@ -1,9 +1,7 @@
 name: infrastructure
 
 on:
-  # Every push to main: each one releases its own tested image (infra/ci.sh waits for check.yml to publish it).
-  push:
-    branches: [main]
+  # Retired GCP infrastructure. No push-triggered deployment.
   workflow_dispatch:
 
 permissions:
@@ -16,7 +14,7 @@ concurrency:
 
 jobs:
   terraform:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.GCP_INFRA_ENABLED == 'true'
     permissions:
       contents: read
       id-token: write

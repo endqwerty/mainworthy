@@ -24,6 +24,12 @@ services:
         value: "2"
       - key: MAINWORTHY_DB_WRITE_POOL
         value: "2"
+      - key: MAINWORTHY_OWNER
+        value: owner
+      - key: MAINWORTHY_PROXY_SECRET
+        sync: false
+      - key: MAINWORTHY_CLIENT_ADDRESS_HEADER
+        value: cf-connecting-ip
       - key: MAINWORTHY_OWNER_TOKEN
         sync: false
       - key: MAINWORTHY_JOB_KEY

@@ -8,7 +8,9 @@ check only. The ready combined PR runs normal CI against GitHub's merge of the f
 Pushing several local commits together produces one PR synchronization event, rather than one per commit.
 
 The combined PR is the merge unit. Link its draft review layers in its description. Review each layer, then
-verify and audit the complete combined change at its exact current tip and `main` base. A changed tip or base
+verify the complete combined change at its exact current tip and `main` base. Follow the existing
+[audit threshold](security-audit.md#where-it-sits-in-delivery): a single combined audit requires earlier audits of
+every layer, or at least five layers. Otherwise audit each layer against its base. A changed tip or base
 invalidates that evidence. Refresh the merge tree and required checks before landing it.
 
 Merge the combined PR by rebase only with the owner's authorization. Confirm `main` contains every layer's

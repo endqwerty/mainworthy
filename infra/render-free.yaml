@@ -1,0 +1,45 @@
+# Temporary free setup. Database expires after 30 days; attachments are ephemeral.
+# Use render.yaml when upgrading to durable paid services.
+# The pinned image is the currently deployed release. Publish new tested digests explicitly.
+services:
+  - type: web
+    name: mainworthy-render
+    runtime: image
+    region: oregon
+    plan: free
+    image:
+      url: ghcr.io/endqwerty/mainworthy@sha256:964167bba8e268970f683205c286f7de99c0a4deb3e1e900984a746e501fba22
+    healthCheckPath: /health
+    envVars:
+      - key: MAINWORTHY_DATABASE_URL
+        fromDatabase:
+          name: mainworthy-render-db
+          property: connectionString
+      - key: MAINWORTHY_JOB_RUNNER
+        value: "1"
+      - key: MAINWORTHY_DB_POOL
+        value: "2"
+      - key: MAINWORTHY_DB_WRITE_POOL
+        value: "2"
+      - key: MAINWORTHY_OWNER
+        value: owner
+      - key: MAINWORTHY_PROXY_SECRET
+        sync: false
+      - key: MAINWORTHY_CLIENT_ADDRESS_HEADER
+        value: cf-connecting-ip
+      - key: MAINWORTHY_OWNER_TOKEN
+        sync: false
+      - key: MAINWORTHY_JOB_KEY
+        sync: false
+      - key: MAINWORTHY_PUBLIC_URL
+        sync: false
+
+databases:
+  - name: mainworthy-render-db
+    databaseName: mainworthy
+    user: mainworthy
+    region: oregon
+    plan: free
+    postgresMajorVersion: "18"
+    connectionPool: none
+    ipAllowList: []

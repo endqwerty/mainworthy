@@ -6,7 +6,7 @@ too.
 
 Read [README.md](README.md), then `docs/product-vision.md`, `docs/competitors.md` and `docs/open-questions.md`.
 Where it stands: the board (below), `docs/roadmap.md` and `docs/decisions/`; how it fits together:
-`docs/architecture.md`. The instance at `https://mainworthy.com` follows `main` (`docs/deploy.md`).
+`docs/architecture.md`. The instance at `https://mainworthy.com` runs a selected Render image (`docs/deploy.md`).
 
 A rule here names what enforces it; one that nothing enforces is a judgment call. A mistake that happens twice is
 fixed in code, a check or a script, not noted here (decision 0091). This file stays under 12,000 bytes.
@@ -57,8 +57,9 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - Behaviour changes need tests and a check on the real surface. A user-visible change adds a `.changes/` fragment.
   Secrets never enter the repository, logs or chat.
 - A `proposed` decision record (`docs/decisions/`) binds nothing.
-- Until the Google Cloud cutover, Coolify is best-effort; check its `/health` only after migration or startup changes.
-  After cutover, check that `https://mainworthy.com/health` names the commit after every landing.
+- Render runs an explicitly selected image digest. A merge does not deploy it. After a deployment, check that
+  `https://mainworthy.com/health` names the selected source commit. The initial Free environment has zero customer
+  data and disposable attachments; use `docs/render-migration.md` for setup and the later paid upgrade.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
   rewrite. The goal: landing costs minutes.
@@ -98,7 +99,8 @@ branch). A stack lands in one step when the owner's word covers it: `docs/landin
 
 For related changes, draft review layers may sit below one non-draft combined PR from the tip to `main`.
 Only that combined PR is a merge unit; it needs the complete check, independent verdict and audit. Draft layers
-run only the description check and cannot land independently on the combined result. Follow `docs/landing-a-stack.md`.
+run only the description check and cannot land independently on the combined result. The existing layer-audit
+threshold still applies. Follow `docs/landing-a-stack.md`.
 
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
 the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
