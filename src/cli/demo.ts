@@ -103,8 +103,7 @@ async function refreshAlone(
 	options: Options & { signal: AbortSignal },
 ): Promise<SeedResult> {
 	const { app, owner } = instance;
-	// When `signal` aborts, the refresh stops at its next statement or request: a stopping server has ten seconds on
-	// Cloud Run, and its deadline covers a statement still waiting for a lock (#914).
+	// When `signal` aborts, the refresh stops where it is, cancelling a statement waiting for a lock (#914).
 	const { signal } = options;
 	const state = await app.database.read(
 		async (db) => {
@@ -272,7 +271,7 @@ export function drainRetiredDemos(
 	const work = (async () => {
 		const { app } = instance;
 		let plan: RemovalPlan | undefined;
-		// The signal also stops a slice at its next statement, and an aborted slice does not commit.
+		// The signal also stops a slice where it is, cancelling a statement in flight, and an aborted slice does not commit.
 		const signal = options.signal ? { signal: options.signal } : {};
 		for (;;) {
 			options.signal?.throwIfAborted();
@@ -332,8 +331,8 @@ export async function renewDemoWork(
 	const slot = slots.find((slot) => slot.id === seeded.workSlot);
 	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
 	signal?.throwIfAborted();
-	// Aborted, the write stops at its next statement and does not commit, and `invoke` throws the signal's reason. A
-	// statement waiting for another writer of the demo waits on; a stopping server's deadline covers that.
+	// Aborted, the write stops, also while it waits for another writer of the demo, and does not commit, and `invoke`
+	// throws the signal's reason.
 	const taken = await invoke(instance.app, OPS, {
 		op: "work",
 		project,

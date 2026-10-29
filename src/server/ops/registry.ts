@@ -181,8 +181,8 @@ export type Call = {
 	 */
 	at?: number;
 	/**
-	 * Stops a write at its next statement: the write rolls back and `invoke` throws the signal's reason. A statement
-	 * already sent, such as one waiting for a lock, runs to its end first.
+	 * Stops a write where it is, cancelling a statement in flight, such as one waiting for a lock: the write rolls back
+	 * and `invoke` throws the signal's reason.
 	 */
 	signal?: AbortSignal;
 };

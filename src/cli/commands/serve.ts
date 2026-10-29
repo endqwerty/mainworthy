@@ -107,8 +107,10 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 		stopping = true;
 		refreshController.abort(new Error("server stopping"));
 		clearInterval(workTimer);
-		// Cloud Run sends SIGKILL ten seconds after SIGTERM. Whatever still runs at the deadline is left to the database,
-		// which rolls back the open transactions when the connections close; demo state is disposable (#914).
+		// The abort cancels the demo work's statements, also one waiting for a lock, so it ends at once. The deadline is
+		// for what the abort does not reach, such as a request still being served, before Cloud Run's SIGKILL ten
+		// seconds after SIGTERM. What runs then is left to the database, which rolls back the open transactions when the
+		// connections close; demo state is disposable (#914).
 		let running = "the demo refresh";
 		setTimeout(() => {
 			warning(
