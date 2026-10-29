@@ -207,11 +207,11 @@ gh api --method GET repos/endqwerty/mainworthy/actions/workflows/check.yml/runs 
 ```
 
 Prefer stacks for related changes and batch local commits before pushing. The current workflow runs on PR
-events and pushes to `main`, not separately for each commit in a single push. Stacking alone does not reduce
-those triggers. Full CI on only the stack tip needs explicit workflow and [landing-policy](../landing-a-stack.md)
-support: test the combined change against `main`, record the exact tip and base, and refresh evidence when
-either changes. Lower layers must not land independently on evidence that only covers the combined stack.
-Until that support exists, every layer still needs its current required checks. Do not claim stack savings yet.
+events and pushes to `main`, not separately for each commit in a single push. Keep review layers draft and use
+one ready combined PR from the tip to `main`, following the [stack landing policy](../landing-a-stack.md).
+Draft PRs run only the description check. The combined PR tests the full change against `main`; record the exact
+tip and base, and refresh evidence when either changes. Lower layers must not land independently on evidence
+that only covers the combined stack. Native stacks with ready layers still run checks on every layer.
 
 ## Run sequence tests
 

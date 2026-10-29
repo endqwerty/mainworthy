@@ -53,6 +53,7 @@ concurrency:
 
 jobs:
   scope:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -272,7 +273,7 @@ jobs:
   gate:
     needs: [scope, static, tests, image, description]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 9
     permissions:

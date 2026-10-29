@@ -1,5 +1,28 @@
 # Landing a stack
 
+## Use one combined check for draft review layers
+
+For related changes, keep the layer PRs as drafts and open one combined PR from the tip branch to `main`.
+Keep that combined PR draft while assembling the stack, then mark it ready once. Draft PRs run the description
+check only. The ready combined PR runs normal CI against GitHub's merge of the full stack into `main`.
+Pushing several local commits together produces one PR synchronization event, rather than one per commit.
+
+The combined PR is the merge unit. Link its draft review layers in its description. Review each layer, then
+verify and audit the complete combined change at its exact current tip and `main` base. A changed tip or base
+invalidates that evidence. Refresh the merge tree and required checks before landing it.
+
+Merge the combined PR by rebase only with the owner's authorization. Confirm `main` contains every layer's
+changes before closing the draft review PRs with a link to the merged combined PR. Do not use `gh stack merge`
+for this mode: draft review layers are not independent merge units. To land a partial stack instead, open a
+ready combined PR for that prefix and obtain its own checks, review and audit.
+
+Skipped draft jobs prove nothing about the code. A lower layer that becomes an independent merge unit must be
+marked ready and pass its own checks. Keep `ready_for_review` in the workflow triggers so that transition runs CI.
+Main pushes still run CI and publish a tested image. This reduces duplicate checks across review layers; it does
+not limit how many times a ready combined PR can run after further pushes.
+
+## Land native stacks with checks on every layer
+
 For an agent, when the owner has said in the current thread to merge a stack or its lower layers. Without those
 words nothing merges: `build`, `babysit` and `autopilot-stack` open the stack, link it to the thread and stop.
 

@@ -8,8 +8,8 @@ or attachment backup. There is no restore, credential continuity or data-migrati
 
 - Shut down the old GCP projects. Render does not need to be running first.
 - Prepare Render with `infra/render.yaml`. Validate the Blueprint and review its paid resources before creating them.
-- Reduce CI frequency and support one combined stack check. Until the workflow and landing policy support that,
-  each layer still needs its existing checks. See [test costs](development/tests.md#estimate-the-recurring-ci-cost).
+- Keep review layers draft and run one combined stack check against `main` before landing. See
+  [test costs](development/tests.md#estimate-the-recurring-ci-cost) and [stack landing](landing-a-stack.md).
 - Keep GitCafe as a candidate source host. Compare its account-wide storage and outbound usage with the reduced
   CI plan before paying for a larger plan or moving the forge.
 

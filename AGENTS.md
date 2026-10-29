@@ -96,6 +96,10 @@ and stop. Do not merge, arm auto-merge, close it or push to `main`, even when ch
 in the current thread, to merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the
 branch). A stack lands in one step when the owner's word covers it: `docs/landing-a-stack.md`.
 
+For related changes, draft review layers may sit below one non-draft combined PR from the tip to `main`.
+Only that combined PR is a merge unit; it needs the complete check, independent verdict and audit. Draft layers
+run only the description check and cannot land independently on the combined result. Follow `docs/landing-a-stack.md`.
+
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
 the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
 changes.

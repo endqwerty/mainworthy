@@ -1,5 +1,10 @@
 # Running Mainworthy on a server
 
+The project-specific GCP projects are pending deletion as of 2026-10-28, and the dedicated billing account is
+closed. There are zero users and zero customer data to migrate. The old Google DNS and proxy rule have been
+removed from Cloudflare. Use [the fresh Render deployment runbook](render-migration.md) for the replacement.
+The GCP sections below describe the retired setup.
+
 Mainworthy runs as one app process connected to PostgreSQL 18. The app volume holds attachment bytes and
 archive staging; PostgreSQL has its own volume. `compose.yaml` runs both. Running elsewhere is possible but
 not yet supported, as amended in [decision 0026](decisions/0026-the-apps-offer-one-instance.md).
