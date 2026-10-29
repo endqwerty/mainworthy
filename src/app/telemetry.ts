@@ -18,6 +18,7 @@ import {
 	TracerProvider,
 } from "@opentelemetry/sdk-trace";
 import { VERSION } from "../core/version.ts";
+import { LOOPBACK_HOSTS } from "../server/kernel/app.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -74,8 +75,11 @@ export function telemetrySettings(env: Env): TelemetrySettings {
 	} catch {
 		throw new Error("the OTLP endpoint must be a URL");
 	}
-	if (url.protocol !== "https:" && url.protocol !== "http:")
-		throw new Error("the OTLP endpoint must be an http or https URL");
+	// Batches carry the headers, often a vendor's key: in the clear only to this machine.
+	if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)))
+		throw new Error("the OTLP endpoint must use https (plain http only on this machine's loopback address)");
+	if (url.username || url.password)
+		throw new Error("the OTLP endpoint must not carry credentials; put them in OTEL_EXPORTER_OTLP_HEADERS");
 	const samplerName = env.OTEL_TRACES_SAMPLER?.trim().toLowerCase() || "parentbased_always_on";
 	const sampler = SAMPLERS.get(samplerName);
 	if (!sampler) throw new Error(`OTEL_TRACES_SAMPLER must be one of ${[...SAMPLERS.keys()].join(", ")}`);
