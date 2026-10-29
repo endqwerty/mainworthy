@@ -758,13 +758,7 @@ function literalTransitions(): void {
 		}
 	});
 
-	test.each([
-		["exact", "exact", ["auto"], "C-1", 1, "satisfied", "exact"],
-		["assumed refused", "exact", ["auto"], "C-1", undefined, "missing", null],
-		["assumed accepted", "exact-or-assumed", ["auto"], "C-1", undefined, "satisfied", "assumed"],
-		["method refused", "exact", ["human"], "C-1", 1, "missing", null],
-		["other case", "exact", ["auto"], "C-2", 1, "missing", null],
-	] as const)("reported slot admission: %s", async (_name, basis, methods, caseRef, version, state, admitted) => {
+	test("reported slot admission pins case, method and basis across separate targets", async () => {
 		const h = await harness({ preset: "strict" });
 		try {
 			await h.call("propose", {
@@ -776,34 +770,44 @@ function literalTransitions(): void {
 			for (const q of (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
 				.items)
 				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
-			const planned = await h.call<{ run: string }>("plan", {
-				name: "Admission",
-				select: { cases: ["C-1"] },
-				accepts: { commit: "admission01" },
-				require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
-			});
 			const ci = await h.actor("pipeline", "ci", ["read", "record"]);
-			await h.call(
-				"report",
-				{
-					target: { commit: "admission01", branch: "main" },
-					results: [
-						{
-							test: { key: "check" },
-							outcome: "pass",
-							annotation: { case: caseRef, ...(version === undefined ? {} : { version }) },
-						},
-					],
-				},
-				ci,
-			);
-			const slots = await h.call<{ items: { state: string; fills: { admitted: string }[] }[] }>("find", {
-				in: "slots",
-				run: planned.run,
-			});
-			expect(
-				slots.items.map((slot) => ({ state: slot.state, fills: slot.fills.map((fill) => fill.admitted) })),
-			).toEqual([{ state, fills: admitted === null ? [] : [admitted] }]);
+			for (const [name, basis, methods, caseRef, version, state, admitted] of [
+				["exact", "exact", ["auto"], "C-1", 1, "satisfied", "exact"],
+				["assumed refused", "exact", ["auto"], "C-1", undefined, "missing", null],
+				["assumed accepted", "exact-or-assumed", ["auto"], "C-1", undefined, "satisfied", "assumed"],
+				["method refused", "exact", ["human"], "C-1", 1, "missing", null],
+				["other case", "exact", ["auto"], "C-2", 1, "missing", null],
+			] as const) {
+				const commit = `admission-${name.replaceAll(" ", "-")}`;
+				const planned = await h.call<{ run: string }>("plan", {
+					name: `Admission ${name}`,
+					select: { cases: ["C-1"] },
+					accepts: { commit },
+					require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
+				});
+				await h.call(
+					"report",
+					{
+						target: { commit, branch: "main" },
+						results: [
+							{
+								test: { key: "check" },
+								outcome: "pass",
+								annotation: { case: caseRef, ...(version === undefined ? {} : { version }) },
+							},
+						],
+					},
+					ci,
+				);
+				const slots = await h.call<{ items: { state: string; fills: { admitted: string }[] }[] }>("find", {
+					in: "slots",
+					run: planned.run,
+				});
+				expect(
+					slots.items.map((slot) => ({ state: slot.state, fills: slot.fills.map((fill) => fill.admitted) })),
+					name,
+				).toEqual([{ state, fills: admitted === null ? [] : [admitted] }]);
+			}
 		} finally {
 			await h.close();
 		}

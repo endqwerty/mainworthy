@@ -150,7 +150,8 @@ async function call<T>(url: string, op: string, input: unknown): Promise<T> {
 test("a report accepted when the server is killed is applied in full when it starts again, and only once", async () => {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-restart-"));
 	dirs.push(dataDir);
-	const total = 40_000;
+	// Cross the 200-result application slice and retain all 400 files for deferred mapping pages.
+	const total = 800;
 	const failing = total / 100;
 	const report = JSON.stringify({
 		cmd: "upload-0001",

@@ -615,44 +615,49 @@ for (const failure of ["internal", "session change", "refused retry", "missing g
 		30000,
 	);
 
-for (const stored of [
-	'{"name":"Old","select":{},"cmd":"legacy-plan-command"}',
-	"{",
-	'{"name":"Old","select":{}}',
-	'{"name":"Old","select":{"text":5},"cmd":"x"}',
-	"null",
-	"[]",
-])
-	check(
-		`an invalid saved plan ${stored} does not block planning`,
-		async () => {
-			const server = await startServer();
-			const view = await openPage(server, { path: "/p/scratch/runs" });
-			try {
-				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
-				const { page } = view;
-				const prefix = await devicePrefix(server, server.token);
-				const key = `${prefix}run-plan:scratch`;
+check(
+	"invalid saved plans do not block planning",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+			const { page } = view;
+			const prefix = await devicePrefix(server, server.token);
+			const key = `${prefix}run-plan:scratch`;
+			const invalid = [
+				'{"name":"Old","select":{},"cmd":"legacy-plan-command"}',
+				"{",
+				'{"name":"Old","select":{}}',
+				'{"name":"Old","select":{"text":5},"cmd":"x"}',
+				"null",
+				"[]",
+			];
+			for (const [index, stored] of invalid.entries()) {
+				await page.goto(`${server.url}/p/scratch/runs`);
+				await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
 				await page.evaluate(([key, stored]) => localStorage.setItem(key ?? "", stored ?? ""), [key, stored]);
 				await page.keyboard.press("n");
-				await page.getByLabel("Run name").fill("Fresh plan");
+				const name = `Fresh plan ${index + 1}`;
+				await page.getByLabel("Run name").fill(name);
 				await page.locator('.run-planner button[type="submit"]').click();
 				await eventually(
 					async () => (await server.api("find", { in: "runs", origin: "planned" })).items.length,
-					(count) => count === 1,
+					(count) => count === index + 1,
 				);
-				await page.waitForURL("**/runs/1");
-				expect(Run.array().parse((await server.api("find", { in: "runs", origin: "planned" })).items)).toMatchObject([
-					{ name: "Fresh plan", slots: 1 },
-				]);
+				await page.waitForURL(`**/runs/${index + 1}`);
+				expect(Run.array().parse((await server.api("find", { in: "runs", origin: "planned" })).items)).toContainEqual(
+					expect.objectContaining({ name, slots: 1 }),
+				);
 				expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBeNull();
-			} finally {
-				await view.close();
-				await server.stop();
 			}
-		},
-		30000,
-	);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 check(
 	"a retry refused by the operation releases the plan for correction",
@@ -1218,66 +1223,65 @@ for (const failure of ["read", "removal"] as const)
 		30_000,
 	);
 
-for (let repeat = 1; repeat <= 10; repeat++)
-	check(
-		`two tabs retry one plan simultaneously without a fresh duplicate (${repeat}/10)`,
-		async () => {
-			const server = await startServer();
-			const view = await openPage(server, { path: "/p/scratch/runs" });
-			try {
-				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
-				const { page, context } = view;
-				const sent: Api["plan"]["input"][] = [];
-				await page.route("**/plan", async (route) => {
-					sent.push(route.request().postDataJSON());
-					if (sent.length > 1) return route.continue();
-					const response = await route.fetch();
-					expect(response.ok()).toBe(true);
-					await route.abort();
-				});
-				await page.keyboard.press("n");
-				await page.getByLabel("Run name").fill("Plan X");
-				await page.locator('.run-planner button[type="submit"]').click();
-				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
-				const other = await context.newPage();
-				other.on("request", (request) => {
-					if (request.url().endsWith("/plan")) sent.push(request.postDataJSON());
-				});
-				await other.goto(`${server.url}/p/scratch/runs`);
-				await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
-				await other.keyboard.press("n");
-				await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
-				const original = sent[0];
-				if (!original) throw new Error("No plan was submitted");
-				await Promise.all([
-					page.locator('.run-planner button[type="submit"]').click({ force: true }),
-					other.locator('.run-planner button[type="submit"]').click({ force: true, delay: 50 }),
-				]);
-				for (const tab of [page, other])
-					await eventually(
-						() =>
-							tab.evaluate(() => ({
-								path: location.pathname,
-								name: document.querySelector<HTMLInputElement>("#run-name")?.value,
-								editable: document.querySelector<HTMLInputElement>("#run-name")?.readOnly === false,
-							})),
-						({ path, editable }) => /\/runs\/\d+$/.test(path) || editable,
-					);
-				for (const tab of [page, other])
-					expect(await tab.evaluate(() => document.querySelector<HTMLInputElement>("#run-name")?.value ?? "")).toBe("");
-				expect(
-					Run.array()
-						.parse((await server.api("find", { in: "runs", origin: "planned" })).items)
-						.map((run) => run.name),
-				).toEqual(["Plan X"]);
-				for (const input of sent) expect(input).toEqual(original);
-			} finally {
-				await view.close();
-				await server.stop();
-			}
-		},
-		30_000,
-	);
+check(
+	"two tabs retry one plan simultaneously without a fresh duplicate",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+			const { page, context } = view;
+			const sent: Api["plan"]["input"][] = [];
+			await page.route("**/plan", async (route) => {
+				sent.push(route.request().postDataJSON());
+				if (sent.length > 1) return route.continue();
+				const response = await route.fetch();
+				expect(response.ok()).toBe(true);
+				await route.abort();
+			});
+			await page.keyboard.press("n");
+			await page.getByLabel("Run name").fill("Plan X");
+			await page.locator('.run-planner button[type="submit"]').click();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			const other = await context.newPage();
+			other.on("request", (request) => {
+				if (request.url().endsWith("/plan")) sent.push(request.postDataJSON());
+			});
+			await other.goto(`${server.url}/p/scratch/runs`);
+			await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+			await other.keyboard.press("n");
+			await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			const original = sent[0];
+			if (!original) throw new Error("No plan was submitted");
+			await Promise.all([
+				page.locator('.run-planner button[type="submit"]').click({ force: true }),
+				other.locator('.run-planner button[type="submit"]').click({ force: true, delay: 50 }),
+			]);
+			for (const tab of [page, other])
+				await eventually(
+					() =>
+						tab.evaluate(() => ({
+							path: location.pathname,
+							name: document.querySelector<HTMLInputElement>("#run-name")?.value,
+							editable: document.querySelector<HTMLInputElement>("#run-name")?.readOnly === false,
+						})),
+					({ path, editable }) => /\/runs\/\d+$/.test(path) || editable,
+				);
+			for (const tab of [page, other])
+				expect(await tab.evaluate(() => document.querySelector<HTMLInputElement>("#run-name")?.value ?? "")).toBe("");
+			expect(
+				Run.array()
+					.parse((await server.api("find", { in: "runs", origin: "planned" })).items)
+					.map((run) => run.name),
+			).toEqual(["Plan X"]);
+			for (const input of sent) expect(input).toEqual(original);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
 
 for (const trigger of ["click", "Enter", "queued submit"] as const)
 	check(

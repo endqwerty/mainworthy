@@ -2233,7 +2233,7 @@ describe("unlinked tests", () => {
 	test("changing the choice answers every open question, however many one report raised", async () => {
 		await use("standard", "ask");
 		// More than a thousand questions from one report share ranks in the queue's order.
-		const files = 2001;
+		const files = 1001;
 		await h.call("report", {
 			target: { commit: "bbbb0022", branch: "main" },
 			results: Array.from({ length: files }, (_, i) => ({

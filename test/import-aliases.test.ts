@@ -93,17 +93,16 @@ const nameProbes = [
 	["plain @C-2", 2],
 ] satisfies [string, number | null][];
 
-test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [format, name, caseId] as const)))(
-	"%s name claim: %s",
-	async (format, name, caseId) => {
-		const h = await harness();
-		try {
-			await h.call("propose", {
-				edits: [
-					{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] },
-					{ op: "create", body: { title: "Other" } },
-				],
-			});
+test.each([...nameFormats])("%s name claims", async (format) => {
+	const h = await harness();
+	try {
+		await h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] },
+				{ op: "create", body: { title: "Other" } },
+			],
+		});
+		for (const [name, caseId] of nameProbes) {
 			const receipt = await h.call<ReportReceipt>("report", {
 				target: { session: name },
 				results: namedResults(format, [name]),
@@ -130,11 +129,11 @@ test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [fo
 			).toEqual({
 				basis_case: caseId,
 			});
-		} finally {
-			await h.close();
 		}
-	},
-);
+	} finally {
+		await h.close();
+	}
+});
 
 test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores tags and emails", async (format) => {
 	const h = await harness();

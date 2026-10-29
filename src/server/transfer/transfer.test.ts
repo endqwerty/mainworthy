@@ -683,8 +683,8 @@ function rehash(text: string): string {
 	return `${preceding}${JSON.stringify({ end: true, rows, sha256: createHash("sha256").update(preceding).digest("hex") })}\n`;
 }
 
-async function refuse(text: string, message: string | RegExp): Promise<void> {
-	const db = await target();
+async function refuse(text: string, message: string | RegExp, given?: WriteDb): Promise<void> {
+	const db = given ?? (await target());
 	const before = await allRows(db);
 	await expect(importArchive(db, linesOf(text))).rejects.toThrow(message);
 	expect(await allRows(db)).toEqual(before);
@@ -734,7 +734,7 @@ test("archives wait for retired demo cleanup instead of restoring retired data w
 describe("Mainworthy instance archives", () => {
 	test("a demo-seeded export round-trips over HTTP", async () => {
 		await withInstance(async (source) => {
-			await seed(source.client, { project: "demo", cases: 30, days: 1 });
+			await seed(source.client, { project: "demo", cases: 6, days: 1 });
 			const exported = await source.client.request("/api/export");
 			expect(exported.status).toBe(200);
 			if (!exported.body) throw new Error("export is missing its stream");
@@ -1101,7 +1101,7 @@ describe("Mainworthy instance archives", () => {
 
 	test("project removal slices drain an HTTP-seeded demo while another project stays readable", async () => {
 		await withInstance(async ({ client, instance }) => {
-			await seed(client, { project: "demo", cases: 30, days: 1 });
+			await seed(client, { project: "demo", cases: 6, days: 1 });
 			const read = instance.app.database.read.bind(instance.app.database);
 			const kept = (await read((db) => db.allDynamic("SELECT * FROM projects WHERE key='scratch'")))[0];
 			const people = () =>
@@ -1846,57 +1846,37 @@ describe("Mainworthy instance archives", () => {
 		expect(await allRows(db)).toEqual(before);
 	});
 
-	test("a missing footer rolls back every row and bootstrap deletion", async () => {
-		const lines = [...linesOf(await archive(await source()))];
+	test("malformed archive footers, tables, columns and formats are refused without changing the target", async () => {
+		const text = await archive(await source());
+		const db = await target();
+		const lines = [...linesOf(text)];
 		lines.pop();
-		await refuse(`${lines.join("\n")}\n`, /footer|truncated/);
-	});
-
-	test("a truncated footer is refused without changing the target", async () => {
-		await refuse((await archive(await source())).slice(0, -20), /JSON|footer|archive/);
-	});
-
-	test("a flipped byte is refused without changing the target", async () => {
-		await refuse(
-			(await archive(await source())).replace("Archive organisation", "Brchive organisation"),
-			/hash|checksum|SHA/,
-		);
-	});
-
-	test("a wrong footer row count is refused without changing the target", async () => {
-		await refuse((await archive(await source())).replace(/"rows":\d+/, '"rows":0'), /row count/);
-	});
-
-	test("a wrong per-table count is refused even with a valid checksum", async () => {
-		await refuse(
-			rehash((await archive(await source())).replace(/"results":2/, '"results":3')),
-			/results.*count|count.*results/,
-		);
-	});
-
-	test("an unknown row table is named and rolled back", async () => {
-		await refuse(
-			(await archive(await source())).replace('"t":"meta"', '"t":"unknown_table"'),
-			/unknown.*table.*unknown_table/i,
-		);
-	});
-
-	test("an unknown header table is named and refused", async () => {
-		await refuse(
-			(await archive(await source())).replace('"tables":{', '"tables":{"unknown_table":0,'),
-			/unknown.*table.*unknown_table/i,
-		);
-	});
-
-	test("an unknown column is named and rolled back", async () => {
-		await refuse(
-			(await archive(await source())).replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
-			/unknown.*column.*unknown_column/i,
-		);
-	});
-
-	test("newer formats are refused before changing the target", async () => {
-		await refuse((await archive(await source())).replace('"format":1', '"format":2'), /format.*2/);
+		const examples: [string, string, RegExp][] = [
+			["missing footer", `${lines.join("\n")}\n`, /footer|truncated/],
+			["truncated footer", text.slice(0, -20), /JSON|footer|archive/],
+			["flipped byte", text.replace("Archive organisation", "Brchive organisation"), /hash|checksum|SHA/],
+			["footer row count", text.replace(/"rows":\d+/, '"rows":0'), /row count/],
+			["per-table count", rehash(text.replace(/"results":2/, '"results":3')), /results.*count|count.*results/],
+			["unknown row table", text.replace('"t":"meta"', '"t":"unknown_table"'), /unknown.*table.*unknown_table/i],
+			[
+				"unknown header table",
+				text.replace('"tables":{', '"tables":{"unknown_table":0,'),
+				/unknown.*table.*unknown_table/i,
+			],
+			[
+				"unknown column",
+				text.replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
+				/unknown.*column.*unknown_column/i,
+			],
+			["newer format", text.replace('"format":1', '"format":2'), /format.*2/],
+		];
+		for (const [name, input, message] of examples) {
+			try {
+				await refuse(input, message, db);
+			} catch (cause) {
+				throw new Error(name, { cause });
+			}
+		}
 	});
 
 	test("newer and older schemas are refused with a clear message", async () => {

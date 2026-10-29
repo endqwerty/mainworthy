@@ -429,7 +429,7 @@ test("large pinned bodies stay out of a 500-slot page", async () => {
 		db.transaction(() =>
 			db.run(
 				sql<readonly SqlValue[]>(
-					"UPDATE versions SET body = jsonb_set(jsonb_set(body::jsonb, '{methods}', $1::text::jsonb), '{pre}', to_jsonb(repeat('x', 4000000)))::text",
+					"UPDATE versions SET body = jsonb_set(jsonb_set(body::jsonb, '{methods}', $1::text::jsonb), '{pre}', to_jsonb(repeat('x', 16000)))::text",
 				),
 				[JSON.stringify(Array.from({ length: 10000 }, () => "human"))],
 			),

@@ -124,7 +124,7 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 | --- | --- |
 | `src/**/*.test.ts` | pure functions beside their code: the outline grammar, diff, merge, signatures, durations |
 | `test/<area>.test.ts` | an area through the real registry: suite, evidence, runs, policy, sessions, tokens, identities, trackers, archives |
-| `test/sequences-*.test.ts` | deterministic operation sequences under each policy preset, seeds 1–8 per PR and local check, 1–40 daily |
+| `test/sequences-*.test.ts` | deterministic operation sequences under each policy preset, seeds 1–3 per PR and local check, 1–40 daily |
 | `test/architecture.test.ts` | the module map, the registry, the witness writers, the PostgreSQL baseline, the identity rules, the phone layout and what a public repository may contain |
 | `test/integrity.test.ts` | one test for each thing that must never happen, such as a green gate with nothing proven or an agent's result counted as a pipeline's. Each came from an independent review. |
 | `test/budgets.test.ts` | operation counts on hot paths, reported as budgets |
@@ -215,13 +215,14 @@ that only covers the combined stack. Native stacks with ready layers still run c
 
 ## Run sequence tests
 
-Every pull request and `bun run check` runs seeds 1–8 in both sequence generators under all three policy presets.
+Every pull request and `bun run check` runs seeds 1–3 in both sequence generators under all three policy presets.
 Each seed runs 80 steps in `test/sequences.ts` or 100 in `test/sequences-extended.ts`, with an audit after each step.
 `test/sequence-config.ts` owns the PR and daily seed counts. `MAINWORTHY_SEQUENCE_SEEDS` overrides the count;
 `MAINWORTHY_SEQUENCE_FIRST` selects the first seed. Both generators use the same deterministic prefix.
 
 The `sequences` workflow runs seeds 1–40 once a day at 10:17 UTC on `main`, and on manual dispatch from `main`.
-Forty preserves the former coverage, five times the PR count. The recorded six-file workload took 493 seconds;
+Forty preserves the former per-PR coverage of eight seeds five times over; the PR count fell to three on
+2026-10-29, leaving the rest to the daily run. The recorded six-file workload took 493 seconds;
 the workflow allows 25 minutes for tests, setup and reporting. Its JUnit and outcome files use the ordinary
 `test-results/sequences.xml` and `.json` convention. The workflow reuses `scripts/ci-postgres.sh` and
 `scripts/ci-gate.ts`, including the deployed-instance selection and disposable fallback.

@@ -60,7 +60,7 @@ const titlesOf = async (client: Client) =>
 
 test("a demo archive imports with readable open and settled failure questions", async () => {
 	await withInstance(async ({ client }) => {
-		await seed(client, { project: "demo", cases: 6 });
+		await seed(client, { project: "demo", cases: 6, days: 3 });
 		const demo = on(client, "demo");
 		const open = await demo.call("inbox", { kind: "failure" });
 		const settled = await demo.call("inbox", { kind: "failure", state: "decided" });

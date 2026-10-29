@@ -57,15 +57,15 @@ type Exact = { result: number; class: "attributed" | "excused"; decision: number
 const queries = {
 	lanes: `SELECT * FROM run_tests`,
 	slots: `SELECT * FROM slots`,
-	results: `SELECT r.*,b.job,b.state AS audit_batch_state,b.target AS audit_batch_target,t.what AS audit_what,t.project AS audit_project,t.line AS audit_line,t.change AS audit_change,t.repo AS audit_repo
- FROM results r JOIN batches b ON b.id=r.batch JOIN targets t ON t.id=r.target ORDER BY r.seq,r.ord`,
+	results: `SELECT r.id,r.project,r.test,r.seq,r.ord,r.batch,r.target,r.method,r.actor,r.basis,r.basis_case,r.basis_version,r.basis_claim,r.outcome,r.attempt,r.signature,r.run,r.corrects,b.job,b.state AS audit_batch_state,b.target AS audit_batch_target,t.what AS audit_what,t.project AS audit_project,t.line AS audit_line,t.change AS audit_change,t.repo AS audit_repo
+ FROM results r JOIN batches b ON b.id=r.batch JOIN targets t ON t.id=r.target`,
 	questions: `SELECT project,no,state FROM questions`,
 	fills: `SELECT s.slot,r.*,b.job FROM slot_results s JOIN results r ON r.id=s.result JOIN batches b ON b.id=r.batch
  WHERE s.corrected=0 AND s.discounted_by IS NULL`,
 	admitted: `SELECT slot,result,corrected,discounted_by,admitted FROM slot_results`,
 	settlements: `SELECT e.slot,e.result,e.class,e.decision,named.signature,(q.subject::jsonb)->>'scope' AS scope,s.run
  FROM result_excuses e JOIN results named ON named.id=e.result JOIN decisions d ON d.id=e.decision JOIN questions q ON q.id=d.question JOIN slots s ON s.id=e.slot
- WHERE e.slot IS NOT NULL ORDER BY e.decision DESC`,
+ WHERE e.slot IS NOT NULL`,
 	runs: `SELECT * FROM runs`,
 	changes: `SELECT * FROM changes`,
 	targets: `SELECT * FROM targets`,

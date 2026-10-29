@@ -716,7 +716,8 @@ describe("atomic bulk proposals", () => {
 		}
 	});
 
-	test("sealing a 5,000-case fragment move answers reads even when its last case conflicts", async () => {
+	test("sealing a 401-case fragment move answers reads even when its last case conflicts", async () => {
+		// Two 200-case slices precede the last consumer, where the conflict must roll back the move.
 		const instance = await disk();
 		try {
 			result(
@@ -735,7 +736,7 @@ describe("atomic bulk proposals", () => {
 			);
 			const created = result<ProposeReply>(
 				await instance.raw("propose", {
-					edits: Array.from({ length: 5000 }, (_, i) => ({
+					edits: Array.from({ length: 401 }, (_, i) => ({
 						op: "create",
 						body: {
 							title: `Consumer ${i}`,
@@ -753,7 +754,7 @@ describe("atomic bulk proposals", () => {
 							base: 1,
 							body: { steps: [{ id: "ab", action: "Passkey", expected: "Signed in" }] },
 						},
-						{ op: "edit", case: "C-5001", base: 1, body: { title: "Changed consumer" } },
+						{ op: "edit", case: "C-402", base: 1, body: { title: "Changed consumer" } },
 					],
 				}),
 			);
@@ -782,9 +783,7 @@ describe("atomic bulk proposals", () => {
 				if (!instance.observed.active) continue;
 				if (done) break;
 				expect(
-					result<unknown[]>(
-						await invoke(instance.app, instance.ops, instance.call("get", { refs: ["C-2", "C-5001"] })),
-					),
+					result<unknown[]>(await invoke(instance.app, instance.ops, instance.call("get", { refs: ["C-2", "C-402"] }))),
 				).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
 					{ version: 2, title: "Changed consumer", steps: [{ action: "Password", source: { version: 1 } }] },
@@ -795,7 +794,7 @@ describe("atomic bulk proposals", () => {
 				ok: false,
 				error: {
 					code: "conflict",
-					message: "C-5001 changed; redo the fragment batch",
+					message: "C-402 changed; redo the fragment batch",
 				},
 			});
 			expect(await storedCount(instance, "versions")).toBe(before.versions);
@@ -815,7 +814,7 @@ describe("atomic bulk proposals", () => {
 							fragment: "C-1",
 							from: 1,
 							to: 2,
-							cases: created.cases.map(({ ref }) => ({ case: ref, base: ref === "C-5001" ? 2 : 1 })),
+							cases: created.cases.map(({ ref }) => ({ case: ref, base: ref === "C-402" ? 2 : 1 })),
 						},
 					],
 				}),
@@ -828,17 +827,17 @@ describe("atomic bulk proposals", () => {
 				await tick(instance);
 				if (!instance.observed.active) continue;
 				if (done) break;
-				expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+				expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-402"] }))).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
 					{ version: 2, steps: [{ action: "Password", source: { version: 1 } }] },
 				]);
 			}
 			const adopted = result<ProposeReply>(await retry);
 			expect(adopted.status).toBe("adopted");
-			expect(adopted.cases).toHaveLength(5000);
-			expect(await storedCount(instance, "versions")).toBe(before.versions + 5000);
+			expect(adopted.cases).toHaveLength(401);
+			expect(await storedCount(instance, "versions")).toBe(before.versions + 401);
 			expect(await storedCount(instance, "decisions")).toBe(before.decisions + 1);
-			expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+			expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-402"] }))).toMatchObject([
 				{ version: 2, steps: [{ action: "Passkey", source: { version: 2 } }] },
 				{ version: 3, title: "Changed consumer", steps: [{ action: "Passkey", source: { version: 2 } }] },
 			]);
