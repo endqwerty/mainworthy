@@ -1,0 +1,44 @@
+# Validate this Blueprint before creating paid services. See docs/render-migration.md.
+# The pinned image is the currently deployed release. Publish new tested digests explicitly.
+services:
+  - type: web
+    name: mainworthy-render
+    runtime: image
+    region: oregon
+    plan: starter
+    image:
+      url: ghcr.io/endqwerty/mainworthy@sha256:964167bba8e268970f683205c286f7de99c0a4deb3e1e900984a746e501fba22
+    healthCheckPath: /health
+    disk:
+      name: mainworthy-data
+      mountPath: /data
+      sizeGB: 2
+    envVars:
+      - key: MAINWORTHY_DATABASE_URL
+        fromDatabase:
+          name: mainworthy-render-db
+          property: connectionString
+      - key: MAINWORTHY_JOB_RUNNER
+        value: "1"
+      - key: MAINWORTHY_DB_POOL
+        value: "2"
+      - key: MAINWORTHY_DB_WRITE_POOL
+        value: "2"
+      - key: MAINWORTHY_OWNER_TOKEN
+        sync: false
+      - key: MAINWORTHY_JOB_KEY
+        sync: false
+      - key: MAINWORTHY_PUBLIC_URL
+        sync: false
+
+databases:
+  - name: mainworthy-render-db
+    databaseName: mainworthy
+    user: mainworthy
+    region: oregon
+    plan: 0.1c-256mb
+    postgresMajorVersion: "18"
+    diskSizeGB: 5
+    storageAutoscalingEnabled: false
+    connectionPool: none
+    ipAllowList: []
