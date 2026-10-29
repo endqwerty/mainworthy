@@ -194,7 +194,7 @@ test("a retry that does not finish in time leaves the rest and fails the job", a
 	expect(done.lines.at(-1)).toBe("tests-1: its retry did not finish in 45 minutes, so the rest did not run again");
 });
 
-test("the workflow runs the script after the check failed, on its first attempt, for this repository's branches", () => {
+test("automatic retries stay disabled on the sole runner while the manual controller remains available", () => {
 	const text = readFileSync(".github/workflows/rerun.yml", "utf8");
 	const workflow = z
 		.object({
@@ -213,10 +213,7 @@ test("the workflow runs the script after the check failed, on its first attempt,
 		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
 	expect(workflow.on.workflow_run).toEqual({ workflows: [check.name], types: ["completed"] });
 	expect(workflow.permissions).toEqual({ contents: "read", actions: "write" });
-	const condition = workflow.jobs.rerun.if;
-	expect(condition).toContain("github.event.workflow_run.conclusion == 'failure'");
-	expect(condition).toContain("github.event.workflow_run.run_attempt == 1");
-	expect(condition).toContain("github.event.workflow_run.head_repository.full_name == github.repository");
+	expect(workflow.jobs.rerun.if).toBe(`$\{{ false }}`);
 	expect(workflow.jobs.rerun.steps.at(-1)?.run).toBe(
 		`bun scripts/ci-rerun.ts ${"${{"} github.event.workflow_run.id }}`,
 	);

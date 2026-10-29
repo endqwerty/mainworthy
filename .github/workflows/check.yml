@@ -1,8 +1,8 @@
 # The check, and Mainworthy testing itself: the test results of this repository are reported to Mainworthy with the
 # two pipeline lines a user would add (`mainworthy report`, `mainworthy gate`), and the result is Mainworthy's gate.
 #
-# The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. Elapsed-time measurements
-# and database process cleanup checks (scripts/check-plan.ts, PERFORMANCE) have a runner to themselves.
+# A dedicated runner takes one job at a time. The functional shard uses two test workers; elapsed-time
+# measurements and database process cleanup checks (scripts/check-plan.ts, PERFORMANCE) run in a separate serial job.
 # Budget misses warn in its job summary (ten times a baseline fails); workload errors still fail. Every shard uploads its JUnit file; the `gate`
 # job reports them all to one Mainworthy, each under its shard's name, and runs the gate. A shard that left no
 # report fails the gate job: a missing report is not a pass (scripts/ci-gate.ts).
@@ -53,8 +53,8 @@ concurrency:
 
 jobs:
   scope:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 5
     outputs:
       static: ${{ steps.scope.outputs.static }}
@@ -82,7 +82,7 @@ jobs:
   static:
     needs: scope
     if: ${{ success() && needs.scope.outputs.static == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -107,11 +107,16 @@ jobs:
   image:
     needs: scope
     if: ${{ success() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recover CI Docker resources from an interrupted job
+        run: bash scripts/ci-cleanup.sh
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          name: mainworthy-ci
+          cleanup: false
       - name: Image creation time
         id: created
         run: echo "time=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
@@ -158,20 +163,24 @@ jobs:
         run: docker logs mainworthy
       - name: Save the tested image
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        run: docker save --output /tmp/mainworthy-image.tar mainworthy:check
+        run: docker save --output "$RUNNER_TEMP/mainworthy-image.tar" mainworthy:check
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           name: mainworthy-image
-          path: /tmp/mainworthy-image.tar
+          path: ${{ runner.temp }}/mainworthy-image.tar
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
           overwrite: true
 
+      - name: CI Docker logs and cleanup
+        if: always()
+        run: bash scripts/ci-cleanup.sh --logs
+
   description:
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 3
     permissions:
       contents: read
@@ -191,18 +200,21 @@ jobs:
     name: ${{ matrix.name }}
     needs: scope
     if: ${{ success() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
+    # Provisional for the single functional shard until a full ready-PR run measures the VM.
+    timeout-minutes: 45
     strategy:
       # Every shard runs to its end: the gate reads all of them.
       fail-fast: false
-      # Fourteen functional shards (CI_SHARDS in scripts/check-plan.ts), one test worker beside PostgreSQL on each.
-      # Performance keeps its own runner; matrix in scripts/ci-scope.ts and the gate use the same names.
+      # One functional shard with two workers on the four-CPU VM, and a separate serial performance phase.
+      # This is the initial plan, pending full-run VM timings; scope and the gate use the same names.
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     env:
       MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recover CI Docker resources from an interrupted job
+        run: bash scripts/ci-cleanup.sh
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
@@ -215,15 +227,11 @@ jobs:
         run: |
           revision=$(bun -e 'import { SQLITE_REVISION } from "./scripts/port-schema.ts"; process.stdout.write(SQLITE_REVISION)')
           git cat-file -e "${revision}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$revision"
-      - name: PostgreSQL 18 tools for snapshots and isolated cluster checks
+      - name: Check provisioned PostgreSQL 18 tools for snapshots and isolated cluster checks
         run: |
-          sudo apt-get install --yes postgresql-common
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-18
           echo 'MAINWORTHY_PG_BIN=/usr/lib/postgresql/18/bin' >> "$GITHUB_ENV"
-          /usr/lib/postgresql/18/bin/pg_dump --version
-          /usr/lib/postgresql/18/bin/pg_restore --version
+          /usr/lib/postgresql/18/bin/pg_dump --version | grep -E 'PostgreSQL\) 18\.'
+          /usr/lib/postgresql/18/bin/pg_restore --version | grep -E 'PostgreSQL\) 18\.'
       - name: A changed changelog is canonical
         if: ${{ matrix.name == 'tests' || matrix.name == 'tests-1' }}
         env:
@@ -263,19 +271,15 @@ jobs:
           # gate script's to refuse (scripts/ci-gate.ts: "no report").
           if-no-files-found: error
           retention-days: 7
-      - name: PostgreSQL logs and cleanup
+      - name: CI Docker logs and cleanup
         if: always()
-        run: |
-          if docker container inspect postgres >/dev/null 2>&1; then
-            docker logs postgres
-            docker rm --force postgres
-          fi
+        run: bash scripts/ci-cleanup.sh --logs
 
   gate:
     needs: [scope, static, tests, image, description]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
-    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 9
     permissions:
       contents: read
@@ -285,6 +289,8 @@ jobs:
       MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recover CI Docker resources from an interrupted job
+        run: bash scripts/ci-cleanup.sh
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
@@ -323,13 +329,9 @@ jobs:
           SHARDS: ${{ needs.scope.outputs.shards }}
           FILES: ${{ needs.scope.outputs.files }}
         run: bun scripts/ci-gate.ts test-results $SHARDS ${FILES:+"--files=$FILES"}
-      - name: PostgreSQL logs and cleanup
+      - name: CI Docker logs and cleanup
         if: always()
-        run: |
-          if docker container inspect postgres >/dev/null 2>&1; then
-            docker logs postgres
-            docker rm --force postgres
-          fi
+        run: bash scripts/ci-cleanup.sh --logs
       - name: The scope, the type-check, the lint, the image, the description and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
         # or left nothing to upload, and after a re-run the gate above would then read its older attempt's. A job
@@ -346,7 +348,7 @@ jobs:
     needs: [gate, image]
     # `description` is always skipped on a push, and GitHub's implicit `success()` would skip this job for it (#856).
     if: ${{ !cancelled() && needs.gate.result == 'success' && needs.image.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -355,11 +357,17 @@ jobs:
       group: mainworthy-image-publish
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recover CI Docker resources from an interrupted job
+        run: bash scripts/ci-cleanup.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: mainworthy-image
-          path: /tmp
+          path: ${{ runner.temp }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          name: mainworthy-ci
+          cleanup: false
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -369,7 +377,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          docker load --input /tmp/mainworthy-image.tar
+          docker load --input "$RUNNER_TEMP/mainworthy-image.tar"
           image=ghcr.io/endqwerty/mainworthy
           candidate="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           docker tag mainworthy:check "$candidate"
@@ -399,3 +407,6 @@ jobs:
             echo "main has advanced; published the commit tag only"
           fi
           printf 'Published image: `%s@%s`\n' "$image" "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: CI Docker logs and cleanup
+        if: always()
+        run: bash scripts/ci-cleanup.sh --logs

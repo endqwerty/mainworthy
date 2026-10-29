@@ -717,7 +717,7 @@ test("the workers fit the machine: the performance phase is alone on a small one
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
 });
 
-test("CI functional runners leave a CPU for PostgreSQL", () => {
+test("CI functional jobs use two workers on the four-CPU runner", () => {
 	for (const entries of [matrix("all"), matrix(["test/docs.test.ts", "test/policy-latency.test.ts"])]) {
 		for (const entry of entries) {
 			if (entry.name === "performance") {
@@ -725,22 +725,22 @@ test("CI functional runners leave a CPU for PostgreSQL", () => {
 				continue;
 			}
 			const options = parseCheckArgs(["test", ...entry.phase.split(" ")]);
-			expect(options.workers).toBe(1);
+			expect(options.workers).toBe(2);
 			expect(testArgs("parallel", { timings: "t.json", workers: options.workers, shard: options.shard })).toContain(
-				"--parallel=1",
+				"--parallel=2",
 			);
 		}
 	}
 });
 
 test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
-	expect(CI_SHARDS).toBe(14);
+	expect(CI_SHARDS).toBe(1);
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
 	expect(matrix("all")).toEqual([
 		...shards.map((name, i) => ({
 			name,
-			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS} --browser`,
+			phase: `--only=parallel --workers=2 --shard=${i + 1}/${CI_SHARDS} --browser`,
 			files: "",
 		})),
 		{ name: "performance", phase: "--only=performance", files: "" },
@@ -970,7 +970,9 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(upload?.with?.name).toBe("mainworthy-image");
 	expect(upload?.with?.overwrite).toBe(true);
 	expect(download?.with?.name).toBe(upload?.with?.name);
-	expect(image.steps[saveIndex]?.run).toContain(String(upload?.with?.path));
+	expect(upload?.with?.path).toBe(`${expression("runner.temp")}/mainworthy-image.tar`);
+	expect(download?.with?.path).toBe(expression("runner.temp"));
+	expect(image.steps[saveIndex]?.run).toContain('"$RUNNER_TEMP/mainworthy-image.tar"');
 	const login = publish.steps.find((one) => one.uses?.startsWith("docker/login-action@"));
 	expect(login?.with).toEqual({
 		registry: "ghcr.io",
@@ -1255,7 +1257,113 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	}
 });
 
-test("CI installs PostgreSQL snapshot tools before running the test matrix", () => {
+test("CI routes jobs to its dedicated runner and refuses fork PR entry points", () => {
+	const job = z.object({ "runs-on": z.array(z.string()).optional(), if: z.string().optional() });
+	for (const file of new Glob("*.yml").scanSync(".github/workflows")) {
+		const workflow = z
+			.object({ jobs: z.record(z.string(), job) })
+			.parse(Bun.YAML.parse(readFileSync(`.github/workflows/${file}`, "utf8")));
+		for (const one of Object.values(workflow.jobs)) {
+			if (one["runs-on"]) expect(one["runs-on"]).toEqual(["self-hosted", "Linux", "X64", "mainworthy-ci"]);
+		}
+		if (file === "check.yml") {
+			for (const name of ["scope", "description", "gate"])
+				expect(workflow.jobs[name]?.if).toContain("github.event.pull_request.head.repo.full_name == github.repository");
+		}
+	}
+});
+
+test("CI Docker jobs recover stale resources before setup and clean up after failures", () => {
+	const step = z.object({
+		run: z.string().optional(),
+		if: z.string().optional(),
+		uses: z.string().optional(),
+		with: z.object({ name: z.string().optional(), cleanup: z.boolean().optional() }).optional(),
+	});
+	for (const [file, names] of [
+		["check.yml", ["image", "tests", "gate", "publish"]],
+		["sequences.yml", ["sequences"]],
+	] as const) {
+		const workflow = z
+			.object({ jobs: z.record(z.string(), z.object({ steps: z.array(step) })) })
+			.parse(Bun.YAML.parse(readFileSync(`.github/workflows/${file}`, "utf8")));
+		for (const name of names) {
+			const steps = workflow.jobs[name]?.steps ?? [];
+			const cleanup = steps.filter((one) => one.run?.includes("bash scripts/ci-cleanup.sh"));
+			expect(cleanup).toHaveLength(2);
+			expect(steps[1]).toBe(cleanup[0]);
+			expect(cleanup[1]?.if).toBe("always()");
+			const builder = steps.find((one) => one.uses?.startsWith("docker/setup-buildx-action@"));
+			if (builder) expect(builder.with).toEqual({ name: "mainworthy-ci", cleanup: false });
+		}
+	}
+});
+
+test("CI cleanup removes only its resources, survives failed logs and can run again after cancellation", async () => {
+	const root = make("ci-cleanup");
+	const names = [
+		"postgres",
+		"mainworthy",
+		"mainworthy-check",
+		"mainworthy:check",
+		"candidate",
+		"oldcandidate",
+		"builder",
+		"postgres-volume",
+		"unrelated",
+	];
+	for (const name of names) writeFileSync(join(root, name), "stale");
+	writeFileSync(join(root, "mainworthy-image.tar"), "stale");
+	writeFileSync(join(root, "unrelated.tar"), "keep");
+	writeFileSync(
+		join(root, "docker"),
+		`#!/bin/sh
+case "$3" in
+ ghcr.io/endqwerty/mainworthy:build-42-1) set -- "$1" "$2" candidate ;;
+ ghcr.io/endqwerty/mainworthy:build-41-1) set -- "$1" "$2" oldcandidate ;;
+esac
+case "$1 $2" in
+ "info ") exit 0 ;;
+ "container inspect"|"network inspect"|"image inspect") test -f "$CI_RESOURCES/$3" ;;
+ "rm --force")
+   if [ "$3" = --volumes ]; then
+     rm "$CI_RESOURCES/$4"
+     if [ "$4" = postgres ]; then rm "$CI_RESOURCES/postgres-volume"; fi
+   else rm "$CI_RESOURCES/$3"; fi ;;
+ "network rm"|"image rm") rm "$CI_RESOURCES/$3" ;;
+ "image ls")
+   if [ -f "$CI_RESOURCES/candidate" ]; then echo ghcr.io/endqwerty/mainworthy:build-42-1; fi
+   if [ -f "$CI_RESOURCES/oldcandidate" ]; then echo ghcr.io/endqwerty/mainworthy:build-41-1; fi
+   echo ghcr.io/endqwerty/mainworthy:build-not-ci
+   echo ghcr.io/example/other:build-41-1 ;;
+ "buildx inspect") test "$3" = mainworthy-ci && test -f "$CI_RESOURCES/builder" ;;
+ "buildx rm") test "$3" = --force && test "$4" = mainworthy-ci && rm "$CI_RESOURCES/builder" ;;
+ "logs "*) exit 1 ;;
+ *) echo "Unexpected Docker command: $*" >&2; exit 1 ;;
+esac
+`,
+		{ mode: 0o755 },
+	);
+	try {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const execution = Bun.spawn(["bash", "scripts/ci-cleanup.sh", "--logs"], {
+				env: { ...process.env, PATH: `${root}:${process.env.PATH}`, RUNNER_TEMP: root, CI_RESOURCES: root },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [exit, err] = await Promise.all([execution.exited, new Response(execution.stderr).text()]);
+			expect(exit, err).toBe(0);
+			for (const name of names.slice(0, -1)) expect(existsSync(join(root, name))).toBe(false);
+			expect(existsSync(join(root, "mainworthy-image.tar"))).toBe(false);
+			expect(readFileSync(join(root, "unrelated"), "utf8")).toBe("stale");
+			expect(readFileSync(join(root, "unrelated.tar"), "utf8")).toBe("keep");
+		}
+	} finally {
+		remove(root);
+	}
+});
+
+test("CI checks provisioned PostgreSQL snapshot tools before running the test matrix", () => {
 	const workflow = z
 		.object({
 			jobs: z.object({

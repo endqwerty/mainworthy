@@ -40,9 +40,11 @@ test("draft review layers cannot start expensive checks or publish a tested gate
 	expect(workflow).toMatchObject({
 		on: { pull_request: { types: expect.arrayContaining(["ready_for_review"]) } },
 		jobs: {
-			scope: { if: "${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}" },
+			scope: {
+				if: `$\{{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}`,
+			},
 			gate: {
-				if: "${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}",
+				if: `$\{{ !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)) }}`,
 			},
 		},
 	});
@@ -335,7 +337,7 @@ test("no module outside the tests reads a file that only the tests naming it are
 test("the chosen files go to one runner for each phase, and a file name that is not plain is not narrowed", () => {
 	const performance = PERFORMANCE[0] ?? "";
 	expect(matrix(["test/a.test.ts", performance, "test/b.test.ts"])).toEqual([
-		{ name: "tests", phase: "--only=parallel --workers=1", files: "test/a.test.ts test/b.test.ts" },
+		{ name: "tests", phase: "--only=parallel --workers=2", files: "test/a.test.ts test/b.test.ts" },
 		{ name: "performance", phase: "--only=performance", files: performance },
 	]);
 	const read = (lines: string[]) => Object.fromEntries(lines.map((line) => line.split(/=(.*)/s)));

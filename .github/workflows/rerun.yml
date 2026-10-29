@@ -1,6 +1,6 @@
-# When the check fails, the jobs a test failing by chance could have failed run once more, so that Mainworthy can tell
-# a flaky test from a broken commit: a test that passes on the retry has flipped, and reads as flaky (decision 0128).
-# scripts/ci-rerun.ts chooses the jobs and runs them again one after the other; the run's summary says what it chose.
+# Automatic retries are disabled while CI uses one execution runner. The controller waits for each retry
+# and would occupy the runner its retry needs. Run scripts/ci-rerun.ts from a separate machine for the
+# existing bounded retry behavior (decision 0128), or use GitHub's manual rerun controls.
 #
 # GitHub runs this from the default branch's copy, whatever branch the check ran on, so what runs here is code that
 # was reviewed. It reads the failed run's artifacts and jobs, and can run its jobs again: nothing else.
@@ -21,13 +21,10 @@ concurrency:
 
 jobs:
   rerun:
-    # A run's first attempt only: a run that ran again, by this job or by a person, is left as it is. Only runs of a
-    # branch of this repository: a fork's run is not this token's to run again.
-    if: >-
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.run_attempt == 1 &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+    # The controller waits for queued retries and would hold the sole execution runner they need.
+    # Manual GitHub reruns and ci-rerun.ts from a separate machine remain available.
+    if: ${{ false }}
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     # Three jobs, one after the other, each with the gate after it.
     timeout-minutes: 60
     steps:
