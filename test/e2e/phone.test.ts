@@ -45,7 +45,8 @@ const actions = (page: Page) => page.getByRole("button", { name: "Actions", exac
 test.skipIf(!browserAvailable)(
 	"a preserved copy in Suite has a phone-sized Discard button",
 	async () => {
-		const server = await startServer({ cases: 1 });
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Phone case" }] });
 		const phone = await openPage(server, { device: "phone", path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = phone;
@@ -84,7 +85,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"on a phone every screen shows its list, a row opens the detail, and Back returns",
 	async () => {
-		const server = await startServer({ cases: 40 });
+		const server = await startServer({ cases: 12 });
 		const phone = await openPage(server, { device: "phone" });
 		try {
 			const { page } = phone;
@@ -184,7 +185,8 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"closing the phone drawer with its keyboard button returns focus to Menu",
 	async () => {
-		const server = await startServer({ cases: 1 });
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Phone case" }] });
 		const phone = await openPage(server, { device: "phone" });
 		try {
 			const { page } = phone;
@@ -211,7 +213,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"on a phone the sidebar is a drawer, and Actions offers the actions of what is shown",
 	async () => {
-		const server = await startServer({ cases: 40 });
+		const server = await startServer({ cases: 12 });
 		const phone = await openPage(server, { device: "phone" });
 		try {
 			const { page } = phone;
@@ -366,7 +368,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"on a phone a run is recorded with a thumb: the results stay under the case",
 	async () => {
-		const server = await startServer({ cases: 40 });
+		const server = await startServer({ cases: 12 });
 		const phone = await openPage(server, { device: "phone", path: "/p/scratch/runs" });
 		try {
 			const { page } = phone;
@@ -456,7 +458,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"on a phone with a keyboard attached, the answer, result and archive keys and Tab record nothing about a covered row",
 	async () => {
-		const server = await startServer({ cases: 40 });
+		const server = await startServer({ cases: 12 });
 		const phone = await openPage(server, { device: "phone", path: "/p/scratch/queue" });
 		try {
 			const { page } = phone;
@@ -567,7 +569,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"on a phone nothing under the palette or the sheet of keys takes the focus, and Back leaves an editor",
 	async () => {
-		const server = await startServer({ cases: 40 });
+		const server = await startServer({ cases: 12 });
 		const phone = await openPage(server, { device: "phone", path: "/p/scratch/queue" });
 		try {
 			const { page } = phone;

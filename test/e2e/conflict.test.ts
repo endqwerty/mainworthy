@@ -1,18 +1,38 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { z } from "zod";
 import { mergeBodies } from "../../src/core/merge3.ts";
 import { CaseBody, ConflictAddress, conflictLabel } from "../../src/core/model.ts";
+import { call } from "../../src/web/lib/api.ts";
 import choicesTable from "../fixtures/conflict-choices.json";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+
+let sharedServer: Promise<Server> | undefined;
+let projectNumber = 0;
+afterAll(async () => {
+	if (sharedServer) await (await sharedServer).stop();
+});
+async function fixture(): Promise<Server> {
+	sharedServer ??= startServer();
+	const shared = await sharedServer;
+	const project = `conflict-${++projectNumber}`;
+	await shared.api("admin", { do: "project.create", key: project, preset: "loose" });
+	return {
+		...shared,
+		project,
+		api: (op, input, options = {}) =>
+			call(op, input, { url: shared.url, project, token: options.token ?? shared.token }),
+		stop: async () => {},
+	};
+}
 
 test.skipIf(!browserAvailable)(
 	"same-field edits retain both sides until a merge decision makes the next version",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await server.api("propose", {
 			edits: [{ op: "create", outline: "Original title\n  Apply coupon > Coupon accepted" }],
 		});
-		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const browser = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = browser;
 			await page.getByRole("button", { name: "Original title", exact: true }).waitFor();
@@ -63,9 +83,9 @@ for (const row of scenarios)
 	test.skipIf(!browserAvailable)(
 		`shared conflict choices: ${row.name}`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await server.api("propose", { edits: [{ op: "create", body: row.base }] });
-			const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const browser = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 			try {
 				const { page } = browser;
 				await page.getByRole("button", { name: row.base.title, exact: true }).waitFor();

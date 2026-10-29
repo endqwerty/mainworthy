@@ -1146,54 +1146,61 @@ test.skipIf(!browserAvailable)(
 	30000,
 );
 
-for (const home of [
-	{ kind: "run", ref: "R-999" },
-	{ kind: "search", text: "alpha", folder: "Gone", tag: "missing-tag" },
-])
-	test.skipIf(!browserAvailable)(
-		`a missing ${home.kind} home opens Suite once with an explanation`,
-		async () => {
-			const server = await startServer({ cases: 1 });
-			const browser = await openPage(server, { path: "/p/scratch/settings" });
-			try {
-				const { page } = browser;
-				await page.getByRole("option", { name: "Your home", exact: true }).click();
-				await page.getByRole("button", { name: "Save home", exact: true }).click();
-				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
-				const key = await page.evaluate(() => Object.keys(localStorage).find((key) => key.includes(":home:")));
-				if (!key) throw new Error("Missing home preference");
-				await page.evaluate(({ key, home }) => localStorage.setItem(key, JSON.stringify(home)), { key, home });
-				await page.goto(`${server.url}/`);
-				await page.waitForURL("**/p/scratch/suite");
-				await eventually(
-					() => page.locator("#lcount").innerText(),
-					(text) => text === "1 cases",
-				);
-				const notice = page
-					.locator("#bar")
-					.getByRole("status")
-					.filter({ hasText: "Your home was not found. Opened Suite." });
-				await notice.waitFor();
-				expect(await notice.count()).toBe(1);
-				await page.keyboard.type("gq");
-				await page.waitForURL("**/p/scratch/queue");
-				await page.keyboard.type("gh");
-				await page.waitForURL("**/p/scratch/suite");
-				await notice.waitFor();
-				expect(await notice.count()).toBe(1);
-				expect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("");
-				expect(browser.errors).toEqual(
-					home.kind === "run"
-						? Array(2).fill("Failed to load resource: the server responded with a status of 404 (Not Found)")
-						: [],
-				);
-			} finally {
-				await browser.close();
-				await server.stop();
+test.skipIf(!browserAvailable)(
+	"missing run and search homes open Suite once with an explanation",
+	async () => {
+		const host = await startServer();
+		await host.api("propose", { edits: [{ op: "create", outline: "Home case" }] });
+		try {
+			for (const home of [
+				{ kind: "run", ref: "R-999" },
+				{ kind: "search", text: "alpha", folder: "Gone", tag: "missing-tag" },
+			]) {
+				const server = host;
+				const variantExpect = <T>(value: T) => expect(value, home.kind);
+				const browser = await openPage(server, { path: `/p/${server.project}/settings` });
+				try {
+					const { page } = browser;
+					await page.getByRole("option", { name: "Your home", exact: true }).click();
+					await page.getByRole("button", { name: "Save home", exact: true }).click();
+					await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+					const key = await page.evaluate(() => Object.keys(localStorage).find((key) => key.includes(":home:")));
+					if (!key) throw new Error("Missing home preference");
+					await page.evaluate(({ key, home }) => localStorage.setItem(key, JSON.stringify(home)), { key, home });
+					await page.goto(`${server.url}/`);
+					await page.waitForURL(`**/p/${server.project}/suite`);
+					await eventually(
+						() => page.locator("#lcount").innerText(),
+						(text) => text === "1 cases",
+					);
+					const notice = page
+						.locator("#bar")
+						.getByRole("status")
+						.filter({ hasText: "Your home was not found. Opened Suite." });
+					await notice.waitFor();
+					variantExpect(await notice.count()).toBe(1);
+					await page.keyboard.type("gq");
+					await page.waitForURL(`**/p/${server.project}/queue`);
+					await page.keyboard.type("gh");
+					await page.waitForURL(`**/p/${server.project}/suite`);
+					await notice.waitFor();
+					variantExpect(await notice.count()).toBe(1);
+					variantExpect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("");
+					variantExpect(browser.errors).toEqual(
+						home.kind === "run"
+							? Array(2).fill("Failed to load resource: the server responded with a status of 404 (Not Found)")
+							: [],
+					);
+				} finally {
+					await browser.close();
+				}
 			}
-		},
-		30000,
-	);
+		} finally {
+			await host.stop();
+		}
+	},
+	30000,
+);
 
 test.skipIf(!browserAvailable)(
 	"sidebar folder and tag filters keep the Suite search text",

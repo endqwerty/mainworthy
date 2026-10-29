@@ -1,7 +1,27 @@
 // Drafts and conflicts in the case editor: the findings of the fourth review (R4A).
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { z } from "zod";
+import { call } from "../../src/web/lib/api.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+
+let sharedServer: Promise<Server> | undefined;
+let projectNumber = 0;
+afterAll(async () => {
+	if (sharedServer) await (await sharedServer).stop();
+});
+async function fixture(): Promise<Server> {
+	sharedServer ??= startServer();
+	const shared = await sharedServer;
+	const project = `draft-conflicts-${++projectNumber}`;
+	await shared.api("admin", { do: "project.create", key: project, preset: "loose" });
+	return {
+		...shared,
+		project,
+		api: (op, input, options = {}) =>
+			call(op, input, { url: shared.url, project, token: options.token ?? shared.token }),
+		stop: async () => {},
+	};
+}
 
 const check = test.skipIf(!browserAvailable);
 const latch = () => {
@@ -31,9 +51,9 @@ for (const kind of ["edit", "new"])
 		check(
 			`R4A-3 ${kind} text typed during a held seal survives ${leave}`,
 			async () => {
-				const server = await startServer();
+				const server = await fixture();
 				await cases(server);
-				const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 				const gate = latch();
 				try {
 					const { page } = h;
@@ -84,9 +104,9 @@ for (const same of [false, true])
 	check(
 		`a conflict refuses later ${same ? "title" : "step"} input and sealing until resolution`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await cases(server, 1);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 			try {
 				const { page } = h;
 				await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
@@ -140,9 +160,9 @@ for (const same of [false, true])
 check(
 	"R4A-2 duplicated tabs have distinct owners and transfer the complete draft deliberately",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server, 1);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const a = h.page;
 			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
@@ -182,9 +202,9 @@ check(
 check(
 	"R4A-2 a refused command retries current text under a fresh command",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server, 1);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = h;
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
@@ -225,9 +245,9 @@ for (const busy of [false, true])
 	check(
 		`R4A-5 a live window's unfinished capture is read-only in another window${busy ? " that opens while it is busy" : ""}`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await cases(server, 1);
-			const h = await openPage(server);
+			const h = await openPage(server, { path: `/p/${server.project}/suite` });
 			try {
 				const a = h.page;
 				await a.keyboard.press("c");
@@ -238,7 +258,7 @@ for (const busy of [false, true])
 						const end = performance.now() + 3000;
 						while (performance.now() < end);
 					});
-				await b.goto(`${server.url}/p/scratch/suite`);
+				await b.goto(`${server.url}/p/${server.project}/suite`);
 				await b.locator("#app").waitFor();
 				await title(b).waitFor();
 				expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
@@ -268,9 +288,9 @@ for (const busy of [false, true])
 check(
 	"R4A-1 a conflict after a missing reply shows the current draft, not the earlier send",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server, 1);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = h;
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
@@ -318,9 +338,9 @@ for (const rejection of ["API", "UI"])
 	check(
 		`R4A-2 a conflict rejected through ${rejection} releases its card and draft for fresh editing`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await cases(server, 1);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 			try {
 				const { page } = h;
 				await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();

@@ -153,7 +153,7 @@ test("a seed interrupted after writing resumes command ids rather than duplicati
 	await withInstance(
 		async ({ instance }) => {
 			const { app } = instance;
-			const batched = { ...small, cases: 300, days: 0 };
+			const batched = { ...small, cases: 251, days: 0 };
 			app.config.commit = A;
 			await expect(
 				refreshDemo(instance, "demo", batched, {
@@ -164,12 +164,12 @@ test("a seed interrupted after writing resumes command ids rather than duplicati
 			).rejects.toThrow("interrupted before completion");
 			const project = await app.database.read((db) => findProject(db, "demo"));
 			expect((await app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM cases")))[0]).toEqual({
-				n: 300,
+				n: 251,
 			});
 			const result = await refreshDemo(instance, "demo", batched);
-			expect(result.cases).toHaveLength(300);
+			expect(result.cases).toHaveLength(251);
 			expect((await app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM cases")))[0]).toEqual({
-				n: 300,
+				n: 251,
 			});
 			expect((await app.database.read((db) => findProject(db, "demo")))?.id).toBe(project?.id);
 			expect((await app.database.read((db) => demoDeployment(db, project?.id ?? 0)))?.kind).toBe("ready");

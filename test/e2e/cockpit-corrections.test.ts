@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,8 +18,24 @@ import { answer, browserAvailable, eventually, fetched, openPage, type Server, s
 
 const check = browserAvailable ? test : test.skip;
 
+let sharedServer: Promise<Server> | undefined;
+let projectNumber = 0;
+afterAll(async () => {
+	if (sharedServer) await (await sharedServer).stop();
+});
+
 async function fixture(count = 1, minActors: 1 | 2 = 1, preset: "strict" | "loose" = "strict") {
-	const server = await startServer({ mode: "server" });
+	sharedServer ??= startServer({ mode: "server" });
+	const shared = await sharedServer;
+	const project = `corrections-${++projectNumber}`;
+	await shared.api("admin", { do: "project.create", key: project, preset: "loose" });
+	const server: Server = {
+		...shared,
+		project,
+		api: (op, input, options = {}) =>
+			call(op, input, { url: shared.url, project, token: options.token ?? shared.token }),
+		stop: async () => {},
+	};
 	try {
 		await server.api("propose", {
 			edits: Array.from({ length: count }, (_, index) => ({
@@ -40,7 +56,7 @@ async function fixture(count = 1, minActors: 1 | 2 = 1, preset: "strict" | "loos
 			select: {},
 			require: [{ id: "exercise", kind: "exercise", methods: ["human"], minActors, basis: "exact" }],
 		});
-		return { server, run: plan.run, path: `/p/scratch/runs/${plan.run.slice(2)}` };
+		return { server, run: plan.run, path: `/p/${server.project}/runs/${plan.run.slice(2)}` };
 	} catch (error) {
 		await server.stop();
 		throw error;
@@ -158,19 +174,19 @@ for (const timing of ["after slot refresh", "before slot refresh"] as const)
 				const second = z.object({ token: z.string() }).parse(
 					await server.api("admin", {
 						do: "token.create",
-						actor: "second-person",
+						actor: `second-person-${server.project}`,
 						kind: "human",
 						can: ["read", "produce"],
-						project: "scratch",
+						project: server.project,
 					}),
 				);
 				const lead = z.object({ token: z.string() }).parse(
 					await server.api("admin", {
 						do: "token.create",
-						actor: "lead",
+						actor: `lead-${server.project}`,
 						kind: "human",
 						can: ["read", "produce", "answer"],
-						project: "scratch",
+						project: server.project,
 					}),
 				);
 				await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
@@ -190,7 +206,7 @@ for (const timing of ["after slot refresh", "before slot refresh"] as const)
 				await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
 				if (timing === "before slot refresh") await reading.promise;
 				else await page.getByRole("button", { name: "Slot 1: C-1, disputed by robin", exact: true }).waitFor();
-				const receiptQuestion = await page.locator('[data-slot="1"] .run-question').first().innerText();
+				const receiptQuestion = await page.locator("[data-slot]").nth(0).locator(".run-question").first().innerText();
 				const dispute = (await server.api("inbox", { kind: "failure" })).items.find((item) =>
 					item.title.startsWith(`Disputed C-1 in ${run}:`),
 				);
@@ -210,16 +226,18 @@ for (const timing of ["after slot refresh", "before slot refresh"] as const)
 				held.resolve();
 				expect((await slots(server, run))[0]).toMatchObject({
 					state: "missing",
-					fills: [{ by: "second-person", outcome: "pass" }],
+					fills: [{ by: `second-person-${server.project}`, outcome: "pass" }],
 				});
 				const gate = await server.api("gate", { run });
 				await page.locator(".run-verdict").filter({ hasText: gate.reason }).waitFor();
 				try {
-					await page.getByRole("button", { name: "Slot 1: C-1, missing by second-person", exact: true }).waitFor();
+					await page
+						.getByRole("button", { name: `Slot 1: C-1, missing by second-person-${server.project}`, exact: true })
+						.waitFor();
 				} finally {
 					await screenshot(page, timing === "before slot refresh" ? 8742 : 8741);
 				}
-				await page.locator('[data-slot="1"]').getByRole("link", { name: receiptQuestion, exact: true }).waitFor();
+				await page.locator("[data-slot]").nth(0).getByRole("link", { name: receiptQuestion, exact: true }).waitFor();
 				await page
 					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
 					.waitFor({
@@ -230,7 +248,7 @@ for (const timing of ["after slot refresh", "before slot refresh"] as const)
 				expect((await slots(server, run))[0]).toMatchObject({
 					state: "satisfied",
 					fills: [
-						{ by: "second-person", outcome: "pass" },
+						{ by: `second-person-${server.project}`, outcome: "pass" },
 						{ by: "robin", outcome: "pass" },
 					],
 				});
@@ -365,10 +383,10 @@ for (const restricted of ["produce only", "record and answer", "human approval"]
 				const { token } = z.object({ token: z.string() }).parse(
 					await server.api("admin", {
 						do: "token.create",
-						actor: "runner",
+						actor: `runner-${server.project}`,
 						kind: "human",
 						can: restricted === "record and answer" ? ["read", "record", "answer"] : ["read", "produce"],
-						project: "scratch",
+						project: server.project,
 					}),
 				);
 				view = await openPage(restricted === "human approval" ? server : { ...server, token }, { path });
@@ -394,7 +412,7 @@ for (const restricted of ["produce only", "record and answer", "human approval"]
 				expect(await page.locator(".run-controls").innerText()).toContain(
 					"Run closed. To reopen, withdraw the sign-off in Queue > Settled",
 				);
-				expect(await link.getAttribute("href")).toBe(`/p/scratch/queue/${signoff.q.slice(2)}`);
+				expect(await link.getAttribute("href")).toBe(`/p/${server.project}/queue/${signoff.q.slice(2)}`);
 				expect(await page.locator(".run-last").getByRole("button").count()).toBe(0);
 				expect(await page.locator("#hints").innerText()).not.toContain("Correct last result");
 				let decisions = 0;
@@ -486,7 +504,7 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 				await page.keyboard.press("p");
 				await sent.promise;
 				if (delayed) {
-					await page.locator('[data-slot="1"]').click();
+					await page.locator("[data-slot]").nth(0).click();
 					await page.keyboard.press("b");
 				} else {
 					await page
@@ -527,7 +545,7 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 				if (scenario === "fresh session" || scenario === "retired reports") await refresh();
 				await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
 				await page.keyboard.press("Enter");
-				await page.locator('[data-slot="1"]').click();
+				await page.locator("[data-slot]").nth(0).click();
 				await ready(page);
 				if (scenario === "retired reports") {
 					const refused = page.waitForResponse((response) => response.url().endsWith("/report"));
@@ -561,7 +579,7 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 					await refresh();
 					await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
 					await page.keyboard.press("Enter");
-					await page.locator('[data-slot="1"]').click();
+					await page.locator("[data-slot]").nth(0).click();
 					await ready(page);
 					await page.keyboard.press("b");
 					await page.locator("#stat").filter({ hasText: "C-1 blocked recorded" }).waitFor();
@@ -615,7 +633,7 @@ check(
 			await page.locator("#list").getByRole("link", { name: "Runs", exact: true }).click();
 			await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
 			await page.keyboard.press("Enter");
-			await page.locator('[data-slot="1"]').click();
+			await page.locator("[data-slot]").nth(0).click();
 			await ready(page);
 			await page.keyboard.press("p");
 			// A broken queue sends the pass first. A preserved queue waits for the held failure.
@@ -666,7 +684,7 @@ check(
 			await page.locator("#list").getByRole("link", { name: "Runs", exact: true }).click();
 			await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
 			await page.keyboard.press("Enter");
-			await page.locator('[data-slot="1"]').click();
+			await page.locator("[data-slot]").nth(0).click();
 			await ready(page);
 			await page.unroute("**/command");
 			await page.keyboard.press("p");
@@ -758,7 +776,7 @@ check(
 			await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
 			const other = await context.newPage();
 			await other.goto(`${server.url}${path}`);
-			await other.locator('[data-slot="1"]').click();
+			await other.locator("[data-slot]").nth(0).click();
 			await ready(other);
 			await fail(other, "Second tab new failure");
 			await other.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
@@ -853,15 +871,15 @@ for (const outcome of ["pass", "skip", "blocked"] as const)
 				const { token } = z.object({ token: z.string() }).parse(
 					await server.api("admin", {
 						do: "token.create",
-						actor: "second-person",
+						actor: `second-person-${server.project}`,
 						kind: "human",
 						can: ["read", "produce"],
-						project: "scratch",
+						project: server.project,
 					}),
 				);
 				view = await openPage({ ...server, token }, { path });
 				const { page } = view;
-				await page.locator('[data-slot="1"]').click();
+				await page.locator("[data-slot]").nth(0).click();
 				await ready(page);
 				if (outcome === "skip") await screenshot(page, 612);
 				expect(await page.getByRole("button", { name: "p Pass", exact: true }).isEnabled()).toBe(true);
@@ -873,11 +891,11 @@ for (const outcome of ["pass", "skip", "blocked"] as const)
 				await page.keyboard.press("p");
 				const rows = await eventually(
 					() => slots(server, run),
-					(rows) => rows[0]?.fills.some((fill) => fill.by === "second-person") === true,
+					(rows) => rows[0]?.fills.some((fill) => fill.by === `second-person-${server.project}`) === true,
 				);
 				expect(rows[0]?.fills.map(({ by, outcome }) => ({ by, outcome }))).toEqual([
 					{ by: "robin", outcome },
-					{ by: "second-person", outcome: "pass" },
+					{ by: `second-person-${server.project}`, outcome: "pass" },
 				]);
 				expect(rows[0]?.state).toBe(outcome === "pass" ? "satisfied" : "missing");
 				if (outcome !== "pass") {
@@ -1042,7 +1060,7 @@ check(
 			await page.keyboard.press("u");
 			await sent.promise;
 			await page.keyboard.press("u");
-			await page.locator('[data-slot="2"]').click();
+			await page.locator("[data-slot]").nth(1).click();
 			await page.keyboard.press("p");
 			await page.locator("#stat").filter({ hasText: "C-2 pass recorded" }).waitFor();
 			held.resolve();
@@ -1151,8 +1169,8 @@ for (const outcome of ["skip", "blocked"] as const)
 				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
 					"C-1",
 				);
-				await page.locator('[data-slot="3"]').click();
-				await page.locator('[data-slot="1"]').click();
+				await page.locator("[data-slot]").nth(2).click();
+				await page.locator("[data-slot]").nth(0).click();
 				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
 					"C-1",
 				);
@@ -1240,10 +1258,10 @@ for (const mode of ["open", "closed", "read-only"] as const)
 						? z.object({ token: z.string() }).parse(
 								await server.api("admin", {
 									do: "token.create",
-									actor: "viewer",
+									actor: `viewer-${server.project}`,
 									kind: "human",
 									can: ["read"],
-									project: "scratch",
+									project: server.project,
 								}),
 							).token
 						: server.token;
@@ -1302,10 +1320,10 @@ for (const viewer of ["read-only", "reporter"] as const)
 				const { token } = z.object({ token: z.string() }).parse(
 					await server.api("admin", {
 						do: "token.create",
-						actor: "reviewer",
+						actor: `reviewer-${server.project}`,
 						kind: "human",
 						can: viewer === "read-only" ? ["read"] : ["read", "record"],
-						project: "scratch",
+						project: server.project,
 					}),
 				);
 				view = await openPage({ ...server, token }, { path });
@@ -1338,10 +1356,10 @@ check(
 			const { token } = z.object({ token: z.string() }).parse(
 				await server.api("admin", {
 					do: "token.create",
-					actor: "reviewer",
+					actor: `reviewer-${server.project}`,
 					kind: "human",
 					can: ["read", "record"],
-					project: "scratch",
+					project: server.project,
 				}),
 			);
 			view = await openPage({ ...server, token }, { path });
@@ -1365,11 +1383,9 @@ check(
 			expect(await active(page)).toBe("C-2");
 			await page.keyboard.press("k");
 			expect(await active(page)).toBe("C-1");
-			expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.by === "reviewer"))).toEqual([
-				[true],
-				[false],
-				[true],
-			]);
+			expect(
+				(await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.by === `reviewer-${server.project}`)),
+			).toEqual([[true], [false], [true]]);
 		} finally {
 			await view?.close();
 			await server.stop();
@@ -1388,10 +1404,10 @@ check(
 			const { token } = z.object({ token: z.string() }).parse(
 				await server.api("admin", {
 					do: "token.create",
-					actor: "reviewer-agent",
+					actor: `reviewer-agent-${server.project}`,
 					kind: "agent",
 					can: ["read", "record"],
-					project: "scratch",
+					project: server.project,
 				}),
 			);
 			view = await openPage({ ...server, token }, { path });

@@ -1,131 +1,155 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { call } from "../../src/web/lib/api.ts";
+import type { Server } from "./support.ts";
 import { browserAvailable, eventually, foldersShown, openPage, startServer } from "./support.ts";
 
-for (const next of [true, false]) {
-	test.skipIf(!browserAvailable)(
-		`${next ? "next" : "previous"} folder selects its first case after the list arrives`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [
-					{ op: "create", outline: "Alpha first", folder: "Alpha" },
-					{ op: "create", outline: "Alpha last", folder: "Alpha" },
-					{ op: "create", outline: "Beta first", folder: "Beta" },
-					{ op: "create", outline: "Beta last", folder: "Beta" },
-					{ op: "folder", name: "Empty" },
-				],
-			});
-			const from = next ? "Alpha" : "Beta";
-			const to = next ? "Beta" : "Alpha";
-			const h = await openPage(server, { path: `/p/scratch/suite/c/${next ? 2 : 4}?folder=${from}` });
-			let release = () => {};
-			const held = new Promise<void>((resolve) => {
-				release = resolve;
-			});
-			try {
-				const { page } = h;
-				await page.getByRole("button", { name: `${from} last`, exact: true }).waitFor();
-				await foldersShown(page, to);
-				await page.keyboard.press("x");
-				let requested = false;
-				await page.context().route("**/api/p/scratch/find", async (route) => {
-					const input = z
-						.object({ in: z.string(), folder: z.string().optional() })
-						.parse(route.request().postDataJSON());
-					if (input.in === "cases" && input.folder === to) {
-						requested = true;
-						await held;
-					}
-					await route.continue();
+test.skipIf(!browserAvailable)(
+	"next and previous folders select their first case after the list arrives",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, next] of [true, false].entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(next));
+				await server.api("propose", {
+					edits: [
+						{ op: "create", outline: "Alpha first", folder: "Alpha" },
+						{ op: "create", outline: "Alpha last", folder: "Alpha" },
+						{ op: "create", outline: "Beta first", folder: "Beta" },
+						{ op: "create", outline: "Beta last", folder: "Beta" },
+						{ op: "folder", name: "Empty" },
+					],
 				});
-				await page.keyboard.press(next ? "]" : "Alt+[");
-				await eventually(async () => requested, Boolean);
-				release();
-				await page
-					.getByRole("option")
-					.filter({ hasText: `${to} first` })
-					.waitFor();
-				if (next && process.env.MAINWORTHY_CURSOR_SCREENSHOT)
-					await page.screenshot({ path: process.env.MAINWORTHY_CURSOR_SCREENSHOT });
-				expect(
-					await eventually(
-						() => page.locator('.row[aria-selected="true"] .id').allTextContents(),
-						(refs) => refs.join() === (next ? "C-3" : "C-1"),
-					),
-				).toEqual([next ? "C-3" : "C-1"]);
-				await page.keyboard.press("x");
-				expect(await page.locator(".bulk-indicator").textContent()).toBe("2 selected");
-				if (next) {
-					await page.keyboard.press("]");
-					await page.locator("#ltitle").filter({ hasText: "Empty" }).waitFor();
-					await page.locator("#lcount").filter({ hasText: "0 cases" }).waitFor();
+				const from = next ? "Alpha" : "Beta";
+				const to = next ? "Beta" : "Alpha";
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/${next ? 2 : 4}?folder=${from}` });
+				let release = () => {};
+				const held = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: `${from} last`, exact: true }).waitFor();
+					await foldersShown(page, to);
 					await page.keyboard.press("x");
-					expect(await page.locator(".bulk-indicator").textContent()).toBe("2 selected");
-					await page.keyboard.press("Alt+[");
-					await page.getByRole("option").filter({ hasText: "Beta first" }).waitFor();
-					expect(
+					let requested = false;
+					await page.context().route(`**/api/p/${server.project}/find`, async (route) => {
+						const input = z
+							.object({ in: z.string(), folder: z.string().optional() })
+							.parse(route.request().postDataJSON());
+						if (input.in === "cases" && input.folder === to) {
+							requested = true;
+							await held;
+						}
+						await route.continue();
+					});
+					await page.keyboard.press(next ? "]" : "Alt+[");
+					await eventually(async () => requested, Boolean);
+					release();
+					await page
+						.getByRole("option")
+						.filter({ hasText: `${to} first` })
+						.waitFor();
+					if (next && process.env.MAINWORTHY_CURSOR_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_CURSOR_SCREENSHOT });
+					variantExpect(
 						await eventually(
 							() => page.locator('.row[aria-selected="true"] .id').allTextContents(),
-							(refs) => refs.join() === "C-3",
+							(refs) => refs.join() === (next ? "C-3" : "C-1"),
 						),
-					).toEqual(["C-3"]);
+					).toEqual([next ? "C-3" : "C-1"]);
+					await page.keyboard.press("x");
+					variantExpect(await page.locator(".bulk-indicator").textContent()).toBe("2 selected");
+					if (next) {
+						await page.keyboard.press("]");
+						await page.locator("#ltitle").filter({ hasText: "Empty" }).waitFor();
+						await page.locator("#lcount").filter({ hasText: "0 cases" }).waitFor();
+						await page.keyboard.press("x");
+						variantExpect(await page.locator(".bulk-indicator").textContent()).toBe("2 selected");
+						await page.keyboard.press("Alt+[");
+						await page.getByRole("option").filter({ hasText: "Beta first" }).waitFor();
+						variantExpect(
+							await eventually(
+								() => page.locator('.row[aria-selected="true"] .id').allTextContents(),
+								(refs) => refs.join() === "C-3",
+							),
+						).toEqual(["C-3"]);
+					}
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					release();
+					await h.close();
 				}
-				expect(h.errors).toEqual([]);
-			} finally {
-				release();
-				await h.close();
-				await server.stop();
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
-for (const next of [true, false]) {
-	test.skipIf(!browserAvailable)(
-		`${next ? "next" : "previous"} folder shortcuts keep archived, tag and text filters`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [
-					{ op: "create", outline: "Match Alpha", folder: "Alpha", tags: ["keep", "smoke"] },
-					{ op: "create", outline: "Match Beta", folder: "Beta", tags: ["keep", "smoke"] },
-					{ op: "create", outline: "Match wrong tag", folder: "Beta", tags: ["keep"] },
-					{ op: "create", outline: "Other title", folder: "Beta", tags: ["keep", "smoke"] },
-					{ op: "create", outline: "Match active", folder: "Beta", tags: ["keep", "smoke"] },
-				],
-			});
-			await server.api("propose", { edits: [{ op: "state", cases: ["C-1", "C-2", "C-3", "C-4"], to: "archived" }] });
-			const from = next ? "Alpha" : "Beta";
-			const to = next ? "Beta" : "Alpha";
-			const h = await openPage(server, {
-				path: `/p/scratch/suite/c/${next ? 1 : 2}?folder=${from}&state=archived&tag=keep&tag=smoke&text=Match`,
-			});
-			try {
-				const { page } = h;
-				await page.getByRole("button", { name: `Match ${from}`, exact: true }).waitFor();
-				await foldersShown(page, to);
-				await page.keyboard.press(next ? "]" : "Alt+[");
-				await page.waitForURL((url) => url.searchParams.get("folder") === to);
-				const params = new URL(page.url()).searchParams;
-				expect(params.get("state")).toBe("archived");
-				expect(params.getAll("tag")).toEqual(["keep", "smoke"]);
-				expect(params.get("text")).toBe("Match");
-				await page.locator("#ltitle").filter({ hasText: "Archived" }).waitFor();
-				expect(
-					await eventually(
-						() => page.locator("#list .row .id").allTextContents(),
-						(refs) => refs.join() === (next ? "C-2" : "C-1"),
-					),
-				).toEqual([next ? "C-2" : "C-1"]);
-				await page.getByRole("button", { name: `Match ${to}`, exact: true }).waitFor();
-				expect(h.errors).toEqual([]);
-			} finally {
-				await h.close();
-				await server.stop();
+test.skipIf(!browserAvailable)(
+	"next and previous folder shortcuts keep archived, tag and text filters",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, next] of [true, false].entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(next));
+				await server.api("propose", {
+					edits: [
+						{ op: "create", outline: "Match Alpha", folder: "Alpha", tags: ["keep", "smoke"] },
+						{ op: "create", outline: "Match Beta", folder: "Beta", tags: ["keep", "smoke"] },
+						{ op: "create", outline: "Match wrong tag", folder: "Beta", tags: ["keep"] },
+						{ op: "create", outline: "Other title", folder: "Beta", tags: ["keep", "smoke"] },
+						{ op: "create", outline: "Match active", folder: "Beta", tags: ["keep", "smoke"] },
+					],
+				});
+				await server.api("propose", { edits: [{ op: "state", cases: ["C-1", "C-2", "C-3", "C-4"], to: "archived" }] });
+				const from = next ? "Alpha" : "Beta";
+				const to = next ? "Beta" : "Alpha";
+				const h = await openPage(server, {
+					path: `/p/${server.project}/suite/c/${next ? 1 : 2}?folder=${from}&state=archived&tag=keep&tag=smoke&text=Match`,
+				});
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: `Match ${from}`, exact: true }).waitFor();
+					await foldersShown(page, to);
+					await page.keyboard.press(next ? "]" : "Alt+[");
+					await page.waitForURL((url) => url.searchParams.get("folder") === to);
+					const params = new URL(page.url()).searchParams;
+					variantExpect(params.get("state")).toBe("archived");
+					variantExpect(params.getAll("tag")).toEqual(["keep", "smoke"]);
+					variantExpect(params.get("text")).toBe("Match");
+					await page.locator("#ltitle").filter({ hasText: "Archived" }).waitFor();
+					variantExpect(
+						await eventually(
+							() => page.locator("#list .row .id").allTextContents(),
+							(refs) => refs.join() === (next ? "C-2" : "C-1"),
+						),
+					).toEqual([next ? "C-2" : "C-1"]);
+					await page.getByRole("button", { name: `Match ${to}`, exact: true }).waitFor();
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					await h.close();
+				}
 			}
-		},
-		20_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	20_000,
+);

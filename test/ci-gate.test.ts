@@ -573,6 +573,8 @@ function gateVariants(): typeof gate {
 	};
 }
 
+const checkReportVariant = gateVariants();
+
 /** The Mainworthy the job said it started, if its process is still there a moment after the job ended. */
 async function stillRunning(output: string): Promise<string[]> {
 	const pid = Number(/^Started a Mainworthy for this job: \S+ \(process (\d+)\)$/m.exec(output)?.[1]);
@@ -720,7 +722,7 @@ test("a shard that ran again is read from its newest attempt, and the others fro
 }, 20_000);
 
 test("the newest attempt of a shard is its report also when it failed, or left an artifact with no report in it", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	const failedAgain = await check([
 		...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
 		{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
@@ -757,7 +759,7 @@ test("a test file whose tests were all skipped fails the job, though the gate pa
 }, 20_000);
 
 test("a test file whose name the reader cuts short fails the job, so a skipped file cannot be counted with one that ran", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	// Issue #82. The reader keeps the first 500 characters of a file's name, and the two names below share them:
 	// counted by that name they are one file with two tests and one skip, and the skipped file goes unreported.
 	const deep = `test/${Array.from({ length: 5 }, () => "a".repeat(99)).join("/")}`;
@@ -784,7 +786,7 @@ test("a test file whose name the reader cuts short fails the job, so a skipped f
 }, 40_000);
 
 test("a test that takes its file from its suite is counted for that file", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	// Other producers of JUnit put the file on the suite only. Bun puts it on every test.
 	const inherited = junit({ "test/c.test.ts": null }).replace(/(<testcase\b[^>]*?) file="[^"]+"/g, "$1");
 	expect(inherited).not.toMatch(/<testcase\b[^>]* file=/);
@@ -800,7 +802,7 @@ test("a test that takes its file from its suite is counted for that file", async
 }, 40_000);
 
 test("text inside a test's output is not counted as a test or as a skip", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	const withReport = (xml: string): Shard[] =>
 		green.map((shard) => (shard.name === "tests-2" ? { ...shard, xml, exit: 0 } : shard));
 	const report = (body: string) =>
@@ -845,7 +847,7 @@ test("a test file that is in no shard's report fails the job", async () => {
 
 // Decision 0090: a change that needs only some test files runs those, and the gate expects those in a report.
 test("given the files the change needed, the job expects those in a report and no other", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	const chosen: Shard[] = [
 		{ name: "tests", files: { "test/architecture.test.ts": null, "test/licences.test.ts": null } },
 	];
@@ -859,7 +861,7 @@ test("given the files the change needed, the job expects those in a report and n
 }, 20_000);
 
 test("a slow shard only warns, and a slow failed test still blocks", async () => {
-	const check = gateVariants();
+	const check = checkReportVariant;
 	const taking = (shards: Shard[], seconds: number): Shard[] =>
 		shards.map((shard) => (shard.name === "performance" ? { ...shard, seconds } : shard));
 	for (const seconds of [181, 241]) {

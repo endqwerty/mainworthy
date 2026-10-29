@@ -105,51 +105,54 @@ async function protectedReview() {
 }
 
 describe("who may change the suite and the policy", () => {
-	for (const chosen of ["Merged", "Theirs"])
-		for (const remote of ["addition", "removal", "draft removal"]) {
-			test(`a combined conflict keeps tag and link deltas when choosing ${chosen} with remote ${remote}`, async () => {
+	test("combined conflicts keep tag and link deltas for every chosen body and remote change", async () => {
+		let index = 0;
+		for (const chosen of ["Merged", "Theirs"])
+			for (const remote of ["addition", "removal", "draft removal"]) {
+				const ref = `C-${++index}`;
+				const label = `${chosen}, ${remote}`;
 				await h.call("propose", {
 					edits: [
 						{ op: "create", body: { title: "Base" }, tags: ["old"], covers: remote === "addition" ? [] : ["REQ-100"] },
 					],
 				});
-				await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+				await h.call("propose", { edits: [{ op: "edit", case: ref, base: 1, body: { title: "Theirs" } }] });
 				const pending = await h.call<ProposeReply>("propose", {
 					edits: [
-						{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
-						{ op: "place", cases: ["C-1"], tags: { add: ["mine"], remove: remote === "addition" ? [] : ["old"] } },
+						{ op: "edit", case: ref, base: 1, body: { title: "Mine" } },
+						{ op: "place", cases: [ref], tags: { add: ["mine"], remove: remote === "addition" ? [] : ["old"] } },
 						...(remote === "draft removal"
-							? [{ op: "cover", case: "C-1", requirement: "REQ-100", on: false } satisfies Edit]
+							? [{ op: "cover", case: ref, requirement: "REQ-100", on: false } satisfies Edit]
 							: []),
-						{ op: "cover", case: "C-1", requirement: "REQ-101", on: true },
+						{ op: "cover", case: ref, requirement: "REQ-101", on: true },
 					],
 				});
-				expect(pending.status).toBe("conflict");
+				expect(pending.status, label).toBe("conflict");
 				const question = await open("adopt");
 				await h.call("propose", {
 					edits: [
-						{ op: "edit", case: "C-1", base: 2, body: { pre: "Independent later work" } },
-						{ op: "place", cases: ["C-1"], tags: remote === "addition" ? { set: ["theirs"] } : { add: ["theirs"] } },
-						{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
+						{ op: "edit", case: ref, base: 2, body: { pre: "Independent later work" } },
+						{ op: "place", cases: [ref], tags: remote === "addition" ? { set: ["theirs"] } : { add: ["theirs"] } },
+						{ op: "cover", case: ref, requirement: "REQ-102", on: true },
 						...(remote === "removal"
-							? [{ op: "cover", case: "C-1", requirement: "REQ-100", on: false } satisfies Edit]
+							? [{ op: "cover", case: ref, requirement: "REQ-100", on: false } satisfies Edit]
 							: []),
 					],
 				});
 				const merged = await decide(question, { is: "merge", body: emptyBody(chosen) });
-				expect(merged.status).toBe("decided");
-				expect(await getCase()).toMatchObject({
+				expect(merged.status, label).toBe("decided");
+				expect(await getCase(ref), label).toMatchObject({
 					title: chosen,
 					pre: "Independent later work",
 					version: chosen === "Merged" ? 4 : 3,
 				});
-				expect([...(await getCase()).tags].sort()).toEqual(["mine", "theirs"]);
-				expect((await h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] }))[0]?.covers).toEqual([
+				expect([...(await getCase(ref)).tags].sort(), label).toEqual(["mine", "theirs"]);
+				expect((await h.call<{ covers: string[] }[]>("get", { refs: [ref] }))[0]?.covers, label).toEqual([
 					"REQ-101",
 					"REQ-102",
 				]);
-			});
-		}
+			}
+	});
 
 	test("inline merge additions override same-item removals without losing other or concurrent deltas", async () => {
 		await h.call("propose", {
@@ -291,9 +294,12 @@ describe("who may change the suite and the policy", () => {
 		expect(JSON.parse(proposal?.edits ?? "[]")).toHaveLength(2);
 	});
 
-	for (const source of ["base", "current"] as const) {
-		for (const field of ["title", "action", "expected"] as const) {
-			test(`a merge preserves literal ${source} ${field} text`, async () => {
+	test("a merge preserves literal base and current text in every field", async () => {
+		let index = 0;
+		for (const source of ["base", "current"] as const) {
+			for (const field of ["title", "action", "expected"] as const) {
+				const ref = `C-${++index}`;
+				const label = `${source}, ${field}`;
 				const literal = "Enter #critical in the filter @REQ-100";
 				const content = (text: string) => ({
 					...emptyBody(field === "title" ? text : "Title"),
@@ -304,24 +310,24 @@ describe("who may change the suite and the policy", () => {
 				const base = content(source === "base" ? literal : "Base");
 				const current = content(source === "current" ? literal : "Current");
 				await h.call("propose", { edits: [{ op: "create", body: base }] });
-				await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: current }] });
-				await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: content("Mine") }] });
+				await h.call("propose", { edits: [{ op: "edit", case: ref, base: 1, body: current }] });
+				await h.call("propose", { edits: [{ op: "edit", case: ref, base: 1, body: content("Mine") }] });
 				const chosen = source === "current" ? current : base;
 				const reply = await decide(await open("adopt"), { is: "merge", body: chosen });
-				expect(reply).toMatchObject({
+				expect(reply, label).toMatchObject({
 					status: "decided",
 					effects: { status: source === "current" ? "unchanged" : "adopted" },
 				});
-				expect((await h.call("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				expect((await h.call("get", { refs: [ref] }))[0], label).toMatchObject({
 					title: chosen.title,
 					steps: chosen.steps,
 					tags: [],
 					covers: [],
 					version: source === "current" ? 2 : 3,
 				});
-			});
+			}
 		}
-	}
+	});
 
 	test("an unchanged literal field does not excuse new tokens in another field or step", async () => {
 		const literal = "Enter #critical @REQ-100";

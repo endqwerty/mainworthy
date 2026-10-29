@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, test as bunTest, expect, spyOn } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +17,17 @@ import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-beforeEach(async () => {
-	h = await harness();
-});
+function testWithPreset(preset: string, name: string, body: () => Promise<void>, timeout?: number) {
+	bunTest(
+		name,
+		async () => {
+			h = await harness({ preset });
+			await body();
+		},
+		timeout,
+	);
+}
+const test = testWithPreset.bind(null, "loose");
 afterEach(async () => await h?.close());
 const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
 const base = async (fail: Record<number, string> = { 0: "same cause" }, attempt = 1) =>
@@ -41,44 +49,46 @@ test("inherited support reads sibling comparison metadata in batches", async () 
 	expect(h.app.database.statementCount).toBeLessThanOrEqual(20);
 });
 
-test("policy adoption batches changes whose base has never been reported, then inherits later base proof", async () => {
-	await h.close();
-	h = await harness({ preset: "standard" });
-	for (let pr = 1; pr <= 30; pr++)
-		await h.call(
-			"report",
-			ciReport({
-				commit: `future-change-${pr}`,
-				pr,
-				branch: `feature-${pr}`,
-				base: "future-base",
-				n: 1,
-				fail: { 0: "same cause" },
-			}),
-		);
-	await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
-	const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
-	if (!adoption) throw new Error("missing policy adoption");
-	h.app.database.resetStatementCount();
-	expect(
-		await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
-	).toMatchObject([{ status: "decided" }]);
-	expect(
-		h.app.database.statementCount,
-		"missing bases cannot require one reconciliation per historical run",
-	).toBeLessThan(120);
-	for (let pr = 1; pr <= 30; pr++)
-		expect(await gate(`future-change-${pr}`)).toMatchObject({
-			verdict: "blocked",
-			tally: { unexplained: 1, excused: 0 },
-		});
-	await h.call("report", ciReport({ commit: "future-base", n: 1, fail: { 0: "same cause" } }));
-	for (let pr = 1; pr <= 30; pr++)
-		expect(await gate(`future-change-${pr}`)).toMatchObject({
-			verdict: "passed",
-			tally: { unexplained: 0, excused: 1 },
-		});
-});
+testWithPreset(
+	"standard",
+	"policy adoption batches changes whose base has never been reported, then inherits later base proof",
+	async () => {
+		for (let pr = 1; pr <= 30; pr++)
+			await h.call(
+				"report",
+				ciReport({
+					commit: `future-change-${pr}`,
+					pr,
+					branch: `feature-${pr}`,
+					base: "future-base",
+					n: 1,
+					fail: { 0: "same cause" },
+				}),
+			);
+		await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
+		const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+		if (!adoption) throw new Error("missing policy adoption");
+		h.app.database.resetStatementCount();
+		expect(
+			await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+		expect(
+			h.app.database.statementCount,
+			"missing bases cannot require one reconciliation per historical run",
+		).toBeLessThan(120);
+		for (let pr = 1; pr <= 30; pr++)
+			expect(await gate(`future-change-${pr}`)).toMatchObject({
+				verdict: "blocked",
+				tally: { unexplained: 1, excused: 0 },
+			});
+		await h.call("report", ciReport({ commit: "future-base", n: 1, fail: { 0: "same cause" } }));
+		for (let pr = 1; pr <= 30; pr++)
+			expect(await gate(`future-change-${pr}`)).toMatchObject({
+				verdict: "passed",
+				tally: { unexplained: 0, excused: 1 },
+			});
+	},
+);
 
 for (const answer of ["inherited", "mistaken"]) {
 	for (const existing of [false, true]) {
@@ -123,50 +133,52 @@ for (const answer of ["inherited", "mistaken"]) {
 
 for (const preset of ["loose", "standard"]) {
 	for (const declarationFirst of [true, false]) {
-		test(`${preset} keeps inherited failures visible with a declaration ${declarationFirst ? "before" : "after"} results`, async () => {
-			await h.close();
-			h = await harness({ preset });
-			await h.call("propose", { edits: [{ op: "policy", emptyReports: "nothing-required" }] });
-			const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
-			if (!adoption) throw new Error("missing policy adoption");
-			await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
-			await base();
-			const ordinary = ciReport({
-				commit: "change01",
-				pr: 69,
-				base: "base0001",
-				n: 2,
-				fail: { 0: "same cause", 1: "new cause" },
-			});
-			const declaration = { ...ordinary, job: "path-filter", results: [], nothingRequired: true };
-			if (declarationFirst) {
-				await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
-				expect(await gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 0, unexplained: 0 } });
-			}
-			await h.call("report", ordinary);
-			if (!declarationFirst) await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
-			expect(await gate("change01")).toMatchObject({
-				verdict: "blocked",
-				stale: false,
-				tally: preset === "loose" ? { excused: 1, unexplained: 1 } : { excused: 0, unexplained: 2 },
-			});
-			expect(
-				await h.app.database.read(
-					async (db) =>
-						await db.get(
-							sql<readonly [], { n: number }>(
-								"SELECT count(*) AS n FROM results WHERE batch IN (SELECT id FROM batches WHERE nothing_required = 1)",
+		testWithPreset(
+			preset,
+			`${preset} keeps inherited failures visible with a declaration ${declarationFirst ? "before" : "after"} results`,
+			async () => {
+				await h.call("propose", { edits: [{ op: "policy", emptyReports: "nothing-required" }] });
+				const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+				if (!adoption) throw new Error("missing policy adoption");
+				await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+				await base();
+				const ordinary = ciReport({
+					commit: "change01",
+					pr: 69,
+					base: "base0001",
+					n: 2,
+					fail: { 0: "same cause", 1: "new cause" },
+				});
+				const declaration = { ...ordinary, job: "path-filter", results: [], nothingRequired: true };
+				if (declarationFirst) {
+					await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
+					expect(await gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 0, unexplained: 0 } });
+				}
+				await h.call("report", ordinary);
+				if (!declarationFirst) await h.call("report", declaration, await h.actor("declarer", "ci", ["read", "record"]));
+				expect(await gate("change01")).toMatchObject({
+					verdict: "blocked",
+					stale: false,
+					tally: preset === "loose" ? { excused: 1, unexplained: 1 } : { excused: 0, unexplained: 2 },
+				});
+				expect(
+					await h.app.database.read(
+						async (db) =>
+							await db.get(
+								sql<readonly [], { n: number }>(
+									"SELECT count(*) AS n FROM results WHERE batch IN (SELECT id FROM batches WHERE nothing_required = 1)",
+								),
 							),
-						),
-				),
-			).toEqual({ n: 0 });
-			await base({}, 2);
-			expect(await gate("change01")).toMatchObject({
-				verdict: "blocked",
-				stale: false,
-				tally: { excused: 0, unexplained: 2 },
-			});
-		});
+					),
+				).toEqual({ n: 0 });
+				await base({}, 2);
+				expect(await gate("change01")).toMatchObject({
+					verdict: "blocked",
+					stale: false,
+					tally: { excused: 0, unexplained: 2 },
+				});
+			},
+		);
 	}
 }
 
@@ -177,48 +189,46 @@ test("a base declaration cannot supply inherited failure evidence", async () => 
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
 });
 
-test("loose accepts more than fifty distinct inherited causes", async () => {
-	const fail = Object.fromEntries(Array.from({ length: 52 }, (_, i) => [i, `distinct cause ${i}`]));
-	await h.call("report", ciReport({ commit: "base0001", n: 52, fail }));
-	await h.call("report", ciReport({ commit: "change01", pr: 69, base: "base0001", n: 52, fail }));
-	expect(await gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 52, unexplained: 0 } });
-});
-
 for (const preset of ["standard", "loose"]) {
-	test(`${preset} reads base evidence in proportion to 600 distinct causes`, async () => {
-		await h.close();
-		h = await harness({ preset });
-		const fail = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [i, `distinct cause ${i}`]));
-		await h.call("report", ciReport({ commit: "base0001", n: 600, fail }));
-		const run = (await gate("base0001")).run;
-		if (!run) throw new Error("missing base run");
-		const baseRun = Number(run.slice(2));
-		let reads = 0;
-		const all = (await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb)).all;
-		const spy = spyOn(
-			await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb),
-			"all",
-		).mockImplementation(async function (this: WriteDb, statement, ...params) {
-			const rows = await Reflect.apply(all, this, [statement, ...params]);
-			if (statement.text.includes("FROM run_tests") && params[0] && "run" in params[0] && params[0].run === baseRun)
-				reads += rows.length;
-			return rows;
-		});
-		try {
-			await h.call("report", ciReport({ commit: "change01", pr: 69, base: "base0001", n: 600, fail }));
-			expect((await gate("change01")).tally).toMatchObject(
-				preset === "loose" ? { excused: 600, unexplained: 0 } : { excused: 0, unexplained: 600 },
-			);
-			budget(
-				`evidence reads for 600 inherited failures (${preset})`,
-				reads,
-				600 * (preset === "loose" ? 6 : 2),
-				"reads",
-			);
-		} finally {
-			spy.mockRestore();
-		}
-	}, 120_000);
+	testWithPreset(
+		preset,
+		`${preset} reads base evidence in proportion to 600 distinct causes`,
+		async () => {
+			const fail = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [i, `distinct cause ${i}`]));
+			await h.call("report", ciReport({ commit: "base0001", n: 600, fail }));
+			const run = (await gate("base0001")).run;
+			if (!run) throw new Error("missing base run");
+			const baseRun = Number(run.slice(2));
+			let reads = 0;
+			const all = (await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb)).all;
+			const spy = spyOn(
+				await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb),
+				"all",
+			).mockImplementation(async function (this: WriteDb, statement, ...params) {
+				const rows = await Reflect.apply(all, this, [statement, ...params]);
+				if (statement.text.includes("FROM run_tests") && params[0] && "run" in params[0] && params[0].run === baseRun)
+					reads += rows.length;
+				return rows;
+			});
+			try {
+				await h.call("report", ciReport({ commit: "change01", pr: 69, base: "base0001", n: 600, fail }));
+				expect(await gate("change01")).toMatchObject(
+					preset === "loose"
+						? { verdict: "passed", tally: { excused: 600, unexplained: 0 } }
+						: { tally: { excused: 0, unexplained: 600 } },
+				);
+				budget(
+					`evidence reads for 600 inherited failures (${preset})`,
+					reads,
+					600 * (preset === "loose" ? 6 : 2),
+					"reads",
+				);
+			} finally {
+				spy.mockRestore();
+			}
+		},
+		120_000,
+	);
 }
 
 test("a report's inherited answer reads only its affected runs, regardless of sibling failures", async () => {
@@ -349,11 +359,7 @@ for (const unrelatedReport of [false, true]) {
 }
 
 for (const initial of ["loose", "standard"] as const) {
-	test(`loose restores inherited standing on adoption after starting ${initial}`, async () => {
-		if (initial === "standard") {
-			await h.close();
-			h = await harness({ preset: "standard" });
-		}
+	testWithPreset(initial, `loose restores inherited standing on adoption after starting ${initial}`, async () => {
 		await base();
 		await change({ 0: "same cause" });
 		const use = async (preset: "loose" | "standard") => {
@@ -384,24 +390,26 @@ for (const initial of ["loose", "standard"] as const) {
 	});
 }
 
-test("loose keeps a cause question open while one of its failures still needs an answer", async () => {
-	await h.close();
-	h = await harness({ preset: "standard" });
-	await base();
-	await change({ 0: "same cause", 1: "same cause" });
-	const cause = (await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:69" })).items[0];
-	if (!cause) throw new Error("missing cause question");
-	await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
-	const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
-	if (!adoption) throw new Error("missing policy adoption");
-	expect(
-		await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
-	).toMatchObject([{ status: "decided" }]);
-	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 1, unexplained: 1 } });
-	expect((await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:69" })).items).toMatchObject([
-		{ q: cause.q, state: "open", title: "same cause" },
-	]);
-});
+testWithPreset(
+	"standard",
+	"loose keeps a cause question open while one of its failures still needs an answer",
+	async () => {
+		await base();
+		await change({ 0: "same cause", 1: "same cause" });
+		const cause = (await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:69" })).items[0];
+		if (!cause) throw new Error("missing cause question");
+		await h.call("propose", { edits: [{ op: "policy", preset: "loose" }] });
+		const adoption = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+		if (!adoption) throw new Error("missing policy adoption");
+		expect(
+			await h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+		expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 1, unexplained: 1 } });
+		expect((await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:69" })).items).toMatchObject([
+			{ q: cause.q, state: "open", title: "same cause" },
+		]);
+	},
+);
 
 for (const answer of ["flaky", "defect", "inherited"] as const) {
 	test(`a direct ${answer} replacement of inherited standing uses manual failure holds`, async () => {
@@ -1034,12 +1042,11 @@ test("a skipped base retry keeps a real failure's support", async () => {
 	expect(await gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
 });
 
-test.each([
+for (const { version, excused } of [
 	{ version: 1, excused: 0 },
 	{ version: 2, excused: 1 },
-])(
-	"a closed run inherits only its remaining failures after late proof of case version $version",
-	async ({ version, excused }) => {
+]) {
+	test(`a closed run inherits only its remaining failures after late proof of case version ${version}`, async () => {
 		await h.call("propose", { edits: [{ op: "create", outline: "Case\n Do it > It works" }] });
 		const send = async (commit: string, outcome: string, attempt = 1, version = 1) =>
 			await h.call("report", {
@@ -1079,8 +1086,8 @@ test.each([
 			unexplained: excused,
 			pass: 1 - excused,
 		});
-	},
-);
+	});
+}
 
 test("mutual base references reconcile from results without cycling decisions", async () => {
 	await h.call(
@@ -1170,27 +1177,29 @@ test("retargeting reaches the changed pull request when the report's commit alre
 
 for (const ended of ["closed", "merged"] as const) {
 	for (const initial of ["loose", "standard"] as const) {
-		test(`policy adoption leaves unused ${ended} history from ${initial} until reopening`, async () => {
-			await h.close();
-			h = await harness({ preset: initial });
-			await base();
-			await change({ 0: "same cause" });
-			await h.call(
-				"report",
-				ciReport({ commit: "child001", pr: 70, base: "change01", n: 2, fail: { 0: "same cause" } }),
-			);
-			await h.call("change", { change: "pr:70", state: ended });
-			const before = await gate("child001");
-			const next = initial === "loose" ? "standard" : "loose";
-			await h.call("propose", { edits: [{ op: "policy", preset: next }] });
-			const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
-			if (!q) throw new Error("no adoption");
-			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
-			expect((await gate("child001")).tally).toEqual(before.tally);
-			expect((await gate("change01")).tally.excused).toBe(next === "loose" ? 1 : 0);
-			await h.call("change", { change: "pr:70", state: "open" });
-			expect((await gate("child001")).tally.excused).toBe(next === "loose" ? 1 : 0);
-		});
+		testWithPreset(
+			initial,
+			`policy adoption leaves unused ${ended} history from ${initial} until reopening`,
+			async () => {
+				await base();
+				await change({ 0: "same cause" });
+				await h.call(
+					"report",
+					ciReport({ commit: "child001", pr: 70, base: "change01", n: 2, fail: { 0: "same cause" } }),
+				);
+				await h.call("change", { change: "pr:70", state: ended });
+				const before = await gate("child001");
+				const next = initial === "loose" ? "standard" : "loose";
+				await h.call("propose", { edits: [{ op: "policy", preset: next }] });
+				const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
+				if (!q) throw new Error("no adoption");
+				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+				expect((await gate("child001")).tally).toEqual(before.tally);
+				expect((await gate("change01")).tally.excused).toBe(next === "loose" ? 1 : 0);
+				await h.call("change", { change: "pr:70", state: "open" });
+				expect((await gate("child001")).tally.excused).toBe(next === "loose" ? 1 : 0);
+			},
+		);
 	}
 }
 

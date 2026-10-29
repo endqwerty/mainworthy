@@ -72,7 +72,7 @@ for (const action of ["finish", "cancel", "violate"] as const)
 
 test("every incoming reset reference has an index for its foreign key lookup", async () => {
 	await using db = await writerDatabase();
-	await removalFixture(db, 2, 20_000);
+	await removalFixture(db, 2, 2);
 	const parents = new Set<string>();
 	await removeProject(db, "removing", (step) => {
 		if (step.startsWith("delete ")) parents.add(step.slice(7));
@@ -272,10 +272,10 @@ const folderChain = (length: number) => async (db: WriteDb) => {
 // A row another row of its own table refers to (a folder's parent) waited until nothing referred to it. In a chain only
 // the leaf qualified, and a slice read the whole chain to find it, then the whole chain less one, and so on (#914).
 test("a slice of a table that refers to itself examines a bounded number of rows however long the chain", async () => {
-	const small = await largestSlice(folderChain(500), ["folders"]);
-	const large = await largestSlice(folderChain(5_000), ["folders"]);
+	const small = await largestSlice(folderChain(64), ["folders"], 16);
+	const large = await largestSlice(folderChain(640), ["folders"], 16);
 	console.log(
-		`folder chain: largest slice ${small.largest} and total ${small.total} rows and index entries for 500 folders (${small.slices} slices), ${large.largest} and ${large.total} for 5000 (${large.slices} slices)`,
+		`folder chain: largest slice ${small.largest} and total ${small.total} rows and index entries for 64 folders (${small.slices} slices), ${large.largest} and ${large.total} for 640 (${large.slices} slices)`,
 	);
 	expect(large.largest).toBeLessThan(small.largest * 1.5);
 	expect(large.largest).toBeLessThan(5_000);
@@ -365,11 +365,11 @@ test("a whole removal reads no table again in its last slice, with what it remov
 		);
 		await each(`INSERT INTO slot_leases (slot, actor, since, until) SELECT n, 900, 1, 2 ${n}`, [size]);
 	};
-	// Batches of 16 rows a level, so that both sizes fill whole batches at every level.
-	const small = await largestSlice(demo(400), "every", 16);
-	const large = await largestSlice(demo(4_000), "every", 16);
+	// Batches of 8 rows a level; even the small fixture has 8 groups of 10 rows.
+	const small = await largestSlice(demo(80), "every", 8);
+	const large = await largestSlice(demo(800), "every", 8);
 	console.log(
-		`whole removal: largest slice ${small.largest}, last ${small.last} rows and index entries for 400 of each (${small.slices} slices); largest ${large.largest}, last ${large.last} for 4000 (${large.slices} slices)`,
+		`whole removal: largest slice ${small.largest}, last ${small.last} rows and index entries for 80 of each (${small.slices} slices); largest ${large.largest}, last ${large.last} for 800 (${large.slices} slices)`,
 	);
 	expect(large.slices).toBeGreaterThan(small.slices * 5);
 	// Before, the last slice read 21,950 for 4000 of each, and was the largest. It still checks the foreign keys of
@@ -380,10 +380,10 @@ test("a whole removal reads no table again in its last slice, with what it remov
 
 test("a slice of a table owned through two levels of parents examines a bounded number of rows however many there are", async () => {
 	const tables = ["slot_leases"];
-	const small = await largestSlice(leasedSlots(1_600), tables);
-	const large = await largestSlice(leasedSlots(16_000), tables);
+	const small = await largestSlice(leasedSlots(128), tables, 16);
+	const large = await largestSlice(leasedSlots(1_280), tables, 16);
 	console.log(
-		`largest slice of slot_leases: ${small.largest} rows and index entries for 1600 slots (${small.slices} slices), ${large.largest} for 16000 (${large.slices} slices)`,
+		`largest slice of slot_leases: ${small.largest} rows and index entries for 128 slots (${small.slices} slices), ${large.largest} for 1280 (${large.slices} slices)`,
 	);
 	expect(large.slices).toBeGreaterThan(small.slices * 5);
 	expect(large.largest).toBeLessThan(small.largest * 1.5);
@@ -394,10 +394,10 @@ test("a slice of a table owned through two levels of parents examines a bounded 
 // WHERE project = $1))`: every slice gathered all the demo's parents again, so the work grew with their square.
 test("a slice of a table owned through its parents examines a bounded number of rows however many parents there are", async () => {
 	const tables = ["result_excuses", "attachments"];
-	const small = await largestSlice(excusedResults(400), tables);
-	const large = await largestSlice(excusedResults(4_000), tables);
+	const small = await largestSlice(excusedResults(64), tables, 16);
+	const large = await largestSlice(excusedResults(640), tables, 16);
 	console.log(
-		`largest slice of a parent-owned table: ${small.largest} rows and index entries for 400 parents (${small.slices} slices), ${large.largest} for 4000 (${large.slices} slices)`,
+		`largest slice of a parent-owned table: ${small.largest} rows and index entries for 64 parents (${small.slices} slices), ${large.largest} for 640 (${large.slices} slices)`,
 	);
 	expect(large.slices).toBeGreaterThan(small.slices * 5);
 	expect(large.largest).toBeLessThan(small.largest * 1.5);

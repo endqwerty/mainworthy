@@ -3,6 +3,8 @@ import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
 import { budget } from "../../scripts/budget.ts";
+import { call } from "../../src/web/lib/api.ts";
+import type { Server } from "./support.ts";
 import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -63,55 +65,67 @@ function checkWindows(name: string, journey: (opened: Awaited<ReturnType<typeof 
 	);
 }
 
-for (const locks of ["available", "unavailable", "query fails"])
-	check(
-		`startup ownership with Web Locks ${locks}: renders safely while channel discovery is deferred`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", { edits: [{ op: "create", outline: "Coupon case\n  Apply the coupon" }] });
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-			try {
-				const a = h.page;
-				await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
-				await a.keyboard.press("e");
-				await title(a).fill("Coupon case owned by A");
-				const owner = (await stored(a)).owner;
-				const b = await h.context.newPage();
-				b.on("pageerror", (error) => h.errors.push(error.message));
-				await b.addInitScript((locks) => {
-					if (locks === "unavailable") Object.defineProperty(navigator, "locks", { value: undefined });
-					if (locks === "query fails")
-						navigator.locks.query = () => Promise.reject(new Error("Lock query unavailable"));
-					const timeout = window.setTimeout.bind(window);
-					Object.defineProperty(window, "setTimeout", {
-						value: (handler: TimerHandler, delay?: number, ...args: unknown[]) => {
-							if (delay !== 40) return timeout(handler, delay, ...args);
-							// Hold discovery without making this a machine-speed assertion. Fallback startup must wait;
-							// authoritative locks must let the real editor render before this callback is released.
-							Object.assign(window, { finishDraftDiscovery: () => timeout(handler, 0, ...args) });
-							return 0;
-						},
-					});
-				}, locks);
-				await b.goto(`${server.url}/p/scratch/suite/c/1`, { waitUntil: "commit" });
-				if (locks !== "available") {
-					await b.waitForFunction(() => typeof Reflect.get(window, "finishDraftDiscovery") === "function");
-					expect(await b.locator("#root").evaluate((root) => root.childElementCount)).toBe(0);
-					await b.evaluate(() => Reflect.get(window, "finishDraftDiscovery")());
+test.skipIf(!browserAvailable)(
+	"startup ownership renders safely while channel discovery is deferred for every Web Locks mode",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, locks] of ["available", "unavailable", "query fails"].entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(locks));
+				await server.api("propose", { edits: [{ op: "create", outline: "Coupon case\n  Apply the coupon" }] });
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
+				try {
+					const a = h.page;
+					await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+					await a.keyboard.press("e");
+					await title(a).fill("Coupon case owned by A");
+					const owner = (await stored(a)).owner;
+					const b = await h.context.newPage();
+					b.on("pageerror", (error) => h.errors.push(error.message));
+					await b.addInitScript((locks) => {
+						if (locks === "unavailable") Object.defineProperty(navigator, "locks", { value: undefined });
+						if (locks === "query fails")
+							navigator.locks.query = () => Promise.reject(new Error("Lock query unavailable"));
+						const timeout = window.setTimeout.bind(window);
+						Object.defineProperty(window, "setTimeout", {
+							value: (handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+								if (delay !== 40) return timeout(handler, delay, ...args);
+								// Hold discovery without making this a machine-speed assertion. Fallback startup must wait;
+								// authoritative locks must let the real editor render before this callback is released.
+								Object.assign(window, { finishDraftDiscovery: () => timeout(handler, 0, ...args) });
+								return 0;
+							},
+						});
+					}, locks);
+					await b.goto(`${server.url}/p/${server.project}/suite/c/1`, { waitUntil: "commit" });
+					if (locks !== "available") {
+						await b.waitForFunction(() => typeof Reflect.get(window, "finishDraftDiscovery") === "function");
+						variantExpect(await b.locator("#root").evaluate((root) => root.childElementCount)).toBe(0);
+						await b.evaluate(() => Reflect.get(window, "finishDraftDiscovery")());
+					}
+					await title(b).waitFor();
+					variantExpect(await title(b).inputValue()).toBe("Coupon case owned by A");
+					variantExpect(await readOnly(b)).toBe(true);
+					variantExpect((await stored(b)).owner).toBe(owner);
+					variantExpect(await readOnly(a)).toBe(false);
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					await h.close();
 				}
-				await title(b).waitFor();
-				expect(await title(b).inputValue()).toBe("Coupon case owned by A");
-				expect(await readOnly(b)).toBe(true);
-				expect((await stored(b)).owner).toBe(owner);
-				expect(await readOnly(a)).toBe(false);
-				expect(h.errors).toEqual([]);
-			} finally {
-				await h.close();
-				await server.stop();
 			}
-		},
-		30_000,
-	);
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
 check(
 	"startup with Web Locks and no stored drafts renders while channel discovery is deferred",
