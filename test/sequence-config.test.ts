@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { SEQUENCE_SEEDS, sequenceFailure, sequenceSeeds } from "./sequence-config.ts";
 
-test("PR sequence runs use the fixed first eight seeds, a subset of daily coverage", () => {
-	expect(sequenceSeeds({})).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+test("PR sequence runs use the fixed first three seeds, a subset of daily coverage", () => {
+	expect(sequenceSeeds({})).toEqual([1, 2, 3]);
 	expect(sequenceSeeds({}).length).toBeLessThanOrEqual(SEQUENCE_SEEDS.pr);
-	expect(SEQUENCE_SEEDS.pr).toBe(8);
+	expect(SEQUENCE_SEEDS.pr).toBe(3);
 	expect(SEQUENCE_SEEDS.daily).toBeGreaterThanOrEqual(40);
 	const daily = sequenceSeeds({ MAINWORTHY_SEQUENCE_SEEDS: String(SEQUENCE_SEEDS.daily) });
-	expect(daily.slice(0, 8)).toEqual(sequenceSeeds({}));
+	expect(daily.slice(0, SEQUENCE_SEEDS.pr)).toEqual(sequenceSeeds({}));
 	expect(daily).toHaveLength(SEQUENCE_SEEDS.daily);
 });
 

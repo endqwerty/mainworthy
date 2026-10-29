@@ -2093,7 +2093,7 @@ const casesIn = async (client: Client, project: string) =>
 test("seed fills a project it makes, and leaves its pipeline and agent nothing outside it or after an hour", async () => {
 	await withInstance(async ({ run, client, instance }) => {
 		const started = Date.now();
-		const result = await run(["seed", "demo", "--cases", "12"]);
+		const result = await run(["seed", "demo", "--cases", "12", "--days", "0"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		// The failing test on `main` and on the pull request, the agent's finding and its edit, a test with no case,

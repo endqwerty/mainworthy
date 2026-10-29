@@ -1,5 +1,5 @@
 // The queue and runs: the findings of the fourth review (R4B).
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -779,49 +779,57 @@ for (const scenario of ["lost reply", "withdrawn by someone else"])
 	);
 
 for (const field of ["ref", "reason"])
-	for (const leave of ["row", "kind", "state"])
-		check(
-			`R4B-4 ${field} closes and retains text on ${leave}`,
-			async () => {
-				const server = await startServer({ preset: "standard" });
-				await failures(server, field === "reason");
-				const h = await openPage(server, { path: "/p/scratch/queue" });
-				try {
-					const { page } = h;
-					await page.locator("[data-current-question]").waitFor();
-					const q = await qref(page);
-					if (!q) throw Error("No question");
-					const qs = (await server.api("inbox", { kind: "failure" })).items;
-					const other = qs.find((item) => item.q !== q);
-					if (!other) throw Error("No other question");
-					await page.keyboard.press(field === "ref" ? "d" : "f");
-					await page.locator("#answer-extra").fill("Kept for this question");
-					if (leave === "row") await page.locator(`[data-question="${other.q}"]`).click();
-					else
-						await page
-							.getByRole("button", { name: leave === "kind" ? "Findings" : "Settled", exact: leave !== "kind" })
-							.click();
-					expect(await page.locator("#answer-extra").count()).toBe(0);
-					expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("open");
-					expect(
-						await page.evaluate(() =>
-							Object.entries(localStorage)
-								.filter(([k]) => k.includes(":queue-input:"))
-								.map(([, v]) => v),
-						),
-					).toContain("Kept for this question");
-					await page.getByRole("button", { name: "Open", exact: true }).click();
-					await page.getByRole("button", { name: "All", exact: true }).click();
-					await page.locator(`[data-question="${q}"]`).click();
-					await page.keyboard.press(field === "ref" ? "d" : "f");
-					expect(await page.locator("#answer-extra").inputValue()).toBe("Kept for this question");
-				} finally {
-					await h.close();
-					await server.stop();
-				}
-			},
-			30000,
-		);
+	describe(`retained ${field} input`, () => {
+		let server: Server;
+		beforeAll(async () => {
+			if (!browserAvailable) return;
+			server = await startServer({ preset: "standard" });
+			await failures(server, field === "reason");
+		});
+		afterAll(async () => {
+			await server?.stop();
+		});
+		for (const leave of ["row", "kind", "state"])
+			check(
+				`R4B-4 ${field} closes and retains text on ${leave}`,
+				async () => {
+					const h = await openPage(server, { path: "/p/scratch/queue" });
+					try {
+						const { page } = h;
+						await page.locator("[data-current-question]").waitFor();
+						const q = await qref(page);
+						if (!q) throw Error("No question");
+						const qs = (await server.api("inbox", { kind: "failure" })).items;
+						const other = qs.find((item) => item.q !== q);
+						if (!other) throw Error("No other question");
+						await page.keyboard.press(field === "ref" ? "d" : "f");
+						await page.locator("#answer-extra").fill("Kept for this question");
+						if (leave === "row") await page.locator(`[data-question="${other.q}"]`).click();
+						else
+							await page
+								.getByRole("button", { name: leave === "kind" ? "Findings" : "Settled", exact: leave !== "kind" })
+								.click();
+						expect(await page.locator("#answer-extra").count()).toBe(0);
+						expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("open");
+						expect(
+							await page.evaluate(() =>
+								Object.entries(localStorage)
+									.filter(([k]) => k.includes(":queue-input:"))
+									.map(([, v]) => v),
+							),
+						).toContain("Kept for this question");
+						await page.getByRole("button", { name: "Open", exact: true }).click();
+						await page.getByRole("button", { name: "All", exact: true }).click();
+						await page.locator(`[data-question="${q}"]`).click();
+						await page.keyboard.press(field === "ref" ? "d" : "f");
+						expect(await page.locator("#answer-extra").inputValue()).toBe("Kept for this question");
+					} finally {
+						await h.close();
+					}
+				},
+				30000,
+			);
+	});
 
 check(
 	"R4B-3 withdrawals follow held answers and reopen only when confirmed",

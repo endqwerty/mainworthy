@@ -1,6 +1,6 @@
-// Every PR and local check runs seeds 1–8; the daily workflow runs their superset 1–40.
+// Every PR and local check runs seeds 1–3; the daily workflow runs their superset 1–40.
 // Forty preserves the former coverage (493 s recorded across six files), with setup/reporting room in 25 minutes.
-export const SEQUENCE_SEEDS = { pr: 8, daily: 40 } as const;
+export const SEQUENCE_SEEDS = { pr: 3, daily: 40 } as const;
 
 export function sequenceSeeds(env: Record<string, string | undefined>): number[] {
 	const positive = (name: string, fallback: number) => {

@@ -2811,20 +2811,18 @@ describe("what a run and a change may count", () => {
 
 	test("placing a commit reaches every question about it, however many there are, and keeps every test they named", async () => {
 		const ci = await pipeline();
+		const agent = await explorer();
 		const commit = "manyq00001";
 		const fail = (key: string, message: string) => ({ test: { key }, outcome: "fail", failure: { message } });
 		// One cause in one environment, asked about first. Then a second cause in 205 environments, each answered
 		// on its own: far more than two hundred questions about this commit, the first one the oldest.
-		await report(
-			{ target: { repo: "app", commit, env: "first" }, results: [fail("a", "first cause")] },
-			await explorer(),
-		);
+		await report({ target: { repo: "app", commit, env: "first" }, results: [fail("a", "first cause")] }, agent);
 		expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		const envs = Array.from({ length: 205 }, (_, i) => `env-${i}`);
 		for (const [i, env] of envs.entries())
 			await report(
 				{ target: { repo: "app", commit, env }, results: [fail(i % 2 === 0 ? "b" : "c", "second cause")] },
-				await explorer(),
+				agent,
 			);
 		for (const _ of envs) expect((await decide(await open("failure"), { is: "infra" })).status).toBe("decided");
 		await report(

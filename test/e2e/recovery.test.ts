@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import type { CommandFate } from "../../src/core/ops.ts";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"an unreadable operation reply shows a reload message instead of an empty suite",
@@ -977,12 +977,16 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"rapid trusted navigation settles warmed case state",
 	async () => {
-		const server = await startServer({ cases: 2, days: 0 });
-		let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined;
+		const server = await startServer();
 		let harness: Awaited<ReturnType<typeof openPage>> | undefined;
 		try {
-			browser = await launchBrowser();
-			harness = await openPage(server, { browser });
+			await server.api("propose", {
+				edits: [
+					{ op: "create", outline: "First warmed case" },
+					{ op: "create", outline: "Second warmed case" },
+				],
+			});
+			harness = await openPage(server);
 			const { page, context } = harness;
 			await page.waitForFunction(
 				() => Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) === 2,
@@ -1020,7 +1024,6 @@ test.skipIf(!browserAvailable)(
 			await cdp.detach();
 		} finally {
 			await harness?.close();
-			await browser?.close();
 			await server.stop();
 		}
 	},
