@@ -1,6 +1,10 @@
 # Mainworthy documentation
 
-Mainworthy keeps your test cases, the results that people, pipelines and agents report, and the decisions made about them. Its gate answers whether a change is worthy of `main`. These pages explain how that works, how to use each part, and what you can adjust.
+A red build says that something failed. It does not say whether you can ship. Mainworthy answers that. It keeps your test cases as versioned documents, and puts the results from people, pipelines and AI agents in one record. Each failure becomes a question in one queue, next to its evidence. Someone answers it with one key, such as defect, flaky or infrastructure, and the answer can cover later failures with the same cause. Then `mainworthy gate` tells your pipeline whether the change is worthy of `main`.
+
+Mainworthy is for teams that want to ship through CI/CD but still gate their releases and must show what was tested. Manual and automated results count toward the same verdict, so you can automate at your own pace. Agents connect over MCP with their own tokens, and each project's policy decides what their answers are worth. Mainworthy is open source, you can host it yourself, and you can export your cases, results and decisions at any time.
+
+These pages explain how that works, how to use each part, and what you can adjust.
 
 [Diagram: how Mainworthy works](../diagrams/overview.html)
 
