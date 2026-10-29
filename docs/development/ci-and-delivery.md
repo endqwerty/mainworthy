@@ -5,7 +5,7 @@ external deploy job. Mainworthy judges its own CI: a failing test becomes a ques
 gate stays red until someone fixes the test or a person answers the question. This page explains each step.
 [docs/deploy.md](../deploy.md) has the full record of how the instance and its CI reporting were set up.
 
-Local checks and review precede PR creation; full hosted CI starts when the reviewed draft becomes ready.
+Local checks and review precede PR creation; full CI starts when the reviewed draft becomes ready.
 
 ## Open a pull request
 
@@ -59,11 +59,23 @@ cancelled. A re-run of an older run is neither cancelled by a newer one nor canc
 Draft PRs run only `description`. Marking a PR ready starts its normal checks. For related changes, keep review
 layers draft and use one ready combined PR against `main`: [landing a stack](../landing-a-stack.md).
 
+Jobs use one dedicated Ubuntu 24.04 runner with four CPUs, 8 GB RAM and the labels
+`[self-hosted, Linux, X64, mainworthy-ci]`. There is no hosted-runner fallback. GitHub's repository setting
+restricts PR creation to collaborators, currently only the owner. The PR entry jobs also refuse fork heads.
+Keep that admission restriction in place before registering the runner. Workflow conditions in editable PR
+code do not replace it. The VM's host enforces its network isolation, and its Docker daemon serves CI alone.
+
+The initial plan is one functional shard with two workers and a separate serial performance job. Its
+45-minute test-job timeout is provisional until a full ready-PR run measures memory use and completion time
+on the VM. These settings are a starting point, not measured capacity. With one execution runner, jobs run
+one at a time, including performance. PostgreSQL 18 host tools and browser system libraries are provisioned
+on the VM. Each test job checks the snapshot-tool versions and downloads the browser pinned by `bun.lock`.
+
 | Job | Runs when | What it does |
 | --- | --- | --- |
 | `scope` | ready PRs and main pushes | compares the changed paths with `scripts/ci-scope.ts` and decides which jobs and test files run |
 | `static` | code, scripts or configuration changed | `bun run typecheck`, `bun run lint` and `bun scripts/async-port.ts --check` |
-| `tests` | ready PRs and main pushes, in a matrix from `scope` | 14 shards of functional tests and one runner for the serial performance phase. Each shard uploads its JUnit report as `results-<shard>-attempt-<n>`. |
+| `tests` | ready PRs and main pushes, in a matrix from `scope` | one functional shard and a separate serial performance phase. Each uploads its JUnit report as `results-<shard>-attempt-<n>`. |
 | `image` | a file the Dockerfile copies changed | builds the container, starts it, and checks `/health`, the docs, a diagram, a screenshot and the skill archive |
 | `description` | every pull request | `bun scripts/work.ts pr-body <number>`. After you fix a description or a milestone, run this job again. |
 | `gate` | ready PRs and main pushes, after the others even when they fail | reports every shard's results to Mainworthy and reads the verdict |
@@ -75,6 +87,13 @@ the CI files themselves runs everything. To see what CI would run for your branc
 
 A shard with a failing test still ends as a success, so that the gate, not the shard, decides. The test step
 continues on error and uploads its report.
+
+Docker jobs run `scripts/ci-cleanup.sh` before setup and after success or failure. It removes only the CI
+containers `mainworthy` and `postgres`, the `mainworthy-check` network, the `mainworthy:check` image and
+`$RUNNER_TEMP/mainworthy-image.tar`. Startup cleanup recovers resources left by cancellation or a VM restart.
+Publication also removes its exact local `build-<run>-<attempt>` image tag. Cleanup never prunes the daemon.
+The image job uploads the tested image from its temporary directory; publication
+downloads and loads that artifact in its own temporary directory only after the gate passes.
 
 ## Read the gate
 
@@ -115,6 +134,11 @@ To clear the gate, do one of these:
   replaces the older one, and if the test passes, so does the gate. GitHub's "Re-run failed jobs" re-runs only
   `gate`, because the shard itself succeeded.
 
+Automatic retries in `rerun.yml` are disabled. Its controller waits for each retry to finish and would occupy
+the only runner the queued retry needs. GitHub's rerun controls remain available. To use the bounded manual
+controller, run `GH_REPO=endqwerty/mainworthy bun scripts/ci-rerun.ts <run>` from a separate machine with `gh`
+authenticated. Keep its existing retry limits and inspect the resulting gate.
+
 `ci` reads `blocked` with a question open when a person is asked. For a CI failure that means the policy was changed
 back, and it says how to set it again. An older commit reads `blocked` with no question once a later commit passed
 its failing tests, which ends the answer (decision 0102); nobody is asked about it. Never overrule the rule's answer
@@ -128,11 +152,10 @@ failure still open on that pull request is then no longer asked about. To replay
 
 ## Follow the deploy
 
-Coolify on the home server follows `main` and deploys `compose.coolify.yaml`: an app container, PostgreSQL 18 on an internal network with its own volume, and the retained SQLite volume
-and a Tailscale sidecar. The deploy job lives outside this repository. Before it deploys a commit, it must see
-that the newest push run of `check.yml` for that commit completed, that its `gate` job succeeded in the run's
-current attempt, and that `main` has not moved for ten minutes. [docs/deploy.md](../deploy.md#checks-a-deployment-must-wait-for)
-lists the exact reads. This repository does not verify that the external job makes them.
+Render runs an explicitly selected GHCR image digest. Merging a pull request publishes a tested image after
+its main-push gate passes; it does not select a new Render image. After selecting one, check that
+`https://mainworthy.com/health` reports its source commit. The runner VM hosts no application service.
+[The Render runbook](../render-migration.md) covers image selection and the initial disposable Free environment.
 
 After a pull request lands, check that the instance runs it:
 

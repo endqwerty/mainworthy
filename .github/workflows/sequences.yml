@@ -14,7 +14,7 @@ permissions:
 jobs:
   sequences:
     if: ${{ github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     # Forty seeds per preset preserves the former ~8 minute workload; leave room for setup and reporting.
     timeout-minutes: 25
     permissions:
@@ -24,6 +24,8 @@ jobs:
       MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recover CI Docker resources from an interrupted job
+        run: bash scripts/ci-cleanup.sh
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
@@ -61,13 +63,9 @@ jobs:
         # No sequences project means no deployed URL, so selection cannot default to the CI project.
         # Reuse the ordinary report validation, deployed-instance selection, fallback, report and gate commands.
         run: bun scripts/ci-gate.ts test-results sequences --files=test/sequences-loose.test.ts,test/sequences-standard.test.ts,test/sequences-strict.test.ts,test/sequences-extended-loose.test.ts,test/sequences-extended-standard.test.ts,test/sequences-extended-strict.test.ts
-      - name: PostgreSQL logs and cleanup
+      - name: CI Docker logs and cleanup
         if: always()
-        run: |
-          if docker container inspect postgres >/dev/null 2>&1; then
-            docker logs postgres
-            docker rm --force postgres
-          fi
+        run: bash scripts/ci-cleanup.sh --logs
       - name: The sequence tests passed
         if: always()
         run: test '${{ steps.sequences.outcome }}' = success

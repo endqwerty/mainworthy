@@ -26,7 +26,7 @@ permissions:
 jobs:
   terraform:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     # Up to 40 minutes waiting for check.yml's image, then the apply.
     timeout-minutes: 75
     permissions:

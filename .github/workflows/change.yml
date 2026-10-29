@@ -29,7 +29,7 @@ jobs:
   tell:
     # A pull request from a fork is given no secret, so nothing is said about it.
     if: ${{ vars.MAINWORTHY_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, mainworthy-ci]
     timeout-minutes: 40
     # One pull request's reports go one at a time, in order, so a close and a reopen during a deploy land as sent.
     concurrency:
