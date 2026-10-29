@@ -184,6 +184,17 @@ has closed". Press <kbd>e</kbd> or choose "Take over here" to continue the draft
 
 Select a case to read its version, author, proof, and timeline.
 A result names the case version it exercised. Editing the case does not rewrite that result.
+Linked automation lists the automated tests currently linked to the case, with links to their test pages.
+"No linked automated tests" means no automated counterpart is linked. A linked test with no result for this case
+says so, even if it ran before it was linked. Each available result shows its outcome and the version it ran
+against. A pass on an older or unknown version does not prove the current version. Linking describes coverage;
+it does not by itself supply evidence. Unlinking removes the test from this list and keeps its historical Proof
+and timeline entries. There is no age cutoff for these results.
+
+The `get` reply's `tests` list carries each linked test's `t`, `name`, `file`, and nullable `last` result.
+A `last` result carries `id`, `outcome`, `version`, `at`, and `current`. It is the test's newest result that counted
+for this case, and null when it has none: a later result recorded for no case, or for another, does not replace it. `current` compares the recorded version with the case's head, independently of outcome.
+
 The Proof section shows each method's latest result, with its original version, author, basis, and any model or test name.
 It keeps those details even when the result is older than the timeline's displayed entries.
 An older pass does not prove the current version. If a result has no recorded version, Proof says "unknown version".

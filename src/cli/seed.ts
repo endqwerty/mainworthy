@@ -9,7 +9,15 @@ import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.t
 import { ProposeReply } from "../core/ops.ts";
 import type { DemoSeed } from "../server/kernel/ctx.ts";
 import type { Client } from "./client.ts";
-import { automateOf, type DemoCase, demoBulkProposal, demoCases, random, requirementOf } from "./demo/cases.ts";
+import {
+	automateOf,
+	type DemoCase,
+	demoBulkProposal,
+	demoCases,
+	pendingAutomationCase,
+	random,
+	requirementOf,
+} from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import {
 	AGENT_MODEL,
@@ -757,6 +765,48 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 			job: "unit",
 			results: unitTests(unlinkedFiles),
+		});
+	}
+	await report(ci, "coverage-failure", before(9.5 * MINUTE), {
+		target: { commit: change, repo: REPO, ...REVIEW_CHANGE },
+		...shop(before(9.5 * MINUTE), pipelineResults(broken, 0.6, true, [0])),
+	});
+	const pendingCase = pendingAutomationCase(suite);
+	if (pendingCase !== null) {
+		const file = "coverage/checkout.spec.ts";
+		const pending = { key: `${file}::pending`, name: "Checkout automation awaiting evidence", file };
+		const stale = { key: `${file}::older`, name: "Checkout automation before the case edit", file };
+		await report(ci, "coverage-discovery", before(9 * MINUTE), {
+			target: { session: "coverage-discovery" },
+			results: [pending, stale].map((test) => ({ test, outcome: "pass" })),
+		});
+		const question = (await owner.call("inbox", { kind: "map", limit: 500 })).items.find(
+			(question) => MapEvidence.parse(question.evidence).file === file,
+		);
+		if (question) {
+			const found = z.array(UnlinkedTest).parse((await owner.call("find", { in: "tests", text: file })).items);
+			await write(owner, "decide", "coverage-link", before(8 * MINUTE), {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "link", pairs: found.map((test) => [test.ref, refOf(pendingCase)]) },
+			});
+		}
+		const [current] = await owner.call("get", { refs: [refOf(pendingCase)] });
+		const head = z.object({ head: z.number() }).parse(current).head;
+		if (head === 1)
+			await write(owner, "propose", "coverage-edit", before(7 * MINUTE), {
+				edits: [
+					{
+						op: "edit",
+						case: refOf(pendingCase),
+						base: 1,
+						body: { pre: `${caseOf(pendingCase).pre} Check the updated checkout expectations.`.trim() },
+					},
+				],
+			});
+		await report(ci, "coverage-older", before(6 * MINUTE), {
+			target: { session: "coverage-older" },
+			results: [{ test: stale, outcome: "pass", annotation: { case: refOf(pendingCase), version: 1 } }],
 		});
 	}
 	// What the demo leaves to answer, read back: more than the replies above name. The failing test is a question

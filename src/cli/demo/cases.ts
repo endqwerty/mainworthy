@@ -233,3 +233,9 @@ export function demoBulkProposal(cases: readonly DemoCase[]): Api["propose"]["in
 		},
 	}));
 }
+
+/** A manual case for linking a discovered test before it reports evidence about the case. */
+export function pendingAutomationCase(cases: readonly DemoCase[]): number | null {
+	const index = cases.findIndex((item, index) => index > 2 && item.test === null);
+	return index < 0 ? null : index;
+}

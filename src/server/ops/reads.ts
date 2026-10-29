@@ -64,6 +64,7 @@ import {
 	lastResultsOfCase,
 	lastResultsOfCases,
 	lastResultsOfTest,
+	lastResultsOfTestsForCase,
 	listTests,
 	mustTarget,
 	passedOnRetry,
@@ -308,10 +309,32 @@ export async function caseView(
 		out.proof = await caseProof(ctx, row);
 		out.open = await openCountOn(ctx.db, row.project, caseRef(row));
 	}
-	if (want.has("tests"))
-		out.tests = (await testsOfCase(ctx.db, row.project, row.id))
-			.filter((test) => test.kind === "auto")
-			.map((test) => ({ t: testRef(test), name: test.name, file: test.file }));
+	if (want.has("tests")) {
+		const tests = (await testsOfCase(ctx.db, row.project, row.id)).filter((test) => test.kind === "auto");
+		const latest = await lastResultsOfTestsForCase(
+			ctx.db,
+			row.project,
+			row.id,
+			tests.map((test) => test.id),
+		);
+		out.tests = tests.map((test) => {
+			const result = latest.get(test.id);
+			return {
+				t: testRef(test),
+				name: test.name,
+				file: test.file,
+				last: result
+					? {
+							id: result.id,
+							outcome: result.outcome,
+							version: result.basis_version,
+							at: result.at,
+							current: result.basis_version === row.head,
+						}
+					: null,
+			};
+		});
+	}
 	return out;
 }
 
@@ -694,7 +717,12 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 		return { ...document, etag };
 	};
 	const out: Record<string, unknown>[] = [];
-	for (const text of input.refs) out.push(await readOne(text));
+	const known = new Map<string, Record<string, unknown>>();
+	for (const text of input.refs) {
+		const reply = known.get(text) ?? (await readOne(text));
+		known.set(text, reply);
+		out.push(reply);
+	}
 	return out;
 }
 

@@ -122,3 +122,75 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 	},
 	60_000,
 );
+
+// These labels and links are decided by the case page, so an operation test cannot cover them.
+test.skipIf(!browserAvailable)(
+	"a case separates linked automation from historical proof",
+	async () => {
+		const server = await startServer({ preset: "loose", unlinked: "ask" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [{ op: "create", body: { title: "Manual checkout" } }],
+			});
+			const results = ["Current pass", "Failing test", "Older pass", "Pending test"].map((name, index) => ({
+				test: { key: `coverage-${index}`, name, file: "checkout.spec.ts" },
+				outcome: "pass" as const,
+			}));
+			const ci = await server.api("admin", {
+				do: "token.create",
+				actor: "coverage-ci",
+				kind: "ci",
+				can: ["record", "read"],
+				project: "scratch",
+			});
+			if (!("token" in ci) || typeof ci.token !== "string") throw new Error("CI token missing");
+			await server.api("report", { target: { session: "discovery" }, results }, { token: ci.token });
+			const [question] = (await server.api("inbox", { kind: "map" })).items;
+			if (!question) throw new Error("Mapping question missing");
+			await server.api("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "link", pairs: results.map((_, index) => [`T-${index + 1}`, "C-1"]) },
+			});
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Manual checkout updated" } }],
+			});
+			await server.api(
+				"report",
+				{
+					target: { session: "linked" },
+					results: results.slice(0, 3).map((result, index) => ({
+						...result,
+						outcome: index === 1 ? "fail" : "pass",
+						annotation: { case: "C-1", version: index === 2 ? 1 : 2 },
+						...(index === 1 ? { failure: { message: "Payment declined" } } : {}),
+					})),
+				},
+				{ token: ci.token },
+			);
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const { page } = view;
+			await page.getByText("Timeline", { exact: true }).waitFor();
+			const capture = process.env.MAINWORTHY_COVERAGE_SCREENSHOT;
+			if (capture) await page.screenshot({ path: capture, fullPage: true });
+			const coverage = page.getByRole("region", { name: "Linked automation" });
+			await coverage.getByRole("link", { name: "Current pass", exact: true }).waitFor();
+			expect(await coverage.textContent()).toContain("pass on v2 · current version");
+			expect(await coverage.textContent()).toContain("fail on v2 · current version");
+			expect(await coverage.textContent()).toContain("pass on v1 · does not prove the current version");
+			expect(await coverage.textContent()).toContain("linked, no result for this case yet");
+			expect(await coverage.getByRole("link", { name: "Current pass", exact: true }).getAttribute("href")).toBe(
+				"/p/scratch/tests/1",
+			);
+			await server.api("decide", { undo: question.q });
+			await page.reload();
+			await page.getByText("No linked automated tests.", { exact: true }).waitFor();
+			expect(await page.locator(".proof-block").last().textContent()).toContain("pass on v1");
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);

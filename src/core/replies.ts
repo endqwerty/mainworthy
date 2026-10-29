@@ -340,7 +340,16 @@ export const CaseDocument = z.looseObject({
 	updated: z.looseObject({ at: number, by: text, kind: ActorKind }).optional(),
 	proof: Proofs.optional(),
 	open: whole.optional(),
-	tests: z.array(z.looseObject({ t: text, name: text, file: nullableText })).optional(),
+	tests: z
+		.array(
+			z.looseObject({
+				t: text,
+				name: text,
+				file: nullableText,
+				last: z.object({ id: whole, outcome: text, version: whole.nullable(), at: number, current: flag }).nullable(),
+			}),
+		)
+		.optional(),
 });
 export const CaseSummary = z.looseObject({
 	ref: caseRef,

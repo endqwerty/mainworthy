@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { observeDatabase } from "../../bench/profile.ts";
+import { CaseDocument } from "../core/replies.ts";
 import { ResultTrail } from "../core/results.ts";
 import { Client } from "./client.ts";
 import { demoCases } from "./demo/cases.ts";
@@ -107,6 +108,15 @@ test("a seeded project holds a suite in folders, a fortnight of history and seve
 		expect(evidenceReads).toBeLessThanOrEqual(40);
 		expect(ruleLookups).toBe(0);
 		const demo = on(client, "demo");
+		const coverage = z.array(CaseDocument).parse(await demo.call("get", { refs: seeded.cases }));
+		expect(coverage.some((row) => row.tests?.length === 0)).toBe(true);
+		expect(coverage.some((row) => row.tests?.some((test) => test.last === null))).toBe(true);
+		expect(coverage.some((row) => row.tests?.some((test) => test.last?.current && test.last.outcome === "pass"))).toBe(
+			true,
+		);
+		expect(coverage.some((row) => row.tests?.some((test) => test.last?.outcome === "fail"))).toBe(true);
+		expect(coverage.some((row) => row.tests?.some((test) => test.last && !test.last.current))).toBe(true);
+
 		const pipeline = z
 			.array(z.object({ last: z.array(z.object({ steps: ResultTrail.nullable() })) }))
 			.parse(await demo.call("get", { refs: ["T-1"] }))[0]

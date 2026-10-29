@@ -20,12 +20,13 @@ export const FolderRow = z.object({
 	cases: schemaNumber,
 });
 export type FolderRow = z.infer<typeof FolderRow>;
-export const CaseView = CaseDocument.omit({ etag: true, claim: true, hasFragments: true, tests: true })
+export const CaseView = CaseDocument.omit({ etag: true, claim: true, hasFragments: true })
 	.required()
 	.extend({
 		sourceSteps: CaseDocument.shape.sourceSteps,
 		kind: CaseKind.default("case"),
 		users: CaseDocument.shape.users.default([]),
+		tests: CaseDocument.shape.tests.default([]),
 		methods: CaseBody.shape.methods,
 		fields: CaseBody.shape.fields.default({}),
 		usedStepIds: z.array(StepId).default([]),
