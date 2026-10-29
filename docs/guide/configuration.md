@@ -241,7 +241,7 @@ The server can send a trace of each request to an OpenTelemetry collector, or to
 
 | Variable | Default | What it sets |
 | --- | --- | --- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | The collector's base address. The server sends to `<address>/v1/traces`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | The collector's base address. The server sends to `<address>/v1/traces`. It must use `https`, or `http` only on `localhost`, `127.0.0.1` or `[::1]`, and hold no user name or password: the batches carry the headers below. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | none | The whole address for traces, used as written. It takes precedence over the base address. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | none | Headers sent with each batch, such as a vendor's key: `name=value` pairs separated by commas, each value percent-encoded. `OTEL_EXPORTER_OTLP_TRACES_HEADERS` adds to them and wins where a name repeats. Keep the value in the server's secret environment. |
 | `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Which traces to keep: `always_on`, `always_off`, `traceidratio`, or the same with `parentbased_` before it. |
@@ -249,7 +249,7 @@ The server can send a trace of each request to an OpenTelemetry collector, or to
 | `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `mainworthy` | The name the collector shows, and further attributes such as `deployment.environment.name=production`. |
 | `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER` | none | `OTEL_SDK_DISABLED=true` or `OTEL_TRACES_EXPORTER=none` turns tracing off with an endpoint set. |
 
-The server sends OTLP as JSON over HTTP. Another protocol in `OTEL_EXPORTER_OTLP_PROTOCOL`, an exporter other than `otlp`, an unknown sampler or a malformed address or header stops the start with a line that names the variable. When tracing is on, the start says where traces go: `traces go to https://collector.example`.
+The server sends OTLP as JSON over HTTP. Another protocol in `OTEL_EXPORTER_OTLP_PROTOCOL`, an exporter other than `otlp`, an unknown sampler, a malformed address or header, or plain `http` to another machine stops the start with a line that names the variable. When tracing is on, the start says where traces go: `traces go to https://collector.example`.
 
 A trace carries what the server knows about its own code: the route's pattern (`POST /api/p/:project/:op`, or the method alone for a request no route took), the operation's name, a statement's text as it is written in the source, with `$1` in place of each value, an error's type and a status code. It never carries what a caller sent or named: no request body, project key, case text, person, token, address, or error message, and no text of a statement the server builds while it runs. The service version is the commit from `MAINWORTHY_COMMIT` when it is set. The server starts a new trace for each request and ignores a `traceparent` header. The health probe is not traced.
 

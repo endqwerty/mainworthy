@@ -280,7 +280,8 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 
 const OIDC_NAMES = ["ISSUER", "CLIENT_ID", "CLIENT_SECRET", "NAME"] as const;
 /** Plain http is taken only from a provider on this machine, which is a test's or a developer's. */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/** Host names of this machine as a URL writes them: plain http is allowed only to these. */
+export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 function oidcOf(env: Record<string, string | undefined>): Pick<Config, "oidc"> {
 	const [issuer, clientId, clientSecret, name] = OIDC_NAMES.map((name) => env[`MAINWORTHY_OIDC_${name}`]?.trim() ?? "");

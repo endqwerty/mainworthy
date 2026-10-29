@@ -327,22 +327,28 @@ test("the settings: off unless an endpoint is named, and a value the server cann
 	for (const env of [
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "not a url" },
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "ftp://x" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_EXPORTER: "zipkin" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_PROTOCOL: "grpc" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "sometimes" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "no-equals-sign" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "constructor" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "constructor" },
-		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "traceidratio", OTEL_TRACES_SAMPLER_ARG: "2" },
+		// Plain http reaches only this machine, and the address holds no credentials.
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.example" },
+		{ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://10.0.0.5:4318/v1/traces" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://key:secret@collector.example" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_TRACES_EXPORTER: "zipkin" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_PROTOCOL: "grpc" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_TRACES_SAMPLER: "sometimes" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_HEADERS: "no-equals-sign" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_TRACES_SAMPLER: "constructor" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_TRACES_SAMPLER: "constructor" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "https://x", OTEL_TRACES_SAMPLER: "traceidratio", OTEL_TRACES_SAMPLER_ARG: "2" },
 	])
 		expect(() => telemetrySettings(env)).toThrow();
+	for (const endpoint of ["http://localhost:4318", "http://127.0.0.1:4318", "http://[::1]:4318"])
+		expect(telemetrySettings({ OTEL_EXPORTER_OTLP_ENDPOINT: endpoint }).kind).toBe("traces");
 	expect(
 		telemetrySettings({
-			OTEL_EXPORTER_OTLP_ENDPOINT: "http://x",
+			OTEL_EXPORTER_OTLP_ENDPOINT: "https://x",
 			OTEL_TRACES_SAMPLER: "traceidratio",
 			OTEL_TRACES_SAMPLER_ARG: "0.25",
 		}).kind,
