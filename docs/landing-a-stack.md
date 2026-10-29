@@ -2,8 +2,9 @@
 
 ## Use one combined check for draft review layers
 
-For related changes, keep the layer PRs as drafts and open one combined PR from the tip branch to `main`.
-Keep that combined PR draft while assembling the stack, then mark it ready once. Draft PRs run the description
+Batch small related changes as commits. Use draft layer PRs only for chunks that benefit from separate review,
+not for every small change. Open each layer only after its local checks and review. Open the combined draft PR
+from the tip branch to `main` after the whole change passes local checks and independent review. Complete its PR-dependent audit, then mark it ready once. Draft PRs run the description
 check only. The ready combined PR runs normal CI against GitHub's merge of the full stack into `main`.
 Pushing several local commits together produces one PR synchronization event, rather than one per commit.
 

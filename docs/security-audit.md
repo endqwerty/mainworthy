@@ -1,10 +1,9 @@
 # The security audit before a merge
 
-Every merge into `main` passes a Daybreak security audit first (the owner, 2026-10-21). Its first round runs beside the
-first independent review, on the same head, so one fix answers both (the owner, 2026-10-27: "yes let it run earlier").
-The round that clears the merge is on the revision that will land, after the independent verdict and a green `gate`. The
-rule is this repository's; other repositories have their own security posture and their own rules. Nothing runs it for
-you: it is a judgment call that the owner reviews.
+Every merge into `main` passes a Daybreak security audit. Complete local checks and independent review before
+opening a PR. The first audit runs on the reviewed draft because its runner requires an open PR. Resolve findings
+before marking ready and starting full CI. The round that clears the merge runs on the revision that will land,
+after the independent verdict and a green `gate`. This repository's audit rule is enforced by delivery review.
 
 ## Running it
 
@@ -105,12 +104,11 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
 
 ## Where it sits in delivery
 
-- **Review-first** (`AGENTS.md`, Delivery): open the pull request first, since the audit reads only an open one. Start
-  the first round with the first independent review, on the same head, and fix what both find in one change. Audit again
-  only on a head the verifier has passed, after a green `gate`, as the last step before you hand the pull request over.
-  Record every round in the description: the model and effort, the head and the base it read, the commit the script came
-  from, each issue and what answered it. The owner then knows which revision on which `main` was audited, and by which
-  copy of the audit.
+- **Review before the PR** (`AGENTS.md`, Delivery): batch a coherent change, run local checks and obtain its
+  independent verdict first. Open a draft only once it is likely to ship. The PR-dependent audit runs there while
+  heavy CI remains skipped. Resolve findings before marking ready. Run the final audit after a green `gate` on
+  the reviewed head/base. Record each round's model, effort, head, base, trusted runner revision and findings in
+  the standalone description.
 - **When the owner says to merge** (`ship`, [landing-a-stack.md](landing-a-stack.md)): just before the merge, check
   that each head and base is still the audited pair; if one is not, audit it again first.
 - **A stack may be audited as one** when every layer has already had its own audit, or when it has five layers or

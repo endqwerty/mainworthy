@@ -5,7 +5,7 @@ external deploy job. Mainworthy judges its own CI: a failing test becomes a ques
 gate stays red until someone fixes the test or a person answers the question. This page explains each step.
 [docs/deploy.md](../deploy.md) has the full record of how the instance and its CI reporting were set up.
 
-[Diagram: a change, from a branch to the deployed instance](diagrams/change-to-deploy.html)
+Local checks and review precede PR creation; full hosted CI starts when the reviewed draft becomes ready.
 
 ## Open a pull request
 
@@ -16,17 +16,17 @@ To deliver a change, follow these steps:
 
 1. If the change has an issue, move its card to In Progress before the first edit:
    `bun scripts/work.ts board start <number>`.
-2. Make the change on the worktree's branch and run `bun run check`.
-3. Open a non-draft pull request. Give it the issue's milestone. Put `Closes #123` on a line of its own only when
-   the merge makes everything the issue asks for true. Otherwise write `Part of #123`.
-4. Set `pr: <this PR's URL>` in each fragment this PR adds, commit and push that update, then run
-   `bun scripts/work.ts pr-body <number>`. It checks the linked issues, milestone and fragment PR references.
-   CI's `description` job runs the same command; `pr: pending` is allowed only while the PR is a draft.
-5. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
-6. Get an independent verification from a model of another provider, as the `verify` skill asks, and run the
-   Daybreak security audit's first round beside it on the same head; fix what both find in one change. Audit again
-   on a head the verifier has passed, once `gate` is green, address every issue, and record each round in the
-   description: [docs/security-audit.md](../security-audit.md).
+2. Batch related small changes as commits on one branch. Run `bun run check` and the focused checks for the change.
+3. Obtain an independent review locally and fix its findings before opening a PR. A backup branch push needs no PR.
+   Use one PR per coherent outcome; do not create one for each commit or small correction.
+4. Once the reviewed change is likely to ship, open a draft PR. Give it the issue's milestone. Put `Closes #123` on
+   a line of its own only when the merge completes the issue; otherwise use `Part of #123`. Link the PR to the thread.
+5. Set `pr: <this PR's URL>` in each fragment it adds, commit that metadata together and run
+   `bun scripts/work.ts pr-body <number>`. Move the PR card with `bun scripts/work.ts board start <number>`.
+6. Run the first Daybreak audit on the reviewed draft. Drafts run only the description check. Resolve the audit's
+   findings and obtain any required targeted re-review before marking the PR ready.
+7. Mark ready once the change is expected to ship. That event starts full CI. After a green `gate`, run the final
+   audit on the current head/base and record every round in the description: [security audit](../security-audit.md).
 
 The owner reviews every change and merges it by rebase (`gh pr merge --rebase`), only while the head and base are
 the pair the audit read. An agent stops once the pull request has its verdict and audit, even when every check is

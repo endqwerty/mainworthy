@@ -35,10 +35,11 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **A phone is styled in one file**, `src/web/phone.css`, each rule under `:root[data-layout="phone"]`. A screen adds no touch control for what a key does. A binding is `list: true` only when it decides nothing about the selected row | `test/architecture.test.ts`, "the phone layout" |
 | **Licences are read from the build** (decision 0025). After changing a dependency run `bun scripts/licences.ts` and commit the result. A licence the script does not name is the owner's call, asked in the pull request | `test/licences.test.ts` |
 | **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0100). Put no write time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
-| **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
-| **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why (the owner, 2026-10-24: "None of them should be hard limits"). A weekly task, not a pull request, refreshes `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
-| **Guard only what is critical.** Before adding a check, test or audit fix, name what reaches the state; if nothing does yet, say so, add nothing (the owner, 2026-10-25: "Only guard if it's absolutely critical to do so") | the audit brief (`test/security-audit.test.ts`); review judgment |
-| **A reachable finding becomes a test at the cheapest layer that reaches it**, extending an existing one before adding a file (the owner, 2026-10-27: "4 is critical"; docs/development/tests.md) | `pr-body` asks why of each added browser test (`scripts/browser-tests.ts`); the layer is review judgment |
+| **A feature adds to the demo**: `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
+| **A budget is a baseline that warns.** Every number goes through `budget()`: above the baseline it warns; above ten times it fails for review, unless the pull request moves the baseline and says why. A weekly task, not a pull request, refreshes `scripts/test-timings.json` (docs/development/tests.md) | `scripts/budget.ts` |
+| **Guard only what is critical.** Before adding a check, test or audit fix, name what reaches the state; if nothing does yet, say so, add nothing | the audit brief (`test/security-audit.test.ts`); review judgment |
+| **A reachable finding becomes a test at the cheapest layer that reaches it**, extending an existing one before adding a file (docs/development/tests.md) | `pr-body` asks why of each added browser test (`scripts/browser-tests.ts`); the layer is review judgment |
+| **Batch and review before a PR.** Use one PR per coherent outcome, after local checks and independent review. Audit while draft; mark ready when likely to ship | delivery review; draft CI guards |
 | **Price added CI work.** At the 2026-10-28 full-CI frequency, one added runner-second on every run is about **$0.45/month** at private Linux rates. Name the failure, reuse coverage, and justify the test's frequency with the [cost estimate](docs/development/tests.md#estimate-the-recurring-ci-cost). This is a dated estimate, not a spending limit | PR review judgment; no extra CI check |
 | **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Timing and database process cleanup tests run alone with `bun run performance` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
@@ -63,8 +64,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
   brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
   rewrite. The goal: landing costs minutes.
-- Browser tests run once, in the pull request's CI, not in `bun run check` (the owner, 2026-10-27: "I'm leaning no and
-  to run the browser tests once later in the phase"). Run a browser file locally only when a change is to what a
+- Browser tests run once, in the pull request's CI, not in `bun run check`. Run a browser file locally only when a change is to what a
   browser shows.
 - `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
   rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
@@ -90,17 +90,17 @@ one, take the verifier from `--profile balanced` and say so in the pull request;
 
 ## Delivery
 
-**Review-first: the owner merges; you do not.** On the T3 branch, follow the `build` skill: open a non-draft pull
-request with a standalone description naming its issue (above), link it to the thread, get `verify`'s independent
-verdict and the Daybreak audit every merge needs (`docs/security-audit.md`), its first round beside the first review,
-and stop. Do not merge, arm auto-merge, close it or push to `main`, even when checks are green. Only the owner saying,
-in the current thread, to merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the
-branch). A stack lands in one step when the owner's word covers it: `docs/landing-a-stack.md`.
+Follow `build`: batch small related changes as local commits, run checks and obtain an independent verdict
+before opening a PR. Push a branch for backup when needed; a branch push alone needs no PR. Once likely to ship,
+open one draft PR with a standalone description and link it to the thread. Run its first Daybreak audit on the
+reviewed head. Mark ready only after review and audit findings are resolved, starting full CI once. After a green
+`gate`, run the final current-head/base audit (`docs/security-audit.md`).
 
-For related changes, draft review layers may sit below one non-draft combined PR from the tip to `main`.
-Only that combined PR is a merge unit; it needs the complete check, independent verdict and audit. Draft layers
-run only the description check and cannot land independently on the combined result. The existing layer-audit
-threshold still applies. Follow `docs/landing-a-stack.md`.
+**The owner merges.** Stop before merging, arming auto-merge or pushing to `main` unless the owner authorizes
+identified work in this thread. Then use `ship`, rebase merge and keep the branch. Review layers are optional for
+chunks that benefit from separate review; small changes belong in commits, not separate PRs. Only the combined
+PR to `main` becomes ready and lands. Draft layers cannot land on its result, and the existing layer-audit
+threshold still applies (`docs/landing-a-stack.md`).
 
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
 the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
