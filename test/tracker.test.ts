@@ -1588,15 +1588,15 @@ test("tracker refuses a stale destination confirmation without sending; CLI need
 	expect(sent).toBe(1);
 });
 
-for (const [table, reference] of [
-	["tests", "test"],
-	["targets", "target"],
-	["batches", "batch"],
-	["cases", "basis_case"],
-] as const) {
-	test(`tracker refuses cross-project ${reference} evidence`, async () => {
-		const result = await failure();
-		await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+test("tracker refuses every cross-project evidence reference", async () => {
+	const result = await failure();
+	await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
+	for (const [table, reference] of [
+		["tests", "test"],
+		["targets", "target"],
+		["batches", "batch"],
+		["cases", "basis_case"],
+	] as const) {
 		await h.app.database.write(async (db) =>
 			db.transaction(async () => {
 				await db.run(
@@ -1608,14 +1608,27 @@ for (const [table, reference] of [
 			}),
 		);
 		for (const action of [{ do: "preview" }, { do: "create" }, { do: "link", key: "42" }] as const) {
-			expect(await h.raw("tracker", { ...action, result, cmd: `foreign-${reference}-${action.do}` })).toMatchObject({
+			expect(
+				await h.raw("tracker", { ...action, result, cmd: `foreign-${reference}-${action.do}` }),
+				reference,
+			).toMatchObject({
 				ok: false,
 				error: { code: "not_found" },
 			});
 		}
-		expect(await deliverTrackerRequests(h.app, port)).toBe(0);
-	});
-}
+		expect(await deliverTrackerRequests(h.app, port), reference).toBe(0);
+		await h.app.database.write((db) =>
+			db.transaction(async () => {
+				await db.run(
+					sql<readonly SqlValue[]>(
+						`UPDATE ${table} SET project = (SELECT id FROM projects WHERE key = 'scratch') WHERE id = (SELECT ${reference} FROM results WHERE id = $1)`,
+					),
+					[result],
+				);
+			}),
+		);
+	}
+});
 
 test("tracker preview rechecks read after its snapshot", async () => {
 	const result = await failure();

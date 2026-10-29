@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import { call } from "../../src/web/lib/api.ts";
 import { ciReport } from "../helpers.ts";
+import type { Server } from "./support.ts";
 import { answer, browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 async function holdReply(page: Page, pattern: string, matches: (input: unknown) => boolean = () => true) {
@@ -242,51 +244,68 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const choice of ["same address", "leave and return", "history"] as const) {
-	test.skipIf(!browserAvailable)(
-		`a late home lookup preserves a later ${choice} navigation`,
-		async () => {
-			const server = await startServer({ cases: 2 });
-			const run = await server.api("plan", { name: "Home run", select: { cases: ["C-1"] } });
-			const browser = await openPage(server, { path: "/p/scratch/settings" });
-			const { page } = browser;
-			const reply = await holdReply(
-				page,
-				"**/api/p/scratch/get",
-				(input) => z.object({ refs: z.tuple([z.literal(run.run)]) }).safeParse(input).success,
-			);
-			try {
-				await page.getByRole("option", { name: "Your home", exact: true }).click();
-				await page.getByLabel("Home screen", { exact: true }).selectOption("run");
-				await page.getByLabel("Home run", { exact: true }).fill(run.run);
-				await page.getByRole("button", { name: "Save home", exact: true }).click();
-				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
-				await page.keyboard.type("gq");
-				await page.getByRole("listbox", { name: "Questions", exact: true }).waitFor();
-				await page.keyboard.type("gh");
-				await reply.arrived;
-				if (choice !== "same address") {
-					await page.keyboard.type("gs");
-					await page.getByRole("textbox", { name: "Filter cases", exact: true }).waitFor();
-				}
-				if (choice === "history") await page.goBack();
-				else await page.keyboard.type("gq");
-				await page.getByRole("listbox", { name: "Questions", exact: true }).waitFor();
-				const answered = page.waitForResponse(
-					(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0] === run.run,
+test.skipIf(!browserAvailable)(
+	"a late home lookup preserves every later navigation path",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, choice] of (["same address", "leave and return", "history"] as const).entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(choice));
+				await server.api("propose", {
+					edits: [
+						{ op: "create", outline: "Home first" },
+						{ op: "create", outline: "Home second" },
+					],
+				});
+				const run = await server.api("plan", { name: "Home run", select: { cases: ["C-1"] } });
+				const browser = await openPage(server, { path: `/p/${server.project}/settings` });
+				const { page } = browser;
+				const reply = await holdReply(
+					page,
+					`**/api/p/${server.project}/get`,
+					(input) => z.object({ refs: z.tuple([z.literal(run.run)]) }).safeParse(input).success,
 				);
-				reply.release();
-				await (await answered).finished();
-				await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-				expect(new URL(page.url()).pathname).toBe("/p/scratch/queue");
-				expect(await page.getByRole("listbox", { name: "Questions", exact: true }).isVisible()).toBe(true);
-				expect(browser.errors).toEqual([]);
-			} finally {
-				reply.release();
-				await browser.close();
-				await server.stop();
+				try {
+					await page.getByRole("option", { name: "Your home", exact: true }).click();
+					await page.getByLabel("Home screen", { exact: true }).selectOption("run");
+					await page.getByLabel("Home run", { exact: true }).fill(run.run);
+					await page.getByRole("button", { name: "Save home", exact: true }).click();
+					await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+					await page.keyboard.type("gq");
+					await page.getByRole("listbox", { name: "Questions", exact: true }).waitFor();
+					await page.keyboard.type("gh");
+					await reply.arrived;
+					if (choice !== "same address") {
+						await page.keyboard.type("gs");
+						await page.getByRole("textbox", { name: "Filter cases", exact: true }).waitFor();
+					}
+					if (choice === "history") await page.goBack();
+					else await page.keyboard.type("gq");
+					await page.getByRole("listbox", { name: "Questions", exact: true }).waitFor();
+					const answered = page.waitForResponse(
+						(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0] === run.run,
+					);
+					reply.release();
+					await (await answered).finished();
+					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+					variantExpect(new URL(page.url()).pathname).toBe(`/p/${server.project}/queue`);
+					variantExpect(await page.getByRole("listbox", { name: "Questions", exact: true }).isVisible()).toBe(true);
+					variantExpect(browser.errors).toEqual([]);
+				} finally {
+					reply.release();
+					await browser.close();
+				}
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);

@@ -878,32 +878,41 @@ for (const status of [403, 429]) {
 	});
 }
 
-for (const status of [403, 429]) {
-	for (const remaining of ["0", "5000", null]) {
-		test(`${status} with remaining ${remaining} uses reset only when the limit is exhausted`, async () => {
-			const fixture = await setup();
-			await report(fixture, "pass");
+test("rate-limit reset applies only to exhausted limits for both HTTP statuses", async () => {
+	const fixture = await setup();
+	let index = 0;
+	for (const status of [403, 429]) {
+		for (const remaining of ["0", "5000", null]) {
+			const label = `${status}, remaining ${remaining}`;
+			await report(fixture, "pass", {
+				commit: (++index).toString(16).padStart(40, "0"),
+				repo: github.repository,
+				pr: index,
+			});
 			const headers = new Headers({ "x-ratelimit-reset": String(Math.ceil((fixture.app.now() + 3_000_000) / 1000)) });
 			if (remaining !== null) headers.set("x-ratelimit-remaining", remaining);
 			let refuse = true;
 			const fake = remote(() => (refuse ? new Response(credential, { status, headers }) : response()));
 			const log = spyOn(console, "error").mockImplementation(() => undefined);
 			try {
-				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(1);
+				expect(await deliverCommitStatuses(fixture.app, fake.port), label).toBe(1);
 				refuse = false;
 				fixture.advance(59_000);
-				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
+				expect(await deliverCommitStatuses(fixture.app, fake.port), label).toBe(0);
 				fixture.advance(1000);
-				expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(remaining === "0" ? 0 : 1);
+				expect(await deliverCommitStatuses(fixture.app, fake.port), label).toBe(remaining === "0" ? 0 : 1);
 				fixture.advance(2_941_000);
 				await deliverCommitStatuses(fixture.app, fake.port);
-				expect(fake.requests.map((request) => request.body.state)).toEqual(["success", "success"]);
+				expect(
+					fake.requests.map((request) => request.body.state),
+					label,
+				).toEqual(["success", "success"]);
 			} finally {
 				log.mockRestore();
 			}
-		});
+		}
 	}
-}
+});
 
 test("the rolling hour permits 240 status posts across jobs and resumes when the oldest posts expire", async () => {
 	const fixture = await setup();

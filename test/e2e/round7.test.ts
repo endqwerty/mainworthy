@@ -1,8 +1,28 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import { call } from "../../src/web/lib/api.ts";
 import { DraftConflict } from "../../src/web/lib/drafts.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+
+let sharedServer: Promise<Server> | undefined;
+let projectNumber = 0;
+afterAll(async () => {
+	if (sharedServer) await (await sharedServer).stop();
+});
+async function fixture(): Promise<Server> {
+	sharedServer ??= startServer();
+	const shared = await sharedServer;
+	const project = `round-seven-${++projectNumber}`;
+	await shared.api("admin", { do: "project.create", key: project, preset: "loose" });
+	return {
+		...shared,
+		project,
+		api: (op, input, options = {}) =>
+			call(op, input, { url: shared.url, project, token: options.token ?? shared.token }),
+		stop: async () => {},
+	};
+}
 
 const check = test.skipIf(!browserAvailable);
 const title = (page: Page) => page.getByRole("textbox", { name: "Case title", exact: true });
@@ -86,13 +106,13 @@ for (const order of ["resolve then reload", "reload then resolve"])
 	check(
 		`R7-1 route A: an existing second window freezes and releases through storage, ${order}`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await cases(server);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 			try {
 				const a = h.page;
 				const b = await h.context.newPage();
-				await b.goto(`${server.url}/p/scratch/suite/c/1`);
+				await b.goto(`${server.url}/p/${server.project}/suite/c/1`);
 				await b.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 				await conflict(server, a);
 				await b.keyboard.press("e");
@@ -135,14 +155,14 @@ for (const order of ["resolve then reload", "reload then resolve"])
 check(
 	"R7-1 route B: rejection while opened on another case clears the stored conflict and preserves a later proposal",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = h;
 			await conflict(server, page);
 			const q = await question(server);
-			await page.goto(`${server.url}/p/scratch/suite/c/2`);
+			await page.goto(`${server.url}/p/${server.project}/suite/c/2`);
 			await page.getByRole("button", { name: "Case 2", exact: true }).waitFor();
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 			await page.locator('[data-testid="case-list"] [role="option"]').filter({ hasText: "C-1" }).click();
@@ -186,13 +206,13 @@ check(
 check(
 	"R7-1 storage freezes an already open editor and rejection releases it without a reload",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const a = h.page;
 			const b = await h.context.newPage();
-			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.goto(`${server.url}/p/${server.project}/suite/c/1`);
 			await b.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await b.keyboard.press("e");
 			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(false);
@@ -222,9 +242,9 @@ for (const choice of ["Keep current version", "Use current title"])
 	check(
 		`R7-2 rejection preserves the draft after unconfirmed ${choice}`,
 		async () => {
-			const server = await startServer();
+			const server = await fixture();
 			await cases(server);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 			try {
 				const { page } = h;
 				await conflict(server, page);
@@ -233,7 +253,7 @@ for (const choice of ["Keep current version", "Use current title"])
 				await page.close();
 				await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 				const returned = await h.context.newPage();
-				await returned.goto(`${server.url}/p/scratch/suite/c/1`);
+				await returned.goto(`${server.url}/p/${server.project}/suite/c/1`);
 				await title(returned).waitFor();
 				await card(returned).waitFor({ state: "detached" });
 				await returned.getByText("Your current draft is kept", { exact: false }).first().waitFor();
@@ -251,9 +271,9 @@ for (const choice of ["Keep current version", "Use current title"])
 check(
 	"R7-3 a merge decided elsewhere drops already recorded text and shows the actual head",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = h;
 			await conflict(server, page);
@@ -268,7 +288,7 @@ check(
 				sent++;
 				await route.continue();
 			});
-			await returned.goto(`${server.url}/p/scratch/suite/c/1`);
+			await returned.goto(`${server.url}/p/${server.project}/suite/c/1`);
 			await eventually(
 				() => drafts(returned),
 				(rows) => rows.length === 0,
@@ -291,9 +311,9 @@ check(
 check(
 	"R7-4 a second press after a lost merge reply releases the card without a reload",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		const gate = latch();
 		try {
 			const { page } = h;
@@ -335,9 +355,9 @@ check(
 check(
 	"R7 removal guard: a merge reply preserves a stored body that changed since mine",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		const gate = latch();
 		try {
 			const { page } = h;
@@ -374,15 +394,15 @@ check(
 check(
 	"R7 write guard: a conflict stored before its event refuses input in an unfrozen editor",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		try {
 			const { page } = h;
 			await conflict(server, page);
 			const stored = (await drafts(page))[0]?.conflict;
 			if (!stored) throw Error("Missing conflict");
-			await page.goto(`${server.url}/p/scratch/suite/c/2`);
+			await page.goto(`${server.url}/p/${server.project}/suite/c/2`);
 			await page.getByRole("button", { name: "Case 2", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			await title(page).fill("Case 2 draft");
@@ -414,15 +434,15 @@ check(
 check(
 	"R7 removal guard: a late merge reply keeps a fresh draft after another window released the conflict",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		const gate = latch();
 		try {
 			const a = h.page;
 			await conflict(server, a);
 			const b = await h.context.newPage();
-			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.goto(`${server.url}/p/${server.project}/suite/c/1`);
 			await card(b).waitFor();
 			await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Recorded choice");
 			let received = false;
@@ -461,9 +481,9 @@ check(
 check(
 	"R7-4 retry after a lost merge reply keeps text subsequently typed in the card",
 	async () => {
-		const server = await startServer();
+		const server = await fixture();
 		await cases(server);
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 		const gate = latch();
 		try {
 			const { page } = h;

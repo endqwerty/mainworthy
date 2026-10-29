@@ -981,34 +981,44 @@ const rawTestAttributes = (values: Record<string, string | undefined>, quote = '
 		.map(([name, value]) => `${name}=${quote}${value}${quote}`)
 		.join(" ");
 
-test.each(rawIdentityChanges)("raw JUnit identity changes stay separate: %j", async (change) => {
-	const identity = {
-		file: "t.py",
-		classname: "t.TestA",
-		name: "x",
-		id: "case-1",
-		line: "12",
-		package: "tests",
-		"custom-runner-identity": "same",
-	};
-	const initial = change.separateSuites ? identity : { ...identity, [change.attribute]: change.before };
-	const retried = change.separateSuites ? identity : { ...identity, [change.attribute]: change.after };
-	const first = `<testcase ${rawTestAttributes(initial)}><failure message="real"/></testcase>`;
-	const last = `<testcase ${rawTestAttributes({ ...retried, name: `${retried.name} (retry #1)` })}/>`;
-	const xml = change.separateSuites
-		? `<testsuites><testsuite name="same">${first}</testsuite><testsuite name="same">${last}</testsuite></testsuites>`
-		: `<testsuite>${first}${last}</testsuite>`;
-	const parsed = parseReport(xml, { file: "raw-identity.xml" });
-	expect(parsed.results).toHaveLength(2);
-	expect(parsed.results.map((item) => item.outcome)).toEqual(["fail", "pass"]);
-	expect(parsed.results.every((item) => item.tries === undefined)).toBe(true);
-	await h.call("report", {
-		target: { commit: "fedc7336", repo: "acme/web", branch: "main" },
-		job: "e2e",
-		results: parsed.results,
-	});
-	expect(await gate("fedc7336")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
-	expect(await flaky()).toBe(0);
+test("raw JUnit identity changes stay separate for every identity attribute", async () => {
+	for (const [index, change] of rawIdentityChanges.entries()) {
+		const label = JSON.stringify(change);
+		const commit = `rawidentity${index}`;
+		const identity = {
+			file: "t.py",
+			classname: "t.TestA",
+			name: "x",
+			id: "case-1",
+			line: "12",
+			package: "tests",
+			"custom-runner-identity": "same",
+		};
+		const initial = change.separateSuites ? identity : { ...identity, [change.attribute]: change.before };
+		const retried = change.separateSuites ? identity : { ...identity, [change.attribute]: change.after };
+		const first = `<testcase ${rawTestAttributes(initial)}><failure message="real"/></testcase>`;
+		const last = `<testcase ${rawTestAttributes({ ...retried, name: `${retried.name} (retry #1)` })}/>`;
+		const xml = change.separateSuites
+			? `<testsuites><testsuite name="same">${first}</testsuite><testsuite name="same">${last}</testsuite></testsuites>`
+			: `<testsuite>${first}${last}</testsuite>`;
+		const parsed = parseReport(xml, { file: "raw-identity.xml" });
+		expect(parsed.results, label).toHaveLength(2);
+		expect(
+			parsed.results.map((item) => item.outcome),
+			label,
+		).toEqual(["fail", "pass"]);
+		expect(
+			parsed.results.every((item) => item.tries === undefined),
+			label,
+		).toBe(true);
+		await h.call("report", {
+			target: { commit, repo: "acme/web", branch: "main" },
+			job: "e2e",
+			results: parsed.results,
+		});
+		expect(await gate(commit), label).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		expect(await flaky(), label).toBe(0);
+	}
 });
 
 test.each(["(retry #1)", "[retry 1]"])(

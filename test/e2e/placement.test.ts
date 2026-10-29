@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { API_VERSION, API_VERSION_HEADER } from "../../src/core/version.ts";
+import { call } from "../../src/web/lib/api.ts";
+import type { Server } from "./support.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 const legacyBundle = process.env.MAINWORTHY_LEGACY_BUNDLE;
@@ -62,13 +64,13 @@ for (const contract of ["missing", "mismatch", ...(legacyBundle ? ["historical"]
 	);
 }
 
-async function holdPlacements(page: Awaited<ReturnType<typeof openPage>>["page"]) {
+async function holdPlacements(page: Awaited<ReturnType<typeof openPage>>["page"], project = "scratch") {
 	let started = false;
 	let release = () => {};
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
 	});
-	await page.context().route("**/api/p/scratch/propose", async (route) => {
+	await page.context().route(`**/api/p/${project}/propose`, async (route) => {
 		started = true;
 		await held;
 		await route.continue();
@@ -76,61 +78,72 @@ async function holdPlacements(page: Awaited<ReturnType<typeof openPage>>["page"]
 	return { release, started: () => started };
 }
 
-for (const folders of ["failed", "slow"] as const) {
-	test.skipIf(!browserAvailable)(
-		`server-filtered cases stay visible when the folders read is ${folders}`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [{ op: "create", folder: "Original", body: { title: "Waiting for folders" } }],
-			});
-			let release = () => {};
-			const held = new Promise<void>((resolve) => {
-				release = resolve;
-			});
-			let requested = false;
-			const h = await openPage(server, {
-				path: "/p/scratch/suite?folder=Original",
-				setup: async (_page, context) => {
-					await context.route("**/api/p/scratch/find", async (route) => {
-						if (!z.object({ in: z.literal("folders") }).safeParse(route.request().postDataJSON()).success)
-							return route.continue();
-						requested = true;
-						if (folders === "slow") {
-							await held;
-							await route.continue();
-						} else
-							await route.fulfill({
-								status: 500,
-								contentType: "application/json",
-								body: JSON.stringify({ ok: false, error: { code: "internal", message: "Folders unavailable" } }),
-							});
-					});
-				},
-			});
-			try {
-				const { page } = h;
-				await eventually(async () => requested, Boolean);
-				await page.locator("#lcount").filter({ hasText: "1 cases" }).waitFor();
-				await page.getByRole("button", { name: "Waiting for folders", exact: true }).waitFor();
-				if (folders === "slow" && process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT)
-					await page.screenshot({ path: process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT });
-				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
-				if (folders === "slow") {
+test.skipIf(!browserAvailable)(
+	"server-filtered cases stay visible for failed and slow folder reads",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, folders] of (["failed", "slow"] as const).entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(folders));
+				await server.api("propose", {
+					edits: [{ op: "create", folder: "Original", body: { title: "Waiting for folders" } }],
+				});
+				let release = () => {};
+				const held = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				let requested = false;
+				const h = await openPage(server, {
+					path: `/p/${server.project}/suite?folder=Original`,
+					setup: async (_page, context) => {
+						await context.route(`**/api/p/${server.project}/find`, async (route) => {
+							if (!z.object({ in: z.literal("folders") }).safeParse(route.request().postDataJSON()).success)
+								return route.continue();
+							requested = true;
+							if (folders === "slow") {
+								await held;
+								await route.continue();
+							} else
+								await route.fulfill({
+									status: 500,
+									contentType: "application/json",
+									body: JSON.stringify({ ok: false, error: { code: "internal", message: "Folders unavailable" } }),
+								});
+						});
+					},
+				});
+				try {
+					const { page } = h;
+					await eventually(async () => requested, Boolean);
+					await page.locator("#lcount").filter({ hasText: "1 cases" }).waitFor();
+					await page.getByRole("button", { name: "Waiting for folders", exact: true }).waitFor();
+					if (folders === "slow" && process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT });
+					variantExpect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+					if (folders === "slow") {
+						release();
+						await page.locator("button.fo").filter({ hasText: "Original" }).waitFor();
+						variantExpect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+						variantExpect(h.errors).toEqual([]);
+					}
+				} finally {
 					release();
-					await page.locator("button.fo").filter({ hasText: "Original" }).waitFor();
-					expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
-					expect(h.errors).toEqual([]);
+					await h.close();
 				}
-			} finally {
-				release();
-				await h.close();
-				await server.stop();
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"UI-5 one immediate undo is queued behind a pending tag write",
@@ -176,65 +189,77 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const action of ["move", "archive"]) {
-	test.skipIf(!browserAvailable)(
-		`UI-5 immediate undo also waits for a pending ${action}`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [
-					{ op: "create", folder: "Original", body: { title: "Placement undo case" } },
-					{ op: "folder", name: "Destination" },
-				],
-			});
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-			let release = () => {};
-			try {
-				const { page } = h;
-				await page.getByRole("button", { name: "Placement undo case", exact: true }).waitFor();
-				const held = await holdPlacements(page);
-				release = held.release;
-				if (action === "move") {
-					await page.keyboard.press("m");
-					await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
-					await page.keyboard.press("Enter");
-					expect(await page.locator(".cmeta .path").textContent()).toBe("Destination");
-				} else {
-					await page.keyboard.press("#");
-					expect(await page.getByRole("option").filter({ hasText: "Placement undo case" }).count()).toBe(0);
+test.skipIf(!browserAvailable)(
+	"UI-5 immediate undo waits for pending moves and archives",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, action] of ["move", "archive"].entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(action));
+				await server.api("propose", {
+					edits: [
+						{ op: "create", folder: "Original", body: { title: "Placement undo case" } },
+						{ op: "folder", name: "Destination" },
+					],
+				});
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
+				let release = () => {};
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: "Placement undo case", exact: true }).waitFor();
+					const held = await holdPlacements(page, server.project);
+					release = held.release;
+					if (action === "move") {
+						await page.keyboard.press("m");
+						await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
+						await page.keyboard.press("Enter");
+						variantExpect(await page.locator(".cmeta .path").textContent()).toBe("Destination");
+					} else {
+						await page.keyboard.press("#");
+						variantExpect(await page.getByRole("option").filter({ hasText: "Placement undo case" }).count()).toBe(0);
+					}
+					await eventually(async () => held.started(), Boolean);
+					const before = (await server.api("get", { refs: ["C-1"] }))[0];
+					if (action === "move")
+						variantExpect(z.object({ path: z.string() }).parse(before?.folder).path).toBe("Original");
+					else variantExpect(before?.state).toBe("active");
+					await page.keyboard.press("u");
+					if (action === "move") variantExpect(await page.locator(".cmeta .path").textContent()).toBe("Original");
+					else variantExpect(await page.getByRole("option").filter({ hasText: "Placement undo case" }).count()).toBe(1);
+					await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undo queued."));
+					release();
+					const timeline = await eventually(
+						() => server.api("timeline", { ref: "C-1" }),
+						(reply) => reply.entries.filter((entry) => entry.t === "placement").length === 2,
+					);
+					const rows = await eventually(
+						() => server.api("get", { refs: ["C-1"] }),
+						(rows) =>
+							action === "move"
+								? z.object({ path: z.string() }).parse(rows[0]?.folder).path === "Original"
+								: rows[0]?.state === "active",
+					);
+					variantExpect(rows[0]?.version).toBe(1);
+					variantExpect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(2);
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					release();
+					await h.close();
 				}
-				await eventually(async () => held.started(), Boolean);
-				const before = (await server.api("get", { refs: ["C-1"] }))[0];
-				if (action === "move") expect(z.object({ path: z.string() }).parse(before?.folder).path).toBe("Original");
-				else expect(before?.state).toBe("active");
-				await page.keyboard.press("u");
-				if (action === "move") expect(await page.locator(".cmeta .path").textContent()).toBe("Original");
-				else expect(await page.getByRole("option").filter({ hasText: "Placement undo case" }).count()).toBe(1);
-				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undo queued."));
-				release();
-				const timeline = await eventually(
-					() => server.api("timeline", { ref: "C-1" }),
-					(reply) => reply.entries.filter((entry) => entry.t === "placement").length === 2,
-				);
-				const rows = await eventually(
-					() => server.api("get", { refs: ["C-1"] }),
-					(rows) =>
-						action === "move"
-							? z.object({ path: z.string() }).parse(rows[0]?.folder).path === "Original"
-							: rows[0]?.state === "active",
-				);
-				expect(rows[0]?.version).toBe(1);
-				expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(2);
-				expect(h.errors).toEqual([]);
-			} finally {
-				release();
-				await h.close();
-				await server.stop();
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"tagging updates the case before its request finishes and undo records the inverse",
@@ -403,7 +428,7 @@ test.skipIf(!browserAvailable)(
 			const { page } = h;
 			await page.getByRole("button", { name: "Two tags", exact: true }).waitFor();
 			let seen = 0;
-			await page.context().route("**/api/p/scratch/propose", async (route) => {
+			await page.context().route(`**/api/p/${server.project}/propose`, async (route) => {
 				seen += 1;
 				if (seen === 1) {
 					await first.promise;
@@ -465,7 +490,7 @@ test.skipIf(!browserAvailable)(
 			const { page } = h;
 			await page.getByRole("button", { name: "Edit while tagging", exact: true }).waitFor();
 			let started = false;
-			await page.context().route("**/api/p/scratch/propose", async (route) => {
+			await page.context().route(`**/api/p/${server.project}/propose`, async (route) => {
 				started = true;
 				await fail.promise;
 				await route.fulfill(failedReply("The tag failed"));
@@ -518,7 +543,7 @@ test.skipIf(!browserAvailable)(
 			await page.reload();
 			await page.getByRole("button", { name: "Undo behind a tag", exact: true }).waitFor();
 			let seen = 0;
-			await page.context().route("**/api/p/scratch/propose", async (route) => {
+			await page.context().route(`**/api/p/${server.project}/propose`, async (route) => {
 				seen += 1;
 				const turn = seen;
 				await (turn === 1 ? first : turn === 2 ? second : inverse).promise;
@@ -567,44 +592,55 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const queryFolder of ["Original", "original"]) {
-	test.skipIf(!browserAvailable)(
-		`a moved case appears when its destination folder is opened without reloading from ${queryFolder}`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [
-					{ op: "create", folder: "Original", body: { title: "Moved case" } },
-					{ op: "folder", name: "Destination" },
-				],
-			});
-			const h = await openPage(server, { path: `/p/scratch/suite/c/1?folder=${queryFolder}` });
-			try {
-				const { page } = h;
-				await page.getByRole("button", { name: "Moved case", exact: true }).waitFor();
-				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
-				await page.keyboard.press("m");
-				await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
-				await page.keyboard.press("Enter");
-				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
-				await page.locator("button.fo").filter({ hasText: "Destination" }).click();
-				await page.waitForFunction(
-					() =>
-						document.querySelector("#ltitle")?.textContent === "Destination" &&
-						document.querySelector("#lcount")?.textContent?.trim() === "1 cases",
-				);
-				if (queryFolder === "Original" && process.env.MAINWORTHY_PLACEMENT_SCREENSHOT)
-					await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_SCREENSHOT });
-				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
-				expect(h.errors).toEqual([]);
-			} finally {
-				await h.close();
-				await server.stop();
+test.skipIf(!browserAvailable)(
+	"a moved case appears at its destination without reloading for either folder spelling",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, queryFolder] of ["Original", "original"].entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(queryFolder));
+				await server.api("propose", {
+					edits: [
+						{ op: "create", folder: "Original", body: { title: "Moved case" } },
+						{ op: "folder", name: "Destination" },
+					],
+				});
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/1?folder=${queryFolder}` });
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: "Moved case", exact: true }).waitFor();
+					variantExpect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+					await page.keyboard.press("m");
+					await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
+					await page.keyboard.press("Enter");
+					await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
+					await page.locator("button.fo").filter({ hasText: "Destination" }).click();
+					await page.waitForFunction(
+						() =>
+							document.querySelector("#ltitle")?.textContent === "Destination" &&
+							document.querySelector("#lcount")?.textContent?.trim() === "1 cases",
+					);
+					if (queryFolder === "Original" && process.env.MAINWORTHY_PLACEMENT_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_SCREENSHOT });
+					variantExpect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					await h.close();
+				}
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"an archived case can be found and restored after reloading",

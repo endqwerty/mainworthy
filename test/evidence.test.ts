@@ -3655,34 +3655,23 @@ describe("imported invalid correction edges", () => {
 	}
 
 	for (const field of mismatches) {
-		test(`${field} mismatch leaves the original evidence standing`, async () => {
-			const { id } = await importedCorrection(field);
-			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing)).toBe(true);
-		});
-		test(`${field} mismatch does not withdraw a held result`, async () => {
-			const { id } = await importedCorrection(field);
-			expect(await h.app.database.read((db) => isWithdrawn(db, id))).toBe(false);
-		});
-		test(`${field} mismatch preserves evidence when reopening a run`, async () => {
-			const { run } = await importedCorrection(field);
+		test(`${field} mismatch preserves standing and held evidence, reopened runs and legitimate corrections`, async () => {
+			const { id, run } = await importedCorrection(field);
+			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing), field).toBe(true);
+			expect(await h.app.database.read((db) => isWithdrawn(db, id)), field).toBe(false);
 			const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
 			await h.call("decide", { undo: signoff.q });
-			expect(await h.call<GateStatus>("gate", { run })).toMatchObject({
+			expect(await h.call<GateStatus>("gate", { run }), field).toMatchObject({
 				verdict: "passed",
 				tally: { pass: 1, missing: 0 },
 			});
-		});
-		test(`${field} mismatch permits the producer's legitimate correction`, async () => {
-			const { id, run } = await importedCorrection(field);
-			const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
-			await h.call("decide", { undo: signoff.q });
 			const corrected = await h.call<ReportReceipt>("report", {
 				run,
 				results: [{ test: { case: "C-1" }, outcome: "pass", corrects: id }],
 			});
-			expect(corrected.results).toHaveLength(1);
-			expect(await h.app.database.read((db) => isWithdrawn(db, id))).toBe(true);
-			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing)).toBe(false);
+			expect(corrected.results, field).toHaveLength(1);
+			expect(await h.app.database.read((db) => isWithdrawn(db, id)), field).toBe(true);
+			expect(await h.app.database.read(async (db) => (await resultsByIds(db, [id]))[0]?.standing), field).toBe(false);
 		});
 	}
 });

@@ -1,8 +1,28 @@
 // A hand-typed merge and who may release it: the eighth review's second and third findings (R8-2, R8-3).
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { call } from "../../src/web/lib/api.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+
+let sharedServer: Promise<Server> | undefined;
+let projectNumber = 0;
+afterAll(async () => {
+	if (sharedServer) await (await sharedServer).stop();
+});
+async function fixture(): Promise<Server> {
+	sharedServer ??= startServer();
+	const shared = await sharedServer;
+	const project = `merged-drafts-${++projectNumber}`;
+	await shared.api("admin", { do: "project.create", key: project, preset: "loose" });
+	return {
+		...shared,
+		project,
+		api: (op, input, options = {}) =>
+			call(op, input, { url: shared.url, project, token: options.token ?? shared.token }),
+		stop: async () => {},
+	};
+}
 
 const check = test.skipIf(!browserAvailable);
 const title = (page: Page) => page.getByRole("textbox", { name: "Case title", exact: true });
@@ -22,11 +42,11 @@ async function stored(page: Page) {
 	);
 }
 async function windows() {
-	const server = await startServer();
+	const server = await fixture();
 	await server.api("propose", {
 		edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon" }],
 	});
-	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+	const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
 	const a = h.page;
 	await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 	return {
@@ -35,7 +55,7 @@ async function windows() {
 		a,
 		openFollower: async () => {
 			const b = await h.context.newPage();
-			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.goto(`${server.url}/p/${server.project}/suite/c/1`);
 			await b.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 			return b;
 		},

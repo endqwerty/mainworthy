@@ -201,65 +201,69 @@ check(
 	30000,
 );
 
-for (const surface of ["capture", "edit", "run", "planner", "queue", "settings"])
-	check(
-		`R4C-3 ${surface} opening key repeats stay out of its field until keyup`,
-		async () => {
-			const server = await startServer({ preset: "standard" });
+check(
+	"R4C-3 opening key repeats stay out of each surface's field until keyup",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		try {
 			await failures(server);
 			const run = await server.api("plan", { name: "Repeats", select: {} });
-			const path =
-				surface === "run"
-					? `/p/scratch/runs/${run.run.slice(2)}`
-					: surface === "planner"
-						? "/p/scratch/runs"
-						: surface === "queue"
-							? "/p/scratch/queue"
-							: surface === "settings"
-								? "/p/scratch/settings"
-								: "/p/scratch/suite/c/1";
-			const h = await openPage(server, { path });
-			try {
-				const { page } = h;
-				const key =
-					surface === "capture"
-						? "c"
-						: surface === "edit"
-							? "e"
-							: surface === "run"
-								? "f"
-								: surface === "queue"
-									? "d"
-									: "n";
-				let field = title(page);
-				if (surface === "queue") {
-					await page.locator("[data-current-question]").waitFor();
-					field = page.locator("#answer-extra");
-				} else if (surface === "run") {
-					await ready(page);
-					field = page.getByRole("textbox", { name: "Result note" });
-				} else if (surface === "planner") field = page.locator("#run-name");
-				else if (surface === "settings") {
-					await page.getByRole("option", { name: "Tokens", exact: true }).click();
-					field = page.locator("#token-actor");
-				} else await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
-				await page.keyboard.down(key);
-				await field.waitFor();
-				const before = await field.inputValue();
-				for (let i = 0; i < 5; i++) await page.keyboard.down(key);
-				await page.keyboard.up(key);
-				expect(await field.inputValue()).toBe(before);
-				await page.keyboard.down(key);
-				await page.keyboard.down(key);
-				await page.keyboard.up(key);
-				expect(await field.inputValue()).toBe(before + key + key);
-			} finally {
-				await h.close();
-				await server.stop();
+			for (const surface of ["capture", "edit", "run", "planner", "queue", "settings"]) {
+				const path =
+					surface === "run"
+						? `/p/scratch/runs/${run.run.slice(2)}`
+						: surface === "planner"
+							? "/p/scratch/runs"
+							: surface === "queue"
+								? "/p/scratch/queue"
+								: surface === "settings"
+									? "/p/scratch/settings"
+									: "/p/scratch/suite/c/1";
+				const h = await openPage(server, { path });
+				try {
+					const { page } = h;
+					const key =
+						surface === "capture"
+							? "c"
+							: surface === "edit"
+								? "e"
+								: surface === "run"
+									? "f"
+									: surface === "queue"
+										? "d"
+										: "n";
+					let field = title(page);
+					if (surface === "queue") {
+						await page.locator("[data-current-question]").waitFor();
+						field = page.locator("#answer-extra");
+					} else if (surface === "run") {
+						await ready(page);
+						field = page.getByRole("textbox", { name: "Result note" });
+					} else if (surface === "planner") field = page.locator("#run-name");
+					else if (surface === "settings") {
+						await page.getByRole("option", { name: "Tokens", exact: true }).click();
+						field = page.locator("#token-actor");
+					} else await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
+					await page.keyboard.down(key);
+					await field.waitFor();
+					const before = await field.inputValue();
+					for (let i = 0; i < 5; i++) await page.keyboard.down(key);
+					await page.keyboard.up(key);
+					expect(await field.inputValue(), surface).toBe(before);
+					await page.keyboard.down(key);
+					await page.keyboard.down(key);
+					await page.keyboard.up(key);
+					expect(await field.inputValue(), surface).toBe(before + key + key);
+				} finally {
+					await h.close();
+				}
 			}
-		},
-		30000,
-	);
+		} finally {
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 for (const action of ["close", "reload"])
 	check(

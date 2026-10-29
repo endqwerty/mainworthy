@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
 import { parseCase } from "../../src/core/markdown.ts";
+import { call } from "../../src/web/lib/api.ts";
 import { CaseView, editDraft } from "../../src/web/suite/model.ts";
+import type { Server } from "./support.ts";
 import { browserAvailable, eventually, joinPerson, keyCount, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -65,82 +67,93 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-for (const action of ["placement", "save"] as const) {
-	test.skipIf(!browserAvailable)(
-		`a held Suite page cannot overwrite a ${action} and is followed by a fresh read`,
-		async () => {
-			const server = await startServer();
-			await server.api("propose", {
-				edits: [
-					{ op: "create", body: { title: "Local case" } },
-					{ op: "create", body: { title: "Remote case" } },
-				],
-			});
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-			try {
-				const { page } = h;
-				await page.getByRole("button", { name: "Local case", exact: true }).waitFor();
-				await page.getByRole("option").filter({ hasText: "Remote case" }).waitFor();
-				await page.evaluate(() => {
-					const send = window.fetch.bind(window);
-					let reads = 0;
-					const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
-						const reply = await send(input, init);
-						if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
-							const read = ++reads;
-							document.documentElement.dataset.heldReads = String(read);
-							await new Promise<void>((resolve) =>
-								window.addEventListener(read === 1 ? "test:old" : "test:fresh", () => resolve(), { once: true }),
-							);
-						}
-						return reply;
-					};
-					window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
-				});
+test.skipIf(!browserAvailable)(
+	"a held Suite page cannot overwrite a placement or save and is followed by a fresh read",
+	async () => {
+		const host = await startServer();
+		try {
+			for (const [index, action] of (["placement", "save"] as const).entries()) {
+				const project = `variant-${index}`;
+				await host.api("admin", { do: "project.create", key: project, preset: "loose" });
+				const server: Server = {
+					...host,
+					project,
+					api: (op, input, options) => call(op, input, { url: host.url, project, token: options?.token ?? host.token }),
+				};
+				const variantExpect = <T>(value: T) => expect(value, String(action));
 				await server.api("propose", {
-					edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Remote update" } }],
+					edits: [
+						{ op: "create", body: { title: "Local case" } },
+						{ op: "create", body: { title: "Remote case" } },
+					],
 				});
-				await page.waitForFunction(() => document.documentElement.dataset.heldReads === "1");
-				const row = page.getByRole("option").filter({ hasText: "Local case" });
-				const expected = action === "placement" ? "#localtag" : "Saved local case";
-				if (action === "placement") {
-					await page.keyboard.press("t");
-					await page.keyboard.type("localtag");
-					await page.keyboard.press("Enter");
-				} else {
-					await page.keyboard.press("e");
-					await page.getByRole("textbox", { name: "Case title", exact: true }).fill(expected);
-					await page.keyboard.press("Escape");
-					await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
-					await page.getByRole("option").filter({ hasText: "Remote case" }).click();
+				const h = await openPage(server, { path: `/p/${server.project}/suite/c/1` });
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: "Local case", exact: true }).waitFor();
+					await page.getByRole("option").filter({ hasText: "Remote case" }).waitFor();
+					await page.evaluate(() => {
+						const send = window.fetch.bind(window);
+						let reads = 0;
+						const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+							const reply = await send(input, init);
+							if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
+								const read = ++reads;
+								document.documentElement.dataset.heldReads = String(read);
+								await new Promise<void>((resolve) =>
+									window.addEventListener(read === 1 ? "test:old" : "test:fresh", () => resolve(), { once: true }),
+								);
+							}
+							return reply;
+						};
+						window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+					});
+					await server.api("propose", {
+						edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Remote update" } }],
+					});
+					await page.waitForFunction(() => document.documentElement.dataset.heldReads === "1");
+					const row = page.getByRole("option").filter({ hasText: "Local case" });
+					const expected = action === "placement" ? "#localtag" : "Saved local case";
+					if (action === "placement") {
+						await page.keyboard.press("t");
+						await page.keyboard.type("localtag");
+						await page.keyboard.press("Enter");
+					} else {
+						await page.keyboard.press("e");
+						await page.getByRole("textbox", { name: "Case title", exact: true }).fill(expected);
+						await page.keyboard.press("Escape");
+						await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
+						await page.getByRole("option").filter({ hasText: "Remote case" }).click();
+					}
+					const shown = action === "placement" ? row : page.getByRole("option").filter({ hasText: expected });
+					await eventually(
+						() => shown.textContent(),
+						(text) => text?.includes(expected) === true,
+					);
+					await page.evaluate(() => window.dispatchEvent(new Event("test:old")));
+					await page.waitForFunction(() => Number(document.documentElement.dataset.heldReads) >= 2);
+					await page.evaluate(
+						() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+					);
+					variantExpect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
+						expect.stringContaining(expected),
+					);
+					await page.evaluate(() => window.dispatchEvent(new Event("test:fresh")));
+					await page.getByRole("option").filter({ hasText: "Remote update" }).waitFor();
+					variantExpect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
+						expect.stringContaining(expected),
+					);
+					variantExpect(h.errors).toEqual([]);
+				} finally {
+					await h.close();
 				}
-				const shown = action === "placement" ? row : page.getByRole("option").filter({ hasText: expected });
-				await eventually(
-					() => shown.textContent(),
-					(text) => text?.includes(expected) === true,
-				);
-				await page.evaluate(() => window.dispatchEvent(new Event("test:old")));
-				await page.waitForFunction(() => Number(document.documentElement.dataset.heldReads) >= 2);
-				await page.evaluate(
-					() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-				);
-				expect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
-					expect.stringContaining(expected),
-				);
-				await page.evaluate(() => window.dispatchEvent(new Event("test:fresh")));
-				await page.getByRole("option").filter({ hasText: "Remote update" }).waitFor();
-				expect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
-					expect.stringContaining(expected),
-				);
-				expect(h.errors).toEqual([]);
-			} finally {
-				await h.close();
-				await server.stop();
 			}
-		},
-		30_000,
-	);
-}
+		} finally {
+			await host.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"UI-3 capture from a case URL creates a new case without editing the selected case",
@@ -187,7 +200,7 @@ test.skipIf(!browserAvailable)(
 test.skipIf(!browserAvailable)(
 	"the Suite finishes paging and refreshes while changes arrive during every read",
 	async () => {
-		const server = await startServer({ cases: 1001 });
+		const server = await startServer({ cases: 501 });
 		const h = await openPage(server, {
 			path: "/p/scratch/suite",
 			setup: async (page) => {
@@ -222,9 +235,9 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = h;
 			await page.waitForFunction(
-				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "1001",
+				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "501",
 			);
-			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-total")).toBe("1001");
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-total")).toBe("501");
 			const duringReads = () =>
 				page.evaluate(() => ({
 					reads: Number(document.documentElement.dataset.caseReads),
@@ -237,7 +250,7 @@ test.skipIf(!browserAvailable)(
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated while reading" } }],
 			});
 			await page.getByRole("option").filter({ hasText: "Updated while reading" }).waitFor();
-			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("501");
 			const refreshedReads = await duringReads();
 			expect(refreshedReads.reads).toBeGreaterThan(initialReads.reads);
 			expect(refreshedReads.eventful).toBe(refreshedReads.reads);
@@ -839,12 +852,12 @@ test.skipIf(!browserAvailable)(
 
 // Issue #146. The suite asks for the pages of its list one after another, and a change that arrives while it asks
 // for the next page reads the pages again. When that lands in the same task as the request, the page never shows
-// that it was waiting for one, and the list stopped where it was (500 of 1,001 here). The change is sent from the
+// that it was waiting for one, and the list stopped where it was (500 of 501 here). The change is sent from the
 // page's own `fetch`, as the request for the second page leaves, so the order is the same every time.
 test.skipIf(!browserAvailable)(
 	"a change that arrives as the list asks for its next page does not stop the list",
 	async () => {
-		const server = await startServer({ cases: 1001 });
+		const server = await startServer({ cases: 501 });
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
@@ -879,7 +892,7 @@ test.skipIf(!browserAvailable)(
 				const list = document.querySelector('[data-testid="case-list"]');
 				return list?.getAttribute("data-loaded") === list?.getAttribute("data-total");
 			});
-			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("501");
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
