@@ -56,6 +56,8 @@ A closing keyword in a pull request links it to its issue, and GitHub's workflow
 `.github/workflows/check.yml` runs when a pull request opens, receives commits, reopens or becomes ready for review, and on every push to `main`. The ready-for-review run prevents a draft's `pr: pending` from carrying into a ready PR.
 A new run on a pull request cancels that pull request's older run if it is still going. A push to `main` is never
 cancelled. A re-run of an older run is neither cancelled by a newer one nor cancels it: both run.
+Draft PRs run only `description`. Marking a PR ready starts its normal checks. For related changes, keep review
+layers draft and use one ready combined PR against `main`: [landing a stack](../landing-a-stack.md).
 
 | Job | Runs when | What it does |
 | --- | --- | --- |

@@ -35,6 +35,19 @@ const covers = (paths: { include: readonly string[]; exclude?: readonly string[]
 	paths.include.some((pattern) => new Glob(pattern).match(file)) &&
 	!(paths.exclude ?? []).some((pattern) => new Glob(pattern).match(file));
 
+test("draft review layers cannot start expensive checks or publish a tested gate", () => {
+	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
+	expect(workflow).toMatchObject({
+		on: { pull_request: { types: expect.arrayContaining(["ready_for_review"]) } },
+		jobs: {
+			scope: { if: "${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}" },
+			gate: {
+				if: "${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}",
+			},
+		},
+	});
+});
+
 test("a change to prose runs no job but the tests, and of them only the ones that read it", () => {
 	const chosen = plan(["AGENTS.md", "docs/decisions/0015-the-project-is-called-mainworthy.md"], tests);
 	expect(chosen.jobs).toEqual({ static: false, image: false });
