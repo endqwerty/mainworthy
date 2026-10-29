@@ -36,16 +36,39 @@ type Handler = (req: Request, server: unknown) => Response | Promise<Response>;
 const isHandler = (value: unknown): value is Handler => typeof value === "function";
 
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"]);
-const answered = (span: Span, reply: Response): Response => {
+/** A socket the UI route took over answers with no reply. */
+const answered = <R extends Response | undefined>(span: Span, reply: R): R => {
+	if (!reply) return reply;
 	span.setAttribute("http.response.status_code", reply.status);
 	if (reply.status >= 500) markFailed(span, String(reply.status));
 	return reply;
 };
 
 /**
- * A handler whose reply carries the headers, in a span named by the route's pattern and never by the path asked,
- * which names a project. One that answers at once still answers at once.
+ * Runs `answer` in a request's span, named by the pattern of the route that took it and never by the path asked,
+ * which names a project; by its method alone when no route did. One that answers at once still answers at once.
+ * Every request the listener takes passes here, through the route table below or `http.ts`'s fallbacks.
  */
+export function inRequestSpan<R extends Response | undefined>(
+	req: Request,
+	route: string | null,
+	answer: () => R | Promise<R>,
+): R | Promise<R> {
+	const method = METHODS.has(req.method) ? req.method : "_OTHER";
+	const name = method === "_OTHER" ? "HTTP" : method;
+	return withSpan(
+		route ? `${name} ${route}` : name,
+		{ "http.request.method": method, ...(route ? { "http.route": route } : {}) },
+		(span) => {
+			const reply = answer();
+			return reply instanceof Promise ? reply.then((settled) => answered(span, settled)) : answered(span, reply);
+		},
+		"root",
+		"server",
+	);
+}
+
+/** A handler whose reply carries the headers, in its request's span. */
 const wrapped =
 	(
 		route: string,
@@ -53,23 +76,13 @@ const wrapped =
 		put: (req: Request, reply: Response) => Response = withHeaders,
 		before?: (req: Request) => Response | null,
 	): Handler =>
-	(req, server) => {
-		const method = METHODS.has(req.method) ? req.method : "_OTHER";
-		return withSpan(
-			`${method === "_OTHER" ? "HTTP" : method} ${route}`,
-			{ "http.request.method": method, "http.route": route },
-			(span) => {
-				const refused = before?.(req);
-				if (refused) return answered(span, refused);
-				const reply = handler(req, server);
-				return reply instanceof Promise
-					? reply.then((settled) => answered(span, put(req, settled)))
-					: answered(span, put(req, reply));
-			},
-			"root",
-			"server",
-		);
-	};
+	(req, server) =>
+		inRequestSpan(req, route, () => {
+			const refused = before?.(req);
+			if (refused) return refused;
+			const reply = handler(req, server);
+			return reply instanceof Promise ? reply.then((settled) => put(req, settled)) : put(req, reply);
+		});
 
 /** The routes that answer without a session, each reply with the headers and with the policy its route wrote. */
 export function keepingPolicyOnEvery(

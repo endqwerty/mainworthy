@@ -1,6 +1,9 @@
 // Traces as an operator's collector receives them: the real exporter sends to a receiver in this file, over HTTP.
 // Each test file runs in its own worker, so the provider this file registers is seen by nobody else.
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type ReceivedSpan, receiver } from "../scripts/traces.ts";
 import { startTelemetry, type Telemetry, telemetrySettings } from "../src/app/telemetry.ts";
 import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
@@ -27,9 +30,22 @@ const start = (url: string): Telemetry => {
 	return running;
 };
 
-async function instance() {
+const dirs: string[] = [];
+afterEach(() => {
+	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+/** A built web UI of one page, as `bun run build` lists it. */
+function builtUi() {
+	const dir = mkdtempSync(join(tmpdir(), "mainworthy-telemetry-"));
+	dirs.push(dir);
+	const page = join(dir, "index.html");
+	writeFileSync(page, "<!doctype html><title>Telemetry test</title>");
+	return { index: page, files: [{ path: page, headers: { etag: "test", "content-type": "text/html" } }] };
+}
+
+async function instance(options: { ui?: boolean } = {}) {
 	const h = await harness({ project: PROJECT });
-	const server = serve(h.app, h.owner);
+	const server = serve(h.app, h.owner, { ui: options.ui ? builtUi() : null });
 	const { secret } = await createToken(h.app, {
 		actor: "kite-agent",
 		kind: "agent",
@@ -74,6 +90,7 @@ test("a request is one trace of its route, its operation and its statements, car
 	const it = await instance();
 	try {
 		expect((await fetch(`${it.origin}/health`)).status).toBe(200);
+		expect((await fetch(`${it.origin}/no/${PROJECT}/route`)).status).toBe(404);
 		const proposed = await it.send("propose", { edits: [{ op: "create", outline: SECRET_TEXT }] });
 		expect(await proposed.json()).toMatchObject({ ok: true });
 		const found = await it.send("find", { text: SECRET_TEXT });
@@ -83,7 +100,16 @@ test("a request is one trace of its route, its operation and its statements, car
 
 		const spans = collector.spans();
 		const requests = spans.filter((span) => span.parentSpanId === null && span.kind === 2);
-		expect(requests.map((span) => span.name).sort()).toEqual(["POST /api/p/:project/:op", "POST /api/p/:project/:op"]);
+		expect(requests.map((span) => span.name).sort()).toEqual([
+			"GET",
+			"POST /api/p/:project/:op",
+			"POST /api/p/:project/:op",
+		]);
+		// A request no route took is named by its method alone.
+		expect(one(requests, (span) => span.name === "GET").attributes).toEqual({
+			"http.request.method": "GET",
+			"http.response.status_code": 404,
+		});
 		const proposal = one(spans, (span) => span.name === "propose");
 		const request = one(spans, (span) => span.spanId === proposal.parentSpanId);
 		expect(request.attributes).toMatchObject({
@@ -105,6 +131,31 @@ test("a request is one trace of its route, its operation and its statements, car
 		// Nothing the caller sent or named leaves the instance: not the text, the project, the token or a person.
 		const sent = collector.bodies.join("\n");
 		for (const text of [SECRET_TEXT, "Kestrel", PROJECT, it.secret, "robin"]) expect(sent).not.toContain(text);
+	} finally {
+		await it.close();
+		collector.stop();
+	}
+});
+
+test("a page of the web UI is a request like any other, and a write's read variant says it read", async () => {
+	const collector = receiver();
+	const it = await instance({ ui: true });
+	const telemetry = start(collector.url);
+	try {
+		expect((await fetch(`${it.origin}/`)).status).toBe(200);
+		// A tracker preview is the tracker write's read variant (`read.when`); no tracker is set up, so it is refused.
+		const preview = await it.h.raw("tracker", { do: "preview", result: 1, cmd: "preview-probe" });
+		expect(preview.ok).toBe(false);
+		await telemetry.stop(5000);
+		running = null;
+		const spans = collector.spans();
+		expect(one(spans, (span) => span.name === "GET /*").attributes).toMatchObject({
+			"http.route": "/*",
+			"http.response.status_code": 200,
+		});
+		expect(one(spans, (span) => span.name === "tracker").attributes).toMatchObject({
+			"mainworthy.operation.effect": "read",
+		});
 	} finally {
 		await it.close();
 		collector.stop();
@@ -280,6 +331,12 @@ test("the settings: off unless an endpoint is named, and a value the server cann
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_PROTOCOL: "grpc" },
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "sometimes" },
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "no-equals-sign" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "constructor" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_HEADERS: "bad header=value" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-key=a%0d%0aevil: 1" },
+		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "constructor" },
 		{ OTEL_EXPORTER_OTLP_ENDPOINT: "http://x", OTEL_TRACES_SAMPLER: "traceidratio", OTEL_TRACES_SAMPLER_ARG: "2" },
 	])
 		expect(() => telemetrySettings(env)).toThrow();
