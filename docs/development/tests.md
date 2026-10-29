@@ -76,8 +76,6 @@ restoring the matching device lets the same abandoned cluster be removed. Metada
 Browser tests normally run once later, in the PR's CI run. For a change to what a browser shows, run the affected
 file locally with `bun test test/e2e/<file>.test.ts` or the explicit-file check command above. Explicit files run
 even when they need Chromium. Other local browser runs are opt-in with `--browser`.
-The owner said, on 2026-10-27: "I'm not sure about bun run check running browser tests, I'm leaning no and to run
-the browser tests once later in the phase. Reduce the amount of waiting every thread has."
 
 Several worktrees can run `bun run check` at once. Each run takes half the CPU threads that are free when it
 starts (by the load average), at least two and at most half of all threads, so a check alone keeps its speed.
@@ -137,8 +135,7 @@ operation-count budgets in `test/budgets.test.ts` run in the functional check.
 
 ### Put a test at the cheapest layer that reaches it
 
-A reachable finding or a behaviour change gets the cheapest test that would catch it again (the owner, 2026-10-27,
-on [#1010](https://github.com/endqwerty/mainworthy/issues/1010): "4 is critical"). On 2026-10-27, unit tests were 32
+A reachable finding or a behaviour change gets the cheapest test that would catch it again. On 2026-10-27, unit tests were 32
 of 231 files and 0.2% of the test time; browser tests were 39% of it and most of the `flaky-test` issues.
 
 - **Pure logic** (a rule, a parser, a merge, a verdict): a unit test beside the code in `src/`, with no database.
@@ -156,10 +153,9 @@ browser file counts even when it opens no browser, because such a test belongs i
 
 ### Estimate the recurring CI cost
 
-The owner said on 2026-10-28: "the agents shouldn't be so liberal in making tests. They have a tangible dollar
-cost per second added to a CI run." Before adding coverage, name the reachable failure and check whether an
-existing test already catches it. Extend that test when possible. Do not add tests that repeat implementation
-details or cover a state nothing can reach.
+Before adding coverage, name the reachable failure and check whether an existing test already catches it.
+Extend that test when possible. Do not add tests that repeat implementation details or cover a state nothing
+can reach. Every added second of CI work has a recurring compute cost.
 
 For added or expanded CI work, give the PR a short estimate of the added runner time and monthly cost, with
 the measurement or assumption behind it. Explain why the failure needs checking on every change, nightly,
@@ -210,7 +206,6 @@ gh api --method GET repos/endqwerty/mainworthy/actions/workflows/check.yml/runs 
 	-f 'created=2026-10-21T06:25:00Z..2026-10-28T06:25:00Z' -f per_page=1 --jq .total_count
 ```
 
-The owner also asked on 2026-10-28 to use stacked PRs to save CI cost, assuming CI can run on the tip.
 Prefer stacks for related changes and batch local commits before pushing. The current workflow runs on PR
 events and pushes to `main`, not separately for each commit in a single push. Stacking alone does not reduce
 those triggers. Full CI on only the stack tip needs explicit workflow and [landing-policy](../landing-a-stack.md)
@@ -292,16 +287,13 @@ cause instead of retrying.
 
 ## Report a budget
 
-A budget is a baseline, not a limit (the owner, 2026-10-24: "None of them should be hard limits. The end result of
-user experience, user features, and developer experience are all that matters. Numbers are always allowed to be
-broken if the end user gains something from it"). A pull request that breaks one says what the user gains.
+A budget is a baseline. A pull request that exceeds one explains what the user gains.
 
 Any test file can import `budget` from `scripts/budget.ts` and call
 `budget(name, measured, limit, unit)`. Units can be milliseconds, bytes, tokens or another measured quantity.
 A value above the baseline records a warning. A value above ten times the baseline (`FAIL_MULTIPLE`; a baseline of
-0 counts as 1) fails, so the jump is reviewed. The owner, 2026-10-24: "10x is definitely a big enough jump that it's
-fair to mark a test as failed if it suddenly exceeds that and for it to be flagged for review. Only intentionally
-meaning to do that should be allowed." To mean to, change the baseline in the same pull request and say why.
+0 counts as 1) fails, so the jump is reviewed. To accept the increase, change the baseline in the same pull
+request and explain why.
 Invalid measurements and workload errors still fail.
 
 The check collects warnings from every phase into its end summary and appends them to `GITHUB_STEP_SUMMARY`
