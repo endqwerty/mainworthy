@@ -22,6 +22,7 @@ import { type Actor, allProjects, findProject } from "../server/kernel/ctx.ts";
 import { isBusy } from "../server/kernel/db.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { authenticateJob } from "../server/kernel/job-auth.ts";
+import { traceNote } from "../server/kernel/telemetry.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invoke, invokeService, READ_ATTEMPTS, type Reply } from "../server/ops/registry.ts";
@@ -1002,7 +1003,7 @@ export function serve(
 						503,
 					),
 				);
-			console.error("[mainworthy] request failed:", error);
+			console.error(`[mainworthy] request failed${traceNote(error)}:`, error);
 			return withHeaders(null, jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500));
 		},
 	};

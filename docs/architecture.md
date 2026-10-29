@@ -167,6 +167,16 @@ is one short write transaction that reads only the retired project's rows, by in
 parents one batch of its parents at a time, at every level of the chain (issue #914); `deploy.md` ("Demo deployment and cleanup") has the
 measurements.
 
+## Traces
+
+`src/server/kernel/telemetry.ts` makes spans through the OpenTelemetry API, which does nothing until
+`src/app/telemetry.ts` registers an exporter: `serve` does that when an OTLP endpoint is configured. Spans start at
+three places every call already passes: the route wrapper in `src/surfaces/with-headers.ts` (one root span per
+request, named by the route's pattern), `invoke` and `invokeService` in the registry (one per operation), and
+`query` in `kernel/db.ts` (one per statement, plus the wait for a connection). A job run is a root span in
+`kernel/jobs.ts`. A statement or connection wait outside any span makes none, so idle polling stays out of the
+traces. A span carries only what the code names: a statement's text is sent only when it was declared with `sql()`.
+
 ## Who may call
 
 An actor is a person, an agent, a pipeline or the policy's own rule. What it may do is a grant per project (or

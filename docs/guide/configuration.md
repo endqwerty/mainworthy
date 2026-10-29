@@ -235,6 +235,28 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 `/api/login`, `/api/logout`, `/api/login/oidc` and `/api/login/invitation` refuse requests from another site's page. A script, `curl` or the command line can send requests without a site header. If nobody outside your network should see these addresses, keep the server off the public internet or put the proxy's access control in front of it.
 
+## Send traces to an OpenTelemetry collector
+
+The server can send a trace of each request to an OpenTelemetry collector, or to a vendor that accepts OTLP over HTTP, such as Sentry or Grafana Cloud. It is off until you name an endpoint. A trace shows the request, the operation it ran, each PostgreSQL statement, and the wait for a connection, with their durations. A background job is a trace of its own.
+
+| Variable | Default | What it sets |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | none | The collector's base address. The server sends to `<address>/v1/traces`. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | none | The whole address for traces, used as written. It takes precedence over the base address. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | none | Headers sent with each batch, such as a vendor's key: `name=value` pairs separated by commas, each value percent-encoded. `OTEL_EXPORTER_OTLP_TRACES_HEADERS` adds to them and wins where a name repeats. Keep the value in the server's secret environment. |
+| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Which traces to keep: `always_on`, `always_off`, `traceidratio`, or the same with `parentbased_` before it. |
+| `OTEL_TRACES_SAMPLER_ARG` | `1` | The share of traces kept by a `traceidratio` sampler, from 0 to 1. |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `mainworthy` | The name the collector shows, and further attributes such as `deployment.environment.name=production`. |
+| `OTEL_SDK_DISABLED`, `OTEL_TRACES_EXPORTER` | none | `OTEL_SDK_DISABLED=true` or `OTEL_TRACES_EXPORTER=none` turns tracing off with an endpoint set. |
+
+The server sends OTLP as JSON over HTTP. Another protocol in `OTEL_EXPORTER_OTLP_PROTOCOL`, an exporter other than `otlp`, an unknown sampler or a malformed address or header stops the start with a line that names the variable. When tracing is on, the start says where traces go: `traces go to https://collector.example`.
+
+A trace carries what the server knows about its own code: the route's pattern (`POST /api/p/:project/:op`), the operation's name, a statement's text as it is written in the source, with `$1` in place of each value, an error's type and a status code. It never carries what a caller sent or named: no request body, project key, case text, person, token, address, or error message, and no text of a statement the server builds while it runs. The service version is the commit from `MAINWORTHY_COMMIT` when it is set. The server starts a new trace for each request and ignores a `traceparent` header. The health probe is not traced.
+
+A collector that is slow, refuses or is gone costs requests nothing: spans wait in a queue of 2,048, and new ones are dropped while it is full. The log says once when sending starts failing and once when it works again. A stopping server tries for two seconds to send what is left. While tracing is on, the log line of a failed request, operation or job, and of a slow write, carries `(trace <id>)`, the id to search for in the collector.
+
+To watch traces on your own machine, run `bun scripts/traces.ts` in the source tree. It prints the variable to start the server with and then each trace as a tree.
+
 ## Build the single executable
 
 `bun run build` compiles the server, the web UI, the command line and the MCP endpoint into one file, `dist/mainworthy`, tens of megabytes in size. It needs Bun and the source tree, and the result needs neither. The file carries the Bun that built it. If you build with a Bun other than the one `THIRD-PARTY-NOTICES.md` lists, the build says so. The notices then do not describe that runtime.

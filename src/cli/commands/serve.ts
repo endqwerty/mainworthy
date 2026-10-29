@@ -1,4 +1,5 @@
 import { startServing, VERSION } from "../../app/start.ts";
+import { startTelemetry, telemetrySettings } from "../../app/telemetry.ts";
 import { defaultConfig, defaultDataDir } from "../../server/kernel/app.ts";
 import { findProject } from "../../server/kernel/ctx.ts";
 import { currentPolicy, policyName } from "../../server/policy/policy.ts";
@@ -13,11 +14,14 @@ import { line, warning } from "../output.ts";
 
 /** How long a stopping server waits for its work before it exits anyway: well inside Cloud Run's ten seconds. */
 const STOP_DEADLINE_MS = 7_000;
+/** How long a stopping server tries to send its last traces: a collector that does not answer costs no more. */
+const TELEMETRY_STOP_MS = 2_000;
 
 /** Starts Local or Server with the UI, MCP and archive routes, and releases the listener/database on either signal. */
 export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	assertPositionals(args, 0, 0, "serve");
 	const config = defaultConfig(process.env);
+	const telemetry = startTelemetry(telemetrySettings(process.env), config.commit);
 	const startup = new AbortController();
 	const abortStartup = () => startup.abort(new Error("startup stopped"));
 	process.once("SIGINT", abortStartup);
@@ -30,10 +34,15 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 			open: docsRoutes(VERSION),
 		}),
 		{ signal: startup.signal },
-	).finally(() => {
-		process.removeListener("SIGINT", abortStartup);
-		process.removeListener("SIGTERM", abortStartup);
-	});
+	)
+		.catch(async (error: unknown) => {
+			await telemetry?.stop(TELEMETRY_STOP_MS);
+			throw error;
+		})
+		.finally(() => {
+			process.removeListener("SIGINT", abortStartup);
+			process.removeListener("SIGTERM", abortStartup);
+		});
 	const data = config.dataDir === defaultDataDir(process.env) ? "~/.mainworthy" : config.dataDir;
 	// Local mode signs the owner in with no step, so the line says who you are. A server signs nobody in on its own.
 	const who =
@@ -47,6 +56,7 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	});
 	line(`project "${instance.project}" · ${who} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
+	if (telemetry) line(`traces go to ${telemetry.origin}`);
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);
 	// Deployment work starts after listening. Durable revision state makes a same-build restart a no-op. Each cleanup
 	// slice is bounded by the retired project's own rows, whatever the other projects hold (#914).
@@ -117,6 +127,8 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 				await cleaning;
 				running = "the server's own shutdown";
 				await instance.stop();
+				running = "sending the last traces";
+				await telemetry?.stop(TELEMETRY_STOP_MS);
 			})
 			.then(
 				() => process.exit(0),
