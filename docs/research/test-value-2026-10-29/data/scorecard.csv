@@ -1,0 +1,79 @@
+file,category,tests,tests_ops_all_below,timing_s,runs_observed,failures,fail_runs,fail_on_main_push,sole_file_failures,o_test_only,o_src_only,o_both,o_none_retry,o_unknown,commits_all,commits_no_src,flaky_issues
+test/e2e/accessibility.test.ts,"browser behaviour, needs a browser",1,1,12.4,1286,12,9,0,1,1,0,0,0,11,9,3,1
+test/e2e/agent-model.test.ts,"browser behaviour, needs a browser",1,1,1.6,796,3,3,0,0,1,0,0,0,2,1,0,0
+test/e2e/agent.test.ts,"browser behaviour, needs a browser",24,23,16.3,1997,77,8,1,4,24,0,2,1,50,19,7,3
+test/e2e/attachments.test.ts,"browser behaviour, needs a browser",2,2,1.4,1431,18,15,2,10,3,0,5,3,7,4,1,1
+test/e2e/browser.test.ts,"browser behaviour, needs a browser",2,2,1.3,1989,6,3,0,0,2,0,0,0,4,2,2,0
+test/e2e/capture.test.ts,"browser behaviour, needs a browser",17,14,13.2,1997,45,3,0,0,15,0,0,0,30,15,3,1
+test/e2e/case-loading.test.ts,"browser behaviour, needs a browser",2,2,6.2,353,52,17,2,10,1,0,2,8,41,5,1,1
+test/e2e/cockpit-corrections.test.ts,"browser behaviour, needs a browser",39,39,26.8,851,124,28,2,9,27,0,8,3,86,24,4,1
+test/e2e/cockpit-work.test.ts,"browser behaviour, needs a browser",3,3,6.1,395,7,7,2,1,1,0,2,2,2,4,2,1
+test/e2e/conflict-merge.test.ts,"mixed, retain browser checks and consider moving data-only assertions",18,15,13.0,1978,133,5,0,4,45,0,2,0,86,11,1,0
+test/e2e/conflict.test.ts,"browser behaviour, needs a browser",12,12,7.8,2042,37,4,0,0,12,0,0,0,25,6,0,0
+test/e2e/docs.test.ts,"browser behaviour, needs a browser",3,3,3.7,1978,45,33,0,11,3,0,2,0,40,6,1,0
+test/e2e/draft-conflicts.test.ts,"browser behaviour, needs a browser",19,19,17.1,1999,81,8,0,2,21,0,16,0,44,11,3,1
+test/e2e/draft-ownership.test.ts,"browser behaviour, needs a browser",23,20,23.8,1998,96,16,5,6,26,0,9,4,57,18,4,1
+test/e2e/draft-project-live.test.ts,"browser behaviour, needs a browser",3,3,3.5,378,11,11,3,6,0,0,1,8,2,7,2,2
+test/e2e/draft-project.test.ts,"browser behaviour, needs a browser",9,8,12.8,417,37,32,8,21,2,0,6,17,12,11,4,3
+test/e2e/drafts.test.ts,"browser behaviour, needs a browser",16,14,10.7,1997,57,15,1,7,12,0,13,6,26,19,3,2
+test/e2e/events-lifecycle.test.ts,"browser behaviour, needs a browser",5,5,3.5,310,2,1,2,2,0,0,0,1,1,4,1,1
+test/e2e/execution.test.ts,"mixed, retain browser checks and consider moving data-only assertions",9,9,9.5,1996,30,5,0,0,9,0,0,0,21,18,4,0
+test/e2e/followups.test.ts,"browser behaviour, needs a browser",8,8,7.2,1995,29,7,0,1,8,0,0,0,21,11,1,1
+test/e2e/fragments.test.ts,"browser behaviour, needs a browser",5,5,4.4,1263,15,3,0,0,5,0,0,0,10,6,0,0
+test/e2e/handoff.test.ts,"browser behaviour, needs a browser",1,1,1.3,674,3,3,0,0,1,0,0,0,2,4,0,0
+test/e2e/headers.test.ts,"mixed, retain browser checks and consider moving data-only assertions",3,2,3.5,1937,6,3,0,0,2,0,0,0,4,9,1,1
+test/e2e/impact.test.ts,"browser behaviour, needs a browser",1,1,1.1,364,0,0,0,0,0,0,0,0,0,1,0,0
+test/e2e/interception.test.ts,"browser behaviour, needs a browser",3,3,8.9,1983,9,3,0,0,3,0,0,0,6,4,3,0
+test/e2e/latency-10000.test.ts,"browser performance, skipped",0,0,30.2,1993,5,5,0,1,1,0,0,2,2,1,1,1
+test/e2e/latency-2000.test.ts,"browser performance, skipped",0,0,22.4,1987,3,3,0,0,1,0,0,0,2,1,1,0
+test/e2e/lifetime.test.ts,"process/server, already cheaper layer",0,0,14.7,406,17,4,0,1,5,0,0,1,11,7,3,3
+test/e2e/limit.test.ts,"browser behaviour, needs a browser",1,0,0.5,1937,4,4,0,1,2,0,0,0,2,4,2,0
+test/e2e/merge-receipt.test.ts,"browser behaviour, needs a browser",2,2,1.7,498,6,3,0,0,2,0,0,0,4,3,1,1
+test/e2e/merge.test.ts,"browser behaviour, needs a browser",1,1,0.9,2006,3,3,0,0,1,0,0,0,2,2,1,0
+test/e2e/merged-drafts.test.ts,"browser behaviour, needs a browser",7,7,7.5,1998,23,4,0,0,7,0,0,0,16,7,3,0
+test/e2e/navigation.test.ts,"browser behaviour, needs a browser",7,7,9.1,929,27,3,0,0,9,0,0,0,18,3,0,0
+test/e2e/new-case-drafts.test.ts,"browser behaviour, needs a browser",10,8,6.6,886,48,11,1,5,12,0,14,1,21,4,1,1
+test/e2e/people-access.test.ts,"browser behaviour, needs a browser",4,4,3.8,1486,5,4,0,0,0,0,0,0,5,6,0,0
+test/e2e/people-invite.test.ts,"browser behaviour, needs a browser",9,9,2.9,1908,5,4,0,0,0,0,0,0,5,8,0,0
+test/e2e/people-settings.test.ts,"browser behaviour, needs a browser",11,11,5.1,1908,8,8,0,3,0,0,0,1,7,25,3,2
+test/e2e/people-signin.test.ts,"browser behaviour, needs a browser",27,26,13.1,1907,26,17,1,11,0,0,1,1,24,23,3,2
+test/e2e/people.test.ts,"mixed, retain browser checks and consider moving data-only assertions",1,1,0.5,1914,5,5,0,0,2,0,0,0,3,9,2,1
+test/e2e/phone-actions.test.ts,"browser behaviour, needs a browser",7,6,7.7,180,0,0,0,0,0,0,0,0,0,4,0,0
+test/e2e/phone-focus.test.ts,"browser behaviour, needs a browser",4,4,7.6,179,0,0,0,0,0,0,0,0,0,3,1,0
+test/e2e/phone.test.ts,"browser behaviour, needs a browser",11,11,18.5,1864,64,34,4,10,11,0,4,5,44,15,3,2
+test/e2e/placement.test.ts,"browser behaviour, needs a browser",28,28,15.6,1995,42,3,0,0,14,0,0,0,28,20,2,0
+test/e2e/planner-retry.test.ts,"browser behaviour, needs a browser",45,44,35.4,865,171,3,0,0,57,0,0,0,114,14,1,0
+test/e2e/ports.test.ts,"process/server, already cheaper layer",0,0,0.5,1994,0,0,0,0,0,0,0,0,0,4,1,0
+test/e2e/project-switcher.test.ts,"browser behaviour, needs a browser",3,2,3.5,1868,93,39,0,0,5,0,4,0,84,3,1,0
+test/e2e/proposal-shown.test.ts,"browser behaviour, needs a browser",33,33,33.1,905,78,6,0,6,24,0,0,0,54,11,1,0
+test/e2e/quarantine.test.ts,"browser behaviour, needs a browser",1,1,1.7,1276,3,3,0,0,1,0,0,0,2,6,2,1
+test/e2e/queue-and-runs.test.ts,"browser behaviour, needs a browser",57,57,34.4,1992,170,10,0,4,53,0,0,2,115,38,7,1
+test/e2e/queue-failure-evidence.test.ts,"browser behaviour, needs a browser",1,1,0.8,452,5,4,0,0,1,0,0,0,4,2,0,0
+test/e2e/queue-select.test.ts,"browser behaviour, needs a browser",2,2,1.8,1677,6,3,0,0,2,0,0,0,4,7,1,0
+test/e2e/recovery.test.ts,"browser behaviour, needs a browser",35,35,29.9,2008,130,15,2,4,31,0,29,1,69,12,1,1
+test/e2e/reported-span.test.ts,"browser behaviour, needs a browser",1,1,0.9,183,0,0,0,0,0,0,0,0,0,1,0,0
+test/e2e/reports.test.ts,"browser behaviour, needs a browser",4,4,3.8,1117,9,3,0,0,3,0,0,0,6,7,0,0
+test/e2e/result-location.test.ts,"browser behaviour, needs a browser",1,1,1.4,726,3,3,0,0,1,0,0,0,2,2,0,0
+test/e2e/result-trail.test.ts,"browser behaviour, needs a browser",1,1,2.6,799,5,4,0,0,1,0,0,0,4,2,0,0
+test/e2e/results.test.ts,"browser behaviour, needs a browser",2,2,5.1,1255,9,3,0,0,3,0,0,0,6,5,1,0
+test/e2e/round3-capture.test.ts,"browser behaviour, needs a browser",17,14,14.7,2002,77,12,2,4,17,0,23,1,36,10,2,1
+test/e2e/round3-interactions.test.ts,"browser behaviour, needs a browser",16,15,13.8,2002,83,15,1,10,23,0,1,2,57,10,2,1
+test/e2e/round3-session.test.ts,"browser behaviour, needs a browser",7,7,9.3,1999,78,48,0,6,7,0,0,0,71,12,4,1
+test/e2e/round5.test.ts,"browser behaviour, needs a browser",13,11,12.5,1998,43,6,0,2,13,0,0,0,30,13,3,2
+test/e2e/round6.test.ts,"browser behaviour, needs a browser",21,21,20.3,1998,77,16,5,8,22,0,2,6,47,14,1,0
+test/e2e/round7.test.ts,"browser behaviour, needs a browser",12,12,13.1,2005,42,8,1,3,12,0,2,0,28,5,0,2
+test/e2e/session-and-keys.test.ts,"browser behaviour, needs a browser",9,9,10.7,1997,46,5,0,4,14,0,0,0,32,9,2,0
+test/e2e/settings.test.ts,"mixed, retain browser checks and consider moving data-only assertions",26,26,27.2,2006,94,6,1,1,27,0,11,0,56,31,2,3
+test/e2e/shards.test.ts,"browser behaviour, needs a browser",1,1,1.2,647,6,6,0,0,1,0,0,0,5,2,0,0
+test/e2e/shell.test.ts,"browser behaviour, needs a browser",4,3,7.2,2000,16,6,0,0,4,0,0,0,12,15,1,0
+test/e2e/signin.test.ts,"browser behaviour, needs a browser",16,15,13.0,2001,82,18,0,2,16,1,12,5,48,10,2,1
+test/e2e/slot-work.test.ts,"browser behaviour, needs a browser",7,7,4.7,800,17,4,0,0,5,0,0,0,12,5,1,1
+test/e2e/suite-archive-selection.test.ts,"browser behaviour, needs a browser",3,3,2.1,249,0,0,0,0,0,0,0,0,0,1,0,0
+test/e2e/suite-commands.test.ts,"mixed, retain browser checks and consider moving data-only assertions",29,29,15.0,261,2,1,0,0,2,0,0,0,0,9,3,0
+test/e2e/suite-folder-cursor.test.ts,"browser behaviour, needs a browser",2,2,1.8,354,8,5,1,2,0,0,0,1,7,4,1,1
+test/e2e/suite-move.test.ts,"browser behaviour, needs a browser",4,4,3.1,354,0,0,0,0,0,0,0,0,0,3,2,0
+test/e2e/suite-stream.test.ts,"browser behaviour, needs a browser",15,15,8.6,954,58,10,0,4,15,0,7,1,35,8,3,1
+test/e2e/tag-removal.test.ts,"browser behaviour, needs a browser",10,9,5.6,427,10,1,0,0,10,0,0,0,0,4,0,0
+test/e2e/teams.test.ts,"browser behaviour, needs a browser",3,3,1.9,1421,12,5,0,0,2,0,0,0,10,5,0,0
+test/e2e/tokens.test.ts,"browser behaviour, needs a browser",6,6,4.3,1929,16,4,0,1,5,0,0,0,11,8,1,0
+test/e2e/triage.test.ts,"mixed, retain browser checks and consider moving data-only assertions",12,11,7.3,2007,40,5,0,0,11,0,7,0,22,14,2,2
