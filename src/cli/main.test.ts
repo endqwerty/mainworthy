@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import { testDatabase } from "../../test/db.ts";
+import { fakeServer } from "../../test/fake-server.ts";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
 import { Policy } from "../core/kinds.ts";
@@ -2730,17 +2731,9 @@ test("version reports the CLI contract without reaching a server or reading a to
 test("an incompatible or unversioned server receives no CLI operation or credentials", async () => {
 	for (const apiVersion of [undefined, 0, API_VERSION - 1, API_VERSION + 1, "1", null]) {
 		const received: { path: string; token: string | null }[] = [];
-		const server = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			fetch(req) {
-				received.push({ path: new URL(req.url).pathname, token: req.headers.get("authorization") });
-				return Response.json(
-					new URL(req.url).pathname === "/health"
-						? { ok: true, version: "0.1.0", apiVersion }
-						: { ok: true, result: {} },
-				);
-			},
+		const server = fakeServer((req, path) => {
+			received.push({ path, token: req.headers.get("authorization") });
+			return Response.json(path === "/health" ? { ok: true, version: "0.1.0", apiVersion } : { ok: true, result: {} });
 		});
 		try {
 			await withInstance(async ({ run }) => {
@@ -2753,7 +2746,7 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 					"--state",
 					"merged",
 					"--url",
-					`http://127.0.0.1:${server.port}`,
+					server.url,
 					"--token",
 					"private-token",
 				]);
@@ -2763,7 +2756,7 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 				expect(received).toEqual([{ path: "/health", token: null }]);
 			});
 		} finally {
-			await server.stop(true);
+			await server.stop();
 		}
 	}
 });
@@ -2790,13 +2783,9 @@ test("a redirecting health probe does not warn that a token was sent", async () 
 test("health probe diagnostics distinguish redirects, HTTP failures and invalid JSON", async () => {
 	const received: { path: string; token: string | null }[] = [];
 	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example/health" } });
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch(req) {
-			received.push({ path: new URL(req.url).pathname, token: req.headers.get("authorization") });
-			return response.clone();
-		},
+	const server = fakeServer((req, path) => {
+		received.push({ path, token: req.headers.get("authorization") });
+		return response.clone();
 	});
 	try {
 		await withInstance(async ({ run }) => {
@@ -2807,7 +2796,7 @@ test("health probe diagnostics distinguish redirects, HTTP failures and invalid 
 			] as const) {
 				response = reply;
 				received.length = 0;
-				const result = await run(["find", "--url", `http://127.0.0.1:${server.port}`, "--token", "private-token"]);
+				const result = await run(["find", "--url", server.url, "--token", "private-token"]);
 				expect(result.code).toBe(4);
 				expect(result.stderr).toContain(message);
 				expect(result.stderr).not.toContain("start the server");
@@ -2816,6 +2805,6 @@ test("health probe diagnostics distinguish redirects, HTTP failures and invalid 
 			}
 		});
 	} finally {
-		await server.stop(true);
+		await server.stop();
 	}
 });

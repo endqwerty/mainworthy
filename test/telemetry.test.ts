@@ -90,7 +90,7 @@ test("a request is one trace of its route, its operation and its statements, car
 	const it = await instance();
 	try {
 		expect((await fetch(`${it.origin}/health`)).status).toBe(200);
-		expect((await fetch(`${it.origin}/no/${PROJECT}/route`)).status).toBe(404);
+		expect((await fetch(`${it.origin}/no/${PROJECT}/route`, { method: "DELETE" })).status).toBe(404);
 		const proposed = await it.send("propose", { edits: [{ op: "create", outline: SECRET_TEXT }] });
 		expect(await proposed.json()).toMatchObject({ ok: true });
 		const found = await it.send("find", { text: SECRET_TEXT });
@@ -99,15 +99,16 @@ test("a request is one trace of its route, its operation and its statements, car
 		running = null;
 
 		const spans = collector.spans();
-		const requests = spans.filter((span) => span.parentSpanId === null && span.kind === 2);
+		// This test sends no GET that is traced. Another process on the machine may GET the port (test/fake-server.ts).
+		const requests = spans.filter((span) => span.parentSpanId === null && span.kind === 2 && span.name !== "GET");
 		expect(requests.map((span) => span.name).sort()).toEqual([
-			"GET",
+			"DELETE",
 			"POST /api/p/:project/:op",
 			"POST /api/p/:project/:op",
 		]);
 		// A request no route took is named by its method alone.
-		expect(one(requests, (span) => span.name === "GET").attributes).toEqual({
-			"http.request.method": "GET",
+		expect(one(requests, (span) => span.name === "DELETE").attributes).toEqual({
+			"http.request.method": "DELETE",
 			"http.response.status_code": 404,
 		});
 		const proposal = one(spans, (span) => span.name === "propose");

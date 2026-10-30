@@ -283,6 +283,8 @@ their real operation and correctness check once in functional tests. Warmups and
 - For a server the test stands in for (an agent's endpoint, a tracker, an older Mainworthy), use `fakeServer` in
   `test/fake-server.ts`. Other processes on the machine request new ports too: T3 Code sends `GET /` to each one on
   localhost. `fakeServer` answers only under a path no other process knows, so a test counts only its own requests.
+  A test that counts what a real server saw sends requests a stray `GET /` cannot be mistaken for
+  (`test/telemetry.test.ts`).
 - For a browser, use the context `support.ts` hands out. It connects to the worker's shared Chromium.
 - To move time in a browser test, use the fixture's `/test/clock` route instead of waiting.
 

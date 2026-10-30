@@ -6,6 +6,7 @@ import { sql } from "../src/server/kernel/db.ts";
 import { runArchive } from "../src/server/ops/archives.ts";
 import { changeStream } from "../src/surfaces/events.ts";
 import { serve } from "../src/surfaces/http.ts";
+import { fakeServer } from "./fake-server.ts";
 import { ciReport, harness } from "./helpers.ts";
 import { pauseRead } from "./identity-db.ts";
 
@@ -154,25 +155,22 @@ test.each([false, true])("a heartbeat repairs a missed wakeup (history pruned: %
 	const second = await openApp(first.app.config, { memory: true, now: first.app.now });
 	const suppress = spyOn(second, "subscribeChanges").mockImplementation(() => () => {});
 	const closing = new AbortController();
-	const listener = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch: (req) =>
-			changeStream(
-				second,
-				req,
-				"scratch",
-				closing.signal,
-				async (db, id) =>
-					(await resolveCaller(second, db, { via: "local", owner: "robin" }, id))?.actor.can.includes("read") === true,
-				100,
-			),
-	});
+	const listener = fakeServer((req) =>
+		changeStream(
+			second,
+			req,
+			"scratch",
+			closing.signal,
+			async (db, id) =>
+				(await resolveCaller(second, db, { via: "local", owner: "robin" }, id))?.actor.can.includes("read") === true,
+			100,
+		),
+	);
 	const abort = new AbortController();
 	const deadline = setTimeout(() => abort.abort(), 5000);
 	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	try {
-		const response = await fetch(`http://127.0.0.1:${listener.port}/events`, { signal: abort.signal });
+		const response = await fetch(`${listener.url}/events`, { signal: abort.signal });
 		reader = response.body?.getReader();
 		if (!reader) throw new Error("no event stream");
 		const decoder = new TextDecoder();
@@ -212,7 +210,7 @@ test.each([false, true])("a heartbeat repairs a missed wakeup (history pruned: %
 		abort.abort();
 		closing.abort();
 		await reader?.cancel().catch(() => {});
-		await listener.stop(true);
+		await listener.stop();
 		suppress.mockRestore();
 		await second.close();
 		await first.close();

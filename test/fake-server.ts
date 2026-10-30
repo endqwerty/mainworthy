@@ -6,8 +6,8 @@ export type FakeServer = {
 
 /**
  * A server a test stands in for, on a port of this machine, that answers only under an unguessable path. Any process
- * on the machine may request a port that opens: T3 Code sends `GET /` to each new one on localhost within about a
- * second, and a test that counted that request failed by chance (#1099). `fetch` gets the path after `url`'s.
+ * on the machine may request a port that opens: T3 Code sends `GET /` to each new one on localhost within seconds, and
+ * a test that counted that request failed by chance (#1099). `fetch` gets the path after `url`'s.
  */
 export function fakeServer(fetch: (request: Request, path: string) => Response | Promise<Response>): FakeServer {
 	const base = `/${crypto.randomUUID()}`;
