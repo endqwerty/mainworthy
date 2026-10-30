@@ -1307,7 +1307,7 @@ describe("agent edits", () => {
 
 		const q = first((await queue()).items);
 		expect(q).toMatchObject({ kind: "adopt", producer: "agent" });
-		expect(q.asked).toMatchObject({ clause: "adopt-agent", ruled: false, hidden: 0, special: null });
+		expect(q.asked).toMatchObject({ when: ["author:agent"], ruled: false, hidden: 0, special: null });
 		expect((await queue()).counts["adopt:agent"]).toBe(1);
 		const own = await h.call<{ status: string }[]>(
 			"decide",
@@ -3386,7 +3386,7 @@ test("three creates have a full operation tally and human proposals do not count
 	expect(first(inbox.items)).toMatchObject({
 		title: "3 new cases",
 		evidence: { tally: { create: 3 } },
-		asked: { clause: "adopt-any" },
+		asked: { when: ["always"], ask: { reason: "required" } },
 	});
 	expect(inbox.counts["adopt:agent"]).toBeUndefined();
 	const question = first(inbox.items);

@@ -131,7 +131,6 @@ export const ADOPT_PREDICATES = {
  * answers is `whoAnswers`'s wording, so the guide and the queue say it alike. Null when a rule answers.
  */
 export function whyWaiting(asked: {
-	clause: string;
 	when: readonly string[];
 	ask: Clause["ask"];
 	ruled: boolean;
@@ -140,7 +139,7 @@ export function whyWaiting(asked: {
 }): string | null {
 	if (asked.ask.who === "rule") return null;
 	const who = lowerFirst(
-		whoAnswers({ id: asked.clause, kind: "adopt", when: [...asked.when], ask: asked.ask, blocks: "nothing" }),
+		whoAnswers({ id: "asked", kind: "adopt", when: [...asked.when], ask: asked.ask, blocks: "nothing" }),
 	);
 	let why: string;
 	if (asked.special === "quarantine") why = `Every quarantine waits for ${who}.`;

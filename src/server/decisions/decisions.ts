@@ -2592,7 +2592,6 @@ async function itemOf(
 
 	return {
 		asked: {
-			clause: asked.clause.id,
 			// The conditions under which `clauseFor` answers with a clause of its own rather than the policy's.
 			special:
 				row.kind !== "adopt"

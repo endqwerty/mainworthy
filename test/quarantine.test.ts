@@ -28,7 +28,7 @@ async function quarantine(exit: unknown, base: number | null = null) {
 	});
 	const q = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items.find((q) => q.q === p.question);
 	if (!q) throw new Error("quarantine proposal was not queued for a person");
-	expect(q.asked).toMatchObject({ clause: "quarantine-person", special: "quarantine" });
+	expect(q.asked).toMatchObject({ special: "quarantine" });
 	return (
 		await h.call<{ status: string; decision: number }[]>("decide", {
 			q: q.q,
