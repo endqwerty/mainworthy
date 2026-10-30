@@ -3,8 +3,9 @@
 **In short.** Coverage cannot decide which tests to delete. Planted bugs (mutants) can, and they are expensive to
 run. A browser test cover built from client source lines kept 208 of 778 tests, and the kept set still missed 2 of
 the 18 planted bugs the full set caught. So this repository should not cut its browser suite by coverage. It should
-move rendering checks to component tests (shown to work once here), strengthen the assertions that let 11 of 34
-planted bugs through, and run fewer browser tests per pull request only behind a mutation check. For the product,
+move rendering checks to component tests (shown to work once here), and look into the 11 of 34 planted bugs that no
+browser test caught, strengthening an assertion only where the bug has a visible effect. It should run fewer browser
+tests per pull request only behind a mutation check. For the product,
 the panels settled on a staged design. Mainworthy shows per-test facts and lets a person accept or reject a suggested
 action through a review finding. It suggests an action itself only where it holds the evidence that decides it.
 [The proposed decision](../../decisions/2026-10-29-suggest-test-actions-from-evidence.md) records it, and the
@@ -36,16 +37,16 @@ Each verdict therefore needs its own evidence. A single "value score" would hide
 ## What this repository's suite showed
 
 The suite at `91ce9287` has 225 test files. 78 are under `test/e2e/`, and 77 files open a browser
-(`scripts/browser-tests.ts`). By `scripts/test-timings.json`, browser files account for about 746 of 1,749 summed
-file-seconds. A full pull-request run took about 1,850 runner-seconds across its jobs (run
+(`scripts/browser-tests.ts`). `scripts/test-timings.json` is out of date for this tree: 12 entries name deleted files and 7 current files have
+none. Its entries for current browser files sum to about 731 of 1,749 file-seconds. A full pull-request run took about 1,850 runner-seconds across its jobs (run
 [40973499237](https://github.com/endqwerty/mainworthy/actions/runs/40973499237): `tests-1` 1,524 s, `performance`
 209 s). At [the dated CI estimate](../../development/tests.md#estimate-the-recurring-ci-cost), one runner-second on
 every run is about $0.45 a month.
 
 ### Failure history is thin, and nothing labels it
 
-From 2,580 `check.yml` runs (2026-10-12 to 2026-10-30; 463 of 2,963 attempt logs were unavailable because of GitHub's
-rate limit):
+From 2,580 `check.yml` runs (2026-10-12 to 2026-10-30; 463 of 2,963 attempt logs were unavailable, 459 of them because of
+GitHub's rate limit):
 
 - 4,611 failing-test rows in 450 runs. Only 314 were the only failing test in their run. The rest failed beside
   others, as happens when a branch in progress breaks many things at once.
@@ -59,16 +60,18 @@ rate limit):
 Of 203 issues labelled `bug`, 21 were found by a failing test, 147 by review, 7 by an audit, and 28 by other routes or
 unknown. Git history reaches back only to 2026-10-09.
 
-The deciding gap: this repository's CI answers every failure "needs a fix" by rule
-([docs/deploy.md](../../deploy.md), the CI policy). So its own Mainworthy instance holds no person's answer about why
-a test failed. That answer is the one signal no competitor records, and this repository does not collect it.
+The deciding gap: since 2026-10-20 this repository's CI answers every failure "needs a fix" by rule
+([docs/deploy.md](../../deploy.md), the CI policy). A person can overrule that answer, but nothing asks them to.
+The current instance started empty on 2026-10-28 ([docs/render-migration.md](../../render-migration.md)), and this
+research did not read it. So recent failures are normally answered by rule, and nothing records why a test
+failed. That answer is the one signal no competitor records, and this repository does not collect it.
 
 ### Server operations cannot tell browser tests apart
 
 A scratch export recorded which server operations every test called. 747 of 836 browser tests reached only
 operations that cheaper tests also reach. Reading the assertions told a different story: 67 of 78 browser files check
 browser-side behaviour (focus, drafts across windows, keyboard handling, rendering). Two files are already
-process-level, and seven mix browser checks with data-only assertions that could move down.
+process-level, two are timed performance files, and seven mix browser checks with data-only assertions that could move down.
 
 ### Client coverage and planted bugs: the deciding measurement
 
@@ -92,7 +95,7 @@ sample of all defects.
 
 The two missed mutants mean deletion by line coverage loses real detection. Only the planted-bug check showed this,
 which matches the literature: suites cut by coverage lose 0.2% to about 48% of their fault detection, depending on
-the study (section 1 of the research notes, figures read secondhand). The 11 survivors are either lines no assertion
+the study ([notes/literature.md](notes/literature.md), section 1; figures read secondhand). The 11 survivors are either lines no assertion
 really checks or mutants with no observable effect, and each needs a look. The component render shows that at least
 some rendering checks can move out of the browser.
 
@@ -106,14 +109,17 @@ across windows. The 34 mutants took about two hours on 8 CPU threads.
 
 ## What others do
 
-From the research notes (vendor pages read 2026-10-29; some were blocked, and each is marked there):
+From [notes/competitors.md](notes/competitors.md) (vendor pages read 2026-10-29; some were blocked, and each is
+marked there):
 
 - Datadog Test Optimization, Trunk, CloudBees Smart Tests, BuildPulse and Currents all offer quarantine, disable or
   "fix" for flaky tests. CloudBees adds "never failing" and "longest" reports. None that could be read offers merge,
   move down a layer, redundancy or staleness detection for automated tests. None records a person's reason for a
   failure; Trunk has a "flag as flaky" switch.
-- TestRail, Qase, Xray and Zephyr offer statuses such as deprecated or archived for manual cases. None suggests
-  retiring or merging a case from evidence.
+- For manual cases, Qase, and Zephyr by its defaults, offer statuses such as deprecated, and Xray and Zephyr can
+  archive a case. Some of this came from community pages, not official docs. TestRail's pages were blocked, so its
+  case statuses are not established. In the pages that could be read, no tool suggests retiring or merging a case
+  from evidence.
 - Meta's predictive test selection caught over 95% of failures while running under a third of the selected tests,
   and it needed de-flaked labels to train ([Machalica et al. 2019](https://arxiv.org/abs/1810.05286)).
 - Mutation score tracks real fault detection beyond coverage, but 17% of real faults had no matching mutant
@@ -140,7 +146,7 @@ near-duplicate text, and its "delete" is archiving through a proposal and a deci
 ## How a suggestion reaches people
 
 Two panels answered independently (GPT 6.1 Sol and Claude Opus 5.5, both at high effort). Because they agreed, a third
-pass (GPT 6.1 Sol) argued the strongest alternative. Their answers, condensed:
+pass (GPT 6.1 Sol) argued the strongest alternative. Their answers are in [panels/](panels/); condensed:
 
 - **Both panels:** one shared read per test or case. It carries the facts, a suggested action or "not enough
   evidence", the evidence for and against, and what is missing. It feeds a report page, the CLI and the MCP tools from
@@ -153,18 +159,19 @@ pass (GPT 6.1 Sol) argued the strongest alternative. Their answers, condensed:
   an agent, or a person) attach code-side evidence to a finding, and promote a rule into the server only when its
   deciding inputs live there.
 
-**Settled: staged.** Stage one is the per-test facts read and findings that can name a test with a snapshot of their
+**Settled: staged.** This is the coordinator's synthesis of the three answers, not a point every panel agreed on. Stage one is the per-test facts read and findings that can name a test with a snapshot of their
 evidence. Mainworthy suggests actions only where it holds the deciding inputs: a test that stopped reporting, a
 manual case not run in a long time, near-duplicate manual cases, and the cost of flips and reruns. Code-side verdicts
 come from an assessor in the repository. This repository's own assessor is the first one.
 
 ## Mutation testing in the product
 
-The owner's words were "maybe, if optimal". The same two panels answered, and this time they split.
+The owner's words were "maybe, if optimal". The same two panels answered, and this time they split
+([panels/](panels/)).
 
 - **Claude Opus 5.5:** keep it out of the product. Run a weekly sampled job of about 12 mutants in this repository's
   CI, estimated at $3 to $4 a month, and attach its kill rows to findings. Build an importer only once a user asks
-  for one.
+  for one, or once eight weekly runs have produced findings that people accepted.
 - **GPT 6.1 Sol:** later, accept the standard mutation-testing-elements JSON (StrykerJS, Stryker.NET, and PIT through
   a plugin) as attributed evidence, kept apart from test results and the gate. No recurring job in this repository;
   mutate locally when a specific assertion or removal is being judged. It also found a limit in the format:
@@ -198,8 +205,10 @@ An agent's finding is labelled as the agent's, and a destructive action needs a 
 ## Method
 
 Workers read and measured; the coordinator (Claude Opus 5.5) joined and judged. Every worker wrote its raw extracts
-and scripts beside its findings in a scratch directory that is not kept. The tables a reader needs are in this
-directory's `data/`.
+and scripts beside its findings in a scratch directory that is not kept. Paths under `out/` or `sources/` in the
+notes and panel answers refer to it. The research notes are in [notes/](notes/), the panel answers in
+[panels/](panels/), and the tables a reader needs in `data/`. A committed tool that redoes the coverage and
+planted-bug measurement is the first roadmap item.
 
 | Slice | Who | Source |
 | --- | --- | --- |
@@ -207,8 +216,8 @@ directory's `data/`.
 | Suite history | GPT 6.1 Terra | `git log` of 1,600 commits, 83 flaky-test and 203 bug issues with their closing pull requests |
 | Product inventory | Claude Sonnet 5.5 | the source at `91ce9287`; 219 file:line citations, checked to resolve |
 | Outside research | Claude Sonnet 5.5 | papers and vendor pages, 2026-10-29; secondhand figures are marked in the notes |
-| Server-operation map | GPT 6.1 Sol | an instrumented export: every test file run once, 4 workers on CPUs 0-7 |
-| Client coverage and planted bugs | GPT 6.1 Sol | an instrumented export: V8 coverage per test, 34 mutants, seed 20261029 |
+| Server-operation map | GPT 6.1 Sol | an instrumented export: 214 of 225 test files (11 timed performance files skipped), 3 rerun after instrumentation fixes, 4 workers on CPUs 0-7 |
+| Client coverage and planted bugs | GPT 6.1 Sol | an instrumented export: 778 tests in 74 functional browser files, served a separately built client bundle with inline source maps in place of the test build; 34 of 60 sampled mutants run within a two-hour budget, seed 20261029 |
 | Panels | GPT 6.1 Sol, Claude Opus 5.5, then a GPT 6.1 Sol contrarian | the above |
 
 `data/scorecard.csv` has one row per browser file: tests, CI failures and their classes, failures on `main`, churn,
@@ -218,4 +227,20 @@ file, whether its assertions need a browser.
 
 ## Roadmap
 
-ISSUES
+For this repository's suite (milestone M1, part of [#77](https://github.com/endqwerty/mainworthy/issues/77)):
+
+1. [#1106](https://github.com/endqwerty/mainworthy/issues/1106): a committed command that measures which client lines each browser test runs and which planted
+   bugs it catches. The items below use it for their evidence.
+2. [#1107](https://github.com/endqwerty/mainworthy/issues/1107): move rendering checks and data-only assertions from browser tests to component tests, each
+   shown to catch the same planted bug.
+3. [#1108](https://github.com/endqwerty/mainworthy/issues/1108): look into the 11 planted bugs no browser test caught.
+4. [#1109](https://github.com/endqwerty/mainworthy/issues/1109), the owner's call: run selected browser tests on pull requests and all of them on `main`, guarded
+   by a weekly planted-bug job.
+5. [#1110](https://github.com/endqwerty/mainworthy/issues/1110), the owner's call: record why each CI failure happened, beside the rule's answer.
+
+For the product (milestone M5), the stages of [the proposed decision](../../decisions/2026-10-29-suggest-test-actions-from-evidence.md):
+
+1. [#1111](https://github.com/endqwerty/mainworthy/issues/1111): per-test and per-case facts in one read, on the web, CLI and MCP.
+2. [#1112](https://github.com/endqwerty/mainworthy/issues/1112): review findings that can name an automated test and keep their evidence.
+3. [#1113](https://github.com/endqwerty/mainworthy/issues/1113): suggestions where Mainworthy holds the evidence: tests that stopped reporting, stale manual
+   cases, near-duplicate manual cases, and the cost of flips and reruns.
