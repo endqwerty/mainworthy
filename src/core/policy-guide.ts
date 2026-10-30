@@ -131,7 +131,6 @@ export const ADOPT_PREDICATES = {
  * answers is `whoAnswers`'s wording, so the guide and the queue say it alike. Null when a rule answers.
  */
 export function whyWaiting(asked: {
-	policy: string;
 	clause: string;
 	when: string[];
 	ask: Clause["ask"];
@@ -162,8 +161,9 @@ export function whyWaiting(asked: {
 			? ` that meets ${asked.hidden} more folder or tag ${asked.hidden === 1 ? "condition" : "conditions"}`
 			: "";
 		const scope = `${folders.length ? ` in ${folders.join(" and ")}` : ""}${tags.length ? ` tagged ${tags.join(" and ")}` : ""}${more}`;
-		const policy = asked.policy === "custom" ? "this project's policy" : `the ${asked.policy} policy`;
-		why = `Under ${policy}, ${what}${scope} waits for ${who}.`;
+		// The policy is not named: its name is worked out from its whole clause table, which a reply about one
+		// question has no reason to read, and "this project's" is true whatever it is called.
+		why = `Under this project's policy, ${what}${scope} waits for ${who}.`;
 	}
 	return `Not in effect yet. ${why}`;
 }

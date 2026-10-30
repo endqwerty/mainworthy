@@ -1211,7 +1211,7 @@ t(
 				.filter({ hasText: /proposal.*P-/ })
 				.waitFor();
 			await page
-				.getByText("Not in effect yet. Under the standard policy, an agent's edit waits for a person.", {
+				.getByText("Not in effect yet. Under this project's policy, an agent's edit waits for a person.", {
 					exact: false,
 				})
 				.waitFor();

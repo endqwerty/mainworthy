@@ -133,12 +133,7 @@ const canonical = (clauses: readonly Clause[]): string => JSON.stringify(Clause.
  */
 export function presetOf(policy: Pick<Policy, "preset" | "clauses">): PresetName | null {
 	const name = PRESET_NAMES.find((preset) => preset === policy.preset);
-	// A table of another length is not the preset's, and is not read: a custom table can be large.
-	return name &&
-		policy.clauses.length === PRESETS[name].clauses.length &&
-		canonical(policy.clauses) === canonical(PRESETS[name].clauses)
-		? name
-		: null;
+	return name && canonical(policy.clauses) === canonical(PRESETS[name].clauses) ? name : null;
 }
 
 /**

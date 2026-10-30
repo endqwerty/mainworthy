@@ -55,7 +55,7 @@ import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { claimMint } from "../kernel/witness.ts";
-import { clauseFor, currentPolicy, policyAt, policyName } from "../policy/policy.ts";
+import { clauseFor, currentPolicy, policyAt } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
@@ -2489,8 +2489,6 @@ export async function toItem(db: ReadDb, row: QuestionRow): Promise<QuestionItem
  */
 type ItemPage = {
 	policy: Awaited<ReturnType<typeof currentPolicy>>;
-	/** The policy's name, worked out once for the page rather than once per question. */
-	policyName: string;
 	questions: Awaited<ReturnType<typeof itemReads>>;
 	runs: Map<number, string>;
 	targets: Map<number, TargetRow>;
@@ -2507,10 +2505,8 @@ export async function toItemsFor(ctx: Ctx<ReadDb>, rows: readonly QuestionRow[])
 		),
 	];
 	const targets = await targetsByIds(ctx.db, ids);
-	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const known: ItemPage = {
-		policy,
-		policyName: policyName(policy),
+		policy: await currentPolicy(ctx.db, ctx.project.id),
 		questions: await itemReads(
 			ctx.db,
 			rows.map((row) => row.id),
@@ -2579,7 +2575,6 @@ async function itemOf(
 
 	return {
 		asked: {
-			policy: known?.policyName ?? policyName(current),
 			clause: asked.clause.id,
 			...shownPredicates(asked.clause.when),
 			ask: asked.ask,
