@@ -213,7 +213,6 @@ const DecisionItem = z.object({
 
 export const QuestionItem = z.object({
 	asked: z.object({
-		policy: schemaText,
 		clause: schemaText,
 		when: z.array(Predicate),
 		/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */

@@ -148,18 +148,17 @@ test("why an adoption waits follows its actual clause and ask", () => {
 		for (const subject of ["author:human", "author:agent", "conflict", "policy"]) {
 			const clause = clauseOf(PRESETS[preset], { kind: "adopt", facts: new Set([subject, "author:human"]) });
 			if (!clause) throw new Error("no adopt clause");
-			const asked = { policy: preset, clause: clause.id, when: clause.when, ask: clause.ask, ruled: false, hidden: 0 };
+			const asked = { clause: clause.id, when: clause.when, ask: clause.ask, ruled: false, hidden: 0 };
 			const line = whyWaiting(asked);
 			if (clause.ask.who === "rule") expect(line).toBeNull();
 			else
 				expect(line).toBe(
-					`Not in effect yet. Under the ${preset} policy, ${subject === "policy" ? "a change to the policy" : subject === "conflict" ? "an edit that conflicts with a newer version" : clause.when.includes("always") ? "every edit" : "an agent's edit"} waits for ${whoAnswers(clause).replace(/^./, (c) => c.toLowerCase())}.`,
+					`Not in effect yet. Under this project's policy, ${subject === "policy" ? "a change to the policy" : subject === "conflict" ? "an edit that conflicts with a newer version" : clause.when.includes("always") ? "every edit" : "an agent's edit"} waits for ${whoAnswers(clause).replace(/^./, (c) => c.toLowerCase())}.`,
 				);
 		}
 	}
 	const ask = { who: "member", agents: "none", reason: "optional", notProducer: false } as const;
 	const asked = {
-		policy: "custom",
 		clause: "scoped",
 		when: ["author:agent", "folder:checkout"],
 		ask,
@@ -200,7 +199,6 @@ test("a reply carries each fixed predicate once and a few short scopes, and says
 	});
 	const ask = { who: "member", agents: "none", reason: "optional", notProducer: false } as const;
 	const asked = {
-		policy: "custom",
 		clause: "scoped",
 		ask,
 		ruled: false,
