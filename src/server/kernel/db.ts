@@ -288,6 +288,13 @@ type Lease = {
 	 * is refused, and the transaction does not commit.
 	 */
 	signal?: AbortSignal | undefined;
+	/**
+	 * Cancels the statement the connection's backend runs, from another connection (Bun 1.4.3's `query.cancel()` sends
+	 * nothing). Set once a lease with a signal has learned its backend.
+	 */
+	cancel?: (() => Promise<void>) | undefined;
+	/** The cancel sent for this lease, which must reach the backend before its connection closes. */
+	cancelling?: Promise<void> | undefined;
 };
 async function query<R>(
 	lease: Lease,
@@ -334,10 +341,11 @@ async function statement<R>(
 	const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
 	// A cancel can arrive after the statement ended and stop the connection's next one instead, so a connection that
 	// sent one is closed, not reused.
-	const signal = control ? undefined : lease.signal;
+	const send = lease.cancel;
+	const signal = control || !send ? undefined : lease.signal;
 	const cancel = () => {
 		lease.poisoned = true;
-		pending.cancel();
+		lease.cancelling ??= send?.();
 	};
 	signal?.addEventListener("abort", cancel, { once: true });
 	try {
@@ -689,6 +697,21 @@ export class Database {
 			...(signal ? [signal] : []),
 		]);
 	}
+	private canceller: SQL | undefined;
+	private readonly cancels = new Set<Promise<void>>();
+	/** Cancels what backend `pid` runs. A cancel that fails leaves the statement to the deadline of whoever waits for it. */
+	private cancelBackend(pid: number): Promise<void> {
+		this.canceller ??= new SQL(this.options.url, { bigint: true, max: 1 });
+		const sent = this.canceller
+			.unsafe("SELECT pg_cancel_backend($1)", [pid])
+			.then(
+				() => undefined,
+				() => undefined,
+			)
+			.finally(() => this.cancels.delete(sent));
+		this.cancels.add(sent);
+		return sent;
+	}
 	private async lease(pool: SQL, signal?: AbortSignal): Promise<Lease> {
 		const tracing = this.options.tracing ?? UNTRACED;
 		const conn = await tracing.span(
@@ -711,6 +734,8 @@ export class Database {
 	}
 	private async dispose(lease: Lease): Promise<void> {
 		lease.alive = false;
+		// Closed first, the backend's process id could be another connection's by the time the cancel arrives.
+		await lease.cancelling;
 		if (lease.poisoned || lease.lost) {
 			await lease.conn.close({ timeout: 0 });
 		}
@@ -731,6 +756,10 @@ export class Database {
 		const lease = await this.lease(pool, options.signal);
 		lease.signal = options.signal;
 		try {
+			if (options.signal) {
+				const [row] = await query<{ pid: number }>(lease, "SELECT pg_backend_pid() AS pid");
+				if (row) lease.cancel = () => this.cancelBackend(row.pid);
+			}
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
 			lease.tx = { aborted: null, queues: [[]], kept: new Map() };
 			const result = await fn(new Scope(lease, false));
@@ -799,17 +828,24 @@ export class Database {
 			// A process that exits mid-statement, as a stopping server does at its deadline, leaves the statement running;
 			// checking the client every second lets one waiting for a lock see the closed connection and roll back,
 			// releasing the locks it holds, instead of waiting for the lock first (#914).
-			await query(
+			// A write its caller can stop also learns its backend, in the same round trip, so the abort can cancel it.
+			const settings = await query<unknown>(
 				lease,
 				`SET lock_timeout = '${this.options.lockWaitMs ?? LOCK_WAIT_MS}ms';
  SET statement_timeout = '${LOCK_WAIT_MS}ms';
  SET transaction_timeout = '${LOCK_WAIT_MS}ms';
  SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms';
- SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'`,
+ SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'${options.signal ? ";\n SELECT pg_backend_pid() AS pid" : ""}`,
 				[],
 				false,
 				true,
 			);
+			if (options.signal) {
+				const rows = settings.at(-1);
+				const pid: unknown = Array.isArray(rows) ? rows[0]?.pid : undefined;
+				if (typeof pid !== "number") throw new Error("the write's backend did not say its process id");
+				lease.cancel = () => this.cancelBackend(pid);
+			}
 			const result = await fn(db);
 			if (lease.lost) throw lease.lost;
 			if (lease.tx) throw new Error("write callback returned with an open transaction");
@@ -937,7 +973,14 @@ export class Database {
 		await this.notifications?.close();
 		this.shutdown.abort(new Error("database is closed"));
 		await Promise.all(this.activeWrites);
-		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close(), this.jobs.close()]);
+		await Promise.all(this.cancels);
+		await Promise.all([
+			this.readers.close(),
+			this.writers.close(),
+			this.admissions.close(),
+			this.jobs.close(),
+			this.canceller?.close(),
+		]);
 	}
 }
 /** Runs one statement on the migration's connection outside any transaction (`CREATE INDEX CONCURRENTLY`). */
