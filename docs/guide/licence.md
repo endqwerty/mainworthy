@@ -23,7 +23,7 @@ Mainworthy bundles software and documentation from others under their own licenc
 | What | Where it ships | Licences |
 | --- | --- | --- |
 | npm packages, including React, TanStack Query and Virtual, Zod, the MCP SDK, Ajv and @noble/hashes | the executable, with some also in the web UI | Apache-2.0, MIT, ISC, BSD-3-Clause, CC0-1.0 |
-| The Bun 1.4.3 runtime, with the libraries, Rust crates and packages it links | the executable, compiled with `bun build --compile` | Mostly MIT, BSD, Apache-2.0, ISC, and Zlib. LGPL for JavaScriptCore, WebKit, and TinyCC. MPL-2.0 for some CSS code and three Rust crates. GPL with a runtime exception for the compilers' runtime libraries. Artistic-2.0 for one npm package. |
+| The Bun 1.4.4 runtime, with the libraries, Rust crates and packages it links | the executable, compiled with `bun build --compile` | Mostly MIT, BSD, Apache-2.0, ISC, and Zlib. LGPL for JavaScriptCore, WebKit, and TinyCC. MPL-2.0 for some CSS code and three Rust crates. GPL with a runtime exception for the compilers' runtime libraries. Artistic-2.0 for one npm package. |
 | Archify's viewer and the JetBrains Mono font | the diagrams on these pages, each with both licences | MIT, OFL-1.1 |
 | Basecamp's policies | the adapted privacy policy | CC-BY-4.0 |
 

@@ -1476,26 +1476,26 @@ d. Nothing in this Public License constitutes or may be interpreted as a limitat
 > Creative Commons may be contacted at creativecommons.org
 ```
 
-## Bun 1.4.3: Bun, and code it carries in its own source
+## Bun 1.4.4: Bun, and code it carries in its own source
 
 The Bun runtime itself, and libraries Bun keeps in its own repository.
 
 | Component | Version | Licence |
 | --- | --- | --- |
-| Bun | 1.4.3 | MIT |
-| bun-usockets | 1.4.3 | Apache-2.0 |
-| bun-uws | 1.4.3 | Apache-2.0 |
+| Bun | 1.4.4 | MIT |
+| bun-usockets | 1.4.4 | Apache-2.0 |
+| bun-uws | 1.4.4 | Apache-2.0 |
 | Fiat Cryptography in BoringSSL | bundled at BoringSSL pin | Apache-2.0 |
-| Mozilla NSS certificate data | 1.4.3 | MPL-2.0 |
-| TCC embedded runtime source | 1.4.3 | GPL-2.0-or-later WITH LicenseRef-TCC-unlimited-linking |
-| uWebSockets MoveOnlyFunction | 1.4.3 | MIT |
+| Mozilla NSS certificate data | 1.4.4 | MPL-2.0 |
+| TCC embedded runtime source | 1.4.4 | GPL-2.0-or-later WITH LicenseRef-TCC-unlimited-linking |
+| uWebSockets MoveOnlyFunction | 1.4.4 | MIT |
 | xxHash in libarchive | bundled at parent pin | BSD-2-Clause |
 | xxHash in ls-hpack | bundled at parent pin | BSD-2-Clause |
 | xxHash in Zstandard | bundled at parent pin | BSD-2-Clause |
 
-### Bun 1.4.3
+### Bun 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/LICENSE.md>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/LICENSE.md>
 
 `LICENSE.md`:
 
@@ -1549,7 +1549,35 @@ Bun statically links these libraries:
 | A fork of [`uWebsockets`](https://github.com/jarred-sumner/uwebsockets) | Apache 2.0 licensed |
 | Parts of [Tigerbeetle's IO code](https://github.com/tigerbeetle/tigerbeetle/blob/532c8b70b9142c17e07737ab6d3da68d7500cbca/src/io/windows.zig#L1) | Apache 2.0 licensed |
 | `__cxa_thread_atexit` fallback from [LLVM libc++abi](https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/libcxxabi/src/cxa_thread_atexit.cpp) | Apache 2.0 with LLVM exception |
-| The type checker behind `bun check` is a port of [`typescript-go`](https://github.com/microsoft/typescript-go), and uses TypeScript's diagnostic messages and `lib.*.d.ts` files | Apache 2.0 |
+| The type checker behind `bun check` and the parser it shares with `bun lint` and `bun fmt` are ports of [`typescript-go`](https://github.com/microsoft/typescript-go). They use TypeScript's diagnostic messages and `lib.*.d.ts` files | Apache 2.0 |
+| `bun lint` ports large parts of [ESLint](https://github.com/eslint/eslint): code path analysis, rule helpers such as `ast-utils.js`, config and comment handling, and many rules. The ESLint rules in `bun lint` use ESLint's rule names, options, option schemas, messages and descriptions. The `eslint:recommended` and `eslint:all` presets are ESLint's. Parts of `main.js` in `src/lint/js_plugin/worker` are copied from ESLint, and parts of `LintReport.cpp`, `LintSourceCode.cpp` and `LintTokens.cpp` in `src/jsc/bindings` are ported from it | MIT |
+| `bun lint` does the same with the rules of [`typescript-eslint`](https://github.com/typescript-eslint/typescript-eslint). It also ports `type-utils` and the plugin's `util` helpers, and uses its presets, the error messages of `typescript-estree` and the `lib` globals of `scope-manager` | MIT |
+| Selectors in `bun lint` are a port of [`esquery`](https://github.com/estools/esquery) | BSD 3-Clause |
+| `bun lint` has ports of [`@eslint-community/regexpp`](https://github.com/eslint-community/regexpp), [`@eslint-community/eslint-utils`](https://github.com/eslint-community/eslint-utils), [`levn`](https://github.com/gkz/levn) and [`natural-compare`](https://github.com/litejs/natural-compare-lite), and of parts of [`ts-api-utils`](https://github.com/JoshuaKGoldberg/ts-api-utils) and [`@eslint/eslintrc`](https://github.com/eslint/eslintrc) | MIT |
+| `bun lint` uses the error messages of [`ajv`](https://github.com/ajv-validator/ajv), [`acorn`](https://github.com/acornjs/acorn) and [`optionator`](https://github.com/gkz/optionator), and the lists in [`globals`](https://github.com/sindresorhus/globals) and [`is-core-module`](https://github.com/inspect-js/is-core-module) | MIT |
+| `bun lint` uses the error messages of [`espree`](https://github.com/eslint/js/tree/main/packages/espree) | BSD 2-Clause |
+| `bun lint` uses the `JSON.parse` error messages of [V8](https://github.com/v8/v8) | BSD 3-Clause |
+| `bun lint` has ports of parts of [`@eslint/plugin-kit`, `@eslint/config-array`, `@eslint/config-helpers` and `@eslint/compat`](https://github.com/eslint/rewrite) | Apache 2.0 |
+| `bun lint` and `bun fmt` have a port of the pattern-to-regular-expression table of [`ignore`](https://github.com/kaelzhang/node-ignore) | MIT |
+| `bun lint` and `bun fmt` have ports of [`is-glob`](https://github.com/micromatch/is-glob) and [`is-extglob`](https://github.com/jonschlinkert/is-extglob) | MIT |
+| `bun lint` and `bun fmt` have a port of [`glob-parent`](https://github.com/gulpjs/glob-parent) | ISC |
+| The `react-hooks`, `import`, `n`, `react` and `prettier` rules in `bun lint` are ports of the rules in [`eslint-plugin-react-hooks`](https://github.com/facebook/react/tree/main/packages/eslint-plugin-react-hooks), [`eslint-plugin-import`](https://github.com/import-js/eslint-plugin-import), [`eslint-plugin-n`](https://github.com/eslint-community/eslint-plugin-n), [`eslint-plugin-es-x`](https://github.com/eslint-community/eslint-plugin-es-x), [`eslint-plugin-react`](https://github.com/jsx-eslint/eslint-plugin-react) and [`eslint-plugin-prettier`](https://github.com/prettier/eslint-plugin-prettier), with the same rule names, options and messages. They include the Node.js version tables of `eslint-plugin-n` and a few functions from [`jsx-ast-utils`](https://github.com/jsx-eslint/jsx-ast-utils) and [`prettier-linter-helpers`](https://github.com/prettier/prettier-linter-helpers) | MIT |
+| The text diff used by `bun test` and the `prettier/prettier` rule has parts of [`diff-match-patch`](https://github.com/google/diff-match-patch) and of [`fast-diff`](https://github.com/jhchen/fast-diff), which is derived from it | Apache 2.0 |
+| The `unicorn`, `oxc`, `react-perf`, `jsx-a11y`, `nextjs`, `promise`, `node`, `jest` and `vitest` rules in `bun lint` are ports of the rules in [`oxlint`](https://github.com/oxc-project/oxc), with its messages and help text. With an oxlint config, the other rules use the messages of oxlint and [`tsgolint`](https://github.com/oxc-project/tsgolint) too. `bun lint` also ports parts of `oxc_jsdoc` and `oxc_react_compiler` | MIT |
+| oxlint ported those rules from [`eslint-plugin-unicorn`](https://github.com/sindresorhus/eslint-plugin-unicorn), [`eslint-plugin-react-perf`](https://github.com/cvazac/eslint-plugin-react-perf), [`eslint-plugin-jsx-a11y`](https://github.com/jsx-eslint/eslint-plugin-jsx-a11y), [`@next/eslint-plugin-next`](https://github.com/vercel/next.js/tree/canary/packages/eslint-plugin-next), [`eslint-plugin-n`](https://github.com/eslint-community/eslint-plugin-n), [`eslint-plugin-jest`](https://github.com/jest-community/eslint-plugin-jest) and [`@vitest/eslint-plugin`](https://github.com/vitest-dev/eslint-plugin-vitest). Their rule names, options and some of their messages are in `bun lint` | MIT |
+| oxlint ported its `promise` rules from [`eslint-plugin-promise`](https://github.com/eslint-community/eslint-plugin-promise) | ISC |
+| The ARIA tables of the `jsx-a11y` rules come from [`aria-query`](https://github.com/A11yance/aria-query) by way of oxlint | Apache 2.0 |
+| `bun fmt` is a port of [Prettier](https://github.com/prettier/prettier): its printers for CSS, SCSS, Less, HTML, Vue, Angular, Markdown, YAML, GraphQL and Handlebars, its document printer, its handling of options, pragmas, ranges, cursor offsets and embedded code, and the HTML tables it is built with | MIT |
+| The JavaScript and TypeScript printer of `bun fmt`, its JSDoc formatting and its oxfmt-style import sorting are a port of [`oxc_formatter`](https://github.com/oxc-project/oxc/tree/main/crates/oxc_formatter), which is a port of the [Biome](https://github.com/biomejs/biome) formatter. The intermediate representation and its printer come from Biome by way of `oxc_formatter_core` | MIT |
+| `bun fmt` has ports of the parsers in [`postcss`](https://github.com/postcss/postcss), [`postcss-scss`](https://npmjs.com/package/postcss-scss), [`postcss-less`](https://npmjs.com/package/postcss-less), [`postcss-selector-parser`](https://github.com/postcss/postcss-selector-parser), [`postcss-media-query-parser`](https://github.com/dryoma/postcss-media-query-parser), [`postcss-values-parser`](https://npmjs.com/package/postcss-values-parser), [`angular-html-parser`](https://npmjs.com/package/angular-html-parser), [`graphql-js`](https://github.com/graphql/graphql-js), [`@glimmer/syntax`](https://github.com/glimmerjs/glimmer-vm), [`simple-html-tokenizer`](https://github.com/tildeio/simple-html-tokenizer) and [`@angular/compiler`](https://github.com/angular/angular), and of parts of [`yaml-unist-parser`](https://npmjs.com/package/yaml-unist-parser) and [`angular-estree-parser`](https://npmjs.com/package/angular-estree-parser) | MIT |
+| `bun fmt` also has a port of [`@handlebars/parser`](https://github.com/handlebars-lang/handlebars-parser) and of one file of [`yaml`](https://npmjs.com/package/yaml) | ISC |
+| Import sorting in `bun fmt` has ports of [`@trivago/prettier-plugin-sort-imports`](https://github.com/trivago/prettier-plugin-sort-imports) and [`@ianvs/prettier-plugin-sort-imports`](https://github.com/ianvs/prettier-plugin-sort-imports), and of `organizeImports.ts` in [TypeScript](https://github.com/microsoft/TypeScript) | Apache 2.0 |
+| `bun fmt` has ports of [`jest-docblock`](https://github.com/jestjs/jest/tree/main/packages/jest-docblock) and the crates [`sort-package-json`](https://crates.io/crates/sort-package-json) and [`oxc-toml`](https://crates.io/crates/oxc-toml) (a fork of taplo), and of parts of [`@babel/generator`](https://github.com/babel/babel), [`micromark`](https://github.com/micromark/micromark) and [`editorconfig-without-wasm`](https://github.com/fisker/editorconfig-core-js-without-wasm). Its character width tables are generated from [`emoji-regex`](https://github.com/mathiasbynens/emoji-regex), [`get-east-asian-width`](https://github.com/sindresorhus/get-east-asian-width) and [`narrow-emojis`](https://npmjs.com/package/narrow-emojis) | MIT |
+| Tailwind class sorting in `bun fmt` is a port of parts of [`prettier-plugin-tailwindcss`](https://github.com/tailwindlabs/prettier-plugin-tailwindcss) | MIT |
+| Svelte formatting in `bun fmt` is a port of [`prettier-plugin-svelte`](https://github.com/sveltejs/prettier-plugin-svelte) and of the template parser of [Svelte](https://github.com/sveltejs/svelte) | MIT |
+| With `prettier-plugin-packagejson` in a Prettier config, `bun fmt` sorts `package.json` with a port of the npm package [`sort-package-json`](https://github.com/keithamus/sort-package-json) and the list in [`git-hooks-list`](https://github.com/fisker/git-hooks-list) | MIT |
+
+The tests in `test/cli/lint/conformance` and `test/cli/format` include test cases from ESLint, typescript-eslint, the ESLint plugins above, oxc, tsgolint, Prettier and the two import sorting plugins. They are not part of the `bun` binary. Their licenses are next to them.
 
 ## Polyfills
 
@@ -1587,15 +1615,15 @@ For compatibility reasons, the following packages are embedded into Bun's binary
 - Credit to [@kipply](https://github.com/kipply) for the name "Bun"!
 ```
 
-### bun-usockets 1.4.3
+### bun-usockets 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/packages/bun-usockets/LICENSE>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/packages/bun-usockets/LICENSE>
 
 `LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
 
-### bun-uws 1.4.3
+### bun-uws 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/packages/bun-uws/LICENSE>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/packages/bun-uws/LICENSE>
 
 `LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
 
@@ -1866,9 +1894,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### Mozilla NSS certificate data 1.4.3
+### Mozilla NSS certificate data 1.4.4
 
-MPL-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/packages/bun-usockets/certdata.txt>
+MPL-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/packages/bun-usockets/certdata.txt>
 
 `LICENSE`:
 
@@ -2257,9 +2285,9 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ```
 
-### TCC embedded runtime source 1.4.3
+### TCC embedded runtime source 1.4.4
 
-GPL-2.0-or-later WITH LicenseRef-TCC-unlimited-linking. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/runtime/ffi/libtcc1.c>
+GPL-2.0-or-later WITH LicenseRef-TCC-unlimited-linking. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/ffi/libtcc1.c>
 
 `gpl-2.0.txt`:
 
@@ -2638,9 +2666,9 @@ Boston, MA 02111-1307, USA.
 */
 ```
 
-### uWebSockets MoveOnlyFunction 1.4.3
+### uWebSockets MoveOnlyFunction 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/packages/bun-uws/src/MoveOnlyFunction.h>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/packages/bun-uws/src/MoveOnlyFunction.h>
 
 `MoveOnlyFunction.h.licence.txt`:
 
@@ -2770,14 +2798,14 @@ BSD-2-Clause. <https://github.com/facebook/zstd/blob/f8745da6ff1ad1e7bab384bd1f9
  */
 ```
 
-## Bun 1.4.3: Libraries Bun builds and links
+## Bun 1.4.4: Libraries Bun builds and links
 
 C and C++ libraries Bun builds from a pinned revision and links into its binary.
 
 | Component | Version | Licence |
 | --- | --- | --- |
 | boringssl | pinned commit | Apache-2.0 |
-| brotli | 1.2.0 | MIT |
+| brotli | 1.2.1 | MIT |
 | cares | pinned commit | MIT |
 | hdrhistogram | pinned commit | BSD-2-Clause |
 | highway | pinned commit | BSD-3-Clause |
@@ -2806,9 +2834,9 @@ Apache-2.0. <https://github.com/oven-sh/boringssl/tree/41bf9b59c2ebf277a7aa427e1
 
 `LICENSE`: the same text as `LICENSE` of Fiat Cryptography in BoringSSL bundled at BoringSSL pin.
 
-### brotli 1.2.0
+### brotli 1.2.1
 
-MIT. <https://github.com/google/brotli/tree/028fb5a23661f123017c060daa546b55cf4bde29>
+MIT. <https://github.com/google/brotli/tree/db24a98aed38a16de78cc05ca15cdd8dc2a0d92d>
 
 `LICENSE`:
 
@@ -4434,7 +4462,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### sqlite 3.53.4
 
-LicenseRef-Public-Domain. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/sqlite/sqlite3.c>
+LicenseRef-Public-Domain. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/sqlite/sqlite3.c>
 
 `sqlite3.c.licence.txt`:
 
@@ -5381,32 +5409,32 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 `xxhash.h.licence.txt`: the same text as `xxhash.h.licence.txt` of xxHash in Zstandard bundled at parent pin.
 
-## Bun 1.4.3: WebKit, JavaScriptCore and ICU
+## Bun 1.4.4: WebKit, JavaScriptCore and ICU
 
 The JavaScript engine and the Unicode library, from Bun's fork of WebKit, linked statically.
 
 | Component | Version | Licence |
 | --- | --- | --- |
-| bmalloc | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | BSD-2-Clause |
+| bmalloc | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | BSD-2-Clause |
 | ICU4C | 78.3 | Unicode-3.0 AND ICU AND BSD-3-Clause AND MIT AND LicenseRef-ICU-Third-Party |
-| JavaScriptCore | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | LGPL-2.0-or-later AND BSD-2-Clause |
-| JavaScriptCore ARM64 binja disassembler | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | Apache-2.0 |
-| JavaScriptCore ICU4X derived code | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | Unicode-3.0 |
-| JavaScriptCore temporal_rs derived code | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| JavaScriptCore Zycore | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| JavaScriptCore Zydis | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| simdutf | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| WTF | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | LGPL-2.0-or-later AND BSD-2-Clause |
-| WTF double-conversion/dtoa | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | BSD-3-Clause |
-| WTF dragonbox | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | BSD-2-Clause AND Apache-2.0 WITH LLVM-exception |
-| WTF fast_float | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| WTF libc++ utilities | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
-| WTF LLVM utilities | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | Apache-2.0 WITH LLVM-exception |
-| WTF SIMDe | 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f | MIT |
+| JavaScriptCore | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | LGPL-2.0-or-later AND BSD-2-Clause |
+| JavaScriptCore ARM64 binja disassembler | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | Apache-2.0 |
+| JavaScriptCore ICU4X derived code | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | Unicode-3.0 |
+| JavaScriptCore temporal_rs derived code | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| JavaScriptCore Zycore | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| JavaScriptCore Zydis | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| simdutf | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| WTF | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | LGPL-2.0-or-later AND BSD-2-Clause |
+| WTF double-conversion/dtoa | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | BSD-3-Clause |
+| WTF dragonbox | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | BSD-2-Clause AND Apache-2.0 WITH LLVM-exception |
+| WTF fast_float | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| WTF libc++ utilities | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
+| WTF LLVM utilities | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | Apache-2.0 WITH LLVM-exception |
+| WTF SIMDe | d6375c72affe0f70222cdcb45012b10f0bf3a9d5 | MIT |
 
-### bmalloc 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### bmalloc d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `bmalloc.cpp.licence.txt`:
 
@@ -6014,9 +6042,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### JavaScriptCore 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-LGPL-2.0-or-later AND BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+LGPL-2.0-or-later AND BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `COPYING.LIB`:
 
@@ -6537,9 +6565,9 @@ That's all there is to it!
  */
 ```
 
-### JavaScriptCore ARM64 binja disassembler 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore ARM64 binja disassembler d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-Apache-2.0. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+Apache-2.0. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: Disassembler code is present under JSC; release feature and architecture reachability not conclusively resolved.
 
@@ -6561,9 +6589,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ```
 
-### JavaScriptCore ICU4X derived code 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore ICU4X derived code d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-Unicode-3.0. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+Unicode-3.0. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `LICENSE-icu4x.txt`:
 
@@ -6616,9 +6644,9 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 ```
 
-### JavaScriptCore temporal_rs derived code 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore temporal_rs derived code d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `LICENSE-temporal_rs.txt`:
 
@@ -6646,9 +6674,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### JavaScriptCore Zycore 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore Zycore d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: Disassembler code is present under JSC; release feature and architecture reachability not conclusively resolved.
 
@@ -6679,9 +6707,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### JavaScriptCore Zydis 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### JavaScriptCore Zydis d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: Disassembler code is present under JSC; release feature and architecture reachability not conclusively resolved.
 
@@ -6712,9 +6740,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### simdutf 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### simdutf d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `LICENSE-simdutf.txt`:
 
@@ -6739,11 +6767,11 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### WTF 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-LGPL-2.0-or-later AND BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+LGPL-2.0-or-later AND BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
-`COPYING.LIB`: the same text as `COPYING.LIB` of JavaScriptCore 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f.
+`COPYING.LIB`: the same text as `COPYING.LIB` of JavaScriptCore d6375c72affe0f70222cdcb45012b10f0bf3a9d5.
 
 `WTFString.cpp.licence.txt`:
 
@@ -6799,9 +6827,9 @@ LGPL-2.0-or-later AND BSD-2-Clause. <https://github.com/oven-sh/WebKit/tree/0c06
  */
 ```
 
-### WTF double-conversion/dtoa 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF double-conversion/dtoa d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-BSD-3-Clause. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+BSD-3-Clause. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 `COPYING`:
 
@@ -6834,9 +6862,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### WTF dragonbox 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF dragonbox d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-BSD-2-Clause AND Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+BSD-2-Clause AND Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Declared as BSD-2-Clause AND (Apache-2.0 WITH LLVM-exception OR BSL-1.0); these notices comply with BSD-2-Clause AND Apache-2.0 WITH LLVM-exception.
 
@@ -7124,9 +7152,9 @@ DEALINGS IN THE SOFTWARE.
  */
 ```
 
-### WTF fast_float 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF fast_float d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Declared as Apache-2.0 OR MIT OR BSL-1.0; these notices comply with MIT.
 
@@ -7421,9 +7449,9 @@ Declared as Apache-2.0 OR MIT OR BSL-1.0; these notices comply with MIT.
 //
 ```
 
-### WTF libc++ utilities 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF libc++ utilities d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: WTF retains LICENSE-libc++.txt; exact utility source reachability has not been proved, distinct from GNU Linux libstdc++ runtime. Declared as MIT OR NCSA; these notices comply with MIT.
 
@@ -7508,9 +7536,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### WTF LLVM utilities 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF LLVM utilities d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: WTF retains LICENSE-LLVM.txt; exact utility source reachability into Linux release has not been proved, distinct from toolchain standard library.
 
@@ -7737,9 +7765,9 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 ```
 
-### WTF SIMDe 0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f
+### WTF SIMDe d6375c72affe0f70222cdcb45012b10f0bf3a9d5
 
-MIT. <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f>
+MIT. <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5>
 
 Possibly linked: WTF carries LICENSE-simde.txt; exact Linux x64/arm64 feature-conditioned header reachability not fully resolved.
 
@@ -7768,7 +7796,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## Bun 1.4.3: Rust crates
+## Bun 1.4.4: Rust crates
 
 Crates in Bun's runtime that are linked on Linux (x86-64 and arm64), from its Cargo.lock.
 
@@ -9199,7 +9227,7 @@ DEALINGS IN THE SOFTWARE.
 
 MPL-2.0. <https://static.crates.io/crates/cssparser/cssparser-0.36.0.crate>
 
-`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.3.
+`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.4.
 
 ### derive_more 2.1.1
 
@@ -10440,7 +10468,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### hashbrown 0.15.5
 
-MIT. <https://static.crates.io/crates/hashbrown/hashbrown-0.15.5.crate>
+MIT. <https://static.crates.io/crates/hashbrown/hashbrown-0.17.1.crate>
 
 Declared as MIT OR Apache-2.0; these notices comply with MIT.
 
@@ -10478,7 +10506,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### hashbrown 0.16.1
 
-MIT. <https://static.crates.io/crates/hashbrown/hashbrown-0.16.1.crate>
+MIT. <https://static.crates.io/crates/hashbrown/hashbrown-0.17.1.crate>
 
 Declared as MIT OR Apache-2.0; these notices comply with MIT.
 
@@ -10617,7 +10645,7 @@ Zlib. <https://static.crates.io/crates/konst_macro_rules/konst_macro_rules-0.2.1
 
 ### libc 0.2.186
 
-MIT. <https://static.crates.io/crates/libc/libc-0.2.186.crate>
+MIT. <https://static.crates.io/crates/libc/libc-0.2.189.crate>
 
 Declared as MIT OR Apache-2.0; these notices comply with MIT.
 
@@ -11327,7 +11355,7 @@ DEALINGS IN THE SOFTWARE.
 
 MPL-2.0. <https://static.crates.io/crates/selectors/selectors-0.33.0.crate>
 
-`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.3.
+`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.4.
 
 ### servo_arc 0.4.3
 
@@ -11830,50 +11858,140 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Bun 1.4.3: Code ported or copied into Bun
+## Bun 1.4.4: Code ported or copied into Bun
 
 Code in Bun's source that came from another project, under that project's licence.
 
 | Component | Version | Licence |
 | --- | --- | --- |
-| Babel JSX source transform | 1.4.3 | MIT |
-| Bun copied WebCore and bindings BSD-2-Clause | 1.4.3 | BSD-2-Clause |
-| Bun copied WebCore and bindings BSD-3-Clause | 1.4.3 | BSD-3-Clause |
-| Bun copied WebCore and bindings LGPL-2.0-or-later | 1.4.3 | LGPL-2.0-or-later |
-| Bun copied WebCore and bindings MIT | 1.4.3 | MIT |
-| bun-clap | 1.4.3 | Unlicense |
-| diff-match-patch cleanup semantic port | 1.4.3 | Apache-2.0 |
-| esbuild-derived compiler | 1.4.3 | MIT |
-| glob matcher derived code | 1.4.3 | MIT |
-| GNU dircolors terminal entries | 1.4.3 | FSFAP |
-| kprotty Channel | 1.4.3 | NOASSERTION |
-| kprotty ThreadPool | 1.4.3 | MIT |
-| libuv-derived POSIX compatibility | 1.4.3 | MIT |
-| Lightning CSS and Servo-derived CSS | 1.4.3 | MPL-2.0 |
-| LLVM libcxxabi thread atexit fallback | 1.4.3 | Apache-2.0 WITH LLVM-exception |
-| node-fetch compatibility | 1.4.3 | MIT |
+| Babel JSX source transform | 1.4.4 | MIT |
+| Bun copied WebCore and bindings BSD-2-Clause | 1.4.4 | BSD-2-Clause |
+| Bun copied WebCore and bindings BSD-3-Clause | 1.4.4 | BSD-3-Clause |
+| Bun copied WebCore and bindings LGPL-2.0-or-later | 1.4.4 | LGPL-2.0-or-later |
+| Bun copied WebCore and bindings MIT | 1.4.4 | MIT |
+| bun-clap | 1.4.4 | Unlicense |
+| diff-match-patch cleanup semantic port | 1.4.4 | Apache-2.0 |
+| esbuild-derived compiler | 1.4.4 | MIT |
+| glob matcher derived code | 1.4.4 | MIT |
+| GNU dircolors terminal entries | 1.4.4 | FSFAP |
+| Go stable sort | go1.25.0 | BSD-3-Clause |
+| kprotty Channel | 1.4.4 | NOASSERTION |
+| kprotty ThreadPool | 1.4.4 | MIT |
+| libuv-derived POSIX compatibility | 1.4.4 | MIT |
+| Lightning CSS and Servo-derived CSS | 1.4.4 | MPL-2.0 |
+| LLVM libcxxabi thread atexit fallback | 1.4.4 | Apache-2.0 WITH LLVM-exception |
+| New in-tree grant headers MIT | 1.4.4 | MIT |
+| node-fetch compatibility | 1.4.4 | MIT |
 | Node.js-derived builtins | v26.3.0 and earlier in-tree ports | MIT |
-| Node.js-derived native compatibility | 1.4.3 | MIT |
-| pnpm matcher-derived NodeLinker | 1.4.3 | MIT |
-| React Compiler | 1.4.3 | MIT |
-| Rust str utility port | 1.4.3 | MIT |
+| Node.js-derived native compatibility | 1.4.4 | MIT |
+| pnpm matcher-derived NodeLinker | 1.4.4 | MIT |
+| Port of @angular/compiler | 22.0.6 | MIT |
+| Port of @babel/generator | 8.0.0 | MIT |
+| Port of @eslint-community/eslint-utils | 4.10.1 | MIT |
+| Port of @eslint-community/regexpp | 4.12.2 | MIT |
+| Port of @eslint/compat | 2.1.1 | Apache-2.0 |
+| Port of @eslint/config-array | 0.23.5 | Apache-2.0 |
+| Port of @eslint/config-helpers | 0.7.0 | Apache-2.0 |
+| Port of @eslint/eslintrc | 3.3.7 | MIT |
+| Port of @eslint/json | 2.1.1 | Apache-2.0 |
+| Port of @eslint/markdown | 8.0.3 | MIT |
+| Port of @eslint/plugin-kit | 0.7.3 | Apache-2.0 |
+| Port of @glimmer/syntax | 0.95.0 | MIT |
+| Port of @handlebars/parser | 2.2.4 | ISC |
+| Port of @ianvs/prettier-plugin-sort-imports | 4.7.1 | Apache-2.0 |
+| Port of @next/eslint-plugin-next | 16.4.2 | MIT |
+| Port of @trivago/prettier-plugin-sort-imports | 6.0.0 | Apache-2.0 |
+| Port of @vitest/eslint-plugin | 1.6.27 | MIT |
+| Port of @yarnpkg/extensions | 2.0.7 | BSD-2-Clause |
+| Port of acorn | 8.17.0 | MIT |
+| Port of ajv | 8.20.0 | MIT |
+| Port of angular-estree-parser | 15.5.0 | MIT |
+| Port of angular-html-parser | 10.12.0 | MIT |
+| Port of aria-query | 5.3.2 | Apache-2.0 |
+| Port of Biome formatter | a3132dcded0826c947cae3b1adcba6ed7e03b5b9 | MIT |
+| Port of ci-info | 4.0.0 | MIT |
+| Port of crate fast-glob | 1.1.1 | MIT |
+| Port of crate oxc-toml | 0.15.1 | MIT |
+| Port of crate sort-package-json | 1.0.0 | MIT |
+| Port of diff-match-patch | 1.0.5 | Apache-2.0 |
+| Port of editorconfig-without-wasm | 0.0.7 | MIT |
+| Port of emoji-regex | 10.6.0 | MIT |
+| Port of eslint | 10.6.0 | MIT |
+| Port of eslint-plugin-es-x | 10.1.0 | MIT |
+| Port of eslint-plugin-import | 2.32.0 | MIT |
+| Port of eslint-plugin-jest | 29.15.4 | MIT |
+| Port of eslint-plugin-jsx-a11y | 6.10.2 | MIT |
+| Port of eslint-plugin-n | 18.4.1 | MIT |
+| Port of eslint-plugin-perfectionist | 5.13.0 | MIT |
+| Port of eslint-plugin-prettier | 5.5.6 | MIT |
+| Port of eslint-plugin-promise | 7.3.0 | ISC |
+| Port of eslint-plugin-react | 7.37.5 | MIT |
+| Port of eslint-plugin-react-hooks | 7.1.1 | MIT |
+| Port of eslint-plugin-react-perf | 3.3.3 | MIT |
+| Port of eslint-plugin-unicorn | 72.0.0 | MIT |
+| Port of espree | 11.2.0 | BSD-2-Clause |
+| Port of esquery | 1.7.0 | BSD-3-Clause |
+| Port of fast-diff | 1.3.0 | Apache-2.0 |
+| Port of get-east-asian-width | 1.6.0 | MIT |
+| Port of git-hooks-list | 4.2.1 | MIT |
+| Port of github-slugger | 2.0.0 | ISC |
+| Port of glob-parent | 6.0.2 | ISC |
+| Port of globals | 17.7.0 | MIT |
+| Port of graphql | 17.0.2 | MIT |
+| Port of ignore | 7.0.5 | MIT |
+| Port of is-core-module | 2.17.0 | MIT |
+| Port of is-extglob | 2.1.1 | MIT |
+| Port of is-glob | 4.0.3 | MIT |
+| Port of jest-docblock | 30.4.0 | MIT |
+| Port of jsx-ast-utils | 3.3.5 | MIT |
+| Port of levn | 0.4.1 | MIT |
+| Port of micromark | 4.0.3 | MIT |
+| Port of narrow-emojis | 0.0.3 | MIT |
+| Port of natural-compare | 1.4.0 | MIT |
+| Port of optionator | 0.9.4 | MIT |
+| Port of oxlint, oxc_formatter, oxc_formatter_core, oxc_jsdoc, oxc_react_compiler | f1d90329e263bcbc80a348f036f42f858ab6a1aa | MIT |
+| Port of postcss | 8.5.16 | MIT |
+| Port of postcss-less | 6.0.0 | MIT |
+| Port of postcss-media-query-parser | 0.2.3 | MIT |
+| Port of postcss-scss | 4.0.9 | MIT |
+| Port of postcss-selector-parser | 2.2.3 | MIT |
+| Port of postcss-values-parser | 2.0.1 | MIT |
+| Port of prettier | 3.9.9 | MIT |
+| Port of prettier-linter-helpers | 1.0.1 | MIT |
+| Port of prettier-plugin-jsdoc | 1.8.1 | MIT |
+| Port of prettier-plugin-organize-imports | 4.3.0 | MIT |
+| Port of prettier-plugin-svelte | 4.1.1 | MIT |
+| Port of prettier-plugin-tailwindcss | 0.8.1 | MIT |
+| Port of simple-html-tokenizer | 1.0.0 | MIT |
+| Port of sort-package-json | 3.7.1 | MIT |
+| Port of svelte | 5.57.2 | MIT |
+| Port of ts-api-utils | 2.5.0 | MIT |
+| Port of tsgolint diagnostics | e649c1ef6384513cb481a928218da8e5488ece22 | MIT |
+| Port of typescript | 5.9.3 | Apache-2.0 |
+| Port of typescript-eslint | 8.71.1 | MIT |
+| Port of V8 JSON.parse diagnostics | c8aa29dc965eec46d2c1497b9c414e43b581fd48 | BSD-3-Clause |
+| Port of yaml | 2.9.0 | ISC |
+| Port of yaml-unist-parser | 3.2.0 | MIT |
+| React Compiler | 1.4.4 | MIT |
+| Rust str utility port | 1.4.4 | MIT |
 | rust-core-memchr-derived | nightly-2026-09-15 | MIT |
 | rust-std-crossbeam-channel | nightly-2026-09-15 | MIT |
-| SonicBoom-derived fast stream | 1.4.3 | MIT |
+| SonicBoom-derived fast stream | 1.4.4 | MIT |
+| taplo formatter origin | 0.10.0 | MIT |
 | TigerBeetle-derived IO from Bun root credits | upstream revision cited by Bun | Apache-2.0 |
-| tmux colour conversion | 1.4.3 | ISC |
-| TypeScript embedded lib declarations | 1.4.3 | Apache-2.0 |
-| typescript-go checker and diagnostics | 1.4.3 | Apache-2.0 |
+| tmux colour conversion | 1.4.4 | ISC |
+| TypeScript embedded lib declarations | 1.4.4 | Apache-2.0 |
+| typescript-go checker and diagnostics | 1.4.4 | Apache-2.0 |
 | Unicode Character Database tables | 17.0.0 | Unicode-3.0 |
 | uucode-derived grapheme algorithm | upstream revision unresolved | MIT |
-| WebKit UTF8 codec-derived utility | 1.4.3 | BSD-2-Clause |
-| wyhash in-tree algorithm ports | 1.4.3 | NOASSERTION |
-| zhp WebSocket implementation | 1.4.3 | MIT |
-| Zig-derived WaitGroup | 1.4.3 | MIT |
+| WebKit UTF8 codec-derived utility | 1.4.4 | BSD-2-Clause |
+| wyhash in-tree algorithm ports | 1.4.4 | NOASSERTION |
+| zhp WebSocket implementation | 1.4.4 | MIT |
+| Zig-derived WaitGroup | 1.4.4 | MIT |
 
-### Babel JSX source transform 1.4.3
+### Babel JSX source transform 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/ast/e.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/ast/e.rs>
 
 `LICENSE`:
 
@@ -11902,9 +12020,9 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### Bun copied WebCore and bindings BSD-2-Clause 1.4.3
+### Bun copied WebCore and bindings BSD-2-Clause 1.4.4
 
-BSD-2-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/BunGCOutputConstraint.h>
+BSD-2-Clause. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/BunGCOutputConstraint.h>
 
 `BunGCOutputConstraint.h.licence.txt`:
 
@@ -11933,66 +12051,6 @@ BSD-2-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-```
-
-`DOMURL.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2012 Motorola Mobility Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1.  Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- * 2.  Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`Exception.h.licence.txt`:
-
-```text
-/*
-
-Copyright (C) 2016 Apple Inc. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
-1.  Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-2.  Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-*/
 ```
 
 `ExceptionOr.h.licence.txt`:
@@ -12054,35 +12112,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
-`IDLTypes.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
 `JSCInlines.h.licence.txt`:
 
 ```text
@@ -12138,35 +12167,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`JSFFIFunction.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
@@ -12254,34 +12254,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`URLSearchParams.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
@@ -13045,36 +13017,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
-`HTTPHeaderMap.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2006 Apple Inc.  All rights reserved.
- * Copyright (C) 2009 Google Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
 `HTTPHeaderNames.gperf.licence.txt`:
 
 ```text
@@ -13232,35 +13174,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```text
 /*
  * Copyright (C) 2024 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`JSDOMConvertSequences.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13818,36 +13731,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
-`PerformanceUserTiming.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2012 Intel Inc. All rights reserved.
- * Copyright (C) 2017 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
 `ResourceLoadTiming.h.licence.txt`:
 
 ```text
@@ -13874,36 +13757,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`SerializedScriptValue.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2009-2023 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 ```
 
@@ -14142,36 +13995,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
-`Worker.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
- * Copyright (C) 2009 Google Inc. All Rights Reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
 `Worker.h.licence.txt`:
 
 ```text
@@ -14262,64 +14085,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```text
 /*
  * Copyright (C) 2013 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2020 Sony Interactive Entertainment Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- * THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`CryptoAlgorithmAES_CFBOpenSSL.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2022 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -14635,9 +14400,362 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 ```
 
-### Bun copied WebCore and bindings BSD-3-Clause 1.4.3
+`DOMURL.h.licence.txt`:
 
-BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/ActiveDOMCallback.cpp>
+```text
+/*
+ * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Motorola Mobility Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`Exception.h.licence.txt`:
+
+```text
+/*
+
+Copyright (C) 2016 Apple Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1.  Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+2.  Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+```
+
+`IDLTypes.h.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2016 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`JSFFIFunction.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`URLSearchParams.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2016 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`HTTPHeaderMap.h.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`JSDOMConvertSequences.h.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`PerformanceUserTiming.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2012 Intel Inc. All rights reserved.
+ * Copyright (C) 2017 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`SerializedScriptValue.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2009-2023 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+```
+
+`Worker.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Google Inc. All Rights Reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2020 Sony Interactive Entertainment Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`CryptoAlgorithmAES_CFBOpenSSL.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2022 Sony Interactive Entertainment Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+### Bun copied WebCore and bindings BSD-3-Clause 1.4.4
+
+BSD-3-Clause. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/ActiveDOMCallback.cpp>
 
 `ActiveDOMCallback.cpp.licence.txt`:
 
@@ -14708,7 +14826,7 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-`BunGCOutputConstraint.h.licence.txt`: the same text as `BunGCOutputConstraint.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
+`BunGCOutputConstraint.h.licence.txt`: the same text as `BunGCOutputConstraint.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
 
 `DOMException.cpp.licence.txt`:
 
@@ -14771,40 +14889,6 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`DOMFormData.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2010 Google Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
@@ -14968,74 +15052,7 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-`FetchHeaders.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2016 Canon Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted, provided that the following conditions
- * are required to be met:
- *
- * 1.  Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- * 2.  Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Canon Inc. nor the names of
- *     its contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY CANON INC. AND ITS CONTRIBUTORS "AS IS" AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL CANON INC. AND ITS CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`HTTPHeaderMap.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2022 Apple Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`HTTPHeaderNames.gperf.licence.txt`: the same text as `HTTPHeaderNames.gperf.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
+`HTTPHeaderNames.gperf.licence.txt`: the same text as `HTTPHeaderNames.gperf.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
 
 `HTTPParsers.cpp.licence.txt`:
 
@@ -15171,8 +15188,6 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-`IDLTypes.h.licence.txt`: the same text as `IDLTypes.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
-
 `JSDOMConvertPromise.h.licence.txt`:
 
 ```text
@@ -15202,7 +15217,7 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-`JSDOMConvertStrings.h.licence.txt`: the same text as `JSDOMConvertStrings.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
+`JSDOMConvertStrings.h.licence.txt`: the same text as `JSDOMConvertStrings.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
 
 `JSErrorHandler.cpp.licence.txt`:
 
@@ -15547,6 +15562,147 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
+`CryptoAlgorithmMLDSA.cpp.licence.txt`: the same text as `CryptoAlgorithmMLDSA.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
+
+`ProcessIdentifier.cpp.licence.txt`: the same text as `ProcessIdentifier.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
+
+`JSDOMConvertResult.h.licence.txt`: the same text as `JSDOMConvertResult.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
+
+`CryptoAlgorithm.cpp.licence.txt`: the same text as `CryptoAlgorithm.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
+
+`OpenSSLCryptoUniquePtr.h.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2016 Igalia S.L.
+ * Copyright (C) 2020 Sony Interactive Entertainment Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`DOMFormData.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2010 Google Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above
+ * copyright notice, this list of conditions and the following disclaimer
+ * in the documentation and/or other materials provided with the
+ * distribution.
+ *     * Neither the name of Google Inc. nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`FetchHeaders.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2016 Canon Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted, provided that the following conditions
+ * are required to be met:
+ *
+ * 1.  Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ * 2.  Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ * 3.  Neither the name of Canon Inc. nor the names of
+ *     its contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY CANON INC. AND ITS CONTRIBUTORS "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL CANON INC. AND ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`HTTPHeaderMap.cpp.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2022 Apple Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above
+ * copyright notice, this list of conditions and the following disclaimer
+ * in the documentation and/or other materials provided with the
+ * distribution.
+ *     * Neither the name of Google Inc. nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`IDLTypes.h.licence.txt`: the same text as `IDLTypes.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
+
 `WebSocket.cpp.licence.txt`:
 
 ```text
@@ -15617,49 +15773,11 @@ BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-`CryptoAlgorithmMLDSA.cpp.licence.txt`: the same text as `CryptoAlgorithmMLDSA.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
+`CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt`: the same text as `CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.4.
 
-`ProcessIdentifier.cpp.licence.txt`: the same text as `ProcessIdentifier.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
+### Bun copied WebCore and bindings LGPL-2.0-or-later 1.4.4
 
-`CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt`: the same text as `CryptoAlgorithmAES_CBCOpenSSL.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
-
-`JSDOMConvertResult.h.licence.txt`: the same text as `JSDOMConvertResult.h.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
-
-`CryptoAlgorithm.cpp.licence.txt`: the same text as `CryptoAlgorithm.cpp.licence.txt` of Bun copied WebCore and bindings BSD-2-Clause 1.4.3.
-
-`OpenSSLCryptoUniquePtr.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2016 Igalia S.L.
- * Copyright (C) 2020 Sony Interactive Entertainment Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-### Bun copied WebCore and bindings LGPL-2.0-or-later 1.4.3
-
-LGPL-2.0-or-later. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/DOMURL.cpp>
+LGPL-2.0-or-later. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/DOMURL.cpp>
 
 `lgpl-2.0.txt`:
 
@@ -16146,35 +16264,6 @@ necessary.  Here is a sample; alter the names:
 That's all there is to it!
 ```
 
-`DOMURL.cpp.licence.txt`:
-
-```text
-/*
- * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2003, 2006, 2007, 2008, 2009, 2010, 2014 Apple Inc. All rights reserved.
- *           (C) 2006 Graham Dennis (graham.dennis@gmail.com)
- * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2012 Motorola Mobility Inc.
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public License
- * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
- */
-```
-
 `DOMWrapperWorld.cpp.licence.txt`:
 
 ```text
@@ -16246,138 +16335,12 @@ That's all there is to it!
  */
 ```
 
-`JSBuffer.h.licence.txt`:
-
-```text
-/*
-    This file is part of the WebKit open source project.
-    This file has been generated by generate-bindings.pl. DO NOT MODIFY!
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
-```
-
-`JSDOMExceptionHandling.cpp.licence.txt`:
-
-```text
-/*
- *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2004-2021 Apple Inc. All rights reserved.
- *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
- *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-```
-
 `JSDOMExceptionHandling.h.licence.txt`:
 
 ```text
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2003-2017 Apple Inc. All rights reserved.
- *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
- *  Copyright (C) 2009 Google, Inc. All rights reserved.
- *  Copyright (C) 2012 Ericsson AB. All rights reserved.
- *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-```
-
-`JSDOMWrapper.h.licence.txt`:
-
-```text
-/*
- *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
- *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
- *  Copyright (C) 2009 Google, Inc. All rights reserved.
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-```
-
-`JSDOMWrapperCache.cpp.licence.txt`:
-
-```text
-/*
- *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2004-2011, 2013, 2016 Apple Inc. All rights reserved.
- *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
- *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-```
-
-`JSDOMWrapperCache.h.licence.txt`:
-
-```text
-/*
- *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003-2006, 2008-2009, 2013, 2016 Apple Inc. All rights reserved.
  *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
  *  Copyright (C) 2009 Google, Inc. All rights reserved.
  *  Copyright (C) 2012 Ericsson AB. All rights reserved.
@@ -16573,31 +16536,6 @@ That's all there is to it!
  */
 ```
 
-`EventNames.h.licence.txt`:
-
-```text
-/*
- * Copyright (C) 2005, 2007, 2015 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Jon Shier (jshier@iastate.edu)
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public License
- * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
- *
- */
-```
-
 `EventPath.cpp.licence.txt`:
 
 ```text
@@ -16768,29 +16706,6 @@ That's all there is to it!
  */
 ```
 
-`JSEventListener.cpp.licence.txt`:
-
-```text
-/*
- *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2021 Apple Inc. All Rights Reserved.
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-```
-
 `JSEventListener.h.licence.txt`:
 
 ```text
@@ -16936,9 +16851,212 @@ That's all there is to it!
 */
 ```
 
-### Bun copied WebCore and bindings MIT 1.4.3
+`DOMURL.cpp.licence.txt`:
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/AsymmetricKeyValue.cpp>
+```text
+/*
+ * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
+ *           (C) 1999 Antti Koivisto (koivisto@kde.org)
+ *           (C) 2000 Simon Hausmann <hausmann@kde.org>
+ * Copyright (C) 2003, 2006, 2007, 2008, 2009, 2010, 2014 Apple Inc. All rights reserved.
+ *           (C) 2006 Graham Dennis (graham.dennis@gmail.com)
+ * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Motorola Mobility Inc.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
+```
+
+`JSBuffer.h.licence.txt`:
+
+```text
+/*
+    This file is part of the WebKit open source project.
+    This file has been generated by generate-bindings.pl. DO NOT MODIFY!
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Library General Public
+    License as published by the Free Software Foundation; either
+    version 2 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Library General Public License for more details.
+
+    You should have received a copy of the GNU Library General Public License
+    along with this library; see the file COPYING.LIB.  If not, write to
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
+*/
+```
+
+`JSDOMExceptionHandling.cpp.licence.txt`:
+
+```text
+/*
+ *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
+ *  Copyright (C) 2004-2021 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
+ *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2 of the License, or (at your option) any later version.
+ *
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+```
+
+`JSDOMWrapper.h.licence.txt`:
+
+```text
+/*
+ *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
+ *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
+ *  Copyright (C) 2009 Google, Inc. All rights reserved.
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2 of the License, or (at your option) any later version.
+ *
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+```
+
+`JSDOMWrapperCache.cpp.licence.txt`:
+
+```text
+/*
+ *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
+ *  Copyright (C) 2004-2011, 2013, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
+ *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2 of the License, or (at your option) any later version.
+ *
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+```
+
+`JSDOMWrapperCache.h.licence.txt`:
+
+```text
+/*
+ *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
+ *  Copyright (C) 2003-2006, 2008-2009, 2013, 2016 Apple Inc. All rights reserved.
+ *  Copyright (C) 2007 Samuel Weinig <sam@webkit.org>
+ *  Copyright (C) 2009 Google, Inc. All rights reserved.
+ *  Copyright (C) 2012 Ericsson AB. All rights reserved.
+ *  Copyright (C) 2013 Michael Pruett <michael@68k.org>
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2 of the License, or (at your option) any later version.
+ *
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+```
+
+`EventNames.h.licence.txt`:
+
+```text
+/*
+ * Copyright (C) 2005, 2007, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Jon Shier (jshier@iastate.edu)
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ *
+ */
+```
+
+`JSEventListener.cpp.licence.txt`:
+
+```text
+/*
+ *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
+ *  Copyright (C) 2003-2021 Apple Inc. All Rights Reserved.
+ *
+ *  This library is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU Lesser General Public
+ *  License as published by the Free Software Foundation; either
+ *  version 2 of the License, or (at your option) any later version.
+ *
+ *  This library is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  Lesser General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Lesser General Public
+ *  License along with this library; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+```
+
+### Bun copied WebCore and bindings MIT 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/AsymmetricKeyValue.cpp>
 
 `AsymmetricKeyValue.cpp.licence.txt`:
 
@@ -16956,9 +17074,9 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
 // furnished to do so, subject to the following conditions:
 ```
 
-### bun-clap 1.4.3
+### bun-clap 1.4.4
 
-Unlicense. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/clap/LICENSE>
+Unlicense. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/clap/LICENSE>
 
 `LICENSE`:
 
@@ -16989,9 +17107,9 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org>
 ```
 
-### diff-match-patch cleanup semantic port 1.4.3
+### diff-match-patch cleanup semantic port 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/runtime/test_runner/diff/text_diff.rs>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/test_runner/diff/text_diff.rs>
 
 `LICENSE-APACHE`: the same text as `LICENSE-APACHE` of encoding_rs 0.8.35.
 
@@ -17017,9 +17135,9 @@ Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d9
 // licensed under the Apache License, Version 2.0.
 ```
 
-### esbuild-derived compiler 1.4.3
+### esbuild-derived compiler 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/css/values/color.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/css/values/color.rs>
 
 `LICENSE.md`:
 
@@ -17047,9 +17165,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### glob matcher derived code 1.4.3
+### glob matcher derived code 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/glob/GlobWalker.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/glob/GlobWalker.rs>
 
 `GlobWalker.rs.licence.txt`:
 
@@ -17106,9 +17224,9 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
 // THE SOFTWARE.
 ```
 
-### GNU dircolors terminal entries 1.4.3
+### GNU dircolors terminal entries 1.4.4
 
-FSFAP. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/internal/tty.ts>
+FSFAP. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/internal/tty.ts>
 
 `tty.ts.licence.txt`:
 
@@ -17122,15 +17240,51 @@ FSFAP. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976
 // provided the copyright notice and this notice are preserved.
 ```
 
-### kprotty Channel 1.4.3
+### Go stable sort go1.25.0
 
-NOASSERTION. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/threading/channel.rs>
+BSD-3-Clause. <https://github.com/golang/go/tree/go1.25.0>
+
+`LICENSE`:
+
+```text
+Copyright 2009 The Go Authors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### kprotty Channel 1.4.4
+
+NOASSERTION. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/threading/channel.rs>
 
 Its source states no licence, and the audit could not establish the original's: channel.rs names a kprotty gist but contains no licence or pinned gist revision; likely runtime bun_threading code. Both Linux runtime graphs reach the owning crate; included conservatively as a normal runtime input. Licence provenance remains unresolved, not linkage.
 
-### kprotty ThreadPool 1.4.3
+### kprotty ThreadPool 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/threading/ThreadPool.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/threading/ThreadPool.rs>
 
 `ThreadPool.rs.licence.txt`:
 
@@ -17164,9 +17318,9 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
 //   SOFTWARE.
 ```
 
-### libuv-derived POSIX compatibility 1.4.3
+### libuv-derived POSIX compatibility 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/libuv/uv.h>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/libuv/uv.h>
 
 `uv.h.licence.txt`:
 
@@ -17193,11 +17347,11 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
  */
 ```
 
-### Lightning CSS and Servo-derived CSS 1.4.3
+### Lightning CSS and Servo-derived CSS 1.4.4
 
-MPL-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/css/>
+MPL-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/css/>
 
-`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.3.
+`LICENSE`: the same text as `LICENSE` of Mozilla NSS certificate data 1.4.4.
 
 `build-prefixes.js.licence.txt`:
 
@@ -17207,9 +17361,9 @@ MPL-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d9819
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 ```
 
-### LLVM libcxxabi thread atexit fallback 1.4.3
+### LLVM libcxxabi thread atexit fallback 1.4.4
 
-Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/workaround-missing-symbols.cpp>
+Apache-2.0 WITH LLVM-exception. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/workaround-missing-symbols.cpp>
 
 `LICENSE.TXT`:
 
@@ -17548,9 +17702,39 @@ THE SOFTWARE.
 // run at static-destruction time) apply only on glibc 2.17.
 ```
 
-### node-fetch compatibility 1.4.3
+### New in-tree grant headers MIT 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/thirdparty/node-fetch.ts>
+MIT. <https://github.com/oven-sh/bun/tree/38afee6c84fcf48c0edb2466aa4b27d287a59c30>
+
+`main.js.licence.txt`:
+
+```text
+// Portions of this file are copied from ESLint, which is under the MIT License:
+//
+// Copyright OpenJS Foundation and other contributors, <www.openjsf.org>
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+```
+
+### node-fetch compatibility 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/thirdparty/node-fetch.ts>
 
 `LICENSE.md`:
 
@@ -17580,7 +17764,7 @@ SOFTWARE.
 
 ### Node.js-derived builtins v26.3.0 and earlier in-tree ports
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/builtins/ProcessObjectInternals.ts>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/builtins/ProcessObjectInternals.ts>
 
 `LICENSE`:
 
@@ -20533,67 +20717,6 @@ The externally maintained libraries used by Node.js are:
   """
 ```
 
-`ProcessObjectInternals.ts.licence.txt`:
-
-```text
-/*
- * Copyright Joyent, Inc. and other Node contributors.
- * Copyright 2023 Codeblog Corp. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-```
-
-`quic.ts.licence.txt`:
-
-```text
-/*
- * Portions of this code are derived from the Node.js project (https://nodejs.org/),
- * originally developed by Node.js contributors and Joyent, Inc.
- *
- * Copyright Node.js contributors. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * Modifications were made to the original code.
- */
-```
-
 `callbacks.js.licence.txt`:
 
 ```text
@@ -20672,6 +20795,118 @@ The externally maintained libraries used by Node.js are:
 // Ported from Node.js v26.3.0 lib/internal/repl/utils.js for Bun's node:repl.
 // Attribution: derived from Node.js, MIT licensed (Node.js contributors).
 // prettier-ignore
+```
+
+`readline.js.licence.txt`:
+
+```text
+// Ported from Node.js v26.3.0 lib/readline.js for Bun's node:repl.
+// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
+// prettier-ignore
+```
+
+`readline.promises.js.licence.txt`:
+
+```text
+// Ported from Node.js v26.3.0 lib/readline/promises.js for Bun's node:repl.
+// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
+// prettier-ignore
+```
+
+`repl.js.licence.txt`:
+
+```text
+// Ported from Node.js v26.3.0 lib/repl.js for Bun's node:repl.
+// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
+// prettier-ignore
+```
+
+`url.ts.licence.txt`:
+
+```text
+/*
+ * Copyright Joyent, Inc. and other Node contributors.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to permit
+ * persons to whom the Software is furnished to do so, subject to the
+ * following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+ * NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+ * USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+```
+
+`ProcessObjectInternals.ts.licence.txt`:
+
+```text
+/*
+ * Copyright Joyent, Inc. and other Node contributors.
+ * Copyright 2023 Codeblog Corp. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+```
+
+`quic.ts.licence.txt`:
+
+```text
+/*
+ * Portions of this code are derived from the Node.js project (https://nodejs.org/),
+ * originally developed by Node.js contributors and Joyent, Inc.
+ *
+ * Copyright Node.js contributors. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * Modifications were made to the original code.
+ */
 ```
 
 `inspect.js.licence.txt`:
@@ -20792,66 +21027,15 @@ The externally maintained libraries used by Node.js are:
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 ```
 
-`readline.js.licence.txt`:
+### Node.js-derived native compatibility 1.4.4
 
-```text
-// Ported from Node.js v26.3.0 lib/readline.js for Bun's node:repl.
-// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
-// prettier-ignore
-```
-
-`readline.promises.js.licence.txt`:
-
-```text
-// Ported from Node.js v26.3.0 lib/readline/promises.js for Bun's node:repl.
-// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
-// prettier-ignore
-```
-
-`repl.js.licence.txt`:
-
-```text
-// Ported from Node.js v26.3.0 lib/repl.js for Bun's node:repl.
-// Attribution: derived from Node.js, MIT licensed (Node.js contributors).
-// prettier-ignore
-```
-
-`url.ts.licence.txt`:
-
-```text
-/*
- * Copyright Joyent, Inc. and other Node contributors.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to permit
- * persons to whom the Software is furnished to do so, subject to the
- * following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
- * NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
- * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
- * USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
-```
-
-### Node.js-derived native compatibility 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/paths/resolve_path.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/paths/resolve_path.rs>
 
 `LICENSE`: the same text as `LICENSE` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
-### pnpm matcher-derived NodeLinker 1.4.3
+### pnpm matcher-derived NodeLinker 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/install_types/NodeLinker.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/install_types/NodeLinker.rs>
 
 `LICENSE`:
 
@@ -20880,9 +21064,2571 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### React Compiler 1.4.3
+### Port of @angular/compiler 22.0.6
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/react_compiler/UPSTREAM_PORTED>
+MIT. <https://registry.npmjs.org/@angular/compiler/-/compiler-22.0.6.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License
+
+Copyright (c) 2010-2026 Google LLC. https://angular.dev/license
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of @babel/generator 8.0.0
+
+MIT. <https://registry.npmjs.org/@babel/generator/-/generator-8.0.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Babel JSX source transform 1.4.4.
+
+### Port of @eslint-community/eslint-utils 4.10.1
+
+MIT. <https://registry.npmjs.org/@eslint-community/eslint-utils/-/eslint-utils-4.10.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2018 Toru Nagashima
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of @eslint-community/regexpp 4.12.2
+
+MIT. <https://registry.npmjs.org/@eslint-community/regexpp/-/regexpp-4.12.2.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of @eslint-community/eslint-utils 4.10.1.
+
+### Port of @eslint/compat 2.1.1
+
+Apache-2.0. <https://registry.npmjs.org/@eslint/compat/-/compat-2.1.1.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @eslint/config-array 0.23.5
+
+Apache-2.0. <https://registry.npmjs.org/@eslint/config-array/-/config-array-0.23.5.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @eslint/config-helpers 0.7.0
+
+Apache-2.0. <https://registry.npmjs.org/@eslint/config-helpers/-/config-helpers-0.7.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @eslint/eslintrc 3.3.7
+
+MIT. <https://registry.npmjs.org/@eslint/eslintrc/-/eslintrc-3.3.7.tgz>
+
+`LICENSE`:
+
+```text
+Copyright OpenJS Foundation and other contributors, <www.openjsf.org>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of @eslint/json 2.1.1
+
+Apache-2.0. <https://registry.npmjs.org/@eslint/json/-/json-2.1.1.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @eslint/markdown 8.0.3
+
+MIT. <https://registry.npmjs.org/@eslint/markdown/-/markdown-8.0.3.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright OpenJS Foundation and other contributors, https://openjsf.org
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of @eslint/plugin-kit 0.7.3
+
+Apache-2.0. <https://registry.npmjs.org/@eslint/plugin-kit/-/plugin-kit-0.7.3.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @glimmer/syntax 0.95.0
+
+MIT. <https://registry.npmjs.org/@glimmer/syntax/-/syntax-0.95.0.tgz>
+
+`LICENSE`:
+
+```text
+Copyright (c) 2015 Tilde, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of @handlebars/parser 2.2.4
+
+ISC. <https://registry.npmjs.org/@handlebars/parser/-/parser-2.2.4.tgz>
+
+Its source states no licence, and the audit could not establish the original's: Bun LICENSE.md and src/lint or src/format attribution; runtime directly includes bun_lint_driver; released binary contains rule diagnostics and fmt command. Bun gives no exact upstream pin; nearest identifiable published release at or before Bun tag date, selected by npm publication time. Upstream archive and repository publish no licence file or grant; npm package metadata declares ISC. Licence-text provenance remains unresolved.
+
+### Port of @ianvs/prettier-plugin-sort-imports 4.7.1
+
+Apache-2.0. <https://registry.npmjs.org/@ianvs/prettier-plugin-sort-imports/-/prettier-plugin-sort-imports-4.7.1.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @next/eslint-plugin-next 16.4.2
+
+MIT. <https://github.com/vercel/next.js/tree/2864b1772c37242a9b40ab4d366eb7d368c2a070>
+
+`license.md`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2025 Vercel, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of @trivago/prettier-plugin-sort-imports 6.0.0
+
+Apache-2.0. <https://registry.npmjs.org/@trivago/prettier-plugin-sort-imports/-/prettier-plugin-sort-imports-6.0.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of @opentelemetry/api 1.10.0.
+
+### Port of @vitest/eslint-plugin 1.6.27
+
+MIT. <https://registry.npmjs.org/@vitest/eslint-plugin/-/eslint-plugin-1.6.27.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2022 - PRESENT Verité Mugabo  Makuza
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of @yarnpkg/extensions 2.0.7
+
+BSD-2-Clause. <https://registry.npmjs.org/@yarnpkg/extensions/-/extensions-2.0.7.tgz>
+
+`LICENSE.md`:
+
+```text
+BSD 2-Clause License
+
+Copyright (c) 2016-present, Yarn Contributors.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Port of acorn 8.17.0
+
+MIT. <https://registry.npmjs.org/acorn/-/acorn-8.17.0.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (C) 2012-2022 by various contributors (see AUTHORS)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of ajv 8.20.0
+
+MIT. <https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of ajv 8.18.0.
+
+### Port of angular-estree-parser 15.5.0
+
+MIT. <https://registry.npmjs.org/angular-estree-parser/-/angular-estree-parser-15.5.0.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) Ika <ikatyang@gmail.com> (https://github.com/ikatyang)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of angular-html-parser 10.12.0
+
+MIT. <https://registry.npmjs.org/angular-html-parser/-/angular-html-parser-10.12.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of angular-estree-parser 15.5.0.
+
+### Port of aria-query 5.3.2
+
+Apache-2.0. <https://registry.npmjs.org/aria-query/-/aria-query-5.3.2.tgz>
+
+`LICENSE`:
+
+```text
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction,
+and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by
+the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all
+other entities that control, are controlled by, or are under common
+control with that entity. For the purposes of this definition,
+"control" means (i) the power, direct or indirect, to cause the
+direction or management of such entity, whether by contract or
+otherwise, or (ii) ownership of fifty percent (50%) or more of the
+outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity
+exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications,
+including but not limited to software source code, documentation
+source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical
+transformation or translation of a Source form, including but
+not limited to compiled object code, generated documentation,
+and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or
+Object form, made available under the License, as indicated by a
+copyright notice that is included in or attached to the work
+(an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object
+form, that is based on (or derived from) the Work and for which the
+editorial revisions, annotations, elaborations, or other modifications
+represent, as a whole, an original work of authorship. For the purposes
+of this License, Derivative Works shall not include works that remain
+separable from, or merely link (or bind by name) to the interfaces of,
+the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including
+the original version of the Work and any modifications or additions
+to that Work or Derivative Works thereof, that is intentionally
+submitted to Licensor for inclusion in the Work by the copyright owner
+or by an individual or Legal Entity authorized to submit on behalf of
+the copyright owner. For the purposes of this definition, "submitted"
+means any form of electronic, verbal, or written communication sent
+to the Licensor or its representatives, including but not limited to
+communication on electronic mailing lists, source code control systems,
+and issue tracking systems that are managed by, or on behalf of, the
+Licensor for the purpose of discussing and improving the Work, but
+excluding communication that is conspicuously marked or otherwise
+designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity
+on behalf of whom a Contribution has been received by Licensor and
+subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+copyright license to reproduce, prepare Derivative Works of,
+publicly display, publicly perform, sublicense, and distribute the
+Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+(except as stated in this section) patent license to make, have made,
+use, offer to sell, sell, import, and otherwise transfer the Work,
+where such license applies only to those patent claims licensable
+by such Contributor that are necessarily infringed by their
+Contribution(s) alone or by combination of their Contribution(s)
+with the Work to which such Contribution(s) was submitted. If You
+institute patent litigation against any entity (including a
+cross-claim or counterclaim in a lawsuit) alleging that the Work
+or a Contribution incorporated within the Work constitutes direct
+or contributory patent infringement, then any patent licenses
+granted to You under this License for that Work shall terminate
+as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+Work or Derivative Works thereof in any medium, with or without
+modifications, and in Source or Object form, provided that You
+meet the following conditions:
+
+(a) You must give any other recipients of the Work or
+Derivative Works a copy of this License; and
+
+(b) You must cause any modified files to carry prominent notices
+stating that You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works
+that You distribute, all copyright, patent, trademark, and
+attribution notices from the Source form of the Work,
+excluding those notices that do not pertain to any part of
+the Derivative Works; and
+
+(d) If the Work includes a "NOTICE" text file as part of its
+distribution, then any Derivative Works that You distribute must
+include a readable copy of the attribution notices contained
+within such NOTICE file, excluding those notices that do not
+pertain to any part of the Derivative Works, in at least one
+of the following places: within a NOTICE text file distributed
+as part of the Derivative Works; within the Source form or
+documentation, if provided along with the Derivative Works; or,
+within a display generated by the Derivative Works, if and
+wherever such third-party notices normally appear. The contents
+of the NOTICE file are for informational purposes only and
+do not modify the License. You may add Your own attribution
+notices within Derivative Works that You distribute, alongside
+or as an addendum to the NOTICE text from the Work, provided
+that such additional attribution notices cannot be construed
+as modifying the License.
+
+You may add Your own copyright statement to Your modifications and
+may provide additional or different license terms and conditions
+for use, reproduction, or distribution of Your modifications, or
+for any such Derivative Works as a whole, provided Your use,
+reproduction, and distribution of the Work otherwise complies with
+the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+any Contribution intentionally submitted for inclusion in the Work
+by You to the Licensor shall be under the terms and conditions of
+this License, without any additional terms or conditions.
+Notwithstanding the above, nothing herein shall supersede or modify
+the terms of any separate license agreement you may have executed
+with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+names, trademarks, service marks, or product names of the Licensor,
+except as required for reasonable and customary use in describing the
+origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+agreed to in writing, Licensor provides the Work (and each
+Contributor provides its Contributions) on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied, including, without limitation, any warranties or conditions
+of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE. You are solely responsible for determining the
+appropriateness of using or redistributing the Work and assume any
+risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+whether in tort (including negligence), contract, or otherwise,
+unless required by applicable law (such as deliberate and grossly
+negligent acts) or agreed to in writing, shall any Contributor be
+liable to You for damages, including any direct, indirect, special,
+incidental, or consequential damages of any character arising as a
+result of this License or out of the use or inability to use the
+Work (including but not limited to damages for loss of goodwill,
+work stoppage, computer failure or malfunction, or any and all
+other commercial damages or losses), even if such Contributor
+has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+the Work or Derivative Works thereof, You may choose to offer,
+and charge a fee for, acceptance of support, warranty, indemnity,
+or other liability obligations and/or rights consistent with this
+License. However, in accepting such obligations, You may act only
+on Your own behalf and on Your sole responsibility, not on behalf
+of any other Contributor, and only if You agree to indemnify,
+defend, and hold each Contributor harmless for any liability
+incurred by, or claims asserted against, such Contributor by reason
+of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+To apply the Apache License to your work, attach the following
+boilerplate notice, with the fields enclosed by brackets "{}"
+replaced with your own identifying information. (Don't include
+the brackets!)  The text should be enclosed in the appropriate
+comment syntax for the file format. We also recommend that a
+file or class name and description of purpose be included on the
+same "printed page" as the copyright notice for easier
+identification within third-party archives.
+
+Copyright 2020 A11yance
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
+### Port of Biome formatter a3132dcded0826c947cae3b1adcba6ed7e03b5b9
+
+MIT. <https://github.com/biomejs/biome/tree/a3132dcded0826c947cae3b1adcba6ed7e03b5b9>
+
+`LICENSE-MIT`:
+
+```text
+MIT License
+
+Copyright (c) 2023-present Biome Developers and Contributors.
+Copyright (c) 2020-2023 Rome Tools is Rome Tools, Inc. and its affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of ci-info 4.0.0
+
+MIT. <https://registry.npmjs.org/ci-info/-/ci-info-4.0.0.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016 Thomas Watson Steen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of crate fast-glob 1.1.1
+
+MIT. <https://crates.io/crates/fast-glob/1.1.1>
+
+Its source states no licence, and the audit could not establish the original's: src/glob/pattern.rs explicitly names port of validate from fast-glob 1.1.1. Source port, not a Cargo dependency; archive SHA256 verified.
+
+### Port of crate oxc-toml 0.15.1
+
+MIT. <https://crates.io/crates/oxc-toml/0.15.1>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2025 Boshen (oxc-toml - Formatter-only fork)
+Copyright (c) 2020 Ferenc Tamás (Original Taplo project)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of crate sort-package-json 1.0.0
+
+MIT. <https://crates.io/crates/sort-package-json/1.0.0>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2024-present VoidZero Inc. & Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of diff-match-patch 1.0.5
+
+Apache-2.0. <https://registry.npmjs.org/diff-match-patch/-/diff-match-patch-1.0.5.tgz>
+
+`LICENSE`:
+
+```text
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+```
+
+### Port of editorconfig-without-wasm 0.0.7
+
+MIT. <https://registry.npmjs.org/editorconfig-without-wasm/-/editorconfig-without-wasm-0.0.7.tgz>
+
+`LICENSE`:
+
+```text
+Copyright © 2012 EditorConfig Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of emoji-regex 10.6.0
+
+MIT. <https://registry.npmjs.org/emoji-regex/-/emoji-regex-10.6.0.tgz>
+
+`LICENSE-MIT.txt`:
+
+```text
+Copyright Mathias Bynens <https://mathiasbynens.be/>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of eslint 10.6.0
+
+MIT. <https://registry.npmjs.org/eslint/-/eslint-10.6.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of @eslint/eslintrc 3.3.7.
+
+### Port of eslint-plugin-es-x 10.1.0
+
+MIT. <https://registry.npmjs.org/eslint-plugin-es-x/-/eslint-plugin-es-x-10.1.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of @eslint-community/eslint-utils 4.10.1.
+
+### Port of eslint-plugin-import 2.32.0
+
+MIT. <https://registry.npmjs.org/eslint-plugin-import/-/eslint-plugin-import-2.32.0.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Ben Mosher
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of eslint-plugin-jest 29.15.4
+
+MIT. <https://registry.npmjs.org/eslint-plugin-jest/-/eslint-plugin-jest-29.15.4.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2018 Jonathan Kim
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of eslint-plugin-jsx-a11y 6.10.2
+
+MIT. <https://registry.npmjs.org/eslint-plugin-jsx-a11y/-/eslint-plugin-jsx-a11y-6.10.2.tgz>
+
+`LICENSE.md`:
+
+```text
+The MIT License (MIT)
+Copyright (c) 2016 Ethan Cohen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of eslint-plugin-n 18.4.1
+
+MIT. <https://registry.npmjs.org/eslint-plugin-n/-/eslint-plugin-n-18.4.1.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Toru Nagashima
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of eslint-plugin-perfectionist 5.13.0
+
+MIT. <https://registry.npmjs.org/eslint-plugin-perfectionist/-/eslint-plugin-perfectionist-5.13.0.tgz>
+
+`license.md`:
+
+```text
+# The MIT License (MIT)
+
+Copyright 2023 Azat S. <to@azat.io>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of eslint-plugin-prettier 5.5.6
+
+MIT. <https://registry.npmjs.org/eslint-plugin-prettier/-/eslint-plugin-prettier-5.5.6.tgz>
+
+`LICENSE.md`:
+
+```text
+# The MIT License (MIT)
+
+Copyright © 2017 Andres Suarez and Teddy Katz
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the “Software”), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of eslint-plugin-promise 7.3.0
+
+ISC. <https://registry.npmjs.org/eslint-plugin-promise/-/eslint-plugin-promise-7.3.0.tgz>
+
+`LICENSE.md`:
+
+```text
+Copyright (c) 2020, Jamund Ferguson
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+
+### Port of eslint-plugin-react 7.37.5
+
+MIT. <https://registry.npmjs.org/eslint-plugin-react/-/eslint-plugin-react-7.37.5.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014 Yannick Croissant
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of eslint-plugin-react-hooks 7.1.1
+
+MIT. <https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-7.1.1.tgz>
+
+`LICENSE`: the same text as `LICENSE` of react 19.3.0.
+
+### Port of eslint-plugin-react-perf 3.3.3
+
+MIT. <https://registry.npmjs.org/eslint-plugin-react-perf/-/eslint-plugin-react-perf-3.3.3.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2016 Charles Vazac
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of eslint-plugin-unicorn 72.0.0
+
+MIT. <https://registry.npmjs.org/eslint-plugin-unicorn/-/eslint-plugin-unicorn-72.0.0.tgz>
+
+`license`:
+
+```text
+MIT License
+
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of espree 11.2.0
+
+BSD-2-Clause. <https://registry.npmjs.org/espree/-/espree-11.2.0.tgz>
+
+`LICENSE`:
+
+```text
+BSD 2-Clause License
+
+Copyright (c) Open JS Foundation
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Port of esquery 1.7.0
+
+BSD-3-Clause. <https://registry.npmjs.org/esquery/-/esquery-1.7.0.tgz>
+
+`license.txt`:
+
+```text
+Copyright (c) 2013, Joel Feenstra
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the ESQuery nor the names of its contributors may
+      be used to endorse or promote products derived from this software without
+      specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL JOEL FEENSTRA BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Port of fast-diff 1.3.0
+
+Apache-2.0. <https://registry.npmjs.org/fast-diff/-/fast-diff-1.3.0.tgz>
+
+`LICENSE`:
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2014-2023 Jason Chen
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+```
+
+### Port of get-east-asian-width 1.6.0
+
+MIT. <https://registry.npmjs.org/get-east-asian-width/-/get-east-asian-width-1.6.0.tgz>
+
+`license`: the same text as `license` of Port of eslint-plugin-unicorn 72.0.0.
+
+### Port of git-hooks-list 4.2.1
+
+MIT. <https://registry.npmjs.org/git-hooks-list/-/git-hooks-list-4.2.1.tgz>
+
+`license`:
+
+```text
+MIT License
+
+Copyright (c) fisker Cheung <lionkay@gmail.com> (https://www.fiskercheung.com/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of github-slugger 2.0.0
+
+ISC. <https://registry.npmjs.org/github-slugger/-/github-slugger-2.0.0.tgz>
+
+`LICENSE`:
+
+```text
+Copyright (c) 2015, Dan Flettre <fletd01@yahoo.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### Port of glob-parent 6.0.2
+
+ISC. <https://registry.npmjs.org/glob-parent/-/glob-parent-6.0.2.tgz>
+
+`LICENSE`:
+
+```text
+The ISC License
+
+Copyright (c) 2015, 2019 Elan Shanker, 2021 Blaine Bublitz <blaine.bublitz@gmail.com>, Eric Schoffstall <yo@contra.io> and other contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+### Port of globals 17.7.0
+
+MIT. <https://registry.npmjs.org/globals/-/globals-17.7.0.tgz>
+
+`license`: the same text as `license` of Port of eslint-plugin-unicorn 72.0.0.
+
+### Port of graphql 17.0.2
+
+MIT. <https://registry.npmjs.org/graphql/-/graphql-17.0.2.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) GraphQL Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of ignore 7.0.5
+
+MIT. <https://registry.npmjs.org/ignore/-/ignore-7.0.5.tgz>
+
+`LICENSE-MIT`:
+
+```text
+Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors
+http://kael.me/
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of is-core-module 2.17.0
+
+MIT. <https://registry.npmjs.org/is-core-module/-/is-core-module-2.17.0.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014 Dave Justice
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of is-extglob 2.1.1
+
+MIT. <https://registry.npmjs.org/is-extglob/-/is-extglob-2.1.1.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014-2016, Jon Schlinkert
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of is-glob 4.0.3
+
+MIT. <https://registry.npmjs.org/is-glob/-/is-glob-4.0.3.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2014-2017, Jon Schlinkert.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### Port of jest-docblock 30.4.0
+
+MIT. <https://registry.npmjs.org/jest-docblock/-/jest-docblock-30.4.0.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+Copyright Contributors to the Jest project.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of jsx-ast-utils 3.3.5
+
+MIT. <https://registry.npmjs.org/jsx-ast-utils/-/jsx-ast-utils-3.3.5.tgz>
+
+`LICENSE.md`: the same text as `LICENSE.md` of Port of eslint-plugin-jsx-a11y 6.10.2.
+
+### Port of levn 0.4.1
+
+MIT. <https://registry.npmjs.org/levn/-/levn-0.4.1.tgz>
+
+`LICENSE`:
+
+```text
+Copyright (c) George Zahariev
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of micromark 4.0.3
+
+MIT. <https://registry.npmjs.org/micromark/-/micromark-4.0.3.tgz>
+
+`license`:
+
+```text
+(The MIT License)
+
+Copyright (c) Titus Wormer <tituswormer@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of narrow-emojis 0.0.3
+
+MIT. <https://registry.npmjs.org/narrow-emojis/-/narrow-emojis-0.0.3.tgz>
+
+`license`: the same text as `license` of Port of git-hooks-list 4.2.1.
+
+### Port of natural-compare 1.4.0
+
+MIT. <https://registry.npmjs.org/natural-compare/-/natural-compare-1.4.0.tgz>
+
+`index.js.licence.txt`:
+
+```text
+/*
+ * @version    1.4.0
+ * @date       2015-10-26
+ * @stability  3 - Stable
+ * @author     Lauri Rooden (https://github.com/litejs/natural-compare-lite)
+ * @license    MIT License
+ */
+```
+
+### Port of optionator 0.9.4
+
+MIT. <https://registry.npmjs.org/optionator/-/optionator-0.9.4.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of levn 0.4.1.
+
+### Port of oxlint, oxc_formatter, oxc_formatter_core, oxc_jsdoc, oxc_react_compiler f1d90329e263bcbc80a348f036f42f858ab6a1aa
+
+MIT. <https://github.com/oxc-project/oxc/tree/f1d90329e263bcbc80a348f036f42f858ab6a1aa>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2024-present VoidZero Inc. & Contributors
+Copyright (c) 2023 Boshen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of postcss 8.5.16
+
+MIT. <https://registry.npmjs.org/postcss/-/postcss-8.5.16.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright 2013 Andrey Sitnik <andrey@sitnik.es>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of postcss-less 6.0.0
+
+MIT. <https://registry.npmjs.org/postcss-less/-/postcss-less-6.0.0.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2013 Andrey Sitnik <andrey@sitnik.ru>
+Copyright (c) 2016 Denys Kniazevych <webschik@gmail.com>
+Copyright (c) 2016 Pat Sissons <patricksissons@gmail.com>
+Copyright (c) 2017 Andrew Powell <andrew@shellscape.org>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of postcss-media-query-parser 0.2.3
+
+MIT. <https://registry.npmjs.org/postcss-media-query-parser/-/postcss-media-query-parser-0.2.3.tgz>
+
+`README.md.licence.txt`:
+
+```text
+## License
+
+MIT
+```
+
+### Port of postcss-scss 4.0.9
+
+MIT. <https://registry.npmjs.org/postcss-scss/-/postcss-scss-4.0.9.tgz>
+
+`LICENSE`:
+
+```text
+The MIT License (MIT)
+
+Copyright 2013 Andrey Sitnik <andrey@sitnik.ru>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of postcss-selector-parser 2.2.3
+
+MIT. <https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-2.2.3.tgz>
+
+`LICENSE-MIT`:
+
+```text
+Copyright (c) Ben Briggs <beneb.info@gmail.com> (http://beneb.info)
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of postcss-values-parser 2.0.1
+
+MIT. <https://registry.npmjs.org/postcss-values-parser/-/postcss-values-parser-2.0.1.tgz>
+
+`LICENSE`:
+
+```text
+Copyright (c) Andrew Powell <andrew@shellscape.org>
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of prettier 3.9.9
+
+MIT. <https://registry.npmjs.org/prettier/-/prettier-3.9.9.tgz>
+
+`LICENSE`:
+
+```text
+Copyright © James Long and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of prettier-linter-helpers 1.0.1
+
+MIT. <https://registry.npmjs.org/prettier-linter-helpers/-/prettier-linter-helpers-1.0.1.tgz>
+
+`LICENSE.md`: the same text as `LICENSE.md` of Port of eslint-plugin-prettier 5.5.6.
+
+### Port of prettier-plugin-jsdoc 1.8.1
+
+MIT. <https://registry.npmjs.org/prettier-plugin-jsdoc/-/prettier-plugin-jsdoc-1.8.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2020 Hossein Mohammadi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of prettier-plugin-organize-imports 4.3.0
+
+MIT. <https://registry.npmjs.org/prettier-plugin-organize-imports/-/prettier-plugin-organize-imports-4.3.0.tgz>
+
+`license`:
+
+```text
+MIT License
+
+Copyright (c) Simon Hänisch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of prettier-plugin-svelte 4.1.1
+
+MIT. <https://registry.npmjs.org/prettier-plugin-svelte/-/prettier-plugin-svelte-4.1.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2019 [Contributors](https://github.com/sveltejs/prettier-plugin-svelte/graphs/contributors)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of prettier-plugin-tailwindcss 0.8.1
+
+MIT. <https://registry.npmjs.org/prettier-plugin-tailwindcss/-/prettier-plugin-tailwindcss-0.8.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) Tailwind Labs Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of simple-html-tokenizer 1.0.0
+
+MIT. <https://registry.npmjs.org/simple-html-tokenizer/-/simple-html-tokenizer-1.0.0.tgz>
+
+`LICENSE`:
+
+```text
+Copyright (c) 2014 Yehuda Katz and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of sort-package-json 3.7.1
+
+MIT. <https://registry.npmjs.org/sort-package-json/-/sort-package-json-3.7.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2015 Keith Cirkel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of svelte 5.57.2
+
+MIT. <https://registry.npmjs.org/svelte/-/svelte-5.57.2.tgz>
+
+`LICENSE.md`:
+
+```text
+Copyright (c) 2016-2025 [Svelte Contributors](https://github.com/sveltejs/svelte/graphs/contributors)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of ts-api-utils 2.5.0
+
+MIT. <https://registry.npmjs.org/ts-api-utils/-/ts-api-utils-2.5.0.tgz>
+
+`LICENSE.md`:
+
+```text
+# MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### Port of tsgolint diagnostics e649c1ef6384513cb481a928218da8e5488ece22
+
+MIT. <https://github.com/oxc-project/tsgolint/tree/e649c1ef6384513cb481a928218da8e5488ece22>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2025 July-present VoidZero Inc. & Contributors
+Copyright (c) 2025 July typescript-eslint and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of typescript 5.9.3
+
+Apache-2.0. <https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz>
+
+`LICENSE.txt`:
+
+```text
+Apache License
+
+Version 2.0, January 2004
+
+http://www.apache.org/licenses/ 
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License. You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+```
+
+### Port of typescript-eslint 8.71.1
+
+MIT. <https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.71.1.tgz>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2019 typescript-eslint and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Port of V8 JSON.parse diagnostics c8aa29dc965eec46d2c1497b9c414e43b581fd48
+
+BSD-3-Clause. <https://github.com/v8/v8/tree/c8aa29dc965eec46d2c1497b9c414e43b581fd48>
+
+`LICENSE`:
+
+```text
+This license applies to all parts of V8 that are not externally
+maintained libraries.  The externally maintained libraries used by V8
+are:
+
+  - PCRE test suite, located in
+    test/mjsunit/third_party/regexp-pcre/regexp-pcre.js.  This is based on the
+    test suite from PCRE-7.3, which is copyrighted by the University
+    of Cambridge and Google, Inc.  The copyright notice and license
+    are embedded in regexp-pcre.js.
+
+  - Layout tests, located in test/mjsunit/third_party/object-keys.  These are
+    based on layout tests from webkit.org which are copyrighted by
+    Apple Computer, Inc. and released under a 3-clause BSD license.
+
+  - Strongtalk assembler, the basis of the files assembler-arm-inl.h,
+    assembler-arm.cc, assembler-arm.h, assembler-ia32-inl.h,
+    assembler-ia32.cc, assembler-ia32.h, assembler-x64-inl.h,
+    assembler-x64.cc, assembler-x64.h, assembler.cc and assembler.h.
+    This code is copyrighted by Sun Microsystems Inc. and released
+    under a 3-clause BSD license.
+
+  - Valgrind client API header, located at third_party/valgrind/valgrind.h
+    This is released under the BSD license.
+
+  - The Wasm C/C++ API headers, located at third_party/wasm-api/wasm.{h,hh}
+    This is released under the Apache license. The API's upstream prototype
+    implementation also formed the basis of V8's implementation in
+    src/wasm/c-api.cc.
+
+These libraries have their own licenses; we recommend you read them,
+as their terms may differ from the terms below.
+
+Further license information can be found in LICENSE files located in
+sub-directories.
+
+Copyright 2014, the V8 project authors. All rights reserved.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+      copyright notice, this list of conditions and the following
+      disclaimer in the documentation and/or other materials provided
+      with the distribution.
+    * Neither the name of Google Inc. nor the names of its
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Port of yaml 2.9.0
+
+ISC. <https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz>
+
+`LICENSE`:
+
+```text
+Copyright Eemeli Aro <eemeli@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+
+### Port of yaml-unist-parser 3.2.0
+
+MIT. <https://registry.npmjs.org/yaml-unist-parser/-/yaml-unist-parser-3.2.0.tgz>
+
+`LICENSE`: the same text as `LICENSE` of Port of angular-estree-parser 15.5.0.
+
+### React Compiler 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/react_compiler/UPSTREAM_PORTED>
 
 `LICENSE`: the same text as `LICENSE` of react 19.3.0.
 
@@ -20895,9 +23641,9 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
 // LICENSE file in the root directory of this source tree.
 ```
 
-### Rust str utility port 1.4.3
+### Rust str utility port 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/bun_core/string/immutable.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/bun_core/string/immutable.rs>
 
 Declared as MIT OR Apache-2.0; these notices comply with MIT.
 
@@ -21030,9 +23776,9 @@ MIT. <https://github.com/rust-lang/rust/tree/574ff7d98bd6d037e5236a8453029173b32
 // DEALINGS IN THE SOFTWARE.
 ```
 
-### SonicBoom-derived fast stream 1.4.3
+### SonicBoom-derived fast stream 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/internal/streams/fast-utf8-stream.ts>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/internal/streams/fast-utf8-stream.ts>
 
 `LICENSE`: the same text as `LICENSE` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
@@ -21041,6 +23787,36 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
 ```text
 // Ported from Node.js lib/internal/streams/fast-utf8-stream.js, which is itself
 // derived from the SonicBoom module (MIT, Copyright (c) 2017 Matteo Collina).
+```
+
+### taplo formatter origin 0.10.0
+
+MIT. <https://github.com/tamasfe/taplo/tree/0.10.0>
+
+`LICENSE`:
+
+```text
+MIT License
+
+Copyright (c) 2020 Ferenc Tamás
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### TigerBeetle-derived IO from Bun root credits upstream revision cited by Bun
@@ -21231,9 +24007,9 @@ Possibly linked: Bun LICENSE.md cites TigerBeetle Windows IO. No matching attrib
    END OF TERMS AND CONDITIONS
 ```
 
-### tmux colour conversion 1.4.3
+### tmux colour conversion 1.4.4
 
-ISC. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/css_jsc/color_js.rs>
+ISC. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/css_jsc/color_js.rs>
 
 `colour.c.licence.txt`:
 
@@ -21256,9 +24032,9 @@ ISC. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
  */
 ```
 
-### TypeScript embedded lib declarations 1.4.3
+### TypeScript embedded lib declarations 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/runtime/cli/typescript_libs.rs>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/cli/typescript_libs.rs>
 
 `LICENSE`:
 
@@ -21760,65 +24536,7 @@ SOFTWARE.
 ---------------------------------------------------------
 ```
 
-`LICENSE`:
-
-```text
-Apache License
-
-Version 2.0, January 2004
-
-http://www.apache.org/licenses/ 
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-
-"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-
-You must give any other recipients of the Work or Derivative Works a copy of this License; and
-
-You must cause any modified files to carry prominent notices stating that You changed the files; and
-
-You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-
-If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License. You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-```
+`LICENSE.txt`: the same text as `LICENSE.txt` of Port of typescript 5.9.3.
 
 `NOTICE.txt`:
 
@@ -22260,26 +24978,26 @@ SOFTWARE.
 ---------------------------------------------------------
 ```
 
-### typescript-go checker and diagnostics 1.4.3
+### typescript-go checker and diagnostics 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/sema/lib.rs>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/sema/lib.rs>
 
-`LICENSE`: the same text as `LICENSE` of TypeScript embedded lib declarations 1.4.3.
+`LICENSE`: the same text as `LICENSE` of TypeScript embedded lib declarations 1.4.4.
 
-`NOTICE.txt`: the same text as `NOTICE.txt` of TypeScript embedded lib declarations 1.4.3.
+`NOTICE.txt`: the same text as `NOTICE.txt` of TypeScript embedded lib declarations 1.4.4.
 
-`LICENSE`: the same text as `LICENSE` of TypeScript embedded lib declarations 1.4.3.
+`LICENSE.txt`: the same text as `LICENSE.txt` of Port of typescript 5.9.3.
 
-`NOTICE.txt`: the same text as `NOTICE.txt` of TypeScript embedded lib declarations 1.4.3.
+`NOTICE.txt`: the same text as `NOTICE.txt` of TypeScript embedded lib declarations 1.4.4.
 
 `lib.rs.licence.txt`:
 
 ```text
 //! A TypeScript type checker: resolves types on demand and reports TypeScript's errors by code and position.
 //!
-//! The rules it applies are TypeScript's. Large parts of `check` and `bind` are ports of the checker and binder of
-//! typescript-go (https://github.com/microsoft/typescript-go, Copyright Microsoft Corporation, Apache License 2.0), and comments
-//! name the function a piece of code corresponds to.
+//! It applies TypeScript's rules. Large parts of `check` and `bind` are ported from typescript-go's checker and binder
+//! (https://github.com/microsoft/typescript-go, Copyright Microsoft Corporation, Apache License 2.0). Comments cite the
+//! upstream function each piece of code corresponds to.
 ```
 
 `messages.rs.licence.txt`:
@@ -22287,8 +25005,10 @@ Apache-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d9
 ```text
 //! TypeScript's diagnostic messages, by code.
 //!
-//! Generated from `internal/diagnostics/diagnostics_generated.go` of typescript-go 7.0.2 (Copyright Microsoft Corporation, Apache
-//! License 2.0). Not edited by hand.
+//! `messages.txt` has one `code<tab>category<tab>text` line per message, sorted by code. It's generated from
+//! `internal/diagnostics/diagnostics_generated.go` of typescript-go 7.0.2 (Copyright Microsoft Corporation, Apache
+//! License 2.0) and isn't edited by hand. Release builds embed it compressed and inflate it when the first message is
+//! looked up.
 ```
 
 ### Unicode Character Database tables 17.0.0
@@ -22339,7 +25059,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-`ReadMe.txt.licence.txt`:
+`ReadMe.txt.licence.txt.licence.txt`:
 
 ```text
 # For terms of use and license, see https://www.unicode.org/terms_of_use.html
@@ -22348,7 +25068,7 @@ authorization of the copyright holder.
 
 ### uucode-derived grapheme algorithm upstream revision unresolved
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings/stringWidth.cpp>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings/stringWidth.cpp>
 
 `LICENSE.md`:
 
@@ -22445,9 +25165,9 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
 
-### WebKit UTF8 codec-derived utility 1.4.3
+### WebKit UTF8 codec-derived utility 1.4.4
 
-BSD-2-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/bun_core/string/immutable/unicode.rs>
+BSD-2-Clause. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/bun_core/string/immutable/unicode.rs>
 
 `TextCodecUTF8.cpp.licence.txt`:
 
@@ -22478,15 +25198,15 @@ BSD-2-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76
  */
 ```
 
-### wyhash in-tree algorithm ports 1.4.3
+### wyhash in-tree algorithm ports 1.4.4
 
-NOASSERTION. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/wyhash/lib.rs>
+NOASSERTION. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/wyhash/lib.rs>
 
 Its source states no licence, and the audit could not establish the original's: src/wyhash/lib.rs names final4 and older Wyhash11; no licence header, upstream revision, or full licence file in that directory. Both Linux runtime graphs reach the owning crate; included conservatively as a normal runtime input. Licence provenance remains unresolved, not linkage.
 
-### zhp WebSocket implementation 1.4.3
+### zhp WebSocket implementation 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/http/websocket.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/http/websocket.rs>
 
 `LICENSE`:
 
@@ -22514,9 +25234,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### Zig-derived WaitGroup 1.4.3
+### Zig-derived WaitGroup 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/threading/WaitGroup.rs>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/threading/WaitGroup.rs>
 
 `LICENSE`:
 
@@ -22558,7 +25278,7 @@ THE SOFTWARE.
 //   and substantial portions of the software.
 ```
 
-## Bun 1.4.3: Packages Bun embeds for its Node.js fallbacks
+## Bun 1.4.4: Packages Bun embeds for its Node.js fallbacks
 
 npm packages inside the binary, which Bun's bundler uses when browser code imports a Node.js module.
 
@@ -22566,31 +25286,31 @@ npm packages inside the binary, which Bun's bundler uses when browser code impor
 | --- | --- | --- |
 | acorn embedded REPL parser | 8.16.0 | MIT |
 | acorn-walk embedded REPL parser | 8.3.5 | MIT |
-| browser fallback assert | 1.4.3 | MIT |
-| browser fallback buffer | 1.4.3 | MIT |
-| browser fallback console | 1.4.3 | MIT |
-| browser fallback constants | 1.4.3 | MIT |
-| browser fallback crypto | 1.4.3 | MIT |
-| browser fallback domain | 1.4.3 | Artistic-2.0 |
-| browser fallback events | 1.4.3 | MIT |
-| browser fallback http | 1.4.3 | MIT |
-| browser fallback https | 1.4.3 | MIT |
-| browser fallback net | 1.4.3 | MIT |
-| browser fallback os | 1.4.3 | MIT |
-| browser fallback path | 1.4.3 | MIT |
-| browser fallback process | 1.4.3 | MIT |
-| browser fallback punycode | 1.4.3 | MIT |
-| browser fallback querystring | 1.4.3 | MIT |
-| browser fallback stream | 1.4.3 | MIT |
-| browser fallback string_decoder | 1.4.3 | MIT |
-| browser fallback sys | 1.4.3 | MIT |
-| browser fallback timers | 1.4.3 | MIT |
-| browser fallback tty | 1.4.3 | MIT |
-| browser fallback url | 1.4.3 | MIT |
-| browser fallback util | 1.4.3 | MIT |
-| browser fallback vendor base64-js | 1.4.3 | MIT |
-| browser fallback vendor ieee754 | 1.4.3 | BSD-3-Clause |
-| browser fallback zlib | 1.4.3 | MIT |
+| browser fallback assert | 1.4.4 | MIT |
+| browser fallback buffer | 1.4.4 | MIT |
+| browser fallback console | 1.4.4 | MIT |
+| browser fallback constants | 1.4.4 | MIT |
+| browser fallback crypto | 1.4.4 | MIT |
+| browser fallback domain | 1.4.4 | Artistic-2.0 |
+| browser fallback events | 1.4.4 | MIT |
+| browser fallback http | 1.4.4 | MIT |
+| browser fallback https | 1.4.4 | MIT |
+| browser fallback net | 1.4.4 | MIT |
+| browser fallback os | 1.4.4 | MIT |
+| browser fallback path | 1.4.4 | MIT |
+| browser fallback process | 1.4.4 | MIT |
+| browser fallback punycode | 1.4.4 | MIT |
+| browser fallback querystring | 1.4.4 | MIT |
+| browser fallback stream | 1.4.4 | MIT |
+| browser fallback string_decoder | 1.4.4 | MIT |
+| browser fallback sys | 1.4.4 | MIT |
+| browser fallback timers | 1.4.4 | MIT |
+| browser fallback tty | 1.4.4 | MIT |
+| browser fallback url | 1.4.4 | MIT |
+| browser fallback util | 1.4.4 | MIT |
+| browser fallback vendor base64-js | 1.4.4 | MIT |
+| browser fallback vendor ieee754 | 1.4.4 | BSD-3-Clause |
+| browser fallback zlib | 1.4.4 | MIT |
 | npm abort-controller@3.0.0 | 3.0.0 | MIT |
 | npm asn1.js@4.10.1 | 4.10.1 | MIT |
 | npm assert@2.1.0 | 2.1.0 | MIT |
@@ -22678,33 +25398,9 @@ npm packages inside the binary, which Bun's bundler uses when browser code impor
 
 ### acorn embedded REPL parser 8.16.0
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/internal/repl/acorn.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/internal/repl/acorn.js>
 
-`LICENSE`:
-
-```text
-MIT License
-
-Copyright (C) 2012-2022 by various contributors (see AUTHORS)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-```
+`LICENSE`: the same text as `LICENSE` of Port of acorn 8.17.0.
 
 `acorn.js.licence.txt`:
 
@@ -22725,7 +25421,7 @@ THE SOFTWARE.
 
 ### acorn-walk embedded REPL parser 8.3.5
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/js/internal/repl/acorn-walk.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/internal/repl/acorn-walk.js>
 
 `LICENSE`:
 
@@ -22766,15 +25462,15 @@ THE SOFTWARE.
 // prettier-ignore
 ```
 
-### browser fallback assert 1.4.3
+### browser fallback assert 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/assert.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/assert.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback buffer 1.4.3
+### browser fallback buffer 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/buffer.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/buffer.js>
 
 `buffer.js.licence.txt`:
 
@@ -22791,129 +25487,129 @@ MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d98197686
  */
 ```
 
-### browser fallback console 1.4.3
+### browser fallback console 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/console.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback constants 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/constants.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/console.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback crypto 1.4.3
+### browser fallback constants 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/crypto.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback domain 1.4.3
-
-Artistic-2.0. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/domain.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/constants.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback events 1.4.3
+### browser fallback crypto 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/events.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback http 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/http.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/crypto.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback https 1.4.3
+### browser fallback domain 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/https.js>
+Artistic-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/domain.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback net 1.4.3
+### browser fallback events 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/net.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/events.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback http 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/http.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback https 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/https.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback net 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/net.js>
 
 `child_process.ts.licence.txt`: the same text as `child_process.ts.licence.txt` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
-### browser fallback os 1.4.3
+### browser fallback os 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/os.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/os.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback path 1.4.3
+### browser fallback path 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/path.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/path.js>
 
 `child_process.ts.licence.txt`: the same text as `child_process.ts.licence.txt` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
-### browser fallback process 1.4.3
+### browser fallback process 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/process.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback punycode 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/punycode.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/process.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback querystring 1.4.3
+### browser fallback punycode 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/querystring.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback stream 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/stream.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/punycode.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback string_decoder 1.4.3
+### browser fallback querystring 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/string_decoder.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback sys 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/sys.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/querystring.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback timers 1.4.3
+### browser fallback stream 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/timers.js>
-
-Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
-
-### browser fallback tty 1.4.3
-
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/tty.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/stream.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
-### browser fallback url 1.4.3
+### browser fallback string_decoder 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/url.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/string_decoder.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback sys 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/sys.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback timers 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/timers.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback tty 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/tty.js>
+
+Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
+
+### browser fallback url 1.4.4
+
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/url.js>
 
 `child_process.ts.licence.txt`: the same text as `child_process.ts.licence.txt` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
-### browser fallback util 1.4.3
+### browser fallback util 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/util.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/util.js>
 
 `child_process.ts.licence.txt`: the same text as `child_process.ts.licence.txt` of Node.js-derived builtins v26.3.0 and earlier in-tree ports.
 
-### browser fallback vendor base64-js 1.4.3
+### browser fallback vendor base64-js 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/vendor/base64-js.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/vendor/base64-js.js>
 
 `LICENSE`:
 
@@ -22941,9 +25637,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### browser fallback vendor ieee754 1.4.3
+### browser fallback vendor ieee754 1.4.4
 
-BSD-3-Clause. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/vendor/ieee754.js>
+BSD-3-Clause. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/vendor/ieee754.js>
 
 `LICENSE`:
 
@@ -22967,9 +25663,9 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 /* ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 ```
 
-### browser fallback zlib 1.4.3
+### browser fallback zlib 1.4.4
 
-MIT. <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/node-fallbacks/zlib.js>
+MIT. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/node-fallbacks/zlib.js>
 
 Bun's own file, which loads the package of the same name in this list. It states no licence of its own.
 
@@ -23007,7 +25703,7 @@ SOFTWARE.
 
 MIT. <https://registry.npmjs.org/asn1.js/-/asn1.js-4.10.1.tgz>
 
-`README.md.licence.txt`:
+`README.md.licence.txt.licence.txt`:
 
 ```text
 #### LICENSE
@@ -23131,7 +25827,7 @@ MIT. <https://registry.npmjs.org/bn.js/-/bn.js-5.2.2.tgz>
 
 MIT. <https://registry.npmjs.org/brorand/-/brorand-1.1.0.tgz>
 
-`README.md.licence.txt`:
+`README.md.licence.txt.licence.txt`:
 
 ```text
 #### LICENSE
@@ -23778,7 +26474,7 @@ SOFTWARE.
 
 MIT. <https://registry.npmjs.org/elliptic/-/elliptic-6.6.1.tgz>
 
-`README.md.licence.txt`:
+`README.md.licence.txt.licence.txt`:
 
 ```text
 #### LICENSE
@@ -23835,31 +26531,7 @@ MIT. <https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.1.tgz>
 
 MIT. <https://registry.npmjs.org/event-target-shim/-/event-target-shim-5.0.1.tgz>
 
-`LICENSE`:
-
-```text
-The MIT License (MIT)
-
-Copyright (c) 2015 Toru Nagashima
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+`LICENSE`: the same text as `LICENSE` of Port of eslint-plugin-n 18.4.1.
 
 ### npm evp_bytestokey@1.0.3 1.0.3
 
@@ -24131,7 +26803,7 @@ THE SOFTWARE.
 
 MIT. <https://registry.npmjs.org/hash.js/-/hash.js-1.1.7.tgz>
 
-`README.md.licence.txt`: the same text as `README.md.licence.txt` of npm brorand@1.1.0 1.1.0.
+`README.md.licence.txt.licence.txt`: the same text as `README.md.licence.txt.licence.txt` of npm brorand@1.1.0 1.1.0.
 
 ### npm hasown@2.0.2 2.0.2
 
@@ -24167,7 +26839,7 @@ SOFTWARE.
 
 MIT. <https://registry.npmjs.org/hmac-drbg/-/hmac-drbg-1.0.1.tgz>
 
-`README.md.licence.txt`:
+`README.md.licence.txt.licence.txt`:
 
 ```text
 #### LICENSE
@@ -24402,7 +27074,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 MIT. <https://registry.npmjs.org/minimalistic-crypto-utils/-/minimalistic-crypto-utils-1.0.1.tgz>
 
-`README.md.licence.txt`:
+`README.md.licence.txt.licence.txt`:
 
 ```text
 #### LICENSE
@@ -24632,30 +27304,7 @@ MIT. <https://registry.npmjs.org/public-encrypt/-/public-encrypt-4.0.3.tgz>
 
 MIT. <https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz>
 
-`LICENSE-MIT.txt`:
-
-```text
-Copyright Mathias Bynens <https://mathiasbynens.be/>
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
+`LICENSE-MIT.txt`: the same text as `LICENSE-MIT.txt` of Port of emoji-regex 10.6.0.
 
 ### npm querystring-es3@1.0.0-0 1.0.0-0
 
@@ -25046,7 +27695,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-## Bun 1.4.3: Runtime libraries of the compilers
+## Bun 1.4.4: Runtime libraries of the compilers
 
 Parts of the C++ and Rust runtimes that the compilers link into Bun's binary.
 

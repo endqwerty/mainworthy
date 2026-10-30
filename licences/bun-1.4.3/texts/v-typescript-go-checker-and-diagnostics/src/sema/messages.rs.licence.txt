@@ -1,4 +1,0 @@
-//! TypeScript's diagnostic messages, by code.
-//!
-//! Generated from `internal/diagnostics/diagnostics_generated.go` of typescript-go 7.0.2 (Copyright Microsoft Corporation, Apache
-//! License 2.0). Not edited by hand.

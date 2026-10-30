@@ -9,9 +9,9 @@ build bundles and from this directory (decision 0025). The directory holds what 
 | `archify/`, `jetbrains-mono/`, `basecamp-policies/` | Their licence files, from their repositories at the versions named |
 | `npm/qrcode-generator@2.0.4/LICENSE` | The unchanged MIT licence from [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator/blob/master/LICENSE). Version 2.0.4 omits a licence file from its npm package. Its distributed JavaScript identifies the same author, copyright year, and MIT licence. |
 | `npm/saxes@6.0.0/LICENSE` | The unchanged licence from [saxes v6.0.0](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE); npm's package omits the file. The notice generator uses `npm/<name>@<version>/` only when the installed package has no licence file. |
-| `bun-1.4.3/components.json` | Every part of Bun 1.4.3 that is or may be linked into its Linux binary, with its licence files |
-| `bun-1.4.3/texts/` | Those licence files, exactly as each project publishes them, each text once |
-| `bun-1.4.3/audit.tsv` | The audit's decision for each of 444 parts it looked at, linked or not, and why |
+| `bun-1.4.4/components.json` | Every part of Bun 1.4.4 that is or may be linked into its Linux binary, with its licence files |
+| `bun-1.4.4/texts/` | Those licence files, exactly as each project publishes them, each text once |
+| `bun-1.4.4/audit.tsv` | The audit's decision for each of 536 parts it looked at, linked or not, and why |
 | `npm/<name>/<version>/` | Published manifests and licence files of npm packages embedded inside another bundled package's dist |
 | `SOURCE.md` | Where the source of the LGPL and MPL parts is, how to link a changed library again, and the written offer |
 
@@ -66,6 +66,21 @@ worker and reviewed by Claude Opus 5.5, which found four faults in its first res
 verifier of the pull request that brought it in (Codex GPT-6.1 Sol) found that the import dropped the notices of
 source files whose project also has a licence file, and joined texts that differed only in whitespace; both are
 fixed, and `test/licences.test.ts` holds the import to it.
+
+Bun 1.4.4 (tag `bun-v1.4.4`, commit `38afee6c84fcf48c0edb2466aa4b27d287a59c30`) was audited on 2026-10-30 as a
+change to that list. A GPT-6.1 Sol worker started from the 444 decisions of 1.4.3 and audited again every part the
+172 commits between the tags touch. Brotli and WebKit moved their pins. ICU stayed at 78.3. The other dependency
+changes were patches and build flags at the same upstream revisions. No crate from the registry was added. The
+release adds `bun fmt` and a linter; the released binary has no `bun lint` command, but its build links the linter's
+crate and its strings carry the rules' messages, so both count as linked. Of the 92 parts the audit adds, 90 are
+linked: ports of Prettier, ESLint, typescript-eslint and their plugins, postcss and its parsers, oxlint and oxc's
+formatter, and others, each with the licence file of the release Bun names or, where it names none, the last one
+published before Bun 1.4.4. That choice is recorded in each part's reason. None is under a licence that `LICENCES`
+does not name. Claude Opus 5.5 reviewed the result and marked one addition as not linked: the worker listed links in
+Bun's installer to files in npm's repository as an Artistic-2.0 port of npm. They are comments naming behaviour Bun
+matches. The files they point at are ISC packages. The same links were in 1.4.3, whose audit did not count them. The
+port of `@handlebars/parser` is listed without a text: the package declares ISC, but neither it nor its repository
+publishes the licence.
 
 What the audit did not settle. The owner settled them on 2026-10-23 for the published image and executable
 ([#234](https://github.com/endqwerty/mainworthy/issues/234)): [SOURCE.md](SOURCE.md) says where the source of the LGPL
