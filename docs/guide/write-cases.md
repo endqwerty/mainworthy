@@ -375,6 +375,11 @@ Under `loose`, ordinary case proposals take effect at once.
 Under `standard`, an agent's edit waits for a person. A person's ordinary edit still takes effect at once.
 Under `strict`, ordinary edits wait for a person with a reason, including edits by people.
 
+While a case has open proposals, a notice under its version strip names who proposed the change and says
+it is not in effect yet. **See the change** takes you to its timeline card; the Q-ref opens it in Queue.
+For several proposals, the notice says how many wait. If one proposal includes several operations,
+it warns that accepting applies all of them. New case title and metadata lines use `+` in the proposal diff.
+
 The case timeline shows the proposal with every edit in it, the edits of other cases included,
 since accepting it accepts all of them. An authorized person can use
 <kbd>a</kbd> to accept it or <kbd>r</kbd> to reject it.

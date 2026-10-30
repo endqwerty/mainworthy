@@ -268,7 +268,7 @@ export const ANSWER_HELP = {
 	adopt: {
 		accept: "Makes this the current version.",
 		reject: "Leaves the case as it is. The proposal stays in the history.",
-		merge: "Adopts the version you put together from both sides.",
+		merge: "Proposes the version you put together from both sides.",
 	},
 	map: {
 		link: "Results of this test count for the case from now on.",

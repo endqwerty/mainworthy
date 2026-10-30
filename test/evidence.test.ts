@@ -3675,3 +3675,19 @@ describe("imported invalid correction edges", () => {
 		});
 	}
 });
+
+test("the clause shown for a waiting agent edit is the clause that decides it", async () => {
+	await h.close();
+	h = await harness({ preset: "standard" });
+	await h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
+	const agent = await h.actor("writer", "agent", ["read", "produce"]);
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed" } }] }, agent);
+	const q = (await queue()).items[0];
+	if (!q) throw new Error("missing question");
+	expect(q.asked.clause).toBe("adopt-agent");
+	expect((await decide(q, { is: "accept" }))?.status).toBe("decided");
+	const settled = await h.call<InboxReply>("inbox", { state: "decided" });
+	const decision = settled.items.find((item) => item.q === q.q)?.decision;
+	if (!decision) throw new Error("missing decision");
+	expect(decision.signers?.[0]?.clause).toBe(q.asked.clause);
+});

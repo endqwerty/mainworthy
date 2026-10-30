@@ -54,7 +54,7 @@ import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { claimMint } from "../kernel/witness.ts";
-import { clauseFor, currentPolicy, policyAt } from "../policy/policy.ts";
+import { clauseFor, currentPolicy, policyAt, policyName } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
@@ -2465,19 +2465,21 @@ async function askNow(
 	question: QuestionRow,
 	facts: ReadonlySet<string>,
 	policy?: Awaited<ReturnType<typeof currentPolicy>>,
-): Promise<Ask> {
+) {
 	const stored = json<Ask>(question.ask);
-	const ask = clauseFor(policy ?? (await currentPolicy(db, question.project)), {
+	const clause = clauseFor(policy ?? (await currentPolicy(db, question.project)), {
 		kind: question.kind,
 		facts: new Set(facts),
-	}).ask;
-	return ask.who === "rule" && stored.who !== "rule" ? { ...ask, who: "member" } : ask;
+	});
+	const ruled = clause.ask.who === "rule" && stored.who !== "rule";
+	return { clause, ask: ruled ? { ...clause.ask, who: "member" as const } : clause.ask, ruled };
 }
 
 /** A question as the queue, a case page and an agent see it. */
 export async function toItem(db: ReadDb, row: QuestionRow): Promise<QuestionItem> {
 	const facts = await factsNow(db, row);
-	return await itemOf(db, row, facts, await askNow(db, row, facts));
+	const policy = await currentPolicy(db, row.project);
+	return await itemOf(db, row, facts, await askNow(db, row, facts, policy), undefined, policy);
 }
 
 /**
@@ -2520,16 +2522,18 @@ export async function toItemFor(
 	known?: ItemPage,
 ): Promise<QuestionItem & { you: "counts" | "advice" | "forbidden" }> {
 	const facts = await factsNow(ctx.db, row);
-	const ask = await askNow(ctx.db, row, facts, known?.policy);
-	return { ...(await itemOf(ctx.db, row, facts, ask, known)), you: await standingFor(ctx, row, ask) };
+	const policy = known?.policy ?? (await currentPolicy(ctx.db, row.project));
+	const ask = await askNow(ctx.db, row, facts, policy);
+	return { ...(await itemOf(ctx.db, row, facts, ask, known, policy)), you: await standingFor(ctx, row, ask.ask) };
 }
 
 async function itemOf(
 	db: ReadDb,
 	row: QuestionRow,
 	facts: ReadonlySet<string>,
-	ask: Ask,
+	asked: Awaited<ReturnType<typeof askNow>>,
 	known?: ItemPage,
+	policy?: Awaited<ReturnType<typeof currentPolicy>>,
 ): Promise<QuestionItem> {
 	const stored = json<Record<string, unknown> & { hints?: string[]; tests?: { sameCode?: SameCodeEvidence }[] }>(
 		row.evidence,
@@ -2563,12 +2567,19 @@ async function itemOf(
 			? await decisionById(db, decision.supersedes)
 			: null;
 	const fixedIn = decision && supersedes ? await fixedInOf(db, row, decision) : null;
-	const current = known?.policy ?? (await currentPolicy(db, row.project));
+	const current = policy ?? known?.policy ?? (await currentPolicy(db, row.project));
 	const clause = clauseFor(current, { kind: row.kind, facts, answer: "approve" });
 	const approvals =
 		row.kind === "signoff" ? await approvalSigners(db, row, clause.ask, clause.id, current.version) : [];
 
 	return {
+		asked: {
+			policy: policyName(current),
+			clause: asked.clause.id,
+			when: asked.clause.when,
+			ask: asked.ask,
+			ruled: asked.ruled,
+		},
 		approvalNeeded: row.kind === "signoff" ? (clause.ask.approvals ?? 1) : undefined,
 		approvals: await mapAsync(approvals, async (signer) => ({
 			...signer,
@@ -2583,7 +2594,7 @@ async function itemOf(
 		evidenceHash: row.evidence_hash,
 		seen: { count: row.seen_count, carried: row.carried },
 		needs: [
-			describeAsk(ask),
+			describeAsk(asked.ask),
 			...[...facts]
 				.filter((fact) => fact.startsWith("refused:"))
 				.map((fact) => `accepting refused: ${fact.slice("refused:".length)}`),

@@ -199,3 +199,13 @@
 	display: block;
 	width: 100%;
 }
+
+.case-proposal-notice {
+	margin: 12px 0;
+	padding: 8px 12px;
+	border-left: 2px solid var(--line);
+	overflow-wrap: anywhere;
+}
+.case-proposal-notice.agent-proposal {
+	border-left-color: var(--agent);
+}

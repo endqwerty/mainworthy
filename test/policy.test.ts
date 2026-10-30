@@ -1307,6 +1307,8 @@ describe("agent edits", () => {
 
 		const q = first((await queue()).items);
 		expect(q).toMatchObject({ kind: "adopt", producer: "agent" });
+		expect(q.asked).toMatchObject({ policy: "standard", clause: "adopt-agent", ruled: false });
+		expect((await queue()).counts["adopt:agent"]).toBe(1);
 		const own = await h.call<{ status: string }[]>(
 			"decide",
 			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } },
@@ -3376,3 +3378,24 @@ for (const notProducer of [false, true])
 		).toMatchObject([{ status: "pending" }]);
 		expect(await h.call("get", { refs: [planned.run] })).toMatchObject([{ state: "open" }]);
 	});
+
+test("three creates have a full operation tally and human proposals do not count as agents", async () => {
+	await use("strict");
+	await h.call("propose", { edits: Array.from({ length: 3 }, (_, i) => ({ op: "create", outline: `Case ${i}` })) });
+	const inbox = await queue();
+	expect(first(inbox.items)).toMatchObject({
+		title: "3 new cases",
+		evidence: { tally: { create: 3 } },
+		asked: { policy: "strict" },
+	});
+	expect(inbox.counts["adopt:agent"]).toBeUndefined();
+	const question = first(inbox.items);
+	await h.call("decide", {
+		q: question.q,
+		onEvidence: question.evidenceHash,
+		answer: { is: "accept" },
+		reason: "Reviewed the new cases",
+	});
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person revision" } }] });
+	expect((await queue()).counts["adopt:agent"]).toBeUndefined();
+});

@@ -15,6 +15,7 @@ import {
 import { type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
+import { proposalTally, proposalTitle } from "../../core/proposals.ts";
 import {
 	dropExcuse,
 	dropResultExcuses,
@@ -151,11 +152,8 @@ export async function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Rais
 	});
 	const first = summary[0];
 	const quarantine = resolved.find((edit) => edit.op === "quarantine");
-	const title = quarantine
-		? `${quarantine.exit === null ? "End quarantine" : "Quarantine"} ${quarantine.test}`
-		: resolved.length === 1 && first && "title" in first && first.title
-			? `${first.op === "create" ? "New case" : first.op === "edit" ? "Edit" : first.op}: ${first.title}`
-			: `${resolved.length} edits`;
+	const tally = proposalTally(resolved);
+	const title = proposalTitle(tally, quarantine ?? first);
 	return tools.raise(ctx, {
 		kind: "adopt",
 		key: `proposal:${proposal.id}`,
@@ -167,6 +165,7 @@ export async function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Rais
 			authorId: ctx.actor.id,
 			reason: proposal.reason,
 			edits: summary,
+			tally,
 			count: resolved.length,
 			conflicts: sealed.conflicts,
 		},

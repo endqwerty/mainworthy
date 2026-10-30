@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { projectCommand } from "./commands.ts";
 import { QuarantineExit } from "./flaky.ts";
-import { Clause, PolicySettings, Unlinked } from "./kinds.ts";
+import { ANSWER_HELP, Clause, PolicySettings, Unlinked } from "./kinds.ts";
 import { CaseBody, CaseKind, EDIT_MAX } from "./model.ts";
 import {
 	flag as schemaFlag,
@@ -132,3 +132,91 @@ export const ProposeInput = z.object({
 	...projectCommand,
 });
 export type ProposeInput = z.infer<typeof ProposeInput>;
+
+export const ProposalTally = z.object({
+	create: z.number().optional(),
+	edit: z.number().optional(),
+	restore: z.number().optional(),
+	place: z.number().optional(),
+	state: z.number().optional(),
+	folder: z.number().optional(),
+	cover: z.number().optional(),
+	policy: z.number().optional(),
+	quarantine: z.number().optional(),
+});
+export type ProposalTally = z.infer<typeof ProposalTally>;
+const proposalParts = {
+	create: "new case",
+	edit: "case edit",
+	restore: "restore",
+	place: "placement change",
+	state: "archive change",
+	folder: "folder change",
+	cover: "coverage change",
+	policy: "policy change",
+	quarantine: "quarantine change",
+} satisfies Record<keyof ProposalTally, string>;
+/** How many operations a proposal holds, whatever their kinds. */
+export const proposalSize = (tally: ProposalTally): number =>
+	Object.values(tally).reduce<number>((sum, n) => sum + (n ?? 0), 0);
+/** Counts a proposal's operations by kind: every one of them, not the shortened summary its question stores. */
+export function proposalTally(edits: readonly { op: keyof ProposalTally }[]): ProposalTally {
+	const tally: ProposalTally = {};
+	for (const edit of edits) tally[edit.op] = (tally[edit.op] ?? 0) + 1;
+	return tally;
+}
+/** A proposal's title in the queue: the case for one body edit, the quarantine, else what it holds, counted. */
+export function proposalTitle(
+	tally: ProposalTally,
+	first?: { op: string; title?: string | null; test?: string; exit?: unknown },
+): string {
+	const total = proposalSize(tally);
+	if (first?.op === "quarantine") return `${first.exit === null ? "End quarantine" : "Quarantine"} ${first.test}`;
+	if (total === 1) {
+		if (tally.policy) return "Policy change";
+		if (first?.title && (first.op === "create" || first.op === "edit" || first.op === "restore"))
+			return `${first.op === "create" ? "New case" : first.op === "edit" ? "Edit" : "Restore"}: ${first.title}`;
+	}
+	return Object.entries(proposalParts)
+		.flatMap(([op, label]) => {
+			const n = tally[op as keyof ProposalTally] ?? 0;
+			return n ? [`${n} ${label}${n === 1 ? "" : "s"}`] : [];
+		})
+		.join(" · ");
+}
+/** What the evidence of an adoption question says about its proposal: the whole tally, its facts, any quarantine. */
+const AdoptEvidence = z.object({
+	tally: ProposalTally.optional().catch(undefined),
+	facts: z.array(z.string()).optional().catch(undefined),
+	edits: z.array(z.unknown()).optional().catch(undefined),
+});
+
+/**
+ * What accepting and rejecting a proposal does, said for its shape: one edit, new cases, many edits, the policy, a
+ * quarantine or a mix. A question raised before the tally was stored keeps the one-edit sentences.
+ */
+export function adoptHelp(evidence: unknown): Readonly<Record<string, string>> {
+	const { tally, facts, edits } = AdoptEvidence.parse(evidence ?? {});
+	const help = (accept: string, reject: string) => ({
+		...ANSWER_HELP.adopt,
+		accept,
+		reject: `${reject} The proposal stays in the history.`,
+	});
+	if (!tally) return ANSWER_HELP.adopt;
+	if (facts?.includes("quarantine")) {
+		const quarantine = edits?.find((edit) => z.object({ op: z.literal("quarantine") }).safeParse(edit).success);
+		const ends = z.object({ exit: z.null() }).safeParse(quarantine).success;
+		return help(ends ? "Ends the test's quarantine." : "Quarantines the test.", "Leaves the test as it is.");
+	}
+	const total = proposalSize(tally);
+	if (total === 1 && (tally.edit || tally.restore)) return ANSWER_HELP.adopt;
+	if (tally.create === total)
+		return help(
+			total === 1 ? "Adds this case to the suite." : `Adds all ${total} cases to the suite.`,
+			total === 1 ? "Adds no case." : "Adds none of them.",
+		);
+	if (tally.edit === total)
+		return help("Makes the proposed version of each case current.", "Leaves every case as it is.");
+	if (tally.policy === total) return help("Puts the proposed policy in force.", "Leaves the policy as it is.");
+	return help("Applies every change in it at once.", "Applies none of it.");
+}

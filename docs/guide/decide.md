@@ -45,7 +45,7 @@ Other questions in the selection can still receive your answer.
 ## Know what needs you today
 
 The line beside "Queue" separates failures from questions that can wait, for example
-"1 failure to explain · 104 can wait". Start with the failures. The queue lists failures first.
+"2 failures to explain · 3 agent proposals · 63 more can wait". Start with the failures. The queue lists failures first.
 The count beside Queue in the sidebar is red only while a failure question is open.
 
 A failure is the one kind of question that blocks anything. While nobody has explained a
@@ -144,7 +144,7 @@ For example, "The failure was a mistake" applies to a disputed planned-run resul
 | --- | --- | --- |
 | <kbd>a</kbd> | Accept | Makes this the current version. |
 | <kbd>r</kbd> | Reject | Leaves the case as it is. The proposal stays in the history. |
-|  | Merge | Adopts the version you put together from both sides. |
+|  | Merge | Proposes the version you put together from both sides. |
 
 ### A test with no case (`map`)
 
@@ -236,6 +236,12 @@ The rows have no box there.
 ## Review a proposal
 
 An adoption question asks whether a proposed edit becomes current.
+Agent rows start with "by an agent". The heading names the proposal and explains why it is not in effect yet,
+using the current policy and who it asks, with a link to **How policies work**.
+When your answer counts, the answer area says so.
+For a new case, Accept "Adds this case to the suite"; Reject "Adds no case. The proposal stays in the history."
+For several new cases, Accept adds all of them and Reject adds none of them.
+For a mixed proposal, Accept "Applies every change in it at once"; Reject "Applies none of it. The proposal stays in the history."
 Read the proposed changes beside the existing case.
 While a proposal waits, each edit is shown applied to the case as it is now, so a change made after the edit was proposed shows too.
 An edit that would be refused on its own is shown as it was proposed, and so is every edit of a decided proposal.
@@ -262,7 +268,7 @@ Accept keeps the adopted version in history.
 
 An edit conflict needs a merged body, rather than a plain acceptance.
 Resolve it in the case's conflict card. See [write cases](./write-cases.md#resolve-simultaneous-edits).
-The merged body is another proposal and still follows the adoption policy.
+Merge proposes the version you put together from both sides. The merged body is another proposal and still follows the adoption policy.
 A proposal containing one body edit can carry the same case's tag additions/removals and requirement-link changes through resolution.
 Those changes stay in the replacement proposal, so current and proposed tags classify the whole edit.
 For an API, CLI or MCP merge answer, extract inline `#tags` and `@REQ-123` links from changed title,

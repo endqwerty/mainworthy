@@ -184,29 +184,29 @@ export function WordDiff({ before, after }: { before: string; after: string }) {
 	);
 }
 /** Stable step ids align edits; the pure core diff owns additions, removals and moves. */
-export function DiffView({ before, after }: { before: CaseBody; after: CaseBody }) {
+export function DiffView({ before, after, added = false }: { before: CaseBody; after: CaseBody; added?: boolean }) {
 	const diff = diffBodies(before, after);
 	return (
 		<section className="diff" aria-label="Case diff">
 			{diff.title.kind === "changed" && (
-				<div className="dl chg">
-					<i>~</i>
+				<div className={`dl ${added ? "add" : "chg"}`}>
+					<i>{added ? "+" : "~"}</i>
 					<div>
 						<WordDiff before={before.title} after={after.title} />
 					</div>
 				</div>
 			)}
 			{diff.pre.kind === "changed" && (
-				<div className="dl chg">
-					<i>~</i>
+				<div className={`dl ${added ? "add" : "chg"}`}>
+					<i>{added ? "+" : "~"}</i>
 					<div>
 						Preconditions: <WordDiff before={before.pre} after={after.pre} />
 					</div>
 				</div>
 			)}
 			{diff.methods.kind === "changed" && (
-				<div className="dl chg">
-					<i>~</i>
+				<div className={`dl ${added ? "add" : "chg"}`}>
+					<i>{added ? "+" : "~"}</i>
 					<div>
 						Evidence from:{" "}
 						<WordDiff
@@ -221,8 +221,8 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 				</div>
 			)}
 			{diff.automate.kind === "changed" && (
-				<div className="dl chg">
-					<i>~</i>
+				<div className={`dl ${added ? "add" : "chg"}`}>
+					<i>{added ? "+" : "~"}</i>
 					<div>
 						Automation: <WordDiff before={before.automate} after={after.automate} />
 					</div>
@@ -232,8 +232,8 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 				[...new Set([...Object.keys(before.fields), ...Object.keys(after.fields)])]
 					.filter((key) => before.fields[key] !== after.fields[key])
 					.map((key) => (
-						<div className="dl chg" key={key}>
-							<i>~</i>
+						<div className={`dl ${added ? "add" : "chg"}`} key={key}>
+							<i>{added ? "+" : "~"}</i>
 							<div>
 								{key}: <WordDiff before={before.fields[key] ?? ""} after={after.fields[key] ?? ""} />
 							</div>

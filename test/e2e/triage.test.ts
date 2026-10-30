@@ -155,12 +155,14 @@ async function recordedDecisions(server: Server, ref: string) {
 				expect(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 772).toBe(true);
 			}
 			await page.locator(".assertion-comparison").waitFor();
-			// The count says how many failures wait to be explained and how many questions can wait, and the
-			// sidebar is red only for the first.
-			expect(await page.locator("#list .phead .dim").innerText()).toBe("5 failures to explain · 15 can wait");
+			// The count says how many failures wait to be explained, how many proposals (here all an agent's) and how
+			// many other questions can wait, and the sidebar is red only for the first.
+			expect(await page.locator("#list .phead .dim").innerText()).toBe(
+				"5 failures to explain · 5 agent proposals · 10 more can wait",
+			);
 			const badge = page.locator('#nav a[aria-label="Queue"] em');
 			expect(await badge.getAttribute("class")).toBe("hot");
-			expect(await badge.getAttribute("title")).toBe("5 failures to explain · 15 can wait");
+			expect(await badge.getAttribute("title")).toBe("5 failures to explain · 5 agent proposals · 10 more can wait");
 			// Failures come first, and each says what leaving it costs. These were typed for a session, so they
 			// name no run.
 			expect(first.kind).toBe("failure");

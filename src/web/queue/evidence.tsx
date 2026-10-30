@@ -188,8 +188,9 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 		<div className={question.producer === "agent" ? "prop" : "ev"}>
 			{parsed.success && (
 				<p>
-					<ProducerGlyph kind={question.producer} /> {parsed.data.author} proposes {parsed.data.proposal}
-					{parsed.data.reason && `: ${parsed.data.reason}`}
+					<ProducerGlyph kind={question.producer} /> {parsed.data.author},{" "}
+					{question.producer === "agent" ? "an agent" : question.producer === "human" ? "a person" : "the pipeline"},
+					proposes this{parsed.data.reason ? `: ${parsed.data.reason}` : "."}
 				</p>
 			)}
 			<ProposalEdits question={question} />
@@ -284,7 +285,7 @@ export function ProposalEdits({ question }: { question: QuestionItem }) {
 											{edit.tags.length > 0 && ` · tags ${edit.tags.join(", ")}`}
 											{edit.covers.length > 0 && ` · covers ${edit.covers.join(", ")}`}
 										</p>
-										<DiffView before={emptyBody()} after={edit.body} />
+										<DiffView before={emptyBody()} after={edit.body} added />
 									</div>
 								);
 							case "restore":

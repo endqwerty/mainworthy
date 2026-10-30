@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
-import { type Ask, clauseOf, type Kind, standingOf } from "./kinds.ts";
-import { PRESET_GUIDE, PRESET_SUMMARY, whoAnswers } from "./policy-guide.ts";
+import { type Ask, clauseOf, type Kind, Predicate, standingOf } from "./kinds.ts";
+import {
+	ADOPT_PREDICATES,
+	PRESET_GUIDE,
+	PRESET_SUMMARY,
+	whoAnswers,
+	whyWaiting,
+	yourAnswerCounts,
+} from "./policy-guide.ts";
 import { PRESET_NAMES, PRESETS, type PresetName, presetOf } from "./presets.ts";
 
 const clause = (preset: PresetName, kind: Kind, facts: string[], answer?: string) => {
@@ -133,4 +140,42 @@ test("a policy is a preset only while it has the preset's clauses", () => {
 	}
 	expect(presetOf({ preset: "loose", clauses: PRESETS.strict.clauses })).toBeNull();
 	expect(presetOf({ preset: "custom", clauses: PRESETS.loose.clauses })).toBeNull();
+});
+
+test("why an adoption waits follows its actual clause and ask", () => {
+	for (const preset of PRESET_NAMES) {
+		for (const subject of ["author:human", "author:agent", "conflict", "policy"]) {
+			const clause = clauseOf(PRESETS[preset], { kind: "adopt", facts: new Set([subject, "author:human"]) });
+			if (!clause) throw new Error("no adopt clause");
+			const asked = { policy: preset, clause: clause.id, when: clause.when, ask: clause.ask, ruled: false };
+			const line = whyWaiting(asked);
+			if (clause.ask.who === "rule") expect(line).toBeNull();
+			else
+				expect(line).toBe(
+					`Not in effect yet. Under the ${preset} policy, ${subject === "policy" ? "a change to the policy" : subject === "conflict" ? "an edit that conflicts with a newer version" : clause.when.includes("always") ? "every edit" : "an agent's edit"} waits for ${whoAnswers(clause).replace(/^./, (c) => c.toLowerCase())}.`,
+				);
+		}
+	}
+	const ask = { who: "member", agents: "none", reason: "optional", notProducer: false } as const;
+	const asked = { policy: "custom", clause: "scoped", when: ["author:agent", "folder:checkout"], ask, ruled: false };
+	expect(whyWaiting(asked)).toBe(
+		"Not in effect yet. Under this project's policy, an agent's edit in checkout waits for a person.",
+	);
+	expect(whyWaiting({ ...asked, clause: "quarantine-person" })).toBe(
+		"Not in effect yet. Every quarantine waits for a person.",
+	);
+	expect(whyWaiting({ ...asked, clause: "refused-replay" })).toContain(
+		"Which folders and tags it touches is not known now",
+	);
+	expect(whyWaiting({ ...asked, ruled: true })).toContain("A rule would answer this, but its answer was set aside");
+	expect(whyWaiting({ ...asked, ask: { ...ask, who: "rule" } })).toBeNull();
+});
+test("every fixed policy predicate is classified for adoption copy", () => {
+	expect(Object.keys(ADOPT_PREDICATES).sort()).toEqual(Predicate.options[0].options.toSorted());
+});
+test("a counted answer keeps the server's warning that accepting would be refused", () => {
+	expect(yourAnswerCounts("one member who is not an agent")).toBe("Your answer counts.");
+	expect(
+		yourAnswerCounts('one member who is not an agent; accepting refused: folder path "Checkout" is ambiguous'),
+	).toBe('Your answer counts; accepting refused: folder path "Checkout" is ambiguous.');
 });
