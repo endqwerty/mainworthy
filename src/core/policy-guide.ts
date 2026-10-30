@@ -130,14 +130,18 @@ export const ADOPT_PREDICATES = {
  * Why an open proposal is not in effect, from the clause that owns its question now (a reply's `asked`). Who
  * answers is `whoAnswers`'s wording, so the guide and the queue say it alike. Null when a rule answers.
  */
-export function whyWaiting(asked: {
-	when: readonly string[];
-	ask: Clause["ask"];
-	ruled: boolean;
-	hidden: number;
-	special: "quarantine" | "refused-replay" | null;
-}): string | null {
-	if (asked.ask.who === "rule") return null;
+export function whyWaiting(
+	asked:
+		| {
+				when: readonly string[];
+				ask: Clause["ask"];
+				ruled: boolean;
+				hidden: number;
+				special: "quarantine" | "refused-replay" | null;
+		  }
+		| undefined,
+): string | null {
+	if (!asked || asked.ask.who === "rule") return null;
 	const who = lowerFirst(
 		whoAnswers({ id: "asked", kind: "adopt", when: [...asked.when], ask: asked.ask, blocks: "nothing" }),
 	);
