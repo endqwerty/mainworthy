@@ -183,6 +183,12 @@
 	background: var(--agent-soft);
 	padding: 6px 0;
 }
+/* While the keyboard is on a link of the card, its answers stay in place instead of sticking over it (WCAG
+   2.4.11): focus does not scroll a link already inside the pane, so a sticky row could hide it. A sticky box keeps
+   its place in the flow, so nothing else moves. */
+.ev.prop:has(:focus:not(.pbtn *)) .pbtn {
+	position: static;
+}
 .preserved-draft {
 	margin-block: 16px;
 }
