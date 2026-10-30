@@ -79,8 +79,8 @@ published before Bun 1.4.4. That choice is recorded in each part's reason. None 
 does not name. Claude Opus 5.5 reviewed the result and marked one addition as not linked: the worker listed links in
 Bun's installer to files in npm's repository as an Artistic-2.0 port of npm. They are comments naming behaviour Bun
 matches. The files they point at are ISC packages. The same links were in 1.4.3, whose audit did not count them. The
-port of `@handlebars/parser` is listed without a text: the package declares ISC, but neither it nor its repository
-publishes the licence.
+port of `@handlebars/parser` is the only new part listed without a text: the package declares ISC, but neither it
+nor its repository publishes the licence.
 
 What the audit did not settle. The owner settled them on 2026-10-23 for the published image and executable
 ([#234](https://github.com/endqwerty/mainworthy/issues/234)): [SOURCE.md](SOURCE.md) says where the source of the LGPL

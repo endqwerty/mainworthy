@@ -2257,9 +2257,10 @@
 					"relyOn": [
 						"MIT"
 					],
-					"source": "https://crates.io/crates/fast-glob/1.1.1",
-					"texts": [],
-					"note": "Its source states no licence, and the audit could not establish the original's: src/glob/pattern.rs explicitly names port of validate from fast-glob 1.1.1. Source port, not a Cargo dependency; archive SHA256 verified."
+					"source": "https://github.com/oxc-project/fast-glob/blob/c8b8711a2bd7b86cb2fed7900469d7e799ed868c/LICENSE",
+					"texts": [
+						"bun-1.4.4/texts/ports-github/oxc-project/fast-glob/LICENSE"
+					]
 				},
 				{
 					"name": "Port of crate oxc-toml",
