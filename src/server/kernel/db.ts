@@ -701,29 +701,34 @@ export class Database {
 	}
 	private canceller: SQL | undefined;
 	private readonly cancels = new Set<Promise<void>>();
+	/** Whether the network holds a cancel past `CANCEL_WAIT_MS`, until it is answered. */
+	private stalled = false;
 	/**
 	 * Cancels what backend `pid` runs. A cancel that fails leaves the statement to the deadline of whoever waits for it.
-	 * One still unanswered after `CANCEL_WAIT_MS` holds up no lease, no later cancel and no `close`: its connection is
-	 * closed and forgotten, not waited for (Bun 1.4.3's `close` waits for the query however short its timeout). For
-	 * that cancel to land late on a backend that took the process id since, the ids would have to wrap.
+	 * One still unanswered after `CANCEL_WAIT_MS` holds up its lease no longer, and while it stays unanswered no other
+	 * is sent: the path that holds it would hold them too. Its connection is kept, as Bun 1.4.3 cannot end a connection
+	 * with a query in flight, and closes once the cancel is answered. For that cancel to land late on a backend that took
+	 * the process id since, the ids would have to wrap.
 	 */
 	private cancelBackend(pid: number): Promise<void> {
+		if (this.stalled) return Promise.resolve();
 		this.canceller ??= new SQL(this.options.url, { bigint: true, max: 1 });
-		const canceller = this.canceller;
+		const answered = this.canceller.unsafe("SELECT pg_cancel_backend($1)", [pid]).then(
+			() => undefined,
+			() => undefined,
+		);
 		const sent = (async () => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const late = new Promise<"late">((resolve) => {
 				timer = setTimeout(() => resolve("late"), CANCEL_WAIT_MS);
 			});
-			const answered = canceller.unsafe("SELECT pg_cancel_backend($1)", [pid]).then(
-				() => "answered" as const,
-				() => "answered" as const,
-			);
 			const outcome = await Promise.race([answered, late]);
 			clearTimeout(timer);
 			if (outcome === "late") {
-				if (this.canceller === canceller) this.canceller = undefined;
-				void canceller.close({ timeout: 0 }).catch(() => undefined);
+				this.stalled = true;
+				void answered.then(() => {
+					this.stalled = false;
+				});
 			}
 		})().finally(() => this.cancels.delete(sent));
 		this.cancels.add(sent);
@@ -991,12 +996,14 @@ export class Database {
 		this.shutdown.abort(new Error("database is closed"));
 		await Promise.all(this.activeWrites);
 		await Promise.all(this.cancels);
+		// A cancel the network still holds would hold this close too, so the canceller then ends once it is answered.
+		const canceller = this.stalled ? void this.canceller?.close().catch(() => undefined) : this.canceller?.close();
 		await Promise.all([
 			this.readers.close(),
 			this.writers.close(),
 			this.admissions.close(),
 			this.jobs.close(),
-			this.canceller?.close(),
+			canceller,
 		]);
 	}
 }
