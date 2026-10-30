@@ -99,13 +99,17 @@ from the author's PDF copy, `sources/just.txt`) [read].
 For a single test, the useful derived quantity is its **unique kill set**: the mutants only this test kills. A test
 with an empty unique kill set is redundant in the minimisation sense. A test with a non-empty unique kill set that
 is high-value is justified. Stryker computes this directly when per-test coverage is on (see `methods.md`).
+*Corrected later ([panels/mutation-codex-sol.md](../panels/mutation-codex-sol.md)): a report's `killedBy` may list
+only the first test that failed, so a report alone does not give the unique kill set. That needs every covering test
+replayed against the mutant.*
 
 **Transfer: strong in principle, limited in practice here.**
 
 - All the mutation studies are on Java. JavaScript/TypeScript mutation works (StrykerJS) but no study I found
   measured mutation-versus-real-fault correlation on a TypeScript web app. [unconfirmed: I searched and found none.]
-- The 17% of real faults not coupled to any mutant is an upper bound on how much a mutation-based keep/delete
-  verdict can miss. For a UI test the share is probably higher: a mutant on server code does not model a layout
+- The 17% of real faults not coupled to any mutant was read as an upper bound on how much a mutation-based keep/delete
+  verdict can miss. *Corrected later ([panels/mutation-codex-sol.md](../panels/mutation-codex-sol.md)): the 17% is
+  that Java study's result, not a bound for other code.* For a UI test the share is probably higher: a mutant on server code does not model a layout
   or a focus bug, which are exactly what a browser test exists to catch.
 - Cost: a mutation run needs the whole suite many times. Google's diff-based answer (mutate only changed lines) is the
   design to copy, not a full-suite run.
