@@ -4,6 +4,7 @@ import {
 	ADOPT_PREDICATES,
 	PRESET_GUIDE,
 	PRESET_SUMMARY,
+	shownPredicates,
 	whoAnswers,
 	whyWaiting,
 	yourAnswerCounts,
@@ -147,7 +148,7 @@ test("why an adoption waits follows its actual clause and ask", () => {
 		for (const subject of ["author:human", "author:agent", "conflict", "policy"]) {
 			const clause = clauseOf(PRESETS[preset], { kind: "adopt", facts: new Set([subject, "author:human"]) });
 			if (!clause) throw new Error("no adopt clause");
-			const asked = { policy: preset, clause: clause.id, when: clause.when, ask: clause.ask, ruled: false };
+			const asked = { policy: preset, clause: clause.id, when: clause.when, ask: clause.ask, ruled: false, hidden: 0 };
 			const line = whyWaiting(asked);
 			if (clause.ask.who === "rule") expect(line).toBeNull();
 			else
@@ -157,7 +158,14 @@ test("why an adoption waits follows its actual clause and ask", () => {
 		}
 	}
 	const ask = { who: "member", agents: "none", reason: "optional", notProducer: false } as const;
-	const asked = { policy: "custom", clause: "scoped", when: ["author:agent", "folder:checkout"], ask, ruled: false };
+	const asked = {
+		policy: "custom",
+		clause: "scoped",
+		when: ["author:agent", "folder:checkout"],
+		ask,
+		ruled: false,
+		hidden: 0,
+	};
 	expect(whyWaiting(asked)).toBe(
 		"Not in effect yet. Under this project's policy, an agent's edit in checkout waits for a person.",
 	);
@@ -178,4 +186,27 @@ test("a counted answer keeps the server's warning that accepting would be refuse
 	expect(
 		yourAnswerCounts('one member who is not an agent; accepting refused: folder path "Checkout" is ambiguous'),
 	).toBe('Your answer counts; accepting refused: folder path "Checkout" is ambiguous.');
+});
+test("a reply carries each fixed predicate once and a few short scopes, and says how many it left out", () => {
+	const folders = Array.from({ length: 50 }, (_, i) => `folder:area${i}`);
+	const long = `tag:${"x".repeat(300)}`;
+	expect(shownPredicates(["author:agent", ...folders, "author:agent", long, "tag:critical"])).toEqual({
+		when: ["author:agent", ...folders.slice(0, 8)],
+		hidden: 44,
+	});
+	expect(shownPredicates(["folder:checkout", "tag:critical", "author:agent"])).toEqual({
+		when: ["author:agent", "folder:checkout", "tag:critical"],
+		hidden: 0,
+	});
+	const ask = { who: "member", agents: "none", reason: "optional", notProducer: false } as const;
+	const asked = {
+		policy: "custom",
+		clause: "scoped",
+		ask,
+		ruled: false,
+		...shownPredicates(["always", `folder:${"y".repeat(215)}`]),
+	};
+	expect(whyWaiting(asked)).toBe(
+		"Not in effect yet. Under this project's policy, every edit that meets 1 more folder or tag condition waits for a person.",
+	);
 });
