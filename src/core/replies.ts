@@ -212,8 +212,9 @@ const DecisionItem = z.object({
 });
 
 export const QuestionItem = z.object({
+	// Every field is bounded whatever the policy holds (`shownPredicates`; a role name is short): the reply repeats
+	// it for every question, and a custom clause's id and predicates are not bounded (issue #1105).
 	asked: z.object({
-		clause: schemaText,
 		when: z.array(Predicate),
 		/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */
 		hidden: schemaNumber,
