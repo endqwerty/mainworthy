@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { type AddressInfo, connect, createServer, type Socket } from "node:net";
 import { cluster } from "../../../scripts/pg.ts";
 import { drainDatabaseDrops, type TestDatabase, testDatabase } from "../../../test/db.ts";
 import { defaultConfig, openApp } from "./app.ts";
@@ -708,6 +709,47 @@ test("closing cancels an exclusive callback's write waiting for a lock, which do
 		finish.release();
 		await holding;
 		await closing.close();
+	}
+});
+
+test("a cancel the network holds up holds up neither the aborted write nor closing", async () => {
+	// Every connection goes through this proxy, which keeps back what carries a cancel, as a stalled path would.
+	const sockets: Socket[] = [];
+	const proxy = createServer((client) => {
+		const target = new URL(fixture.url);
+		const upstream = connect(Number(target.port), target.hostname);
+		sockets.push(client, upstream);
+		client.on("data", (data) => {
+			if (!data.includes("pg_cancel_backend")) upstream.write(data);
+		});
+		upstream.on("data", (data) => client.write(data));
+		client.on("error", () => {});
+		upstream.on("error", () => {});
+	});
+	await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+	const proxied = new URL(fixture.url);
+	proxied.hostname = "127.0.0.1";
+	proxied.port = String((proxy.address() as AddressInfo).port);
+	const stalled = await Database.open({ url: proxied.toString(), writePool: 1 });
+	try {
+		const controller = new AbortController();
+		const reason = new Error("stopped by the test");
+		const entered = barrier();
+		const work = stalled.write(
+			(db) =>
+				db.transaction(async () => {
+					entered.release();
+					await db.allDynamic("SELECT pg_sleep(0.2)");
+				}),
+			{ signal: controller.signal },
+		);
+		await entered.promise;
+		controller.abort(reason);
+		await expect(work).rejects.toBe(reason);
+		await stalled.close();
+	} finally {
+		for (const socket of sockets) socket.destroy();
+		proxy.close();
 	}
 });
 
