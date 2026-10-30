@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ANSWER_HELP } from "./kinds.ts";
-import { adoptHelp, proposalTally, proposalTitle } from "./proposals.ts";
+import { adoptHelp, adoptHelpFor, proposalTally, proposalTitle } from "./proposals.ts";
 
 test("proposal titles count operations across the whole proposal", () => {
 	expect(
@@ -52,4 +52,12 @@ test("answer help describes the whole proposal", () => {
 	expect(quarantine(null).accept).toBe("Ends the test's quarantine.");
 	expect(quarantine({ at: 1 }).accept).toBe("Quarantines the test.");
 	expect(adoptHelp(undefined)).toBe(ANSWER_HELP.adopt);
+});
+test("an answer sent to several proposals is described for all of them, not the one on screen", () => {
+	const created = { tally: { create: 1 }, facts: [] };
+	expect(adoptHelpFor([created]).accept).toBe("Adds this case to the suite.");
+	expect(adoptHelpFor([created, { tally: { edit: 3 }, facts: [] }])).toMatchObject({
+		accept: "Applies each selected proposal in full.",
+		reject: "Applies none of them. They stay in the history.",
+	});
 });

@@ -14,7 +14,7 @@ import {
 	type Kind,
 } from "../../core/kinds.ts";
 import { whyWaiting, yourAnswerCounts } from "../../core/policy-guide.ts";
-import { adoptHelp, ProposalTally } from "../../core/proposals.ts";
+import { adoptHelpFor, ProposalTally } from "../../core/proposals.ts";
 import { type InboxReply, QuestionItem } from "../../core/replies.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
@@ -886,7 +886,11 @@ function QueueWorkbench() {
 	const selectable = bulk && selection[0] ? capped(allOfKind(items, selection[0].kind, alone)).kept : [];
 	const selectableRefs = new Set(selectable);
 	const help: Readonly<Record<string, string>> =
-		answerKind === "adopt" && current ? adoptHelp(current.evidence) : answerKind ? ANSWER_HELP[answerKind] : {};
+		answerKind === "adopt" && current
+			? adoptHelpFor(bulk ? selection.map((question) => question.evidence) : [current.evidence])
+			: answerKind
+				? ANSWER_HELP[answerKind]
+				: {};
 	return (
 		<>
 			<section className="pane queue-pane" id="list">

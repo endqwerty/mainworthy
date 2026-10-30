@@ -242,6 +242,7 @@ When your answer counts, the answer area says so.
 For a new case, Accept "Adds this case to the suite"; Reject "Adds no case. The proposal stays in the history."
 For several new cases, Accept adds all of them and Reject adds none of them.
 For a mixed proposal, Accept "Applies every change in it at once"; Reject "Applies none of it. The proposal stays in the history."
+With several proposals selected, Accept "Applies each selected proposal in full" and Reject "Applies none of them".
 Read the proposed changes beside the existing case.
 While a proposal waits, each edit is shown applied to the case as it is now, so a change made after the edit was proposed shows too.
 An edit that would be refused on its own is shown as it was proposed, and so is every edit of a decided proposal.

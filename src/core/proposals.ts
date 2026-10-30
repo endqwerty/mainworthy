@@ -220,3 +220,16 @@ export function adoptHelp(evidence: unknown): Readonly<Record<string, string>> {
 	if (tally.policy === total) return help("Puts the proposed policy in force.", "Leaves the policy as it is.");
 	return help("Applies every change in it at once.", "Applies none of it.");
 }
+
+/**
+ * What accepting and rejecting does for the proposals an answer is sent to: one is said for its shape, several
+ * only as a whole, since each may hold something else.
+ */
+export function adoptHelpFor(evidences: readonly unknown[]): Readonly<Record<string, string>> {
+	if (evidences.length === 1) return adoptHelp(evidences[0]);
+	return {
+		...ANSWER_HELP.adopt,
+		accept: "Applies each selected proposal in full.",
+		reject: "Applies none of them. They stay in the history.",
+	};
+}
