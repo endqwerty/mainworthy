@@ -19,6 +19,7 @@ import {
 	describeAsk,
 	type FixedIn,
 	type Kind,
+	type Predicate,
 	standingOf,
 } from "../../core/kinds.ts";
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
@@ -2528,6 +2529,22 @@ export async function toItemFor(
 	return { ...(await itemOf(ctx.db, row, facts, ask, known, policy)), you: await standingFor(ctx, row, ask.ask) };
 }
 
+/**
+ * What a reply repeats of the clause that owns a question, worked out once per clause. A page of questions shares
+ * one policy and so its clause objects; a custom clause's predicates are not bounded and are not walked again for
+ * each question it owns (issue #1105 bounds the table itself).
+ */
+type Shown = { when: Predicate[]; hidden: number };
+const shownByClause = new WeakMap<object, Shown>();
+function shownOf(clause: { when: readonly Predicate[] }): Shown {
+	let shown = shownByClause.get(clause);
+	if (!shown) {
+		shown = shownPredicates(clause.when);
+		shownByClause.set(clause, shown);
+	}
+	return shown;
+}
+
 async function itemOf(
 	db: ReadDb,
 	row: QuestionRow,
@@ -2576,7 +2593,7 @@ async function itemOf(
 	return {
 		asked: {
 			clause: asked.clause.id,
-			...shownPredicates(asked.clause.when),
+			...shownOf(asked.clause),
 			ask: asked.ask,
 			ruled: asked.ruled,
 		},
