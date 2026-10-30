@@ -412,6 +412,8 @@ test.skipIf(!browserAvailable)(
 			await preserved.waitFor();
 			expect(await preserved.inputValue()).toContain("Original capture");
 			await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
+			// Discarding renders after the click returns, so wait for the copy to go rather than count it at once.
+			await page.waitForFunction(() => document.querySelectorAll(".preserved-draft").length === 0);
 			expect(await page.locator(".preserved-draft").count()).toBe(0);
 			expect((await server.api("find", { in: "cases" })).items).toHaveLength(2);
 		} finally {
