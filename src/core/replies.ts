@@ -213,20 +213,23 @@ const DecisionItem = z.object({
 
 export const QuestionItem = z.object({
 	// Every field is bounded whatever the policy holds (`shownPredicates`; a role name is short): the reply repeats
-	// it for every question, and a custom clause's id and predicates are not bounded (issue #1105).
-	asked: z.object({
-		when: z.array(Predicate),
-		/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */
-		hidden: schemaNumber,
-		/**
-		 * The server's own clause, not the policy's: every quarantine is asked of a person, and a replay whose
-		 * folders cannot be told is asked of whoever every clause it might match asks. Null for a policy clause,
-		 * whatever its id.
-		 */
-		special: z.enum(["quarantine", "refused-replay"]).nullable(),
-		ask: Ask,
-		ruled: z.boolean(),
-	}),
+	// it for every question, and a custom clause's id and predicates are not bounded (issue #1105). Optional, so a
+	// client reading a server from before it still reads that server's questions (API 3 does not change for it).
+	asked: z
+		.object({
+			when: z.array(Predicate),
+			/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */
+			hidden: schemaNumber,
+			/**
+			 * The server's own clause, not the policy's: every quarantine is asked of a person, and a replay whose
+			 * folders cannot be told is asked of whoever every clause it might match asks. Null for a policy clause,
+			 * whatever its id.
+			 */
+			special: z.enum(["quarantine", "refused-replay"]).nullable(),
+			ask: Ask,
+			ruled: z.boolean(),
+		})
+		.optional(),
 	approvalNeeded: schemaNumber.optional(),
 	approvals: z.array(ApprovalSigner).optional(),
 	q: schemaText,

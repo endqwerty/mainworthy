@@ -10,6 +10,7 @@ import {
 	yourAnswerCounts,
 } from "./policy-guide.ts";
 import { PRESET_NAMES, PRESETS, type PresetName, presetOf } from "./presets.ts";
+import { QuestionItem } from "./replies.ts";
 
 const clause = (preset: PresetName, kind: Kind, facts: string[], answer?: string) => {
 	const found = clauseOf(PRESETS[preset], { kind, facts: new Set(facts), ...(answer ? { answer } : {}) });
@@ -176,6 +177,9 @@ test("why an adoption waits follows its actual clause and ask", () => {
 	);
 	expect(whyWaiting({ ...asked, ruled: true })).toContain("A rule would answer this, but its answer was set aside");
 	expect(whyWaiting({ ...asked, ask: { ...ask, who: "rule" } })).toBeNull();
+	// A server from before `asked` sends none: its questions still parse, and say no more than they know.
+	expect(QuestionItem.shape.asked.parse(undefined)).toBeUndefined();
+	expect(whyWaiting(undefined)).toBeNull();
 });
 test("every fixed policy predicate is classified for adoption copy", () => {
 	expect(Object.keys(ADOPT_PREDICATES).sort()).toEqual(Predicate.options[0].options.toSorted());
