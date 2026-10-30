@@ -22,7 +22,7 @@ with its workflows and data flows.
 
 To set up a checkout, follow these steps:
 
-1. Install Bun 1.4 or newer. CI and the container use Bun 1.4.4.
+1. Install Bun 1.4.4 or newer, which CI and the container use.
 2. Install PostgreSQL 18 binaries, or set `MAINWORTHY_TEST_PG` to a PostgreSQL 18 admin URL.
    The tests clone isolated databases; the URL must permit database creation. `MAINWORTHY_PG_BIN` can name
    the directory containing `initdb` and `pg_ctl`. `compose.yaml` runs PostgreSQL for an app deployment.

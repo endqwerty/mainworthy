@@ -10,7 +10,7 @@ not yet supported. For this source-tree tutorial, install PostgreSQL 18 binaries
 start the checkout's development cluster, or set `MAINWORTHY_DATABASE_URL` to a dedicated empty PostgreSQL database.
 The Local product layer has ended; loopback authentication remains available for development.
 
-You need the `mainworthy` command. First, install Bun 1.4 or newer.
+You need the `mainworthy` command. First, install Bun 1.4.4 or newer.
 From the source tree, run `bun install`, then `bun run build`. The executable is `dist/mainworthy`.
 Where this tutorial says `mainworthy`, use `dist/mainworthy` or add `dist` to your `PATH`.
 You can also use `bun src/cli/main.ts` without a build.

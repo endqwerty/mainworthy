@@ -21,7 +21,7 @@ The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screensh
 
 An instance needs PostgreSQL 18. To start one from the source tree, follow these steps:
 
-1. Install Bun 1.4 or newer, and PostgreSQL 18 (`brew install postgresql@18`, or your system's package).
+1. Install Bun 1.4.4 or newer, and PostgreSQL 18 (`brew install postgresql@18`, or your system's package).
 2. Install the packages from the source tree.
 
 	```
