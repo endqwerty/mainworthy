@@ -5,6 +5,7 @@ import { drainDatabaseDrops, type TestDatabase, testDatabase } from "../../../te
 import { defaultConfig, openApp } from "./app.ts";
 import {
 	Busy,
+	CANCEL_BACKEND,
 	ConnectionLost,
 	Database,
 	databaseAdmin,
@@ -17,6 +18,7 @@ import {
 	type ReadDb,
 	rewriteNamed,
 	sql,
+	sqlState,
 	TransactionAborted,
 	type WriteDb,
 } from "./db.ts";
@@ -801,6 +803,37 @@ async function sleepingWrite(on: Database, signal: AbortSignal) {
 	await entered.promise;
 	return { work };
 }
+
+test("a cancel stops the backend it names, and not another that took its process id and started at another time", async () => {
+	const entered = barrier();
+	let backend: { pid: number; started: string } | undefined;
+	let settled = false;
+	const sleeping = database
+		.write((db) =>
+			db.transaction(async () => {
+				[backend] = await db.allDynamic<{ pid: number; started: string }>(
+					"SELECT pid, backend_start::text AS started FROM pg_stat_activity WHERE pid = pg_backend_pid()",
+				);
+				entered.release();
+				await db.allDynamic("SELECT pg_sleep(5)");
+			}),
+		)
+		.then(
+			() => "slept",
+			(error: unknown) => sqlState(error),
+		)
+		.finally(() => {
+			settled = true;
+		});
+	await entered.promise;
+	if (!backend) throw new Error("the write did not say which backend it is");
+	const { pid, started } = backend;
+	await databaseAdmin(adminUrl, (admin) => admin.all(CANCEL_BACKEND, [pid, "2000-01-01 00:00:00+00"]));
+	await Bun.sleep(100);
+	expect(settled).toBe(false);
+	await databaseAdmin(adminUrl, (admin) => admin.all(CANCEL_BACKEND, [pid, started]));
+	expect(await sleeping).toBe("57014");
+});
 
 test("a cancel the network holds up holds up neither the aborted write nor closing, and no other is sent behind it", async () => {
 	const proxy = await holdingCancels();

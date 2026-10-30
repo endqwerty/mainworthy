@@ -162,6 +162,19 @@ const EXCLUSIVE_POLL_MS = 200;
 const CLIENT_CHECK_MS = 1_000;
 /** How long a lease waits for its cancel to reach the backend: one normally takes a millisecond. */
 const CANCEL_WAIT_MS = 1_000;
+/** The connection's own backend: its process id, and when it started, which tells it from a later one with that id. */
+const OWN_BACKEND = "SELECT pid, backend_start::text AS started FROM pg_stat_activity WHERE pid = pg_backend_pid()";
+/** Cancels what one backend runs, and nothing if that backend has ended and another took its process id. */
+export const CANCEL_BACKEND =
+	"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE pid = $1 AND backend_start = $2::timestamptz";
+type Backend = { pid: number; started: string };
+function backendOf(rows: unknown): Backend {
+	const row: unknown = Array.isArray(rows) ? rows[0] : undefined;
+	const pid: unknown = typeof row === "object" && row !== null ? Reflect.get(row, "pid") : undefined;
+	const started: unknown = typeof row === "object" && row !== null ? Reflect.get(row, "started") : undefined;
+	if (typeof pid !== "number" || typeof started !== "string") throw new Error("the backend did not say which it is");
+	return { pid, started };
+}
 export function sqlState(error: unknown): string | null {
 	if (typeof error !== "object" || error === null) return null;
 	const state: unknown = Reflect.get(error, "errno");
@@ -709,15 +722,15 @@ export class Database {
 	 * Cancels what backend `pid` runs. A cancel that fails leaves the statement to the deadline of whoever waits for it.
 	 * One still unanswered after `CANCEL_WAIT_MS` holds up its lease no longer, and while it stays unanswered no other
 	 * is sent: the path that holds it would hold them too. Its connection is kept, as Bun 1.4.3 cannot end a connection
-	 * with a query in flight, and closes once the cancel is answered. For that cancel to land late on a backend that took
-	 * the process id since, the ids would have to wrap.
+	 * with a query in flight, and closes once the cancel is answered. Landing late, it cancels nothing: a backend that
+	 * took the process id since started at another time.
 	 */
-	private cancelBackend(pid: number): Promise<void> {
+	private cancelBackend({ pid, started }: Backend): Promise<void> {
 		if (this.stalled) return Promise.resolve();
 		this.canceller ??= new SQL(this.options.url, { bigint: true, max: 1 });
 		this.unanswered++;
 		const answered = this.canceller
-			.unsafe("SELECT pg_cancel_backend($1)", [pid])
+			.unsafe(CANCEL_BACKEND, [pid, started])
 			.then(
 				() => undefined,
 				() => undefined,
@@ -783,8 +796,8 @@ export class Database {
 		lease.signal = options.signal;
 		try {
 			if (options.signal) {
-				const [row] = await query<{ pid: number }>(lease, "SELECT pg_backend_pid() AS pid");
-				if (row) lease.cancel = () => this.cancelBackend(row.pid);
+				const backend = backendOf(await query(lease, OWN_BACKEND));
+				lease.cancel = () => this.cancelBackend(backend);
 			}
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
 			lease.tx = { aborted: null, queues: [[]], kept: new Map() };
@@ -861,16 +874,14 @@ export class Database {
  SET statement_timeout = '${LOCK_WAIT_MS}ms';
  SET transaction_timeout = '${LOCK_WAIT_MS}ms';
  SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms';
- SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'${options.signal ? ";\n SELECT pg_backend_pid() AS pid" : ""}`,
+ SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'${options.signal ? `;\n ${OWN_BACKEND}` : ""}`,
 				[],
 				false,
 				true,
 			);
 			if (options.signal) {
-				const rows = settings.at(-1);
-				const pid: unknown = Array.isArray(rows) ? rows[0]?.pid : undefined;
-				if (typeof pid !== "number") throw new Error("the write's backend did not say its process id");
-				lease.cancel = () => this.cancelBackend(pid);
+				const backend = backendOf(settings.at(-1));
+				lease.cancel = () => this.cancelBackend(backend);
 			}
 			const result = await fn(db);
 			if (lease.lost) throw lease.lost;
