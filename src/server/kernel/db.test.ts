@@ -712,15 +712,17 @@ test("closing cancels an exclusive callback's write waiting for a lock, which do
 	}
 });
 
-test("a cancel the network holds up holds up neither the aborted write nor closing", async () => {
+test("a cancel the network holds up holds up neither the aborted write nor closing, and no other is sent behind it", async () => {
 	// Every connection goes through this proxy, which keeps back what carries a cancel, as a stalled path would.
 	const sockets: Socket[] = [];
+	let held = 0;
 	const proxy = createServer((client) => {
 		const target = new URL(fixture.url);
 		const upstream = connect(Number(target.port), target.hostname);
 		sockets.push(client, upstream);
 		client.on("data", (data) => {
-			if (!data.includes("pg_cancel_backend")) upstream.write(data);
+			if (data.includes("pg_cancel_backend")) held++;
+			else upstream.write(data);
 		});
 		upstream.on("data", (data) => client.write(data));
 		client.on("error", () => {});
@@ -732,21 +734,24 @@ test("a cancel the network holds up holds up neither the aborted write nor closi
 	proxied.port = String((proxy.address() as AddressInfo).port);
 	const stalled = await Database.open({ url: proxied.toString(), writePool: 1 });
 	try {
-		const controller = new AbortController();
-		const reason = new Error("stopped by the test");
-		const entered = barrier();
-		const work = stalled.write(
-			(db) =>
-				db.transaction(async () => {
-					entered.release();
-					await db.allDynamic("SELECT pg_sleep(0.2)");
-				}),
-			{ signal: controller.signal },
-		);
-		await entered.promise;
-		controller.abort(reason);
-		await expect(work).rejects.toBe(reason);
+		for (let write = 0; write < 2; write++) {
+			const controller = new AbortController();
+			const reason = new Error("stopped by the test");
+			const entered = barrier();
+			const work = stalled.write(
+				(db) =>
+					db.transaction(async () => {
+						entered.release();
+						await db.allDynamic("SELECT pg_sleep(0.2)");
+					}),
+				{ signal: controller.signal },
+			);
+			await entered.promise;
+			controller.abort(reason);
+			await expect(work).rejects.toBe(reason);
+		}
 		await stalled.close();
+		expect(held).toBe(1);
 	} finally {
 		for (const socket of sockets) socket.destroy();
 		proxy.close();
