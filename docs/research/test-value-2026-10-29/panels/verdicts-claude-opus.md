@@ -85,7 +85,7 @@ yet the file review judged most "needs a browser" (`synth/scorecard.csv`).
 
 With deterministic thresholds and short or rule-answered history, the product will say `not-enough-evidence` for
 nearly every automated test. This repository has about 18 days of CI (2026-10-12 to 10-30, `ci/RESULT.md`), and CI
-answers every failure "needs a fix" by rule (`AGENTS.md`), so there are no person answers at all. Most of this
+answers every failure "needs a fix" by rule (`AGENTS.md`), so there are no person answers at all. *(Corrected later: the brief overstated this. Failures are normally answered by rule and nothing asks a person; whether any person answered is not known. See the research README.)* Most of this
 investigation's verdicts came from evidence the product never sees: operation maps, coverage, mutation, file review
 (`out/e2e-map/`, `out/phase2/`). The honest product might be (d) with facts only, no verdict field, leaving every verdict
 to outside agents that can read the code, through `claim`. Extending the finding locus also changes `claim`'s schema,
