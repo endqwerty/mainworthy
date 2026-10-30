@@ -712,49 +712,134 @@ test("closing cancels an exclusive callback's write waiting for a lock, which do
 	}
 });
 
-test("a cancel the network holds up holds up neither the aborted write nor closing, and no other is sent behind it", async () => {
-	// Every connection goes through this proxy, which keeps back what carries a cancel, as a stalled path would.
+/**
+ * A proxy for every connection of a database opened through `url`. Once a connection carries a cancel, everything it
+ * sends is kept back, as a stalled path would keep it, until `releaseFirst` sends the first query kept back (its
+ * protocol messages up to the Sync after its Execute) and its answer has come.
+ */
+async function holdingCancels() {
 	const sockets: Socket[] = [];
-	let held = 0;
+	const cancellers: { upstream: Socket; held: Buffer }[] = [];
+	let cancels = 0;
+	let answers = 0;
 	const proxy = createServer((client) => {
 		const target = new URL(fixture.url);
 		const upstream = connect(Number(target.port), target.hostname);
 		sockets.push(client, upstream);
+		let canceller: { upstream: Socket; held: Buffer } | undefined;
 		client.on("data", (data) => {
-			if (data.includes("pg_cancel_backend")) held++;
-			else upstream.write(data);
+			const bytes = Buffer.from(data);
+			if (bytes.includes("pg_cancel_backend")) {
+				cancels++;
+				if (!canceller) {
+					canceller = { upstream, held: Buffer.alloc(0) };
+					cancellers.push(canceller);
+				}
+			}
+			if (canceller) canceller.held = Buffer.concat([canceller.held, bytes]);
+			else upstream.write(bytes);
 		});
-		upstream.on("data", (data) => client.write(data));
+		upstream.on("data", (data) => {
+			if (canceller) answers++;
+			client.write(data);
+		});
 		client.on("error", () => {});
 		upstream.on("error", () => {});
 	});
 	await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
-	const proxied = new URL(fixture.url);
-	proxied.hostname = "127.0.0.1";
-	proxied.port = String((proxy.address() as AddressInfo).port);
-	const stalled = await Database.open({ url: proxied.toString(), writePool: 1 });
+	const url = new URL(fixture.url);
+	url.hostname = "127.0.0.1";
+	url.port = String((proxy.address() as AddressInfo).port);
+	return {
+		url: url.toString(),
+		/** Sends that carried a cancel's text, bytes kept back now, and answers the cancel connection has had. */
+		counts: () => ({ cancels, held: cancellers.reduce((sum, one) => sum + one.held.length, 0), answers }),
+		async releaseFirst() {
+			const [one] = cancellers;
+			if (!one) throw new Error("no cancel was kept back");
+			// Each frontend message is a type byte and a length that counts itself. Preparing ends in a Sync ("S") of its
+			// own, and the driver sends the Execute ("E") only once that is answered, so the query ends at the Sync after it.
+			let executed = false;
+			for (let waited = 0; waited < 5_000; waited += 10) {
+				let end = 0;
+				let ended = false;
+				while (end < one.held.length && !ended) {
+					const type = String.fromCharCode(one.held[end] ?? 0);
+					end += 1 + one.held.readInt32BE(end + 1);
+					executed ||= type === "E";
+					ended = executed && type === "S";
+				}
+				const seen = answers;
+				one.upstream.write(one.held.subarray(0, end));
+				one.held = one.held.subarray(end);
+				if (ended) {
+					while (answers === seen) await Bun.sleep(10);
+					return;
+				}
+				await Bun.sleep(10);
+			}
+			throw new Error("the first cancel was never sent whole");
+		},
+		end() {
+			for (const socket of sockets) socket.destroy();
+			proxy.close();
+		},
+	};
+}
+
+/** Starts a write that sleeps in its transaction, and hands it over once it has begun the sleep. */
+async function sleepingWrite(on: Database, signal: AbortSignal) {
+	const entered = barrier();
+	const work = on.write(
+		(db) =>
+			db.transaction(async () => {
+				entered.release();
+				await db.allDynamic("SELECT pg_sleep(0.2)");
+			}),
+		{ signal },
+	);
+	await entered.promise;
+	return { work };
+}
+
+test("a cancel the network holds up holds up neither the aborted write nor closing, and no other is sent behind it", async () => {
+	const proxy = await holdingCancels();
+	const stalled = await Database.open({ url: proxy.url, writePool: 1 });
 	try {
 		for (let write = 0; write < 2; write++) {
 			const controller = new AbortController();
 			const reason = new Error("stopped by the test");
-			const entered = barrier();
-			const work = stalled.write(
-				(db) =>
-					db.transaction(async () => {
-						entered.release();
-						await db.allDynamic("SELECT pg_sleep(0.2)");
-					}),
-				{ signal: controller.signal },
-			);
-			await entered.promise;
+			const { work } = await sleepingWrite(stalled, controller.signal);
 			controller.abort(reason);
 			await expect(work).rejects.toBe(reason);
 		}
 		await stalled.close();
-		expect(held).toBe(1);
+		expect(proxy.counts().cancels).toBe(1);
 	} finally {
-		for (const socket of sockets) socket.destroy();
-		proxy.close();
+		proxy.end();
+	}
+});
+
+test("closing waits for no cancel the network still holds, also after another held one was answered", async () => {
+	const proxy = await holdingCancels();
+	const stalled = await Database.open({ url: proxy.url, writePool: 2 });
+	try {
+		// Both abort before either cancel's wait ends, so both are sent; the second goes once the first is answered.
+		const controllers = [new AbortController(), new AbortController()];
+		const started = await Promise.all(controllers.map((controller) => sleepingWrite(stalled, controller.signal)));
+		for (const controller of controllers) controller.abort(new Error("stopped by the test"));
+		await Promise.all(started.map(({ work }) => work.catch(() => undefined)));
+		expect(proxy.counts().held).toBeGreaterThan(0);
+		await proxy.releaseFirst();
+		// The first cancel is answered; the second, whether the driver sent it already or sends it now, stays kept back.
+		for (let waited = 0; proxy.counts().held === 0; waited += 10) {
+			if (waited > 5_000) throw new Error("no second cancel was sent");
+			await Bun.sleep(10);
+		}
+		const closing = stalled.close().then(() => "closed");
+		expect(await Promise.race([closing, Bun.sleep(1_000).then(() => "still closing")])).toBe("closed");
+	} finally {
+		proxy.end();
 	}
 });
 

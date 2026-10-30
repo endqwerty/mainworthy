@@ -701,7 +701,9 @@ export class Database {
 	}
 	private canceller: SQL | undefined;
 	private readonly cancels = new Set<Promise<void>>();
-	/** Whether the network holds a cancel past `CANCEL_WAIT_MS`, until it is answered. */
+	/** Cancels sent and not yet answered. */
+	private unanswered = 0;
+	/** Whether one of them has gone unanswered past `CANCEL_WAIT_MS`; it stays so until none is left unanswered. */
 	private stalled = false;
 	/**
 	 * Cancels what backend `pid` runs. A cancel that fails leaves the statement to the deadline of whoever waits for it.
@@ -713,10 +715,17 @@ export class Database {
 	private cancelBackend(pid: number): Promise<void> {
 		if (this.stalled) return Promise.resolve();
 		this.canceller ??= new SQL(this.options.url, { bigint: true, max: 1 });
-		const answered = this.canceller.unsafe("SELECT pg_cancel_backend($1)", [pid]).then(
-			() => undefined,
-			() => undefined,
-		);
+		this.unanswered++;
+		const answered = this.canceller
+			.unsafe("SELECT pg_cancel_backend($1)", [pid])
+			.then(
+				() => undefined,
+				() => undefined,
+			)
+			.finally(() => {
+				this.unanswered--;
+				if (this.unanswered === 0) this.stalled = false;
+			});
 		const sent = (async () => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const late = new Promise<"late">((resolve) => {
@@ -724,12 +733,7 @@ export class Database {
 			});
 			const outcome = await Promise.race([answered, late]);
 			clearTimeout(timer);
-			if (outcome === "late") {
-				this.stalled = true;
-				void answered.then(() => {
-					this.stalled = false;
-				});
-			}
+			if (outcome === "late") this.stalled = true;
 		})().finally(() => this.cancels.delete(sent));
 		this.cancels.add(sent);
 		return sent;
@@ -997,7 +1001,8 @@ export class Database {
 		await Promise.all(this.activeWrites);
 		await Promise.all(this.cancels);
 		// A cancel the network still holds would hold this close too, so the canceller then ends once it is answered.
-		const canceller = this.stalled ? void this.canceller?.close().catch(() => undefined) : this.canceller?.close();
+		const canceller =
+			this.unanswered > 0 ? void this.canceller?.close().catch(() => undefined) : this.canceller?.close();
 		await Promise.all([
 			this.readers.close(),
 			this.writers.close(),
