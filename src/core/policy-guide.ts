@@ -2,7 +2,7 @@
 // The table is read from the presets' clauses, so it cannot say something a preset does not do. The sentences
 // are written by hand and restate the table (a test holds the table, so a changed preset shows up beside them).
 import { z } from "zod";
-import { ANSWER_LABELS, applicableAnswers, type Clause, clauseOf, type Facts } from "./kinds.ts";
+import { ANSWER_LABELS, applicableAnswers, type Clause, clauseOf, type Facts, type Predicate } from "./kinds.ts";
 import { PRESETS, type PresetName } from "./presets.ts";
 
 export const PRESET_SUMMARY: Record<PresetName, string> = {
@@ -106,3 +106,67 @@ export const PRESET_GUIDE: GuideRow[] = QUESTIONS.map(({ question, facts }) => (
 		strict: answeredBy("strict", facts),
 	},
 }));
+
+/** What each fixed predicate says of a proposal in `whyWaiting`; null where it is never a fact of one. */
+export const ADOPT_PREDICATES = {
+	always: "every edit",
+	"author:human": "a person's edit",
+	"author:agent": "an agent's edit",
+	"author:ci": "a pipeline's edit",
+	conflict: "an edit that conflicts with a newer version",
+	policy: "a change to the policy",
+	"scope:change": null,
+	"scope:trunk": null,
+	"scope:run": null,
+	"hint:disputed": null,
+	inherited: null,
+	"category:defect": null,
+	"verdict:passed": null,
+	"unlinked:track": null,
+	"unlinked:create": null,
+} satisfies Record<z.infer<(typeof Predicate.options)[0]>, string | null>;
+
+/**
+ * Why an open proposal is not in effect, from the clause that owns its question now (a reply's `asked`). Who
+ * answers is `whoAnswers`'s wording, so the guide and the queue say it alike. Null when a rule answers.
+ */
+export function whyWaiting(asked: {
+	policy: string;
+	clause: string;
+	when: string[];
+	ask: Clause["ask"];
+	ruled: boolean;
+}): string | null {
+	if (asked.ask.who === "rule") return null;
+	const who = lowerFirst(
+		whoAnswers({ id: asked.clause, kind: "adopt", when: asked.when, ask: asked.ask, blocks: "nothing" }),
+	);
+	let why: string;
+	if (asked.clause === "quarantine-person") why = `Every quarantine waits for ${who}.`;
+	else if (asked.clause === "refused-replay")
+		why = `Which folders and tags it touches is not known now, so it waits for ${who}.`;
+	else if (asked.ruled) why = `A rule would answer this, but its answer was set aside, so it waits for ${who}.`;
+	else {
+		const subject = ["policy", "conflict", "author:agent", "author:human", "author:ci"].find((p) =>
+			asked.when.includes(p),
+		);
+		const what = subject
+			? ADOPT_PREDICATES[subject as keyof typeof ADOPT_PREDICATES]
+			: asked.when.length === 1 && asked.when[0] === "always"
+				? "every edit"
+				: "an edit";
+		const folders = asked.when.filter((p) => p.startsWith("folder:")).map((p) => p.slice(7));
+		const tags = asked.when.filter((p) => p.startsWith("tag:")).map((p) => `#${p.slice(4)}`);
+		const scope = `${folders.length ? ` in ${folders.join(" and ")}` : ""}${tags.length ? ` tagged ${tags.join(" and ")}` : ""}`;
+		const policy = asked.policy === "custom" ? "this project's policy" : `the ${asked.policy} policy`;
+		why = `Under ${policy}, ${what}${scope} waits for ${who}.`;
+	}
+	return `Not in effect yet. ${why}`;
+}
+
+/**
+ * The line above a proposal's answers when the reader's answer counts. Who is asked is already said above it; what
+ * stays is the server's warning that accepting would be refused now (`needs` ends with it), which nothing else shows.
+ */
+export const yourAnswerCounts = (needs: string): string =>
+	`${["Your answer counts", ...needs.split("; ").filter((part) => part.startsWith("accepting refused:"))].join("; ")}.`;

@@ -1,6 +1,7 @@
 // What leaving a question unanswered costs, in a sentence, and which open questions can wait.
 // The queue prints it under a question's title, so nobody has to work out whether a row needs them today.
 import type { Kind } from "./kinds.ts";
+import { type ProposalTally, proposalSize } from "./proposals.ts";
 
 /**
  * Whether an open question of this kind is urgent. Only an unexplained failure is: it blocks every run that
@@ -21,7 +22,17 @@ export function waitingPhrase(counts: Readonly<Record<string, number>>): string 
 	if (failures === 0 && canWait === 0) return "nothing needs an answer";
 	const parts: string[] = [];
 	if (failures > 0) parts.push(`${failures} ${failures === 1 ? "failure" : "failures"} to explain`);
-	if (canWait > 0) parts.push(`${canWait} can wait`);
+	const adopt = counts.adopt ?? 0;
+	const agents = counts["adopt:agent"] ?? 0;
+	if (adopt) {
+		const label =
+			agents === adopt
+				? `${adopt} agent ${adopt === 1 ? "proposal" : "proposals"}`
+				: `${adopt} ${adopt === 1 ? "proposal" : "proposals"}${agents ? `, ${agents} by agents` : ""}`;
+		parts.push(`${label}${failures === 0 && canWait === adopt ? " can wait" : ""}`);
+	}
+	const rest = Math.max(0, canWait - adopt);
+	if (rest) parts.push(`${rest}${adopt ? " more" : ""} can wait`);
 	return parts.join(" · ");
 }
 
@@ -40,7 +51,12 @@ const named = (refs: readonly string[]): string =>
  * arrived, an older commit's among them, and a failing result stops counting when it is replaced, whatever the
  * outcome that replaces it. The guide describes those; a sentence that tried to was wrong in some case each time.
  */
-export function stakes(question: { kind: Kind; blocks: readonly string[]; facts: ReadonlySet<string> }): string {
+export function stakes(question: {
+	kind: Kind;
+	blocks: readonly string[];
+	facts: ReadonlySet<string>;
+	tally?: ProposalTally | undefined;
+}): string {
 	const { kind, blocks, facts } = question;
 	switch (kind) {
 		case "failure": {
@@ -53,6 +69,15 @@ export function stakes(question: { kind: Kind; blocks: readonly string[]; facts:
 			if (facts.has("policy")) return "Blocks nothing. Left alone, the policy stays as it is.";
 			if (facts.has("conflict"))
 				return "Blocks nothing. Left alone, the case stays as it is: the edit was made on an older version and waits for its author.";
+			if (question.tally && facts.has("quarantine"))
+				return "Blocks nothing. Left alone, the test stays as it is and the proposal waits.";
+			if (question.tally) {
+				const total = proposalSize(question.tally);
+				if (question.tally.create === total)
+					return "Blocks nothing. Left alone, no case is added and the proposal waits.";
+				if (!(total === 1 && (question.tally.edit || question.tally.restore)))
+					return "Blocks nothing. Left alone, nothing changes and the proposal waits.";
+			}
 			return "Blocks nothing. Left alone, the case stays as it is and the edit waits.";
 		case "finding":
 			return "Blocks nothing. Left alone, the finding stays on record with no answer.";

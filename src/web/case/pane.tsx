@@ -13,6 +13,8 @@ import {
 	METHOD_LABELS,
 } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
+import { whyWaiting } from "../../core/policy-guide.ts";
+import { ProposalTally, proposalSize } from "../../core/proposals.ts";
 import {
 	nullableNumber as schemaNullableNumber,
 	nullableText as schemaNullableText,
@@ -161,6 +163,9 @@ export function CasePane({
 		setPendingAnswer(null);
 	}
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
+	// The notice says what is open on this case now: never from another case's reply kept while this one loads,
+	// nor from one that failed.
+	const noticed = timeline.isError || timeline.isPlaceholderData ? [] : proposals;
 	const pendingQuestion = timelineData?.questions.find((q) => q.q === pendingAnswer?.question.q);
 	// Several failures can show a Create issue button; the key acts on the newest open one, so the keys list it once.
 	const issueKeyQuestion = timelineData?.questions
@@ -323,7 +328,7 @@ export function CasePane({
 						<span className="sv">
 							{waiting ? (
 								<>
-									Proposed, waiting for a person ·{" "}
+									Proposed, not in effect yet ·{" "}
 									<a
 										href={waitingUrl}
 										onClick={(event) => {
@@ -355,6 +360,7 @@ export function CasePane({
 							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
+					<ProposalNotice questions={noticed.filter((q) => q.q !== waiting)} viewer={session.actor} />
 					{ownedElsewhere && (
 						<div role="status">
 							<p>{elsewhereStatus}</p>
@@ -705,7 +711,7 @@ function ProposalCard({
 					{agent ? " · agent" : ""}
 				</b>
 				<p className="why">
-					Proposed, waiting for a person.{" "}
+					{whyWaiting(question.asked) ?? "Not in effect yet."}{" "}
 					{typeof question.evidence.reason === "string" ? question.evidence.reason : question.title}
 				</p>
 				<ProposalEdits question={question} />
@@ -991,5 +997,60 @@ function CaseProperties({
 			</label>
 			<div className="hintl">An agent's evidence counts only when the run admits it too.</div>
 		</details>
+	);
+}
+
+function ProposalNotice({ questions, viewer }: { questions: QuestionItem[]; viewer: string }) {
+	const { project } = useApp();
+	const first = questions[0];
+	if (!first) return null;
+	const agent = questions.some((q) => q.producer === "agent");
+	const author = typeof first.evidence.author === "string" ? first.evidence.author : "author";
+	const tally = ProposalTally.safeParse(first.evidence.tally).data;
+	const total = tally ? proposalSize(tally) : 0;
+	const see = refUrl({ project, ref: first.q });
+	return (
+		<div className={`case-proposal-notice ${agent ? "agent-proposal" : ""}`}>
+			{agent && (
+				<>
+					<ProducerGlyph kind="agent" />{" "}
+				</>
+			)}
+			{questions.length > 1
+				? `${questions.length} proposed changes to this case are not in effect yet. `
+				: `${first.producer === "agent" ? `${author}, an agent,` : first.producer === "ci" ? "The pipeline" : author === viewer ? "You" : author} proposed a change to this case. It is not in effect yet. `}
+			{questions.length === 1 && total > 1 && (
+				<>
+					Accepting applies all {total} changes in {String(first.evidence.proposal)}.{" "}
+				</>
+			)}
+			<a
+				href={see}
+				onClick={(event) => {
+					event.preventDefault();
+					const card = document.querySelector(`[data-proposal="${CSS.escape(first.q)}"]`);
+					if (card) card.scrollIntoView({ block: "start" });
+					else navigate(see);
+				}}
+			>
+				{questions.length === 1 ? "See the change" : "See them"}
+			</a>{" "}
+			·{" "}
+			{questions.slice(0, 3).map((q, i) => (
+				<span key={q.q}>
+					{i > 0 && ", "}
+					<a
+						href={refUrl({ project, ref: q.q })}
+						onClick={(event) => {
+							event.preventDefault();
+							navigate(refUrl({ project, ref: q.q }));
+						}}
+					>
+						{q.q}
+					</a>
+				</span>
+			))}
+			{questions.length > 3 && ` and ${questions.length - 3} more`}
+		</div>
 	);
 }

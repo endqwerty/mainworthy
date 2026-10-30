@@ -84,7 +84,13 @@ function recordProposalShown(evidence: HTMLElement, parts: Iterable<ShownPart>):
 		if (box.right <= area.left || box.left >= area.right) continue;
 		// Short or tall, a part is read only where it was on screen: a fast scroll that showed only its bottom
 		// edge does not count the rest.
-		coverRange(part, Math.max(0, area.top - box.top), Math.min(box.height, area.bottom - box.top));
+		let start = Math.max(0, area.top - box.top);
+		let end = Math.min(box.height, area.bottom - box.top);
+		const x = (Math.max(box.left, area.left) + Math.min(box.right, area.right)) / 2;
+		const exposed = (y: number) => part.element.contains(document.elementFromPoint(x, box.top + y));
+		while (start < end && !exposed(start + 0.5)) start += 1;
+		while (end > start && !exposed(end - 0.5)) end -= 1;
+		coverRange(part, start, end);
 		if (partShown(part)) state.unread.delete(part);
 	}
 	evidence.dataset.proposalRead = state.unread.size === 0 ? "ready" : "loaded";

@@ -34,3 +34,28 @@ test("every kind of question says what leaving it costs, and only a failure bloc
 	expect(adopt(["policy"])).toContain("the policy stays as it is");
 	expect(adopt(["conflict"])).toContain("waits for its author");
 });
+
+test("proposals have their own queue segment", () => {
+	for (const [failure, adopt, agent, rest, phrase] of [
+		[2, 3, 3, 63, "2 failures to explain · 3 agent proposals · 63 more can wait"],
+		[2, 3, 2, 63, "2 failures to explain · 3 proposals, 2 by agents · 63 more can wait"],
+		[2, 1, 0, 63, "2 failures to explain · 1 proposal · 63 more can wait"],
+		[0, 1, 1, 0, "1 agent proposal can wait"],
+		[0, 2, 0, 0, "2 proposals can wait"],
+		[1, 0, 0, 104, "1 failure to explain · 104 can wait"],
+		[0, 0, 0, 0, "nothing needs an answer"],
+	] as const)
+		expect(waitingPhrase({ open: failure + adopt + rest, failure, adopt, "adopt:agent": agent })).toBe(phrase);
+});
+test("adoption stakes describe the changes that wait", () => {
+	for (const [tally, facts, text] of [
+		[{ create: 3 }, [], "no case is added and the proposal waits"],
+		[{ create: 1, edit: 1 }, [], "nothing changes and the proposal waits"],
+		[{ quarantine: 1 }, ["quarantine"], "the test stays as it is and the proposal waits"],
+		[{ edit: 1 }, [], "the case stays as it is and the edit waits"],
+		[{ restore: 1 }, [], "the case stays as it is and the edit waits"],
+		[{ policy: 1 }, ["policy"], "the policy stays as it is"],
+		[{ edit: 1 }, ["conflict"], "waits for its author"],
+	] as const)
+		expect(stakes({ kind: "adopt", blocks: [], facts: new Set(facts), tally })).toContain(text);
+});

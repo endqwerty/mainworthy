@@ -389,6 +389,9 @@ const Q = {
 	openCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0",
 	),
+	openAgentAdopts: sql<{ project: number }, { n: number }>(
+		"SELECT count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0 AND kind = 'adopt' AND producer = 'agent'",
+	),
 	openByKind: sql<{ project: number }, { kind: Kind; n: number }>(
 		"SELECT kind, count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0 GROUP BY kind",
 	),
@@ -769,6 +772,8 @@ export const openQuestionIds = async (db: ReadDb, project: number, kind: Kind): 
 export async function openCounts(db: ReadDb, project: number): Promise<Record<string, number>> {
 	const counts: Record<string, number> = { open: (await db.get(Q.openCount, { project }))?.n ?? 0 };
 	for (const row of await db.all(Q.openByKind, { project })) counts[row.kind] = row.n;
+	const agents = (await db.get(Q.openAgentAdopts, { project }))?.n ?? 0;
+	if (agents) counts["adopt:agent"] = agents;
 	return counts;
 }
 

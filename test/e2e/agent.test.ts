@@ -329,7 +329,7 @@ for (const surface of ["case", "queue"] as const)
 			view = await openPage(server, { path: `/p/scratch/queue/${proposed.question?.slice(2)}` });
 			await view.page.locator(".prop .diff").waitFor();
 			expect(await view.page.locator(".prop .diff").innerText()).toContain("$90.00");
-			expect(await view.page.locator(".prop").innerText()).toContain("writer proposes");
+			expect(await view.page.locator(".prop").innerText()).toContain("writer, an agent, proposes this");
 			// The reply to the answer is held, so the server has the adopted version while the page has not yet
 			// recorded its answer: the order in which a fast person presses u.
 			await view.page.route("**/decide", async (route) => {

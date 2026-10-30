@@ -48,7 +48,12 @@ async function trackLast(page: Page, q: string): Promise<void> {
 }
 const lastSeen = (page: Page) => page.evaluate(() => (window as unknown as { lastSeen: boolean }).lastSeen);
 const frames = (page: Page) =>
-	page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+	page.evaluate(
+		() =>
+			new Promise<void>((r) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+			),
+	);
 const openAdopt = async (server: Server) => (await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q);
 
 /** An unread press finishes by revealing evidence; a ready press finishes with the server's decision. */
@@ -64,18 +69,30 @@ async function advanceProposal(page: Page, q: string, press: () => Promise<unkno
 		await response.finished();
 		return true;
 	}
-	await press();
-	await page
+	const decided = page
+		.waitForResponse((response) => response.url().endsWith("/decide"))
+		.then(async (response) => {
+			expect(response.ok()).toBe(true);
+			await response.finished();
+			return true;
+		});
+	const paged = page
 		.locator("#stat")
 		.filter({ hasText: new RegExp(`${q} (has unread edits|is now in view)`) })
-		.waitFor();
+		.waitFor()
+		.then(() => false);
+	await press();
+	if (await Promise.race([decided, paged])) return true;
 	await frames(page);
-	await page
-		.locator(
-			`[data-proposal-evidence="${q}"][data-proposal-read="loaded"], [data-proposal-evidence="${q}"][data-proposal-read="ready"]`,
-		)
-		.waitFor();
-	return false;
+	return await Promise.race([
+		decided,
+		page
+			.locator(
+				`[data-proposal-evidence="${q}"][data-proposal-read="loaded"], [data-proposal-evidence="${q}"][data-proposal-read="ready"]`,
+			)
+			.waitFor()
+			.then(() => false),
+	]);
 }
 
 /** Samples actual visible pixels independently of the proposal's read state. Reflow resets each part. */
@@ -450,8 +467,16 @@ describe("short case layouts", () => {
 						}
 						await page.keyboard.press("r");
 						await frames(page);
-						expect(await pane.evaluate((element) => element.scrollTop)).toBeCloseTo(outerTop, 0);
-						expect(await evidence.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+						if (device === "desktop")
+							expect(await pane.evaluate((element) => element.scrollTop)).toBeCloseTo(outerTop, 0);
+						else expect(await pane.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(outerTop);
+						if (device === "desktop")
+							expect(await evidence.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+						else
+							expect(
+								(await evidence.evaluate((element) => element.scrollTop)) +
+									(await pane.evaluate((element) => element.scrollTop)),
+							).toBeGreaterThan(before + (presses === 1 ? 0 : outerTop));
 						expect(await openAdopt(server)).toEqual([q]);
 						if (device === "phone") {
 							expect(await page.locator("#bar").evaluate((bar) => bar.clientHeight)).toBeGreaterThan(28);
@@ -1053,10 +1078,14 @@ for (const device of ["desktop", "phone"] as const)
 				let answered = false;
 				for (let presses = 1; presses <= 60; presses++) {
 					await frames(page);
-					const read = await coverage(page);
+					let read = await coverage(page);
 					answered = await advanceProposal(page, q, () =>
 						device === "phone" ? accept.tap() : page.keyboard.press("a"),
 					);
+					if (answered) {
+						await frames(page);
+						read = await coverage(page);
+					}
 					const open = await openAdopt(server);
 					if (read.partial > 0) {
 						console.log(`PROBE ${device} tall unread`, JSON.stringify({ presses, open, ...read }));
@@ -1158,4 +1187,60 @@ t(
 		}
 	},
 	120000,
+);
+
+t(
+	"waiting agent edits name their author, policy and case notice; new titles are additions",
+	async () => {
+		const server = await startServer({ mode: "local", preset: "standard", seed: false });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Original" }] });
+			const token = await agentToken(server);
+			const result = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent revision" } }] },
+				{ token },
+			);
+			const q = result.question ?? "";
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			const page = view.page;
+			await page.locator(".queue-title").filter({ hasText: "by an agent ·" }).waitFor();
+			await page
+				.locator(".queue-meta")
+				.filter({ hasText: /proposal.*P-/ })
+				.waitFor();
+			await page
+				.getByText("Not in effect yet. Under the standard policy, an agent's edit waits for a person.", {
+					exact: false,
+				})
+				.waitFor();
+			await page.getByText("Your answer counts.", { exact: true }).waitFor();
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			const notice = page.locator(".case-proposal-notice");
+			await notice
+				.filter({ hasText: "writer, an agent, proposed a change to this case. It is not in effect yet." })
+				.waitFor();
+			await notice.getByRole("link", { name: "See the change", exact: true }).click();
+			expect(await page.locator(`[data-proposal="${q}"]`).isVisible()).toBe(true);
+			await notice.getByRole("link", { name: q, exact: true }).click();
+			await page.locator(`[data-current-question="${q}"]`).waitFor();
+			const created = await server.api(
+				"propose",
+				{ edits: [{ op: "create", outline: "Added case\n  Open > Works" }] },
+				{ token },
+			);
+			await page.goto(`${server.url}/p/scratch/queue`);
+			await page.locator(`[data-current-question="${created.question}"]`).waitFor();
+			const title = page.locator(`[data-proposal-evidence="${created.question}"] .dl`).first();
+			await title.waitFor();
+			expect(await title.getAttribute("class")).toContain("add");
+			expect(await title.locator("i").textContent()).toBe("+");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
 );

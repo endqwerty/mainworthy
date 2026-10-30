@@ -4,7 +4,7 @@ import { ArtifactCode, MergeReceipt, MergeReceiptResult } from "./changes.ts";
 import { CsvImportRow } from "./csv-replies.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
-import { ActorKind, FixedIn, Kind, Policy, Unlinked } from "./kinds.ts";
+import { ActorKind, Ask, FixedIn, Kind, Policy, Predicate, Unlinked } from "./kinds.ts";
 import {
 	Automate,
 	CaseBody,
@@ -212,6 +212,7 @@ const DecisionItem = z.object({
 });
 
 export const QuestionItem = z.object({
+	asked: z.object({ policy: schemaText, clause: schemaText, when: z.array(Predicate), ask: Ask, ruled: z.boolean() }),
 	approvalNeeded: schemaNumber.optional(),
 	approvals: z.array(ApprovalSigner).optional(),
 	q: schemaText,

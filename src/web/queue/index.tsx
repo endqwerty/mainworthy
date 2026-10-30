@@ -13,6 +13,8 @@ import {
 	KINDS,
 	type Kind,
 } from "../../core/kinds.ts";
+import { whyWaiting, yourAnswerCounts } from "../../core/policy-guide.ts";
+import { adoptHelp, ProposalTally } from "../../core/proposals.ts";
 import { type InboxReply, QuestionItem } from "../../core/replies.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
@@ -24,7 +26,7 @@ import { answerShown } from "../lib/proposals.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { AnswerExtra } from "../ui/answer-extra.tsx";
 import { useApp } from "../ui/context.tsx";
-import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
+import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import {
 	evidenceMessage,
 	FindingEvidence,
@@ -266,7 +268,11 @@ function QueueWorkbench() {
 					...previous.counts,
 					open: Math.max(0, (previous.counts.open ?? 0) - entries.length),
 				};
-				for (const entry of entries) counts[entry.question.kind] = Math.max(0, (counts[entry.question.kind] ?? 0) - 1);
+				for (const { question } of entries) {
+					counts[question.kind] = Math.max(0, (counts[question.kind] ?? 0) - 1);
+					if (question.kind === "adopt" && question.producer === "agent")
+						counts["adopt:agent"] = Math.max(0, (counts["adopt:agent"] ?? 0) - 1);
+				}
 				return { ...previous, counts, items: previous.items.filter((item) => !refs.has(item.q)) };
 			},
 		);
@@ -879,13 +885,16 @@ function QueueWorkbench() {
 	/** What "Select all" in the bar would select: the listed questions of the selection's kind, as many as one answer sends. */
 	const selectable = bulk && selection[0] ? capped(allOfKind(items, selection[0].kind, alone)).kept : [];
 	const selectableRefs = new Set(selectable);
-	const help: Readonly<Record<string, string>> = answerKind ? ANSWER_HELP[answerKind] : {};
+	const help: Readonly<Record<string, string>> =
+		answerKind === "adopt" && current ? adoptHelp(current.evidence) : answerKind ? ANSWER_HELP[answerKind] : {};
 	return (
 		<>
 			<section className="pane queue-pane" id="list">
 				<div className="phead">
 					<b>Queue</b>
-					<span className="dim">{waitingPhrase(counts)}</span>
+					<span className="dim queue-waiting" title={waitingPhrase(counts)}>
+						{waitingPhrase(counts)}
+					</span>
 					<div className="queue-state">
 						<button
 							type="button"
@@ -998,7 +1007,10 @@ function QueueWorkbench() {
 								<ProducerGlyph kind={question.producer} />
 								<span className="ref">{question.q}</span>
 								<span className={`kind k-${question.kind}`}>{KIND_WORDS[question.kind].tag}</span>
-								<span className="queue-title">{question.title}</span>
+								<span className="queue-title">
+									{question.producer === "agent" && <span className="agentv">by an agent · </span>}
+									{question.title}
+								</span>
 								<span className="queue-case ref">{question.about.find((ref) => ref.startsWith("C-"))}</span>
 								{question.state === "open" && question.blocks.length > 0 && <span className="blk">blocks gate</span>}
 								<span className="queue-age">{age(question.openedAt)}</span>
@@ -1042,6 +1054,9 @@ function QueueWorkbench() {
 									{current.q}
 								</span>
 								<span className={`kind k-${current.kind}`}>{KIND_WORDS[current.kind].tag}</span>
+								{current.kind === "adopt" && typeof current.evidence.proposal === "string" && (
+									<span className="ref">{current.evidence.proposal}</span>
+								)}
 								<ProducerGlyph kind={current.producer} />
 								<span className="dim">{age(current.openedAt)}</span>
 								{current.state === "open" && current.blocks.length > 0 && (
@@ -1053,9 +1068,15 @@ function QueueWorkbench() {
 								<p className="queue-stakes">
 									{stakes({
 										kind: current.kind,
+										tally: ProposalTally.safeParse(current.evidence.tally).data,
 										blocks: current.blocks,
 										facts: new Set(z.array(z.string()).safeParse(current.evidence.facts).data ?? []),
 									})}
+								</p>
+							)}
+							{current.state === "open" && current.kind === "adopt" && whyWaiting(current.asked) && (
+								<p className="queue-why">
+									{whyWaiting(current.asked)} <DocLink page="policy">How policies work</DocLink>
 								</p>
 							)}
 						</div>
@@ -1144,7 +1165,12 @@ function QueueWorkbench() {
 											? `You cannot settle this. Needs ${current.needs}.`
 											: current.you === "advice"
 												? `Your answer is advice. Needs ${current.needs}.`
-												: `Needs ${current.needs}.`}
+												: current.kind === "adopt" &&
+														current.state === "open" &&
+														current.you === "counts" &&
+														selected.size <= 1
+													? yourAnswerCounts(current.needs)
+													: `Needs ${current.needs}.`}
 								</div>
 								{offered.map(({ key, is, why }) => (
 									<button

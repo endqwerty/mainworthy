@@ -313,3 +313,15 @@
 .queue-handoff .outs {
 	margin: 10px 0 4px;
 }
+
+.queue-waiting {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.queue-why {
+	margin: 0 0 4px;
+	font-size: 12px;
+	max-width: 78ch;
+}
