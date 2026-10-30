@@ -714,9 +714,11 @@ test("closing cancels an exclusive callback's write waiting for a lock, which do
 /** Starts a write that sleeps in its transaction, and hands it over once it has begun the sleep. */
 async function sleepingWrite(on: Database, signal: AbortSignal) {
 	const entered = barrier();
+	let pid = 0;
 	const work = on.write(
 		(db) =>
 			db.transaction(async () => {
+				pid = (await db.one(Q.pid)).pid;
 				entered.release();
 				await db.allDynamic("SELECT pg_sleep(1)");
 				return "slept";
@@ -724,15 +726,15 @@ async function sleepingWrite(on: Database, signal: AbortSignal) {
 		{ signal },
 	);
 	await entered.promise;
-	return { work };
+	return { work, pid };
 }
 
-test("a cancel through a session-bound connection stops only that connection's statement", async () => {
+test("a cancel through a session-bound connection stops only that connection's statement, and that connection is not used again", async () => {
 	const two = await Database.open({ url: fixture.url, writePool: 2 });
 	try {
 		const stopped = new AbortController();
 		const reason = new Error("stopped by the test");
-		const [{ work: cancelled }, { work: sleeping }] = await Promise.all([
+		const [{ work: cancelled, pid }, { work: sleeping }] = await Promise.all([
 			sleepingWrite(two, stopped.signal),
 			sleepingWrite(two, new AbortController().signal),
 		]);
@@ -741,6 +743,15 @@ test("a cancel through a session-bound connection stops only that connection's s
 		await expect(cancelled).rejects.toBe(reason);
 		expect(performance.now() - started).toBeLessThan(500);
 		expect(await sleeping).toBe("slept");
+		// A late cancel could stop the next statement on that connection, so it is closed and its backend ends.
+		for (let waited = 0; ; waited += 10) {
+			const [row] = await databaseAdmin(adminUrl, (admin) =>
+				admin.all<{ n: number }>("SELECT count(*) AS n FROM pg_stat_activity WHERE pid = $1", [pid]),
+			);
+			if (Number(row?.n) === 0) break;
+			if (waited > 2_000) throw new Error("the connection that sent a cancel is still open");
+			await Bun.sleep(10);
+		}
 	} finally {
 		await two.close();
 	}
