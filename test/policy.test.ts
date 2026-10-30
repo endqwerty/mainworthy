@@ -1307,7 +1307,7 @@ describe("agent edits", () => {
 
 		const q = first((await queue()).items);
 		expect(q).toMatchObject({ kind: "adopt", producer: "agent" });
-		expect(q.asked).toMatchObject({ clause: "adopt-agent", ruled: false, hidden: 0 });
+		expect(q.asked).toMatchObject({ clause: "adopt-agent", ruled: false, hidden: 0, special: null });
 		expect((await queue()).counts["adopt:agent"]).toBe(1);
 		const own = await h.call<{ status: string }[]>(
 			"decide",

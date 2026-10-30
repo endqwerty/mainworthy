@@ -132,18 +132,19 @@ export const ADOPT_PREDICATES = {
  */
 export function whyWaiting(asked: {
 	clause: string;
-	when: string[];
+	when: readonly string[];
 	ask: Clause["ask"];
 	ruled: boolean;
 	hidden: number;
+	special: "quarantine" | "refused-replay" | null;
 }): string | null {
 	if (asked.ask.who === "rule") return null;
 	const who = lowerFirst(
-		whoAnswers({ id: asked.clause, kind: "adopt", when: asked.when, ask: asked.ask, blocks: "nothing" }),
+		whoAnswers({ id: asked.clause, kind: "adopt", when: [...asked.when], ask: asked.ask, blocks: "nothing" }),
 	);
 	let why: string;
-	if (asked.clause === "quarantine-person") why = `Every quarantine waits for ${who}.`;
-	else if (asked.clause === "refused-replay")
+	if (asked.special === "quarantine") why = `Every quarantine waits for ${who}.`;
+	else if (asked.special === "refused-replay")
 		why = `Which folders and tags it touches is not known now, so it waits for ${who}.`;
 	else if (asked.ruled) why = `A rule would answer this, but its answer was set aside, so it waits for ${who}.`;
 	else {
