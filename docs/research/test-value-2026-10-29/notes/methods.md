@@ -108,6 +108,8 @@ percentage saved.
 ## M6. Mutation: the unique kill set (detection ability)
 
 - **Inputs:** source under test, the tests, a mutation tool producing per-test kill data.
+  *Corrected later ([panels/mutation-codex-sol.md](../panels/mutation-codex-sol.md)): the formula needs every
+  covering test run against each mutant; a report's `killedBy` may list only the first test that failed.*
 - **Formula:** `K(t)` = mutants killed by `t`. `unique_kills(t) = |K(t) \ union_{s != t} K(s)|`. Suite mutation score
   `= killed / (total - equivalent)`. `unique_kills(t) = 0` with `|K(t)| > 0` means `t` is redundant for those mutants.
 - **Failure modes:** equivalent mutants (undetectable by design; Google found 85% of reported mutants unproductive before

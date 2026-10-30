@@ -63,8 +63,9 @@ unknown. Git history reaches back only to 2026-10-09.
 The deciding gap: since 2026-10-20 this repository's CI answers every failure "needs a fix" by rule
 ([docs/deploy.md](../../deploy.md), the CI policy). A person can overrule that answer, but nothing asks them to.
 The current instance started empty on 2026-10-28 ([docs/render-migration.md](../../render-migration.md)), and this
-research did not read it. So recent failures are normally answered by rule, and nothing records why a test
-failed. That answer is the one signal no competitor records, and this repository does not collect it.
+research did not read it. So recent failures are normally answered by rule, and no step asks anyone why a test
+failed. A person may have answered some failures, but how many is not known. Answers about why a test failed are
+the one signal no competitor records, and this repository has no step that collects them.
 
 ### Server operations cannot tell browser tests apart
 
@@ -197,7 +198,7 @@ An agent's finding is labelled as the agent's, and a destructive action needs a 
 ## What is not established
 
 - Defect yield per test layer for a web app like this one; no study was found.
-- Any calibration of the gates: this repository has about 18 days of CI history and no failure answered by a person.
+- Any calibration of the gates: this repository has about 18 days of CI history, and its instance was not read for answers given by a person.
 - Whether the 11 surviving mutants are real gaps or mutants with no observable effect.
 - Runner-seconds saved by any reduction. No reduced suite was run in CI.
 - Manual-case methods (staleness, near-duplicates) were not tried on real manual data. This repository has none.
