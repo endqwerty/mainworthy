@@ -1223,6 +1223,25 @@ t(
 				.waitFor();
 			await notice.getByRole("link", { name: "See the change", exact: true }).click();
 			expect(await page.locator(`[data-proposal="${q}"]`).isVisible()).toBe(true);
+			// Focus scrolled to a link of the card stops above its sticky answers, at every window height where the
+			// link would otherwise land under them (CI's accessibility check found it at one; WCAG 2.4.11).
+			const ref = page.locator(`[data-proposal="${q}"] a.ref`).first();
+			const covered: number[] = [];
+			for (let height = 700; height <= 860; height += 4) {
+				await page.setViewportSize({ width: 1280, height });
+				await page.evaluate(() => {
+					for (const pane of document.querySelectorAll(".pane-scroll")) pane.scrollTop = 0;
+				});
+				await ref.focus();
+				const shown = await ref.evaluate((node) => {
+					const box = node.getBoundingClientRect();
+					const above = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+					return above === node || node.contains(above);
+				});
+				if (!shown) covered.push(height);
+			}
+			expect(covered).toEqual([]);
+			await page.setViewportSize({ width: 1280, height: 800 });
 			await notice.getByRole("link", { name: q, exact: true }).click();
 			await page.locator(`[data-current-question="${q}"]`).waitFor();
 			const created = await server.api(
