@@ -17109,11 +17109,11 @@ For more information, please refer to <http://unlicense.org>
 
 ### diff-match-patch cleanup semantic port 1.4.4
 
-Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/test_runner/diff/text_diff.rs>
+Apache-2.0. <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/text_diff/lib.rs>
 
 `LICENSE-APACHE`: the same text as `LICENSE-APACHE` of encoding_rs 0.8.35.
 
-`text_diff.rs.licence.txt`:
+`lib.rs.licence.txt`:
 
 ```text
 //! Line- and character-level diffing for test-runner output.
@@ -21709,7 +21709,7 @@ SOFTWARE.
 
 ### Port of crate fast-glob 1.1.1
 
-MIT. <https://github.com/oxc-project/fast-glob/blob/c8b8711a2bd7b86cb2fed7900469d7e799ed868c/LICENSE>
+MIT. <https://github.com/oxc-project/fast-glob/blob/3b6c31c39a676257fd1d95c338025b64f3f0395a/LICENSE>
 
 `LICENSE`:
 
