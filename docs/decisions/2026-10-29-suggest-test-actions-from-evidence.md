@@ -2,6 +2,7 @@
 
 - Date: 2026-10-29
 - Status: proposed
+- PR: https://github.com/endqwerty/mainworthy/pull/1114
 
 The owner asked whether Mainworthy helps a team decide which tests to keep, delete or refactor, and chose that it
 should "recommend verdicts but make sure the evidence is clear", for automated tests and manual cases.
