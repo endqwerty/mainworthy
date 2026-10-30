@@ -5,6 +5,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { localStarts } from "../src/server/identity/attempts.ts";
 import { startAddressKey } from "../src/server/identity/limiter.ts";
+import { type FakeServer, fakeServer } from "./fake-server.ts";
 import { provider } from "./oidc-support.ts";
 import {
 	authorize,
@@ -235,20 +236,16 @@ test("provider discovery cannot extend an admitted ceremony beyond its original 
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
 	});
-	const proxy: ReturnType<typeof Bun.serve> = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(): Promise<Response> {
-			arrived();
-			await held;
-			const metadata = await fetch(`${idp.issuer}/.well-known/openid-configuration`);
-			return new Response((await metadata.text()).replaceAll(idp.issuer, `http://127.0.0.1:${proxy.port}`), {
-				headers: { "content-type": "application/json" },
-			});
-		},
+	const proxy: FakeServer = fakeServer(async () => {
+		arrived();
+		await held;
+		const metadata = await fetch(`${idp.issuer}/.well-known/openid-configuration`);
+		return new Response((await metadata.text()).replaceAll(idp.issuer, proxy.url), {
+			headers: { "content-type": "application/json" },
+		});
 	});
 	try {
-		const w = await world({ idp, oidc: { issuer: `http://127.0.0.1:${proxy.port}` }, proxied: true });
+		const w = await world({ idp, oidc: { issuer: proxy.url }, proxied: true });
 		const waiting = w.post("/api/login/oidc", {}, client);
 		await discovery;
 		w.clock.advance(300_000);
@@ -259,7 +256,7 @@ test("provider discovery cannot extend an admitted ceremony beyond its original 
 		expect((await w.post("/api/login/oidc", {}, client)).status).toBe(200);
 	} finally {
 		release();
-		await proxy.stop(true);
+		await proxy.stop();
 	}
 });
 
