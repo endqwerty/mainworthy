@@ -1,7 +1,7 @@
 # Source of the parts Mainworthy ships under copyleft licences
 
 The executable, and the container image published to `ghcr.io/endqwerty/mainworthy` that carries it, include the
-Bun 1.4.3 runtime and what it links (`licences/README.md`, "The Bun audit"). Some of those parts are under the
+Bun 1.4.4 runtime and what it links (`licences/README.md`, "The Bun audit"). Some of those parts are under the
 LGPL or the MPL, which ask that whoever receives the executable or the image can get their source, and for the
 LGPL, can link a changed version of the library again. This page is how Mainworthy meets that. The owner settled
 it on 2026-10-23 ([#234](https://github.com/endqwerty/mainworthy/issues/234)).
@@ -17,14 +17,14 @@ the complete build: it compiles the executable with `bun build --compile` using 
 
 | Part | Licence | Source at the shipped revision |
 | --- | --- | --- |
-| JavaScriptCore and WTF (Bun's fork of WebKit) | LGPL-2.0-or-later AND BSD-2-Clause | <https://github.com/oven-sh/WebKit/tree/0c06faadf65bf8e8c8ad3a5a8aca83e1e9ed653f> |
-| WebCore files and bindings Bun copied | LGPL-2.0-or-later | <https://github.com/oven-sh/bun/tree/c6da4a4d3010e5553438c60f6bd76d981976867c/src/jsc/bindings> |
+| JavaScriptCore and WTF (Bun's fork of WebKit) | LGPL-2.0-or-later AND BSD-2-Clause | <https://github.com/oven-sh/WebKit/tree/d6375c72affe0f70222cdcb45012b10f0bf3a9d5> |
+| WebCore files and bindings Bun copied | LGPL-2.0-or-later | <https://github.com/oven-sh/bun/tree/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/jsc/bindings> |
 | TinyCC | LGPL-2.1-or-later | <https://github.com/oven-sh/tinycc/tree/05f0fafaa3be31e31d7b4b5c17dc60f62c991171> |
-| TinyCC's runtime source, `libtcc1.c`, embedded as text | GPL-2.0-or-later with TinyCC's linking exception | <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/src/runtime/ffi/libtcc1.c> |
-| CSS code derived from Lightning CSS and Servo | MPL-2.0 | <https://github.com/oven-sh/bun/tree/c6da4a4d3010e5553438c60f6bd76d981976867c/src/css> |
-| Mozilla's certificate list | MPL-2.0 | <https://github.com/oven-sh/bun/blob/c6da4a4d3010e5553438c60f6bd76d981976867c/packages/bun-usockets/certdata.txt> |
+| TinyCC's runtime source, `libtcc1.c`, embedded as text | GPL-2.0-or-later with TinyCC's linking exception | <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/ffi/libtcc1.c> |
+| CSS code derived from Lightning CSS and Servo | MPL-2.0 | <https://github.com/oven-sh/bun/tree/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/css> |
+| Mozilla's certificate list | MPL-2.0 | <https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/packages/bun-usockets/certdata.txt> |
 | The crates `cssparser` 0.36.0, `selectors` 0.33.0 and `dtoa-short` 0.3.5 | MPL-2.0 | <https://static.crates.io/crates/cssparser/cssparser-0.36.0.crate>, <https://static.crates.io/crates/selectors/selectors-0.33.0.crate>, <https://static.crates.io/crates/dtoa-short/dtoa-short-0.3.5.crate> |
-| Bun itself, which builds all of these into its runtime | MIT, as Bun's `LICENSE.md` states | <https://github.com/oven-sh/bun/tree/c6da4a4d3010e5553438c60f6bd76d981976867c> (tag `bun-v1.4.3`) |
+| Bun itself, which builds all of these into its runtime | MIT, as Bun's `LICENSE.md` states | <https://github.com/oven-sh/bun/tree/38afee6c84fcf48c0edb2466aa4b27d287a59c30> (tag `bun-v1.4.4`) |
 
 The licence texts and notices of every part are in `THIRD-PARTY-NOTICES.md`, which ships in the image at
 `/usr/share/doc/mainworthy/` and inside the executable, served at `/docs/licence`. The compilers' runtime

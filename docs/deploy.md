@@ -301,7 +301,7 @@ security update, so they would not keep an old commit buildable.
 To resolve a new image digest, inspect its tag:
 
 ```
-docker buildx imagetools inspect oven/bun:1.4.3
+docker buildx imagetools inspect oven/bun:1.4.4
 docker buildx imagetools inspect debian:bookworm-slim
 docker buildx imagetools inspect tailscale/tailscale:stable
 ```

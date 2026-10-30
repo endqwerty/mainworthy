@@ -138,7 +138,7 @@ inspected (`licences/README.md`).
 | Ships in | What | Licences |
 | --- | --- | --- |
 | The executable, and of those the web UI a browser loads takes some | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-3-Clause, CC0-1.0 |
-| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 84 npm packages it embeds for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (giving it to others is settled below) |
+| The executable | The Bun runtime 1.4.4 and what it links: 356 parts, among them 65 Rust crates, 84 npm packages it embeds for its Node.js fallbacks, and the code its formatter and linter port from Prettier, ESLint and their plugins (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (giving it to others is settled below) |
 | The pages at `/docs` | Archify 3.0.1's viewer and the JetBrains Mono font in the diagrams; the privacy policy, adapted from Basecamp's policies | MIT, OFL-1.1, CC-BY-4.0 |
 
 None of these places a condition on Mainworthy's own licence. The container's base image, `debian:bookworm-slim`,

@@ -146,7 +146,7 @@ describe("the third-party notices", () => {
 		// `bun run build` runs `prebuild` first; `build` stays the one command the Dockerfile runs too.
 		expect(prebuild).toBe("bun scripts/licences.ts --check-bun");
 		expect(bunMismatch(readVendored().bun)).toBeNull();
-		expect(bunMismatch("1.4.2")).toContain("lists the libraries of Bun 1.4.3");
+		expect(bunMismatch("1.4.2")).toContain(`lists the libraries of Bun ${readVendored().bun}`);
 		const docker = read("Dockerfile");
 		for (const entry of ENTRYPOINTS) {
 			expect(build).toContain(entry);
