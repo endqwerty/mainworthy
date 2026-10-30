@@ -582,6 +582,7 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			"work/run.ts",
 		])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
+		copyFileSync("src/cli/bun-version.ts", join(root, "src/cli/bun-version.ts"));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
 		writeFileSync(join(root, "test/e2e/phone.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
@@ -1236,6 +1237,8 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	);
 	expect(old[0]).toContain("which -a bun");
 	expect(unready({ version: OLDEST_BUN })).toEqual([]);
+	// Bun 1.4.3's query.cancel() sends nothing, so a stopped statement would run on (src/cli/bun-version.ts).
+	expect(unready({ version: "1.4.3" })).toHaveLength(1);
 
 	const root = mkdtempSync(join(tmpdir(), "mainworthy-preflight-"));
 	try {
@@ -1585,7 +1588,13 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 	]);
 	expect(loaded("scripts/browser-tests.ts")).toEqual([]);
 	expect(loaded("scripts/chromium-diagnostics.ts").sort()).toEqual(["node:fs", "node:path"]);
-	expect(loaded("scripts/preflight.ts").sort()).toEqual(["./pg.ts", "node:fs", "node:path"]);
+	expect(loaded("scripts/preflight.ts").sort()).toEqual([
+		"../src/cli/bun-version.ts",
+		"./pg.ts",
+		"node:fs",
+		"node:path",
+	]);
+	expect(loaded("src/cli/bun-version.ts")).toEqual([]);
 	expect(loaded("test/preflight.ts").sort()).toEqual([
 		"../scripts/pg.ts",
 		"../scripts/preflight.ts",

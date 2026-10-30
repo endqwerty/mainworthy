@@ -8,10 +8,10 @@
 // This file imports nothing that is installed: it has to run where nothing is.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { bunTooOld, OLDEST_BUN } from "../src/cli/bun-version.ts";
 import { binaries, POSTGRES_MISSING } from "./pg.ts";
 
-/** The oldest Bun the project runs on. AGENTS.md names it, and the workflow and the Dockerfile install it. */
-export const OLDEST_BUN = "1.4.0";
+export { OLDEST_BUN };
 
 const dependencies = (root: string): string[] => {
 	const manifest: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -33,10 +33,8 @@ export function unready({
 	root?: string;
 } = {}): string[] {
 	const problems: string[] = [];
-	if (!Bun.semver.satisfies(version, `>=${OLDEST_BUN}`))
-		problems.push(
-			`this is Bun ${version} (${bun}) and Mainworthy needs Bun ${OLDEST_BUN} or newer. Put a newer one first on PATH (\`which -a bun\` lists the ones this machine has) or run \`bun upgrade\`.`,
-		);
+	const old = bunTooOld(version, bun);
+	if (old) problems.push(old);
 	const missing = dependencies(root).filter((name) => !existsSync(join(root, "node_modules", name, "package.json")));
 	if (missing.length > 0)
 		problems.push(
