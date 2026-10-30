@@ -160,21 +160,6 @@ export const SLOW_WRITE_MS = 5_000;
 export const MIGRATION_LOCK = 0x4d574d4947520001n;
 const EXCLUSIVE_POLL_MS = 200;
 const CLIENT_CHECK_MS = 1_000;
-/** How long a lease waits for its cancel to reach the backend: one normally takes a millisecond. */
-const CANCEL_WAIT_MS = 1_000;
-/** The connection's own backend: its process id, and when it started, which tells it from a later one with that id. */
-const OWN_BACKEND = "SELECT pid, backend_start::text AS started FROM pg_stat_activity WHERE pid = pg_backend_pid()";
-/** Cancels what one backend runs, and nothing if that backend has ended and another took its process id. */
-export const CANCEL_BACKEND =
-	"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE pid = $1 AND backend_start = $2::timestamptz";
-type Backend = { pid: number; started: string };
-function backendOf(rows: unknown): Backend {
-	const row: unknown = Array.isArray(rows) ? rows[0] : undefined;
-	const pid: unknown = typeof row === "object" && row !== null ? Reflect.get(row, "pid") : undefined;
-	const started: unknown = typeof row === "object" && row !== null ? Reflect.get(row, "started") : undefined;
-	if (typeof pid !== "number" || typeof started !== "string") throw new Error("the backend did not say which it is");
-	return { pid, started };
-}
 export function sqlState(error: unknown): string | null {
 	if (typeof error !== "object" || error === null) return null;
 	const state: unknown = Reflect.get(error, "errno");
@@ -303,13 +288,6 @@ type Lease = {
 	 * is refused, and the transaction does not commit.
 	 */
 	signal?: AbortSignal | undefined;
-	/**
-	 * Cancels the statement the connection's backend runs, from another connection (Bun 1.4.3's `query.cancel()` sends
-	 * nothing). Set once a lease with a signal has learned its backend.
-	 */
-	cancel?: (() => Promise<void>) | undefined;
-	/** The cancel sent for this lease, which must reach the backend before its connection closes. */
-	cancelling?: Promise<void> | undefined;
 };
 async function query<R>(
 	lease: Lease,
@@ -354,19 +332,22 @@ async function statement<R>(
 	const values = params.map(encode);
 	lease.statements();
 	const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
-	// A cancel can arrive after the statement ended and stop the connection's next one instead, so a connection that
-	// sent one is closed, not reused.
-	const send = lease.cancel;
-	const signal = control || !send ? undefined : lease.signal;
+	// The driver's cancel names this connection's backend by its secret key, so it stops nothing of another client's.
+	// It can still arrive after the statement ended and stop the connection's next one, so a connection that sent one
+	// is closed, not reused.
+	const signal = control ? undefined : lease.signal;
 	const cancel = () => {
 		lease.poisoned = true;
-		lease.cancelling ??= send?.();
+		pending.cancel();
 	};
 	signal?.addEventListener("abort", cancel, { once: true });
 	try {
 		return await (simple ? pending.simple() : pending);
 	} catch (error) {
-		if (signal?.aborted && sqlState(error) === "57014") {
+		// Cancelled before it was sent, the statement fails in the driver without reaching the server.
+		const cancelled =
+			sqlState(error) === "57014" || Reflect.get(Object(error), "code") === "ERR_POSTGRES_QUERY_CANCELLED";
+		if (signal?.aborted && cancelled) {
 			if (lease.tx && !lease.tx.aborted) lease.tx.aborted = { error: signal.reason };
 			throw signal.reason;
 		}
@@ -712,45 +693,6 @@ export class Database {
 			...(signal ? [signal] : []),
 		]);
 	}
-	private canceller: SQL | undefined;
-	private readonly cancels = new Set<Promise<void>>();
-	/** Cancels sent and not yet answered. */
-	private unanswered = 0;
-	/** Whether one of them has gone unanswered past `CANCEL_WAIT_MS`; it stays so until none is left unanswered. */
-	private stalled = false;
-	/**
-	 * Cancels what backend `pid` runs. A cancel that fails leaves the statement to the deadline of whoever waits for it.
-	 * One still unanswered after `CANCEL_WAIT_MS` holds up its lease no longer, and while it stays unanswered no other
-	 * is sent: the path that holds it would hold them too. Its connection is kept, as Bun 1.4.3 cannot end a connection
-	 * with a query in flight, and closes once the cancel is answered. Landing late, it cancels nothing: a backend that
-	 * took the process id since started at another time.
-	 */
-	private cancelBackend({ pid, started }: Backend): Promise<void> {
-		if (this.stalled) return Promise.resolve();
-		this.canceller ??= new SQL(this.options.url, { bigint: true, max: 1 });
-		this.unanswered++;
-		const answered = this.canceller
-			.unsafe(CANCEL_BACKEND, [pid, started])
-			.then(
-				() => undefined,
-				() => undefined,
-			)
-			.finally(() => {
-				this.unanswered--;
-				if (this.unanswered === 0) this.stalled = false;
-			});
-		const sent = (async () => {
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const late = new Promise<"late">((resolve) => {
-				timer = setTimeout(() => resolve("late"), CANCEL_WAIT_MS);
-			});
-			const outcome = await Promise.race([answered, late]);
-			clearTimeout(timer);
-			if (outcome === "late") this.stalled = true;
-		})().finally(() => this.cancels.delete(sent));
-		this.cancels.add(sent);
-		return sent;
-	}
 	private async lease(pool: SQL, signal?: AbortSignal): Promise<Lease> {
 		const tracing = this.options.tracing ?? UNTRACED;
 		const conn = await tracing.span(
@@ -773,8 +715,6 @@ export class Database {
 	}
 	private async dispose(lease: Lease): Promise<void> {
 		lease.alive = false;
-		// Closed first, the backend's process id could be another connection's by the time the cancel arrives.
-		await lease.cancelling;
 		if (lease.poisoned || lease.lost) {
 			await lease.conn.close({ timeout: 0 });
 		}
@@ -795,10 +735,6 @@ export class Database {
 		const lease = await this.lease(pool, options.signal);
 		lease.signal = options.signal;
 		try {
-			if (options.signal) {
-				const backend = backendOf(await query(lease, OWN_BACKEND));
-				lease.cancel = () => this.cancelBackend(backend);
-			}
 			await query(lease, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
 			lease.tx = { aborted: null, queues: [[]], kept: new Map() };
 			const result = await fn(new Scope(lease, false));
@@ -867,22 +803,17 @@ export class Database {
 			// A process that exits mid-statement, as a stopping server does at its deadline, leaves the statement running;
 			// checking the client every second lets one waiting for a lock see the closed connection and roll back,
 			// releasing the locks it holds, instead of waiting for the lock first (#914).
-			// A write its caller can stop also learns its backend, in the same round trip, so the abort can cancel it.
-			const settings = await query<unknown>(
+			await query(
 				lease,
 				`SET lock_timeout = '${this.options.lockWaitMs ?? LOCK_WAIT_MS}ms';
  SET statement_timeout = '${LOCK_WAIT_MS}ms';
  SET transaction_timeout = '${LOCK_WAIT_MS}ms';
  SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms';
- SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'${options.signal ? `;\n ${OWN_BACKEND}` : ""}`,
+ SET client_connection_check_interval = '${CLIENT_CHECK_MS}ms'`,
 				[],
 				false,
 				true,
 			);
-			if (options.signal) {
-				const backend = backendOf(settings.at(-1));
-				lease.cancel = () => this.cancelBackend(backend);
-			}
 			const result = await fn(db);
 			if (lease.lost) throw lease.lost;
 			if (lease.tx) throw new Error("write callback returned with an open transaction");
@@ -1010,17 +941,7 @@ export class Database {
 		await this.notifications?.close();
 		this.shutdown.abort(new Error("database is closed"));
 		await Promise.all(this.activeWrites);
-		await Promise.all(this.cancels);
-		// A cancel the network still holds would hold this close too, so the canceller then ends once it is answered.
-		const canceller =
-			this.unanswered > 0 ? void this.canceller?.close().catch(() => undefined) : this.canceller?.close();
-		await Promise.all([
-			this.readers.close(),
-			this.writers.close(),
-			this.admissions.close(),
-			this.jobs.close(),
-			canceller,
-		]);
+		await Promise.all([this.readers.close(), this.writers.close(), this.admissions.close(), this.jobs.close()]);
 	}
 }
 /** Runs one statement on the migration's connection outside any transaction (`CREATE INDEX CONCURRENTLY`). */
