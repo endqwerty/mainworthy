@@ -212,7 +212,15 @@ const DecisionItem = z.object({
 });
 
 export const QuestionItem = z.object({
-	asked: z.object({ policy: schemaText, clause: schemaText, when: z.array(Predicate), ask: Ask, ruled: z.boolean() }),
+	asked: z.object({
+		policy: schemaText,
+		clause: schemaText,
+		when: z.array(Predicate),
+		/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */
+		hidden: schemaNumber,
+		ask: Ask,
+		ruled: z.boolean(),
+	}),
 	approvalNeeded: schemaNumber.optional(),
 	approvals: z.array(ApprovalSigner).optional(),
 	q: schemaText,

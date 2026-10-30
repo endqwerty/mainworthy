@@ -136,6 +136,7 @@ export function whyWaiting(asked: {
 	when: string[];
 	ask: Clause["ask"];
 	ruled: boolean;
+	hidden: number;
 }): string | null {
 	if (asked.ask.who === "rule") return null;
 	const who = lowerFirst(
@@ -157,7 +158,10 @@ export function whyWaiting(asked: {
 				: "an edit";
 		const folders = asked.when.filter((p) => p.startsWith("folder:")).map((p) => p.slice(7));
 		const tags = asked.when.filter((p) => p.startsWith("tag:")).map((p) => `#${p.slice(4)}`);
-		const scope = `${folders.length ? ` in ${folders.join(" and ")}` : ""}${tags.length ? ` tagged ${tags.join(" and ")}` : ""}`;
+		const more = asked.hidden
+			? ` that meets ${asked.hidden} more folder or tag ${asked.hidden === 1 ? "condition" : "conditions"}`
+			: "";
+		const scope = `${folders.length ? ` in ${folders.join(" and ")}` : ""}${tags.length ? ` tagged ${tags.join(" and ")}` : ""}${more}`;
 		const policy = asked.policy === "custom" ? "this project's policy" : `the ${asked.policy} policy`;
 		why = `Under ${policy}, ${what}${scope} waits for ${who}.`;
 	}
@@ -170,3 +174,23 @@ export function whyWaiting(asked: {
  */
 export const yourAnswerCounts = (needs: string): string =>
 	`${["Your answer counts", ...needs.split("; ").filter((part) => part.startsWith("accepting refused:"))].join("; ")}.`;
+
+/** The most folder and tag predicates a question's `asked` carries, and the longest one it names. */
+const SHOWN_SCOPES = 8;
+const SHOWN_SCOPE_LENGTH = 200;
+/**
+ * A clause's predicates as a reply repeats them for every question it owns: each fixed predicate once, and at
+ * most a few short scopes, with how many scopes were left out. A custom clause's table is not bounded, and a page
+ * of questions would otherwise copy it once per question. A scope left out narrows the clause, so `whyWaiting`
+ * says that there are more rather than state the wider rule.
+ */
+export function shownPredicates<P extends string>(when: readonly P[]): { when: P[]; hidden: number } {
+	const unique = [...new Set(when)];
+	const scoped = (predicate: P) => predicate.startsWith("folder:") || predicate.startsWith("tag:");
+	const scopes = unique.filter(scoped);
+	const shown = scopes.filter((predicate) => predicate.length <= SHOWN_SCOPE_LENGTH).slice(0, SHOWN_SCOPES);
+	return {
+		when: [...unique.filter((predicate) => !scoped(predicate)), ...shown],
+		hidden: scopes.length - shown.length,
+	};
+}

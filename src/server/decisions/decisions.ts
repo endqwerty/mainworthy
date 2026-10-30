@@ -22,6 +22,7 @@ import {
 	standingOf,
 } from "../../core/kinds.ts";
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
+import { shownPredicates } from "../../core/policy-guide.ts";
 import { clip } from "../../core/text.ts";
 import {
 	type ChangeRow,
@@ -2488,6 +2489,8 @@ export async function toItem(db: ReadDb, row: QuestionRow): Promise<QuestionItem
  */
 type ItemPage = {
 	policy: Awaited<ReturnType<typeof currentPolicy>>;
+	/** The policy's name, worked out once for the page rather than once per question. */
+	policyName: string;
 	questions: Awaited<ReturnType<typeof itemReads>>;
 	runs: Map<number, string>;
 	targets: Map<number, TargetRow>;
@@ -2504,8 +2507,10 @@ export async function toItemsFor(ctx: Ctx<ReadDb>, rows: readonly QuestionRow[])
 		),
 	];
 	const targets = await targetsByIds(ctx.db, ids);
+	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const known: ItemPage = {
-		policy: await currentPolicy(ctx.db, ctx.project.id),
+		policy,
+		policyName: policyName(policy),
 		questions: await itemReads(
 			ctx.db,
 			rows.map((row) => row.id),
@@ -2574,9 +2579,9 @@ async function itemOf(
 
 	return {
 		asked: {
-			policy: policyName(current),
+			policy: known?.policyName ?? policyName(current),
 			clause: asked.clause.id,
-			when: asked.clause.when,
+			...shownPredicates(asked.clause.when),
 			ask: asked.ask,
 			ruled: asked.ruled,
 		},
