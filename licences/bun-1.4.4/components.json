@@ -1755,10 +1755,10 @@
 					"relyOn": [
 						"Apache-2.0"
 					],
-					"source": "https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/test_runner/diff/text_diff.rs",
+					"source": "https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/text_diff/lib.rs",
 					"texts": [
 						"bun-1.4.4/texts/rust-encoding_rs-0.8.35/LICENSE-APACHE",
-						"bun-1.4.4/texts/v-diff-match-patch-cleanup-semantic-port/src/runtime/test_runner/diff/text_diff.rs.licence.txt"
+						"bun-1.4.4/texts/v-diff-match-patch-cleanup-semantic-port/src/text_diff/lib.rs.licence.txt"
 					]
 				},
 				{
@@ -2257,7 +2257,7 @@
 					"relyOn": [
 						"MIT"
 					],
-					"source": "https://github.com/oxc-project/fast-glob/blob/c8b8711a2bd7b86cb2fed7900469d7e799ed868c/LICENSE",
+					"source": "https://github.com/oxc-project/fast-glob/blob/3b6c31c39a676257fd1d95c338025b64f3f0395a/LICENSE",
 					"texts": [
 						"bun-1.4.4/texts/ports-github/oxc-project/fast-glob/LICENSE"
 					]
