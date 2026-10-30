@@ -77,6 +77,26 @@ Before using the Blueprint:
 The mounted disk requires a single service instance and allows deployment downtime. Database and file backups need
 one consistent recovery point. Backup uploads count toward source egress even when customer traffic is zero.
 
+## Scaling past Render
+
+Attachments stay on the Render disk. The owner, 2026-10-29: "let's stay with the render simple disk, but keep
+cloudflare as a scaling option in mind." Upgrade before the Free database expires on 2026-11-28.
+
+When one instance or the disk no longer fits, look at Cloudflare first, since it already serves the domain:
+
+1. R2 for attachments, as a second `BlobStore` in `src/server/kernel/blobs.ts`. Bun's built-in S3 client works with
+   it, so no package is added. This removes the disk, and with it the single instance and the downtime on deploy.
+2. Cloudflare Containers for the published image. PostgreSQL stays with a PostgreSQL host, reached through
+   Hyperdrive; Cloudflare's own database, D1, is SQLite. Workers alone would mean rewriting the Bun server.
+
+[Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/), read 2026-10-29: Workers Paid at
+$5 a month, then memory and disk for every running second and CPU for active use. One `basic` instance (1/4 vCPU,
+1 GiB) running all month comes to about $13–14 with the plan, most of it memory. `lite` (1/16 vCPU, 256 MiB) is about
+$8 but likely too small. That excludes PostgreSQL. A container that sleeps starts from a fresh disk, so attachments
+must be in R2 first, and while asleep it runs no jobs, so Mainworthy would stay awake (a long `sleepAfter`).
+
+This is a direction, not a plan. Recheck the products and their prices when the time comes.
+
 ## Send traces
 
 Tracing is off until the service has an OTLP endpoint
