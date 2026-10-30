@@ -20,6 +20,7 @@ import { OPS } from "../src/server/ops/index.ts";
 import { type AnyOp, invoke, type Reply } from "../src/server/ops/registry.ts";
 import { casesByIds, findCase, findCases, versionsOf } from "../src/server/suite/suite.ts";
 import { testDatabase } from "./db.ts";
+import { fakeServer } from "./fake-server.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -3036,28 +3037,24 @@ describe("placement reply boundaries and order", () => {
 
 	test("API 2 refuses a version-1 server before a retried create writes", async () => {
 		let writes = 0;
-		const server = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			fetch(request) {
-				if (new URL(request.url).pathname === "/health") return Response.json({ ok: true, apiVersion: 1 });
-				writes++;
-				return Response.json({
-					ok: true,
-					result: { proposal: "P-1", status: "adopted", question: null, needs: null, cases: [], conflicts: [] },
-				});
-			},
+		const server = fakeServer((_request, path) => {
+			if (path === "/health") return Response.json({ ok: true, apiVersion: 1 });
+			writes++;
+			return Response.json({
+				ok: true,
+				result: { proposal: "P-1", status: "adopted", question: null, needs: null, cases: [], conflicts: [] },
+			});
 		});
 		try {
 			for (let attempt = 0; attempt < 2; attempt++) {
-				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
+				const client = new Client({ url: server.url, project: "scratch", token: undefined });
 				await expect(
 					client.call("propose", { edits: [{ op: "create", body: { title: "Never written" } }] }),
 				).rejects.toMatchObject({ code: "incompatible" });
 			}
 			expect(writes).toBe(0);
 		} finally {
-			await server.stop(true);
+			await server.stop();
 		}
 	});
 

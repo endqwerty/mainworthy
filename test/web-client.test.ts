@@ -14,6 +14,7 @@ import {
 	suspendDeviceSession,
 } from "../src/web/lib/device.ts";
 import { signOut } from "../src/web/lib/signin.ts";
+import { fakeServer } from "./fake-server.ts";
 
 test("the client's list of instance operations is the registry's, so each is sent to the path that serves it", () => {
 	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance" && op.effect !== "service").map(
@@ -25,19 +26,15 @@ test("the client's list of instance operations is the registry's, so each is sen
 test("every web request declares its API version and preserves a reload refusal", async () => {
 	const versions: (string | null)[] = [];
 	const message = "This page needs an update. Reload before trying again.";
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch(request) {
-			versions.push(request.headers.get(API_VERSION_HEADER));
-			return Response.json({ ok: false, error: { code: "conflict", message } }, { status: 409 });
-		},
+	const server = fakeServer((request) => {
+		versions.push(request.headers.get(API_VERSION_HEADER));
+		return Response.json({ ok: false, error: { code: "conflict", message } }, { status: 409 });
 	});
 	const transport = globalThis.fetch;
 	const redirected = spyOn(globalThis, "fetch").mockImplementation(
 		Object.assign(
 			(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-				transport(new URL(String(input), server.url), init),
+				transport(`${server.url}${String(input)}`, init),
 			{ preconnect: transport.preconnect },
 		),
 	);
@@ -55,7 +52,7 @@ test("every web request declares its API version and preserves a reload refusal"
 		expect(versions).toEqual(Array(4).fill(String(API_VERSION)));
 	} finally {
 		redirected.mockRestore();
-		await server.stop(true);
+		await server.stop();
 	}
 });
 
@@ -101,25 +98,20 @@ async function deviceReply(
 		version: "0.1.0",
 		projects: [],
 	};
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(request) {
-			const path = new URL(request.url).pathname;
-			if (path === "/api/login" && "login" in options) return Response.json({ ok: true, result: options.login });
-			if (path === "/api/logout" && options.logout) {
-				if (options.logout === "lost") return new Response("Reply lost", { status: 502 });
-				return Response.json({ ok: true, result: {} });
-			}
-			arrived.resolve();
-			const status = await reply.promise;
-			return Response.json(
-				status === 200
-					? { ok: true, result: info }
-					: { ok: false, error: { code: "unauthenticated", message: "This session ended." } },
-				{ status },
-			);
-		},
+	const server = fakeServer(async (_request, path) => {
+		if (path === "/api/login" && "login" in options) return Response.json({ ok: true, result: options.login });
+		if (path === "/api/logout" && options.logout) {
+			if (options.logout === "lost") return new Response("Reply lost", { status: 502 });
+			return Response.json({ ok: true, result: {} });
+		}
+		arrived.resolve();
+		const status = await reply.promise;
+		return Response.json(
+			status === 200
+				? { ok: true, result: info }
+				: { ok: false, error: { code: "unauthenticated", message: "This session ended." } },
+			{ status },
+		);
 	});
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 	const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -142,7 +134,7 @@ async function deviceReply(
 	const redirected = spyOn(globalThis, "fetch").mockImplementation(
 		Object.assign(
 			(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-				transport(new URL(String(input), server.url), init),
+				transport(`${server.url}${String(input)}`, init),
 			{ preconnect: transport.preconnect },
 		),
 	);
@@ -157,7 +149,7 @@ async function deviceReply(
 		if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
 		else Reflect.deleteProperty(globalThis, "localStorage");
 		suspendDeviceSession();
-		await server.stop(true);
+		await server.stop();
 	}
 }
 
@@ -237,21 +229,16 @@ test("an unsigned login refusal keeps its server error without signing out", () 
 
 test("call sends an instance operation to /api/<op> and a project's operation to /api/p/<project>/<op>", async () => {
 	const paths: string[] = [];
-	const echo = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch: (req) => {
-			const path = new URL(req.url).pathname;
-			paths.push(path);
-			return Response.json({
-				ok: true,
-				result: path.endsWith("/inbox") ? { items: [], counts: {}, cursor: null } : [],
-				seq: null,
-			});
-		},
+	const echo = fakeServer((_request, path) => {
+		paths.push(path);
+		return Response.json({
+			ok: true,
+			result: path.endsWith("/inbox") ? { items: [], counts: {}, cursor: null } : [],
+			seq: null,
+		});
 	});
 	try {
-		const options = { url: `http://127.0.0.1:${echo.port}`, project: "web", token: "not-read-by-the-echo" };
+		const options = { url: echo.url, project: "web", token: "not-read-by-the-echo" };
 		expect(await call("session", { do: "list" }, options)).toEqual([]);
 		expect(await call("credential", { do: "list" }, options)).toEqual([]);
 		expect(await call("invitation", { do: "list" }, options)).toEqual([]);
@@ -259,7 +246,7 @@ test("call sends an instance operation to /api/<op> and a project's operation to
 		expect(await call("inbox", {}, options)).toEqual({ items: [], counts: {}, cursor: null });
 		expect(paths).toEqual(["/api/session", "/api/credential", "/api/invitation", "/api/admin", "/api/p/web/inbox"]);
 	} finally {
-		await echo.stop(true);
+		await echo.stop();
 	}
 });
 
@@ -328,22 +315,18 @@ test("busy is a retryable operation refusal in both clients and is never retried
 	const { readEnvelope, unwrap } = await import("../src/cli/client.ts");
 	const { CliError } = await import("../src/cli/errors.ts");
 	let requests = 0;
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch() {
-			requests++;
-			return Response.json(
-				{ ok: false, error: { code: "busy", message: "retry the same request with the same command id" } },
-				{ status: 503 },
-			);
-		},
+	const server = fakeServer(() => {
+		requests++;
+		return Response.json(
+			{ ok: false, error: { code: "busy", message: "retry the same request with the same command id" } },
+			{ status: 503 },
+		);
 	});
 	try {
 		const error = await call(
 			"propose",
 			{ cmd: "busy-client-command", edits: [{ op: "create", body: { title: "preserved" } }] },
-			{ url: server.url.origin, project: "scratch" },
+			{ url: server.url, project: "scratch" },
 		).catch((error: unknown) => error);
 		expect(error).toBeInstanceOf(ApiError);
 		expect(error).toMatchObject({ code: "busy", retryable: true, status: 503 });
@@ -358,6 +341,6 @@ test("busy is a retryable operation refusal in both clients and is never retried
 		expect(cli).toMatchObject({ code: "busy", retryable: true });
 		expect(requests).toBe(2);
 	} finally {
-		await server.stop(true);
+		await server.stop();
 	}
 });

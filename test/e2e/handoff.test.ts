@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { fakeServer } from "../fake-server.ts";
 import { ciReport } from "../helpers.ts";
 import { browserAvailable, openPage, startServer } from "./support.ts";
 
@@ -9,15 +10,11 @@ const secret = "e2e-handoff-signing-secret";
 	"a failure is copied for any agent, and a tap on a phone hands it to the configured one",
 	async () => {
 		const received: { body: string; signature: string | null }[] = [];
-		const endpoint = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			async fetch(request) {
-				received.push({ body: await request.text(), signature: request.headers.get("x-mainworthy-signature") });
-				return new Response(null, { status: 202 });
-			},
+		const endpoint = fakeServer(async (request) => {
+			received.push({ body: await request.text(), signature: request.headers.get("x-mainworthy-signature") });
+			return new Response(null, { status: 202 });
 		});
-		const server = await startServer({ handoff: { url: `http://127.0.0.1:${endpoint.port}/hook`, secret } });
+		const server = await startServer({ handoff: { url: `${endpoint.url}/hook`, secret } });
 		const pages: Awaited<ReturnType<typeof openPage>>[] = [];
 		try {
 			await server.api(
@@ -70,7 +67,7 @@ const secret = "e2e-handoff-signing-secret";
 		} finally {
 			for (const view of pages) await view.close();
 			await server.stop();
-			await endpoint.stop(true);
+			await endpoint.stop();
 		}
 	},
 	60_000,

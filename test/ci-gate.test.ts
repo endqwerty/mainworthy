@@ -18,6 +18,7 @@ import { API_VERSION } from "../src/core/version.ts";
 import { databaseAdmin, sql } from "../src/server/kernel/db.ts";
 import { openApi } from "../src/surfaces/http.ts";
 import { onDatabaseCleanup } from "./db.ts";
+import { fakeServer } from "./fake-server.ts";
 
 // Gate subprocesses release databases to this file, outside each behavioral test's deadline.
 const ownDatabases = beginDatabaseRun(process.cwd());
@@ -359,23 +360,19 @@ test("the production deployment transport keeps twelve attempts, ten-second paus
 test("CI retries health, report and gate outages, exhausts its attempts and returns definite refusals immediately", async () => {
 	let replies: number[] = [];
 	const received: { path: string; body: string }[] = [];
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(req) {
-			received.push({ path: new URL(req.url).pathname, body: await req.text() });
-			return Response.json(
-				{ ok: true, apiVersion: API_VERSION, accepted: "same report" },
-				{ status: replies.shift() ?? 200 },
-			);
-		},
+	const server = fakeServer(async (req, path) => {
+		received.push({ path, body: await req.text() });
+		return Response.json(
+			{ ok: true, apiVersion: API_VERSION, accepted: "same report" },
+			{ status: replies.shift() ?? 200 },
+		);
 	});
 	try {
 		for (const path of ["/health", "/api/p/scratch/report", "/api/p/scratch/gate"]) {
 			const send = async (statuses: number[], retry = true) => {
 				replies = [...statuses];
 				received.length = 0;
-				const options = { url: server.url.origin, project: "scratch", token: undefined };
+				const options = { url: server.url, project: "scratch", token: undefined };
 				const client = new Client({
 					...options,
 					...(retry ? { request: deploymentFetch({ fetch, attempts: 3, pauseMs: 0, timeoutMs: 1000 }) } : {}),
@@ -403,21 +400,19 @@ test("CI retries health, report and gate outages, exhausts its attempts and retu
 				);
 			}
 			const outage = await send([503, 503, 503, 200]);
-			expect(outage).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url.origin}` : 503);
+			expect(outage).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url}` : 503);
 			expect(received.filter((req) => req.path === path)).toHaveLength(3);
 			for (const status of [400, 401, 403, 404, 429, 500]) {
 				const refused = await send([status, 200]);
-				expect(refused).toBe(
-					path === "/health" ? `the server answered ${status} to /health at ${server.url.origin}` : status,
-				);
+				expect(refused).toBe(path === "/health" ? `the server answered ${status} to /health at ${server.url}` : status);
 				expect(received.filter((req) => req.path === path)).toHaveLength(1);
 			}
 			const interactive = await send([503, 200], false);
-			expect(interactive).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url.origin}` : 503);
+			expect(interactive).toBe(path === "/health" ? `the server answered 503 to /health at ${server.url}` : 503);
 			expect(received.filter((req) => req.path === path)).toHaveLength(1);
 		}
 	} finally {
-		await server.stop(true);
+		await server.stop();
 	}
 });
 
@@ -1158,23 +1153,18 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 			[null, 200, { ok: true, result: {} }, 1],
 		] as const) {
 			const received: { path: string; apiVersion: string | null }[] = [];
-			const server = Bun.serve({
-				hostname: "127.0.0.1",
-				port: 0,
-				fetch(req) {
-					const path = new URL(req.url).pathname;
-					received.push({ path, apiVersion: req.headers.get("x-mainworthy-api-version") });
-					return path === "/health"
-						? Response.json({ ok: true, version: "0.1.0", commit: "before-versions", apiVersion })
-						: Response.json(body, { status });
-				},
+			const server = fakeServer((req, path) => {
+				received.push({ path, apiVersion: req.headers.get("x-mainworthy-api-version") });
+				return path === "/health"
+					? Response.json({ ok: true, version: "0.1.0", commit: "before-versions", apiVersion })
+					: Response.json(body, { status });
 			});
 			try {
 				const child = Bun.spawn(["bash", "-e", "-o", "pipefail", "-c", script], {
 					cwd: directory,
 					env: {
 						PATH: process.env.PATH ?? "",
-						MAINWORTHY_URL: `http://127.0.0.1:${server.port}`,
+						MAINWORTHY_URL: server.url,
 						MAINWORTHY_PROJECT: "scratch",
 						MAINWORTHY_TOKEN: "test-token",
 						PULL: "482",
@@ -1200,7 +1190,7 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 				}
 				if (expected !== 0) expect(stdout).toContain("::error::");
 			} finally {
-				await server.stop(true);
+				await server.stop();
 			}
 		}
 	} finally {
@@ -1265,28 +1255,23 @@ exec "$REAL_CURL" "$@"
 			const received: { path: string; payload: unknown }[] = [];
 			let healthCalls = 0;
 			let reportCalls = 0;
-			const server = Bun.serve({
-				hostname: "127.0.0.1",
-				port: 0,
-				async fetch(req) {
-					const path = new URL(req.url).pathname;
-					received.push({ path, payload: path === "/health" ? null : await req.json() });
-					const statuses = path === "/health" ? health : report;
-					const call = path === "/health" ? healthCalls++ : reportCalls++;
-					if (path === "/health" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
-						return Response.json({ ok: false, state: "upgrading", apiVersion: API_VERSION });
-					return Response.json(
-						{ ok: true, apiVersion: API_VERSION },
-						{ status: statuses[Math.min(call, statuses.length - 1)] ?? statuses[0] },
-					);
-				},
+			const server = fakeServer(async (req, path) => {
+				received.push({ path, payload: path === "/health" ? null : await req.json() });
+				const statuses = path === "/health" ? health : report;
+				const call = path === "/health" ? healthCalls++ : reportCalls++;
+				if (path === "/health" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
+					return Response.json({ ok: false, state: "upgrading", apiVersion: API_VERSION });
+				return Response.json(
+					{ ok: true, apiVersion: API_VERSION },
+					{ status: statuses[Math.min(call, statuses.length - 1)] ?? statuses[0] },
+				);
 			});
 			try {
 				const child = Bun.spawn(["bash", "-e", "-o", "pipefail", "-c", script], {
 					cwd: directory,
 					env: {
 						PATH: `${directory}:${process.env.PATH}`,
-						MAINWORTHY_URL: server.url.origin,
+						MAINWORTHY_URL: server.url,
 						MAINWORTHY_PROJECT: "scratch",
 						MAINWORTHY_TOKEN: "test-token",
 						PULL: "482",
@@ -1310,7 +1295,7 @@ exec "$REAL_CURL" "$@"
 				]);
 				return { code, output: stdout + stderr, received, healthCalls, reportCalls };
 			} finally {
-				await server.stop(true);
+				await server.stop();
 			}
 		};
 		const recovered = await run([502, 503, 504, 200], [502, 503, 504, 200]);

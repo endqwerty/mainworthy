@@ -12,6 +12,7 @@ import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { JOB_LEASE_MS, runJob } from "../src/server/kernel/jobs.ts";
 import { testDatabase } from "./db.ts";
+import { type FakeServer, fakeServer } from "./fake-server.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const secret = "test-handoff-signing-secret";
@@ -22,7 +23,7 @@ type Received = { body: string; signature: string | null; delivery: string | nul
 let h: Harness | undefined;
 let instance: Instance | undefined;
 let directory: string | undefined;
-let endpoint: ReturnType<typeof Bun.serve> | undefined;
+let endpoint: FakeServer | undefined;
 afterEach(async () => {
 	await instance?.stop();
 	instance = undefined;
@@ -30,26 +31,22 @@ afterEach(async () => {
 	directory = undefined;
 	await h?.close();
 	h = undefined;
-	await endpoint?.stop(true);
+	await endpoint?.stop();
 	endpoint = undefined;
 });
 
 /** An agent's endpoint on this machine that keeps what it was sent and answers with `status`. */
 function agent(status = 200): { url: string; received: Received[] } {
 	const received: Received[] = [];
-	endpoint = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(request) {
-			received.push({
-				body: await request.text(),
-				signature: request.headers.get("x-mainworthy-signature"),
-				delivery: request.headers.get("x-mainworthy-delivery"),
-			});
-			return new Response(null, { status });
-		},
+	endpoint = fakeServer(async (request) => {
+		received.push({
+			body: await request.text(),
+			signature: request.headers.get("x-mainworthy-signature"),
+			delivery: request.headers.get("x-mainworthy-delivery"),
+		});
+		return new Response(null, { status });
 	});
-	return { url: `http://127.0.0.1:${endpoint.port}/hooks/fix`, received };
+	return { url: `${endpoint.url}/hooks/fix`, received };
 }
 
 /** A project whose pipeline reported one failing test, with a build link and further output. */
@@ -123,7 +120,7 @@ test("an endpoint that refuses, or cannot be reached, leaves a failed hand-off t
 		error:
 			"The agent's endpoint answered HTTP 500. It may have started anyway: look for the agent's work before sending again.",
 	});
-	await endpoint?.stop(true);
+	await endpoint?.stop();
 	await h.call("handoff", { question: q, cmd: "handoff-cmd-03" });
 	await deliverHandoffs(h.app);
 	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
@@ -198,17 +195,13 @@ for (const expired of [false, true])
 		const entered = Promise.withResolvers<void>();
 		const response = Promise.withResolvers<void>();
 		let posts = 0;
-		endpoint = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			async fetch() {
-				posts++;
-				entered.resolve();
-				await response.promise;
-				return new Response(null, { status: 200 });
-			},
+		endpoint = fakeServer(async () => {
+			posts++;
+			entered.resolve();
+			await response.promise;
+			return new Response(null, { status: 200 });
 		});
-		const { h, q } = await failing(`http://127.0.0.1:${endpoint.port}/hook`);
+		const { h, q } = await failing(`${endpoint.url}/hook`);
 		await h.call("handoff", { question: q, cmd: "handoff-two-instances" });
 		const peer = await openApp(h.app.config, { memory: true, now: h.app.now });
 		const first = deliverHandoffs(h.app);

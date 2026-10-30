@@ -18,6 +18,7 @@ import type { DefectDraft, TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
 import { testDatabase } from "./db.ts";
+import { fakeServer } from "./fake-server.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 function rejectTrackerCompletion(app: App, message: string) {
@@ -185,29 +186,21 @@ const transport = (respond: (url: string, init?: RequestInit) => Response | Prom
 test("Jira's REST v3 adapter creates an ADF defect and reads status categories from a fake Jira server", async () => {
 	const requests: { path: string; method: string; authorization: string | null; body: unknown }[] = [];
 	let category = "indeterminate";
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(request) {
-			const url = new URL(request.url);
-			requests.push({
-				path: url.pathname + url.search,
-				method: request.method,
-				authorization: request.headers.get("authorization"),
-				body: request.method === "POST" ? await request.json() : null,
-			});
-			if (request.method === "POST")
-				return Response.json(
-					{ id: "10042", key: "QA-42", self: `${jira.site}/rest/api/3/issue/10042` },
-					{ status: 201 },
-				);
-			return Response.json({ key: "QA-42", fields: { status: { name: "Done", statusCategory: { key: category } } } });
-		},
+	const server = fakeServer(async (request, path) => {
+		requests.push({
+			path: path + new URL(request.url).search,
+			method: request.method,
+			authorization: request.headers.get("authorization"),
+			body: request.method === "POST" ? await request.json() : null,
+		});
+		if (request.method === "POST")
+			return Response.json({ id: "10042", key: "QA-42", self: `${jira.site}/rest/api/3/issue/10042` }, { status: 201 });
+		return Response.json({ key: "QA-42", fields: { status: { name: "Done", statusCategory: { key: category } } } });
 	});
 	try {
 		const adapter = jiraPort(
 			jira,
-			transport((url, init) => fetch(`${server.url.origin}${new URL(url).pathname}${new URL(url).search}`, init)),
+			transport((url, init) => fetch(`${server.url}${new URL(url).pathname}${new URL(url).search}`, init)),
 		);
 		expect(
 			await adapter.createDefect({ title: "A failure", body: "Recorded evidence\n\nExpected <90>, got 100" }),
@@ -239,7 +232,7 @@ test("Jira's REST v3 adapter creates an ADF defect and reads status categories f
 		await expect(adapter.getItem("../QA-42")).rejects.toThrow("configured project");
 		await expect(adapter.getItem("OTHER-42")).rejects.toThrow("configured project");
 	} finally {
-		await server.stop(true);
+		await server.stop();
 	}
 });
 
