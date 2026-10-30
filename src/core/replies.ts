@@ -217,6 +217,12 @@ export const QuestionItem = z.object({
 		when: z.array(Predicate),
 		/** Folder and tag predicates of the clause left out of `when` to keep the reply small. */
 		hidden: schemaNumber,
+		/**
+		 * The server's own clause, not the policy's: every quarantine is asked of a person, and a replay whose
+		 * folders cannot be told is asked of whoever every clause it might match asks. Null for a policy clause,
+		 * whatever its id.
+		 */
+		special: z.enum(["quarantine", "refused-replay"]).nullable(),
 		ask: Ask,
 		ruled: z.boolean(),
 	}),

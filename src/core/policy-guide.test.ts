@@ -148,7 +148,7 @@ test("why an adoption waits follows its actual clause and ask", () => {
 		for (const subject of ["author:human", "author:agent", "conflict", "policy"]) {
 			const clause = clauseOf(PRESETS[preset], { kind: "adopt", facts: new Set([subject, "author:human"]) });
 			if (!clause) throw new Error("no adopt clause");
-			const asked = { clause: clause.id, when: clause.when, ask: clause.ask, ruled: false, hidden: 0 };
+			const asked = { clause: clause.id, when: clause.when, ask: clause.ask, ruled: false, hidden: 0, special: null };
 			const line = whyWaiting(asked);
 			if (clause.ask.who === "rule") expect(line).toBeNull();
 			else
@@ -164,16 +164,22 @@ test("why an adoption waits follows its actual clause and ask", () => {
 		ask,
 		ruled: false,
 		hidden: 0,
-	};
+		special: null,
+	} as const;
 	expect(whyWaiting(asked)).toBe(
 		"Not in effect yet. Under this project's policy, an agent's edit in checkout waits for a person.",
 	);
-	expect(whyWaiting({ ...asked, clause: "quarantine-person" })).toBe(
+	expect(whyWaiting({ ...asked, special: "quarantine" })).toBe(
 		"Not in effect yet. Every quarantine waits for a person.",
 	);
-	expect(whyWaiting({ ...asked, clause: "refused-replay" })).toContain(
+	expect(whyWaiting({ ...asked, special: "refused-replay" })).toContain(
 		"Which folders and tags it touches is not known now",
 	);
+	// A policy may name its own clauses so; only the server's mark says a clause is its own.
+	for (const clause of ["quarantine-person", "refused-replay"])
+		expect(whyWaiting({ ...asked, clause })).toBe(
+			"Not in effect yet. Under this project's policy, an agent's edit in checkout waits for a person.",
+		);
 	expect(whyWaiting({ ...asked, ruled: true })).toContain("A rule would answer this, but its answer was set aside");
 	expect(whyWaiting({ ...asked, ask: { ...ask, who: "rule" } })).toBeNull();
 });
@@ -202,6 +208,7 @@ test("a reply carries each fixed predicate once and a few short scopes, and says
 		clause: "scoped",
 		ask,
 		ruled: false,
+		special: null,
 		...shownPredicates(["always", `folder:${"y".repeat(215)}`]),
 	};
 	expect(whyWaiting(asked)).toBe(
