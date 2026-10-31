@@ -3,17 +3,20 @@
 The project-specific GCP projects are pending deletion as of 2026-10-28, and the dedicated billing account is
 closed. There are zero users and zero customer data to migrate. The old Google DNS and proxy rule have been
 removed from Cloudflare. Use [the fresh Render deployment runbook](render-migration.md) for the replacement.
-The GCP sections below describe the retired setup.
+The GCP and Coolify sections below are historical reference, not instructions for the current deployment.
+`infra.yml` has only a manual trigger and its Terraform job is disabled with `if: ${{ false }}`.
+`infra-execute.yml` retains the old execution steps but has no active caller here.
+The repository defines the replacement in `infra/render.yaml`; it does not establish which revision is live.
 
 Mainworthy runs as one app process connected to PostgreSQL 18. The app volume holds attachment bytes and
 archive staging; PostgreSQL has its own volume. `compose.yaml` runs both. Running elsewhere is possible but
 not yet supported, as amended in [decision 0026](decisions/0026-the-apps-offer-one-instance.md).
 
-## Google Cloud
+## Google Cloud (retired)
 
-Mainworthy runs as one Cloud Run service, `mainworthy` in `us-west1`, on one Cloud SQL database, defined by the
+The retired Terraform configuration defines one Cloud Run service, `mainworthy` in `us-west1`, on one Cloud SQL database, defined by the
 [Terraform in `infra/`](../infra/) and applied only by CI ([the decision](decisions/2026-10-26-one-service-released-by-the-apply.md);
-[the costs](cloud-costs.md)). It does not serve `mainworthy.com` until the cutover below.
+[the costs](cloud-costs.md)). The cutover procedure below records the former design; it does not establish when the cutover happened.
 
 ### What the owner sets up once
 
@@ -47,10 +50,10 @@ Mainworthy runs as one Cloud Run service, `mainworthy` in `us-west1`, on one Clo
    --project="$p"`. The proxy secret goes into Cloudflare at the cutover. `mainworthy-database-password` stays empty:
    the app signs in to PostgreSQL through IAM.
 
-### Every push to main releases
+### Former release workflow (disabled)
 
 `check.yml` builds the image once, tests it and, after its gate, publishes it to GHCR under the commit's tag.
-`infra.yml` runs on every push to `main`: before signing in it waits up to 40 minutes for that tag (`ci.sh digest`,
+The former push workflow ran on every push to `main`: before signing in it waits up to 40 minutes for that tag (`ci.sh digest`,
 anonymous, since the image is public), then plans and applies with the digest as `app_digest`. The registry
 `mainworthy` is a remote repository of `https://ghcr.io`, so Cloud Run runs that exact digest. A new image makes a new
 revision; Cloud Run moves traffic to it once its startup probe gets `/health` ready (the database answers and the
@@ -64,7 +67,7 @@ traffic in Cloud Shell (`gcloud run services update-traffic mainworthy --to-revi
 --project=example-production`); the next apply moves all traffic to its own revision again (the service declares 100% to the latest), so pause merging until the fix is on `main`. Releases do not run the previous
 release's smoke checks against the new schema: before 1.0 nothing is compatible (`AGENTS.md`).
 
-A manual run of **infrastructure** on `main` is the drift check: the reader plans `main`'s tip with its published
+In the former workflow, a manual run of **infrastructure** on `main` was the drift check: the reader plans `main`'s tip with its published
 digest, with `-lock=false -detailed-exitcode`. Exit 0 is no change, 2 is drift (the job fails and names the
 resources), 1 an error.
 
@@ -99,7 +102,7 @@ command order and failure paths, and no Google login. `check.yml`'s static job r
 - Connections: a deploy runs two revisions, each with up to 2 read, 2 write, 1 job, 2 admission, 1 `LISTEN` and 1
   migration connection: 18, plus an operator's session, under `db-f1-micro`'s 25.
 
-### The cutover
+### Historical Google Cloud cutover
 
 `mainworthy.com` reaches the service through a Cloud Run domain mapping (`infra/app.tf`): Google's front end answers
 for the domain with a Google-managed certificate, and Cloudflare proxies to it, so requests arrive with
@@ -127,7 +130,7 @@ Cloud Run's front end answers `/healthz` itself with Google's 404, so the health
 proof: it says only the version and the commit. The bucket mount's two-instance checks (#946) wait for a second
 instance or for attachments in use.
 
-## PostgreSQL cutover at merge
+## Historical PostgreSQL cutover at merge
 
 Merging this engine change makes the owner's instance restart on an empty PostgreSQL database.
 The configured demo fills that database on startup. Existing projects, identities, tokens and sessions
@@ -183,10 +186,10 @@ An inspection error other than a missing commit tag also fails the job without c
 The publisher promotes the inspected manifest by digest and records `ghcr.io/endqwerty/mainworthy@sha256:<digest>`
 in the workflow run summary. Future deployments must use that digest reference; a commit tag or `main` is an alias.
 
-Production still builds on the owner's server through Coolify, using `build: .` in `compose.coolify.yaml`.
-Publishing an image changes no deployment trigger or production configuration. Switching production to a
-published image belongs to [issue #821](https://github.com/endqwerty/mainworthy/issues/821), step 5.
-The future check that the server builds nothing does not apply to production yet.
+The former Coolify deployment built on the owner's server using `build: .` in `compose.coolify.yaml`.
+Current Render image selection is described in [the Render runbook](render-migration.md).
+Publishing an image does not update Render’s selected digest. The source-build transition tracked in
+[issue #821](https://github.com/endqwerty/mainworthy/issues/821) is historical; `infra/render.yaml` selects a published image.
 
 ### Update pinned actions
 
@@ -217,7 +220,7 @@ perform it. Until then, anonymous pulls fail. GitHub documents
 3. After making the package public, pull the summary's digest reference without registry credentials. Inspect its
    OCI labels and run it without a commit environment override. Require HTTP 200, `ok: true`, and `commit` equal to that SHA
    from `/health`. Check that both tags resolve to the same digest when the commit is still `main`.
-4. Confirm Coolify still builds from source on its existing schedule. After that deployment, the public
+4. For the historical Coolify setup, confirm it builds from source on its configured schedule. After that deployment, the public
    `/health` must report the deployed commit. This checks the existing deploy path, not deployment of the GHCR image.
 
 ## The container
@@ -417,7 +420,7 @@ address:
    A test runs this check against both kinds of header (`test/limit.test.ts`). Nobody has run it through a real
    proxy yet.
 
-## Production network lockdown
+## Historical Coolify production network lockdown
 
 `compose.coolify.yaml` enables `MAINWORTHY_LOCKDOWN=1`. The ordinary image and `compose.yaml`
 leave it off, so webhooks, OIDC and other integrations keep working there.
@@ -486,7 +489,7 @@ header normalization, sign-in limits, loopback binding, invalid startup, health,
 and signals. IPv6 uses reachable fixtures; this does not prove public IPv6 routing on the host.
 No real Tailscale identity is enrolled by this test. The operator must check that path after deploy.
 
-## On Coolify
+## On Coolify (historical)
 
 How the instance on the home server was set up. It takes about five minutes through Coolify's API or its
 dashboard. This page writes the tailnet's name as `example.ts.net` and the node's tailnet address as
@@ -1042,6 +1045,8 @@ again two minutes after the old container stopped. What was learned there, for t
   the node takes it and keeps its identity and its address.
 
 ## The upgrade to sessions
+
+Coolify-specific instance details in this section are historical.
 
 Until 2026-10-13 a browser's cookie held the token itself, for a year. A build from that day on gives the
 browser a session instead (decision 0017). What the first start of the new build does by itself:
