@@ -42,7 +42,7 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   pull requests and 355 issues the owner's). To sign the commits of a branch that has unsigned ones, run
   `git rebase --exec 'git commit --amend --no-edit -S' <base>` where 1Password can sign, then push it.
 - **Head and base.** It reads the base branch on origin as it is now (`main`, or the layer below in a stack) and
-  refuses a head that is not on it, so the tree it audits is the tree a rebase merge lands. The commits it checks
+  refuses a head that is not on it, so the tree it audits is the tree a merge commit lands. The commits it checks
   must be exactly `git rev-list <base>..<head>`: it refuses when GitHub's list differs (the pull request changed while
   it was read) or reaches 250, the most GitHub lists.
 - **The export.** It writes each blob of the head's tree as git stores it, not through `git archive`, which applies
@@ -99,7 +99,7 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   findings (the owner, 2026-10-27: "limit reviewers to 2 rounds and if there are still issues, for the agent to pause
   and rethink before trying again").
 - A new head or a new base needs another round: a rebase, a fix from review, or another pull request landing on
-  `main` first. GitHub's rebase merge lands the head on `main` as it is then, which may not be the base the audit
+  `main` first. GitHub's merge commit lands the head on `main` as it is then, which may not be the base the audit
   read.
 
 ## Where it sits in delivery
@@ -118,10 +118,10 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   the top layer's branch to `main`, audit that pull request with every layer's earlier rounds and their answers as
   `--context`, and close it once the stack has landed. The stack lands only while its top head and `main` are the
   pair that round read; a layer or base that changes after it needs another round of the whole stack.
-- **One merge at a time.** A merge that lands first moves `main` under the next one, and GitHub's rebase merge puts
+- **One merge at a time.** A merge that lands first moves `main` under the next one, and GitHub's merge commit joins
   the next head on the new `main`. So land one pull request at a time, and only while nothing else lands on `main`.
   Just before each merge, read the head (`gh pr view <number> --json headRefOid`) and `main`
   (`git ls-remote origin refs/heads/main`), compare them with the pair the script printed, and pass the audited head
-  to `gh pr merge --rebase --match-head-commit <head>`.
+  to `gh pr merge --merge --match-head-commit <sha>` (`<sha>` is that audited head).
 - **When Daybreak cannot run** (not in the catalog, the account not eligible, no allowance left): merge nothing, and
   say in the pull request that the audit is missing and why.

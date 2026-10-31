@@ -382,12 +382,12 @@ jobs:
           candidate="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           docker tag mainworthy:check "$candidate"
           docker push "$candidate"
-          digest=$(docker buildx imagetools inspect "$candidate" --format '{{.Manifest.Digest}}')
+          digest=$(docker buildx imagetools inspect "$candidate" --format '{{printf "%s" .Manifest.Digest}}')
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::Invalid registry digest for the tested image: $digest"
             exit 1
           fi
-          if existing=$(docker buildx imagetools inspect "$image:$GITHUB_SHA" --format '{{.Manifest.Digest}}' 2> "$RUNNER_TEMP/mainworthy-tag-error"); then
+          if existing=$(docker buildx imagetools inspect "$image:$GITHUB_SHA" --format '{{printf "%s" .Manifest.Digest}}' 2> "$RUNNER_TEMP/mainworthy-tag-error"); then
             if [ "$existing" != "$digest" ]; then
               echo "::error::Refusing to overwrite $image:$GITHUB_SHA: existing digest $existing differs from tested digest $digest"
               exit 1

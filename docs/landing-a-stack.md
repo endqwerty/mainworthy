@@ -14,7 +14,7 @@ verify the complete combined change at its exact current tip and `main` base. Fo
 every layer, or at least five layers. Otherwise audit each layer against its base. A changed tip or base
 invalidates that evidence. Refresh the merge tree and required checks before landing it.
 
-Merge the combined PR by rebase only with the owner's authorization. Confirm `main` contains every layer's
+Merge the combined PR with `gh pr merge --merge --match-head-commit <sha>` only with the owner's authorization. Confirm `main` contains every layer's
 changes before closing the draft review PRs with a link to the merged combined PR. Do not use `gh stack merge`
 for this mode: draft review layers are not independent merge units. To land a partial stack instead, open a
 ready combined PR for that prefix and obtain its own checks, review and audit.
@@ -30,12 +30,11 @@ For an agent, when the owner has said in the current thread to merge a stack or 
 words nothing merges: `build`, `babysit` and `autopilot-stack` open the stack, link it to the thread and stop.
 
 A stack is a chain of pull requests: each one's base is the branch of the one below, and the lowest one's base is
-`main`. After a layer lands by rebase its commits have new ids on `main`, so a layer landed alone leaves the rest
-to be rebased onto the result and pushed, and a changed revision or base needs its checks and a short round of
-review again. `gh stack merge` lands the layers together instead:
+`main`. A merge commit preserves the layer's original commit ids. Landing a layer alone still changes the
+remaining layers' bases, which need their checks and audit again. `gh stack merge` lands the layers together instead:
 
 ```
-gh stack merge <the highest pull request the owner's word covers> --rebase --yes
+gh stack merge <the highest pull request the owner's word covers> --merge --yes
 ```
 
 It merges that pull request and every layer below it into the stack's base, or none of them. You look at every
@@ -63,8 +62,8 @@ a time, and looking at the next request between landings. Its other gates hold.
   head and `main` are the pair its round read through a pull request from the top branch to `main`
   ([security-audit.md](security-audit.md) says when a stack may be). No issue is left unaddressed. A changed layer or
   base is audited again before the command.
-- Pass `--rebase`. Without it the command picks the method: the one the account used last or the repository's
-  default. The repository allows rebase only, but pass it anyway. A merge queue on `main` would ignore the flag and
+- Pass `--merge`. Without it the command picks the method: the one the account used last or the repository's
+  default. The repository allows merge commits only, but pass it anyway. A merge queue on `main` would ignore the flag and
   could land the layers apart; there is none, and with one, do not use this command.
 
 ## After the command

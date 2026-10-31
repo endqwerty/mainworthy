@@ -97,7 +97,7 @@ reviewed head. Mark ready only after review and audit findings are resolved, sta
 `gate`, run the final current-head/base audit (`docs/security-audit.md`).
 
 **The owner merges.** Stop before merging, arming auto-merge or pushing to `main` unless the owner authorizes
-identified work in this thread. Then use `ship`, rebase merge and keep the branch. Review layers are optional for
+identified work in this thread. Then use `ship`, a merge commit (`--merge --match-head-commit`), and keep the branch. Review layers are optional for
 chunks that benefit from separate review; small changes belong in commits, not separate PRs. Only the combined
 PR to `main` becomes ready and lands. Draft layers cannot land on its result, and the existing layer-audit
 threshold still applies (`docs/landing-a-stack.md`).
