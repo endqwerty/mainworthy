@@ -317,7 +317,7 @@
       "col": 4,
       "type": "frontend",
       "label": "Owner merges",
-      "sublabel": "Rebase the pull request",
+      "sublabel": "Merge commit, pinned head",
       "width": 160,
       "sources": [
         {

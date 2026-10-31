@@ -28,7 +28,7 @@ To deliver a change, follow these steps:
 7. Mark ready once the change is expected to ship. That event starts full CI. After a green `gate`, run the final
    audit on the current head/base and record every round in the description: [security audit](../security-audit.md).
 
-The owner reviews every change and merges it by rebase (`gh pr merge --rebase`), only while the head and base are
+The owner reviews every change and merges it with a merge commit (`gh pr merge --merge --match-head-commit <sha>`), only while the head and base are
 the pair the audit read. An agent stops once the pull request has its verdict and audit, even when every check is
 green. A stack of dependent pull requests lands in one step when the
 owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
