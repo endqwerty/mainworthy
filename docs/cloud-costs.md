@@ -1,4 +1,7 @@
-# Google Cloud costs in us-west1
+# Historical Google Cloud costs in us-west1
+
+GCP is retired. `infra.yml` has no push trigger and its only job is disabled. These estimates describe
+the retained Terraform configuration, not current spend or the Render replacement. Prices have not been refreshed.
 
 Read 2026-10-25, setup as of 2026-10-26: one Cloud Run service and one database. USD on-demand list prices, 730
 hours per month, no committed-use discount or promotional credit. These are calculations from public prices, not a
